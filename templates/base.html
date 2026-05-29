@@ -1,0 +1,62 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}iChat Pro{% endblock %}</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: ['class', '[data-theme="dark"]'],
+            theme: {
+                extend: {
+                    colors: {
+                        primary: 'var(--color-primary)',
+                        bgMain: 'var(--color-bg)',
+                        textMain: 'var(--color-text-main)',
+                        textSecondary: 'var(--color-text-secondary)',
+                        borderColor: 'var(--color-border)',
+                        bgSidebar: 'var(--color-sidebar-bg)',
+                        bgSearch: 'var(--color-search-bg)',
+                        brand: {
+                            light: '#3390ec',
+                            dark: '#8774e1',
+                        }
+                    },
+                    borderRadius: {
+                        'custom-sm': 'var(--radius-sm)',
+                        'custom-md': 'var(--radius-md)',
+                        'custom-lg': 'var(--radius-lg)',
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Custom Base Stylesheet -->
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    
+    {% block content %}{% endblock %}
+
+    <script>
+        // Apply theme early to avoid flashes
+        const savedTheme = localStorage.getItem('ichat-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        if (savedTheme === 'dark') {
+            document.body.classList.add('dark');
+        }
+        
+        // Initialize all Lucide icons
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+        });
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

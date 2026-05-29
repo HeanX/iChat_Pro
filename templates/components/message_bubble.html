@@ -1,0 +1,78 @@
+<!-- message_bubble.html - Speech bubble component for iChat Pro chat history -->
+{% if is_system %}
+  <!-- System Message (Centered Notification) -->
+  <div class="flex w-full justify-center my-2">
+    <div class="system-capsule">
+      {{ message_text }}
+    </div>
+  </div>
+{% elif is_error %}
+  <!-- Error Bubble with Retry Icon -->
+  <div class="message-row message-row-self">
+    <div class="flex items-center gap-2">
+      <!-- Retry Action Button -->
+      <button class="p-1.5 rounded-full text-red-500 hover:bg-red-500/10 focus:outline-none transition-colors" title="Message failed. Resend?">
+        <i data-lucide="refresh-cw" class="w-4 h-4 animate-spin-hover"></i>
+      </button>
+      <div class="message-bubble-custom bubble-self bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400">
+        <p class="message-text-content">{{ message_text }}</p>
+        <div class="message-meta-line text-red-400/80">
+          <span>Failed to encrypt payload</span>
+          <i data-lucide="alert-circle" class="w-3 h-3"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+{% else %}
+  <!-- Standard Messaging Bubbles (Self or Peer) -->
+  <div class="message-row {% if is_self %}message-row-self{% else %}message-row-peer{% endif %}">
+    {% if not is_self %}
+      {% if show_avatar %}
+        <div class="message-avatar {{ avatar_bg|default:'bg-purple-600' }}" title="{{ sender_name|default:'' }}">
+          {{ avatar_text|default:'AV' }}
+        </div>
+      {% else %}
+        <div class="message-avatar-spacer" aria-hidden="true"></div>
+      {% endif %}
+    {% endif %}
+
+    <div class="message-bubble-custom {% if is_self %}bubble-self{% else %}bubble-peer{% endif %}">
+      {% if is_group and not is_self and show_avatar %}
+        <div class="message-sender-line">
+          <span class="message-sender-name">{{ sender_name }}</span>
+          {% if sender_role %}
+            <span class="message-role-tag role-{{ sender_role|lower }}">{{ sender_role }}</span>
+          {% endif %}
+        </div>
+      {% endif %}
+      
+      <!-- Check if Message represents a shared document or file -->
+      {% if is_file %}
+        <div class="flex items-center space-x-3 bg-brand-light/20 dark:bg-brand-dark/20 p-2.5 rounded-custom-md border border-brand-light/30">
+          <div class="p-2 bg-brand-light dark:bg-brand-dark text-white rounded-custom-md">
+            <i data-lucide="file-text" class="w-5 h-5"></i>
+          </div>
+          <div class="text-left leading-snug">
+            <div class="font-semibold text-sm truncate max-w-[150px]">{{ file_name }}</div>
+            <div class="text-[10px] text-textSecondary">{{ file_size }}</div>
+          </div>
+        </div>
+      {% else %}
+        <!-- Plain Text Content -->
+        <p class="message-text-content">{{ message_text }}</p>
+      {% endif %}
+      
+      <!-- Timestamp & Read State -->
+      <div class="message-meta-line">
+        <span>{{ message_time }}</span>
+        {% if is_self %}
+          {% if is_read %}
+            <i data-lucide="check-check" class="w-3 h-3 text-brand-light dark:text-brand-dark" title="Read"></i>
+          {% else %}
+            <i data-lucide="check" class="w-3 h-3 text-textSecondary" title="Sent"></i>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endif %}

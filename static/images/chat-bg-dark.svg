@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f1218" />
+      <stop offset="100%" stop-color="#181c24" />
+    </linearGradient>
+    
+    <!-- Repeating Telegram-like Pattern -->
+    <pattern id="doodlePattern" width="120" height="120" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.035">
+        <!-- Message bubble -->
+        <path d="M15,15 h15 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-11 l-5,4 v-4 a4,4 0 0 1 -4,-4 v-10 a4,4 0 0 1 4,-4 z" />
+        <line x1="20" y1="21" x2="28" y2="21" />
+        <line x1="20" y1="25" x2="25" y2="25" />
+
+        <!-- Smiley -->
+        <circle cx="80" cy="25" r="10" />
+        <circle cx="77" cy="23" r="1" fill="#ffffff" />
+        <circle cx="83" cy="23" r="1" fill="#ffffff" />
+        <path d="M76,28 Q80,32 84,28" />
+
+        <!-- Star -->
+        <path d="M45,55 L47,59 L52,59 L48,62 L50,66 L45,64 L40,66 L42,62 L38,59 L43,59 Z" />
+
+        <!-- Paper Plane -->
+        <path d="M95,65 L115,55 L108,75 L104,70 L98,72 L102,67 Z" />
+        <line x1="95" y1="65" x2="104" y2="70" />
+
+        <!-- Cloud -->
+        <path d="M20,95 A5,5 0 0 1 25,90 A8,8 0 0 1 38,92 A6,6 0 0 1 42,97 A4,4 0 0 1 38,101 H22 A4,4 0 0 1 20,95 Z" />
+
+        <!-- Heart -->
+        <path d="M75,95 C70,90 65,95 65,100 C65,108 75,113 75,113 C75,113 85,108 85,100 C85,95 80,90 75,95 Z" />
+
+        <!-- Little Sparkles/Dots -->
+        <circle cx="10" cy="60" r="1.5" fill="#ffffff" />
+        <circle cx="110" cy="15" r="1.5" fill="#ffffff" />
+        <circle cx="55" cy="15" r="1.5" fill="#ffffff" />
+        <circle cx="55" cy="105" r="1.5" fill="#ffffff" />
+      </g>
+    </pattern>
+  </defs>
+
+  <!-- Background Rect -->
+  <rect width="100%" height="100%" fill="url(#bgGrad)" />
+  
+  <!-- Pattern Rect overlay -->
+  <rect width="100%" height="100%" fill="url(#doodlePattern)" />
+</svg>

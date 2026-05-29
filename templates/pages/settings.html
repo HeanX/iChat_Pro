@@ -1,0 +1,166 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Settings - iChat Pro{% endblock %}
+
+{% block content %}
+<!-- Standalone Settings Workspace Viewport -->
+<div class="flex h-screen w-screen overflow-hidden bg-bgMain text-textMain relative select-none">
+  
+  <!-- Left Side: Settings Panel Sidebar -->
+  <div id="sidebar-container" class="w-full md:w-[420px] border-r border-borderColor flex flex-col h-full bg-bgSidebar relative flex-shrink-0">
+    {% include 'components/settings_panel.html' %}
+  </div>
+  
+  <!-- Right Side: Encryption & Security Dashboard -->
+  <div class="hidden md:flex flex-1 flex-col h-full bg-bgMain relative chat-bg-pattern justify-center items-center p-8 overflow-y-auto custom-scrollbar">
+    
+    <div class="w-full max-w-[720px] empty-state-card border border-borderColor backdrop-blur-md rounded-custom-lg shadow-2xl p-8 space-y-6">
+      
+      <!-- Dashboard Header -->
+      <div class="flex items-center space-x-4 border-b border-borderColor/60 pb-4">
+        <div class="p-3 bg-brand-light/10 dark:bg-brand-dark/10 text-brand-light dark:text-brand-dark rounded-full">
+          <i data-lucide="shield-check" class="w-8 h-8"></i>
+        </div>
+        <div>
+          <h2 class="text-xl font-bold text-textMain">Cryptographic Security Dashboard</h2>
+          <p class="text-xs text-textSecondary">Real-time status of your zero-knowledge encryption environment</p>
+        </div>
+      </div>
+
+      <!-- Grid: Keys & Algorithm Specs -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        
+        <!-- Algorithm Specifications Box -->
+        <div class="p-4 bg-search-op-40 border border-borderColor rounded-custom-md space-y-3">
+          <h3 class="text-sm font-bold text-textMain flex items-center space-x-2">
+            <i data-lucide="binary" class="w-4 h-4 text-brand-light dark:text-brand-dark"></i>
+            <span>Protocol Specs</span>
+          </h3>
+          <ul class="text-xs text-textSecondary space-y-2 font-mono">
+            <li class="flex justify-between">
+              <span>Key Exchange:</span>
+              <span class="text-textMain font-semibold">ECDH (X25519)</span>
+            </li>
+            <li class="flex justify-between">
+              <span>Signatures:</span>
+              <span class="text-textMain font-semibold">Ed25519</span>
+            </li>
+            <li class="flex justify-between">
+              <span>Cipher Block:</span>
+              <span class="text-textMain font-semibold">AES-256-GCM</span>
+            </li>
+            <li class="flex justify-between">
+              <span>Hash Function:</span>
+              <span class="text-textMain font-semibold">SHA-256</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Local Key Fingerprints Box -->
+        <div class="p-4 bg-search-op-40 border border-borderColor rounded-custom-md space-y-3">
+          <h3 class="text-sm font-bold text-textMain flex items-center space-x-2">
+            <i data-lucide="fingerprint" class="w-4 h-4 text-brand-light dark:text-brand-dark"></i>
+            <span>Your Identity Public Key</span>
+          </h3>
+          <div class="p-2.5 bg-bgSidebar rounded border border-borderColor font-mono text-[10px] text-textMain break-all tracking-wider leading-relaxed">
+            PUB_ECC_7F1A_8E2C_9B3D_4E5F_6A7B_8C9D_0E1F_2A3B_4C5D_6E7F
+          </div>
+          <div class="flex justify-between items-center text-[10px] text-textSecondary">
+            <span>Signature Verified</span>
+            <button class="text-brand-light dark:text-brand-dark hover:underline font-semibold flex items-center space-x-1">
+              <i data-lucide="copy" class="w-3 h-3"></i>
+              <span>Copy Public Key</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Active Logged-in Sessions List -->
+      <div class="space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="text-sm font-bold text-textMain flex items-center space-x-2">
+            <i data-lucide="smartphone" class="w-4 h-4 text-brand-light dark:text-brand-dark"></i>
+            <span>Active Logged-in Devices</span>
+          </h3>
+          <button onclick="terminateOtherSessions()" class="text-xs text-red-500 hover:underline font-semibold">
+            Terminate Other Sessions
+          </button>
+        </div>
+
+        <div class="overflow-x-auto border border-borderColor rounded-custom-md">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-bgSearch text-textSecondary font-bold border-b border-borderColor">
+                <th class="p-3">Device / Browser</th>
+                <th class="p-3">Location</th>
+                <th class="p-3">IP Address</th>
+                <th class="p-3">Status</th>
+              </tr>
+            </thead>
+            <tbody id="sessions-table-body" class="divide-y divide-borderColor/60 text-textMain font-mono">
+              <tr>
+                <td class="p-3 font-sans">
+                  <div class="font-bold flex items-center space-x-1.5">
+                    <i data-lucide="chrome" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark"></i>
+                    <span>Chrome / Windows (Current)</span>
+                  </div>
+                </td>
+                <td class="p-3 font-sans">Beijing, CN</td>
+                <td class="p-3">192.168.1.102</td>
+                <td class="p-3"><span class="text-green-500 font-bold">Active Now</span></td>
+              </tr>
+              <tr class="opacity-80">
+                <td class="p-3 font-sans">
+                  <div class="font-semibold flex items-center space-x-1.5">
+                    <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+                    <span>iPhone 14 / Safari</span>
+                  </div>
+                </td>
+                <td class="p-3 font-sans">Shanghai, CN</td>
+                <td class="p-3">120.244.10.89</td>
+                <td class="p-3 text-textSecondary">2 hours ago</td>
+              </tr>
+              <tr class="opacity-80">
+                <td class="p-3 font-sans">
+                  <div class="font-semibold flex items-center space-x-1.5">
+                    <i data-lucide="tablet" class="w-3.5 h-3.5"></i>
+                    <span>iPad Pro / Chrome</span>
+                  </div>
+                </td>
+                <td class="p-3 font-sans">Shanghai, CN</td>
+                <td class="p-3">120.244.10.89</td>
+                <td class="p-3 text-textSecondary">3 days ago</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // Overrides the back button in settings_panel.html to redirect back to the chat page
+  function hideSettingsPanel() {
+    window.location.href = "{% url 'index' %}";
+  }
+
+  function terminateOtherSessions() {
+    if (confirm("Are you sure you want to terminate all other logged-in sessions? You will need to re-verify encryption keys on those devices.")) {
+      const tableBody = document.getElementById("sessions-table-body");
+      // Keep only the first session (the current one)
+      const currentSessionRow = tableBody.firstElementChild;
+      tableBody.innerHTML = "";
+      tableBody.appendChild(currentSessionRow);
+      alert("All other sessions successfully terminated.");
+    }
+  }
+</script>
+{% endblock %}

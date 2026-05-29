@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<!-- Centered Auth Page Container -->
+<div class="relative min-h-screen flex flex-col items-center justify-center bg-bgMain px-4 py-12 transition-colors duration-200 chat-bg-pattern">
+  
+  <!-- Global Floating Dark Mode Toggle in Top-Right -->
+  <button onclick="toggleTheme()" class="absolute top-6 right-6 p-3 rounded-full bg-bgSidebar hover:bg-bgSearch border border-borderColor text-textMain shadow-sm transition-all focus:outline-none hover:scale-105" title="Toggle Theme">
+    <i data-lucide="sun" class="w-5 h-5 block dark:hidden"></i>
+    <i data-lucide="moon" class="w-5 h-5 hidden dark:block"></i>
+  </button>
+
+  <div class="w-full max-w-[440px] flex flex-col items-center">
+    <!-- App Branding -->
+    <div class="flex flex-col items-center mb-6 text-center">
+      <div class="w-16 h-16 bg-brand-light dark:bg-brand-dark text-white rounded-full flex items-center justify-center shadow-lg shadow-brand-light/35 dark:shadow-brand-dark/35 mb-4 transform hover:scale-110 transition-transform duration-300">
+        <i data-lucide="shield-alert" class="w-8 h-8 animate-pulse text-yellow-300 mr-0.5"></i>
+      </div>
+      <h1 class="text-3xl font-bold tracking-tight text-textMain">iChat Pro</h1>
+      <p class="text-sm text-textSecondary mt-2">End-to-End Encrypted Secure Messaging</p>
+    </div>
+
+    <!-- Auth Card Slot -->
+    <div class="w-full bg-bgSidebar border border-borderColor rounded-custom-lg shadow-xl p-8 backdrop-blur-md transition-all duration-300">
+      {% block auth_card %}{% endblock %}
+    </div>
+
+    <!-- Footer Trust Badges -->
+    <div class="mt-8 flex flex-col items-center space-y-2 text-xs text-textSecondary opacity-85 text-center">
+      <div class="flex items-center space-x-2">
+        <i data-lucide="lock" class="w-3.5 h-3.5 text-green-500"></i>
+        <span>Zero-Knowledge Architecture</span>
+      </div>
+      <p>&copy; 2026 iChat Pro. All chats are private and encrypted.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

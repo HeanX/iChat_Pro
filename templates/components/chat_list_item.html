@@ -1,0 +1,42 @@
+<!-- Reusable Chat List Item Component for iChat Pro -->
+<div id="chat-item-wrapper-{{ chat_id }}" class="w-full">
+  <button id="chat-item-{{ chat_id }}" onclick="selectChat('{{ chat_id }}')"
+    class="chat-item-btn w-full flex items-center px-4 py-3 border-b border-borderColor hover:bg-bgSearch transition-all text-left focus:outline-none relative group select-none">
+    
+    <!-- Left: Avatar Area -->
+    <div class="relative flex-shrink-0">
+      <div class="w-12 h-12 rounded-full {{ chat_avatar_bg }} text-white flex items-center justify-center font-bold text-base shadow-sm">
+        {{ chat_avatar }}
+      </div>
+      <!-- Presence Indicator -->
+      {% if is_online %}
+      <span class="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full bg-green-500 border-2 border-bgSidebar" title="Online"></span>
+      {% endif %}
+    </div>
+
+    <!-- Center: Content Area -->
+    <div class="ml-3.5 flex-1 min-w-0">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-bold text-textMain truncate flex items-center space-x-1">
+          <span>{{ chat_name }}</span>
+          {% if is_encrypted %}
+          <i data-lucide="lock" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark inline-block flex-shrink-0" title="End-to-End Encrypted"></i>
+          {% endif %}
+        </h3>
+        <span id="chat-time-{{ chat_id }}" class="chat-item-time flex-shrink-0">{{ last_message_time }}</span>
+      </div>
+      
+      <div class="flex items-center justify-between mt-1">
+        <p id="last-msg-{{ chat_id }}" class="text-xs text-textSecondary truncate pr-4 leading-tight">
+          {{ last_message }}
+        </p>
+        
+        <!-- Unread badge -->
+        <span id="unread-badge-{{ chat_id }}" 
+          class="{% if not unread_count or unread_count == '0' %}hidden{% endif %} unread-badge flex-shrink-0">
+          {{ unread_count }}
+        </span>
+      </div>
+    </div>
+  </button>
+</div>

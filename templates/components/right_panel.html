@@ -1,0 +1,68 @@
+<!-- right_panel.html - Right side details panel for iChat Pro -->
+<div id="right-panel" class="details-panel collapsed flex flex-col h-full bg-bgSidebar border-l border-borderColor w-[320px] md:w-[360px] flex-shrink-0 select-none z-30 max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-50 max-lg:shadow-2xl">
+  
+  <!-- Header: Title and Close Button -->
+  <header class="h-[60px] border-b border-borderColor px-4 flex items-center justify-between bg-bgSidebar flex-shrink-0">
+    <h3 class="text-sm font-bold text-textMain" data-i18n="chat_info_title">Chat Info</h3>
+    <button onclick="window.toggleRightPanel()" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="Close Panel" data-i18n-title="close_panel">
+      <i data-lucide="x" class="w-5 h-5"></i>
+    </button>
+  </header>
+
+  <!-- Scrollable Panel Content -->
+  <div class="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
+    
+    <!-- Section 1: Chat Avatar, Name, online status -->
+    <div class="flex flex-col items-center text-center space-y-3 pb-6 border-b border-borderColor/55">
+      <div id="details-avatar" class="w-20 h-20 rounded-full bg-brand-light text-white flex items-center justify-center font-bold text-2xl shadow-md">
+        AV
+      </div>
+      <div class="space-y-1">
+        <h4 id="details-name" class="text-base font-bold text-textMain">Alice Vance</h4>
+        <span id="details-status" class="text-xs text-textSecondary">online</span>
+      </div>
+    </div>
+
+    <!-- Section 2: Session Fingerprint and E2EE verification status -->
+    <div class="space-y-3 pb-6 border-b border-borderColor/55">
+      <h5 class="text-xs font-bold text-textSecondary uppercase tracking-wider" data-i18n="encryption_details">Encryption Details</h5>
+      
+      <div class="p-3 bg-bgSearch rounded-custom-md border border-borderColor space-y-2.5">
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-textSecondary" data-i18n="protocol">Protocol</span>
+          <span id="right-panel-protocol" class="font-semibold text-textMain">ECDH + HKDF + AES-GCM</span>
+        </div>
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-textSecondary" data-i18n="verification">Verification</span>
+          <span id="right-panel-verification-status" class="font-semibold text-emerald-500 flex items-center space-x-1">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5 mr-0.5 inline-block text-emerald-500"></i>
+            <span data-i18n="verified">Verified</span>
+          </span>
+        </div>
+        <div id="right-panel-fingerprint-wrapper" class="space-y-1 pt-1.5 border-t border-borderColor/50">
+          <span class="text-[10px] text-textSecondary block" data-i18n="cryptographic_fingerprint">Cryptographic Fingerprint</span>
+          <code id="details-fingerprint" class="text-[10px] font-mono text-textMain break-all tracking-wider block bg-bgMain p-1.5 rounded border border-borderColor/30 mb-2">
+            9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A
+          </code>
+          <button onclick="showFingerprintModal()" class="w-full mt-1.5 py-1.5 bg-brand-light/10 text-brand-light dark:bg-brand-dark/10 dark:text-brand-dark rounded-custom-md text-xs font-bold hover:bg-brand-light/20 dark:hover:bg-brand-dark/20 transition-all flex items-center justify-center space-x-1 border border-brand-light/20 dark:border-brand-dark/20" title="Verify Fingerprint keys" data-i18n-title="verify_fingerprint_btn">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5 mr-0.5 inline-block"></i>
+            <span data-i18n="verify_fingerprint_btn">Verify Fingerprint</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 3: Group Member List (simulated for group creator/owner) -->
+    <div id="right-panel-group-section" class="space-y-3 hidden">
+      <div class="flex items-center justify-between">
+        <h5 id="right-panel-members-count" class="text-xs font-bold text-textSecondary uppercase tracking-wider" data-i18n="group_members_title">Group Members</h5>
+        <span class="text-[10px] bg-brand-light/10 text-brand-light dark:bg-brand-dark/10 dark:text-brand-dark px-2 py-0.5 rounded font-semibold">Creator</span>
+      </div>
+      
+      <div id="right-panel-members-list" class="space-y-3 divide-y divide-borderColor/20">
+        <!-- Members dynamically populated by JS -->
+      </div>
+    </div>
+
+  </div>
+</div>

@@ -1,0 +1,34 @@
+<!-- empty_state.html - Center message when no conversation is active -->
+<div id="empty-state-window" class="flex-1 flex flex-col items-center justify-center p-6 h-full chat-bg-pattern relative select-none">
+  
+  <div class="max-w-md text-center p-8 empty-state-card border border-borderColor backdrop-blur-md rounded-custom-lg shadow-lg flex flex-col items-center">
+    
+    <!-- Central Shield Lock Icon -->
+    <div class="w-16 h-16 rounded-full bg-brand-light/10 dark:bg-brand-dark/10 text-brand-light dark:text-brand-dark flex items-center justify-center mb-4">
+      <i data-lucide="shield-check" class="w-8 h-8 text-brand-light dark:text-brand-dark"></i>
+    </div>
+    
+    <!-- Title & Subtitle -->
+    <h3 class="text-lg font-bold text-textMain" data-i18n="empty_title">No Chat Selected</h3>
+    <p class="text-sm text-textSecondary mt-2 leading-relaxed" data-i18n="empty_desc">
+      Choose a contact from the sidebar list or search for someone new to initiate an end-to-end encrypted session.
+    </p>
+
+    <!-- Brief crypto/security guide list -->
+    <div class="mt-6 border-t border-borderColor/60 pt-4 w-full text-left space-y-2.5">
+      <div class="flex items-center space-x-2.5 text-xs text-textSecondary">
+        <i data-lucide="lock" class="w-4 h-4 text-green-500 flex-shrink-0"></i>
+        <span data-i18n="empty_item1">Messages are ciphered locally using X25519 protocols.</span>
+      </div>
+      <div class="flex items-center space-x-2.5 text-xs text-textSecondary">
+        <i data-lucide="eye-off" class="w-4 h-4 text-green-500 flex-shrink-0"></i>
+        <span data-i18n="empty_item2">No plain text is ever stored on the server directory.</span>
+      </div>
+      <div class="flex items-center space-x-2.5 text-xs text-textSecondary">
+        <i data-lucide="check-check" class="w-4 h-4 text-green-500 flex-shrink-0"></i>
+        <span data-i18n="empty_item3">Verify encryption status by checking active fingerprints.</span>
+      </div>
+    </div>
+
+  </div>
+</div>

@@ -1,0 +1,4 @@
+Django==6.0.5
+asgiref==3.11.1
+sqlparse==0.5.5
+tzdata==2026.2

@@ -1,0 +1,136 @@
+<!-- sidebar.html - Sidebar Container for search, chat list, and settings panel -->
+<div id="sidebar-container" class="w-full md:w-[420px] border-r border-borderColor flex flex-col h-full bg-bgSidebar relative flex-shrink-0">
+  
+  <!-- View 1: Chats (Default view) -->
+  <div id="sidebar-chat-view" class="h-full flex flex-col">
+    
+    <!-- Header: Drawer trigger + search bar -->
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3.5 flex-shrink-0">
+      <!-- Hamburger Menu button -->
+      <div class="relative">
+        <button id="drawer-btn" onclick="toggleMainMenu(event)" class="p-2 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none" title="Main Menu" data-i18n-title="main_menu">
+          <i data-lucide="menu" class="w-5 h-5"></i>
+        </button>
+        
+        <!-- Main Menu Dropdown Floating Card -->
+        <div id="main-menu-dropdown" class="hidden absolute left-0 mt-1.5 w-[280px] bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[22px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
+          <!-- User Account info section -->
+          <div onclick="triggerMyProfileFromInfo(event)" class="main-menu-account-area">
+            <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-base shadow-sm">
+              {{ request.user.username|slice:":1"|upper }}
+            </div>
+            <div class="leading-tight min-w-0 flex-1">
+              <div class="text-sm font-bold text-textMain truncate">{{ request.user.username }}</div>
+              <div class="text-[10px] text-textSecondary truncate">{{ request.user.email|default:"user@ichat.pro" }}</div>
+            </div>
+          </div>
+          
+          <!-- Menu Items -->
+          <div class="py-1">
+            <!-- Add Account -->
+            <button onclick="showToast(currentLanguage === 'zh' ? '多账号功能暂未开放' : 'Multi-account is not yet available'); toggleMainMenu(event);" class="main-menu-item-custom">
+              <i data-lucide="plus"></i>
+              <span data-i18n="menu_add_account">Add Account</span>
+            </button>
+            <!-- My Profile -->
+            <button id="menu-profile-btn" onclick="toggleMainMenu(event);" class="main-menu-item-custom">
+              <i data-lucide="user"></i>
+              <span data-i18n="menu_profile">My Profile</span>
+            </button>
+            <!-- Saved Messages -->
+            <button onclick="showToast(currentLanguage === 'zh' ? '暂无收藏消息' : 'No saved messages'); toggleMainMenu(event);" class="main-menu-item-custom">
+              <i data-lucide="bookmark"></i>
+              <span data-i18n="menu_saved_messages">Saved Messages</span>
+            </button>
+            <!-- Contacts -->
+            <button id="menu-contacts-btn" onclick="toggleMainMenu(event);" class="main-menu-item-custom">
+              <i data-lucide="users"></i>
+              <span data-i18n="menu_contacts">Contacts</span>
+            </button>
+            <!-- Settings -->
+            <button id="menu-settings-btn" onclick="toggleMainMenu(event);" class="main-menu-item-custom">
+              <i data-lucide="settings"></i>
+              <span data-i18n="menu_settings">Settings</span>
+            </button>
+            
+            <!-- Divider -->
+            <div class="h-px bg-borderColor/50 my-1"></div>
+            
+            <!-- More Submenu (click) -->
+            <div class="relative">
+              <button id="menu-more-btn" onclick="toggleMoreSubmenu(event)" class="main-menu-item-custom">
+                <i data-lucide="more-horizontal"></i>
+                <span data-i18n="menu_more">More</span>
+                <i data-lucide="chevron-right" class="ml-auto w-4 h-4"></i>
+              </button>
+              
+              <!-- Submenu overlay -->
+              <div id="main-menu-more-submenu" class="hidden absolute left-full top-0 ml-1.5 w-[190px] bg-bgSidebar border border-borderColor/60 rounded-[18px] shadow-xl z-50 py-1.5 animate-fadeIn">
+                <!-- New Group -->
+                <button id="menu-new-group-btn" onclick="toggleMainMenu(event);" class="menu-item-custom">
+                  <i data-lucide="users"></i>
+                  <span data-i18n="menu_new_group">New Group</span>
+                </button>
+                <!-- About iChat Pro -->
+                <button onclick="showAboutInfo(event)" class="menu-item-custom">
+                  <i data-lucide="info"></i>
+                  <span data-i18n="menu_about">About iChat Pro</span>
+                </button>
+                <!-- Help & FAQ -->
+                <button onclick="showHelpFeedback(event)" class="menu-item-custom">
+                  <i data-lucide="help-circle"></i>
+                  <span data-i18n="menu_help">Help & FAQ</span>
+                </button>
+                <!-- Check Updates -->
+                <button onclick="checkForUpdates(event)" class="menu-item-custom">
+                  <i data-lucide="refresh-cw"></i>
+                  <span data-i18n="menu_updates">Check Updates</span>
+                </button>
+                <div class="h-px bg-borderColor/50 my-1"></div>
+                <!-- Sign Out -->
+                <button onclick="showLogoutConfirmModal(event)" class="menu-item-custom danger">
+                  <i data-lucide="log-out"></i>
+                  <span data-i18n="menu_logout">Sign Out</span>
+                </button>
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      </div>
+      
+      <!-- Search Input Container -->
+      <div class="relative flex-1">
+        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary pointer-events-none">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </span>
+        <input type="text" id="sidebar-search" 
+          class="w-full pl-10 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all"
+          placeholder="Search chats or messages..."
+          data-i18n-placeholder="search_placeholder">
+      </div>
+    </div>
+    
+    <!-- Scrollable Conversations List -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-borderColor/30">
+      
+      <!-- Include Active Chat List Item 1: Alice (E2E, Online) -->
+      {% include 'components/chat_list_item.html' with chat_id=1 chat_name="Alice Vance" chat_avatar="AV" chat_avatar_bg="bg-purple-600" last_message="Did you verify the security fingerprint yet?" last_message_time="10:35 AM" unread_count=1 is_online=True is_encrypted=True %}
+      
+      <!-- Include Active Chat List Item 2: Bob (E2E, Offline) -->
+      {% include 'components/chat_list_item.html' with chat_id=2 chat_name="Bob Builder" chat_avatar="BB" chat_avatar_bg="bg-blue-600" last_message="File: ichat_pro_design.pdf" last_message_time="Yesterday" unread_count=0 is_online=False is_encrypted=True %}
+      
+      <!-- Include Active Chat List Item 3: Core Dev Team (Group, Offline) -->
+      {% include 'components/chat_list_item.html' with chat_id=3 chat_name="Core Development Team" chat_avatar="CD" chat_avatar_bg="bg-green-600" last_message="Alice: Let's review the code." last_message_time="11:07 AM" unread_count=0 is_online=False is_encrypted=False %}
+      
+      <!-- Include Active Chat List Item 4: Sentinel Bot (E2E, Online, Bot) -->
+      {% include 'components/chat_list_item.html' with chat_id=4 chat_name="Security Sentinel Bot" chat_avatar="🛡️" chat_avatar_bg="bg-zinc-700" last_message="Welcome! Send me a message..." last_message_time="12:00 PM" unread_count=0 is_online=True is_encrypted=True %}
+      
+    </div>
+  </div>
+
+  <!-- View 2: Settings Panel View (Hidden initially) -->
+  <div id="sidebar-settings-view" class="hidden h-full">
+    {% include 'components/settings_panel.html' %}
+  </div>
+</div>

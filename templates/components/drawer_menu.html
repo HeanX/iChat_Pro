@@ -1,0 +1,81 @@
+<div id="drawer-menu-overlay" class="hidden fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] transition-opacity">
+  
+  <!-- Drawer Sidebar Content -->
+  <!-- Stop propagation so clicking inside the drawer doesn't close it -->
+  <div id="drawer-menu-content" 
+    class="fixed left-0 top-0 bottom-0 z-50 w-[310px] bg-bgSidebar border-r border-borderColor shadow-2xl flex flex-col drawer-transition -translate-x-full" 
+    onclick="event.stopPropagation()">
+    
+    <!-- Drawer Header: User Avatar & Contact details -->
+    <div class="p-5 bg-brand-light/95 dark:bg-brand-dark/95 text-white flex flex-col justify-end space-y-4">
+      <div class="flex justify-between items-start">
+        <div class="w-14 h-14 rounded-full bg-white text-brand-light dark:text-brand-dark flex items-center justify-center font-bold text-xl shadow">
+          {{ request.user.username|slice:":1"|upper }}
+        </div>
+        <!-- Quick Theme Toggle inside Drawer -->
+        <button onclick="toggleTheme()" class="p-2 rounded-full hover:bg-white/10 text-white transition-colors" title="Toggle Theme" data-i18n-title="menu_theme">
+          <i data-lucide="sun" class="w-5 h-5 block dark:hidden"></i>
+          <i data-lucide="moon" class="w-5 h-5 hidden dark:block"></i>
+        </button>
+      </div>
+      <div>
+        <h3 class="font-bold text-base leading-tight">{{ request.user.username }}</h3>
+        <p class="text-xs text-white/80 mt-0.5">{{ request.user.email|default:"user@ichat.pro" }}</p>
+      </div>
+    </div>
+
+    <!-- Drawer Navigation Body -->
+    <nav class="flex-1 py-2 overflow-y-auto custom-scrollbar select-none">
+      
+      <!-- Profile Link -->
+      <button id="menu-profile-btn" class="w-full px-5 py-3 hover:bg-bgSearch flex items-center space-x-4 text-textMain transition-colors text-left focus:outline-none">
+        <i data-lucide="user" class="w-5 h-5 text-textSecondary"></i>
+        <span class="text-sm font-medium" data-i18n="menu_profile">My Profile</span>
+      </button>
+
+      <!-- New Group -->
+      <button id="menu-new-group-btn" class="w-full px-5 py-3 hover:bg-bgSearch flex items-center space-x-4 text-textMain transition-colors text-left focus:outline-none">
+        <i data-lucide="users" class="w-5 h-5 text-textSecondary"></i>
+        <span class="text-sm font-medium" data-i18n="menu_new_group">New Group</span>
+      </button>
+
+      <!-- Contacts -->
+      <button id="menu-contacts-btn" class="w-full px-5 py-3 hover:bg-bgSearch flex items-center space-x-4 text-textMain transition-colors text-left focus:outline-none">
+        <i data-lucide="user" class="w-5 h-5 text-textSecondary"></i>
+        <span class="text-sm font-medium" data-i18n="menu_contacts">Contacts</span>
+      </button>
+
+      <!-- Saved Messages -->
+      <button class="w-full px-5 py-3 hover:bg-bgSearch flex items-center space-x-4 text-textMain transition-colors text-left focus:outline-none">
+        <i data-lucide="bookmark" class="w-5 h-5 text-textSecondary"></i>
+        <span class="text-sm font-medium" data-i18n="menu_saved_messages">Saved Messages</span>
+      </button>
+
+      <!-- Settings (Toggles Settings Panel View in Sidebar) -->
+      <button id="menu-settings-btn" class="w-full px-5 py-3 hover:bg-bgSearch flex items-center space-x-4 text-textMain transition-colors text-left focus:outline-none">
+        <i data-lucide="settings" class="w-5 h-5 text-textSecondary"></i>
+        <span class="text-sm font-medium" data-i18n="menu_settings">Settings</span>
+      </button>
+
+      <div class="h-px bg-borderColor my-2"></div>
+
+      <!-- About Info -->
+      <button class="w-full px-5 py-3 hover:bg-bgSearch flex items-center space-x-4 text-textMain transition-colors text-left focus:outline-none">
+        <i data-lucide="info" class="w-5 h-5 text-textSecondary"></i>
+        <span class="text-sm font-medium" data-i18n="menu_help">iChat Pro Help & FAQ</span>
+      </button>
+
+    </nav>
+
+    <!-- Drawer Footer / Logout -->
+    <div class="p-4 border-t border-borderColor">
+      <a href="{% url 'logout' %}" class="w-full py-2.5 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-custom-md flex items-center justify-center space-x-2 text-sm font-semibold transition-all">
+        <i data-lucide="log-out" class="w-4 h-4"></i>
+        <span data-i18n="menu_logout">Sign Out</span>
+      </a>
+      <div class="text-[10px] text-textSecondary text-center mt-3 font-mono">
+        v1.0.0-Beta (ECC E2E)
+      </div>
+    </div>
+  </div>
+</div>

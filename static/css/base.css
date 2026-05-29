@@ -1,0 +1,265 @@
+/* ==========================================================================
+   iChat Pro CSS Design System - base.css
+   ========================================================================== */
+
+:root {
+  /* Typography */
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  
+  /* Layout Dimensions */
+  --sidebar-width: 400px;
+  --header-height: 60px;
+  --input-area-height: 64px;
+  --menu-width: 280px;
+
+  /* Border Radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 9999px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.15);
+
+  /* Light Theme Colors (Default) */
+  --color-primary: #3390ec;
+  --color-primary-hover: #2d8adf;
+  --color-primary-light: #e7f3ff;
+  
+  --color-bg: #ffffff;
+  --color-sidebar-bg: #ffffff;
+  --color-search-bg: #f1f3f6;
+  --color-search-focus-bg: #ffffff;
+  
+  --color-text-main: #0f0f0f;
+  --color-text-secondary: #707579;
+  --color-border: #e6e8eb;
+  
+  --color-bubble-self: #eeffde;
+  --color-bubble-other: #ffffff;
+  --color-bubble-self-text: #0f0f0f;
+  --color-bubble-other-text: #0f0f0f;
+  
+  --color-active-state: #f4f4f5;
+  --color-hover-state: #f5f5f5;
+  --color-online: #31b545;
+  --color-unread-badge: #31b545;
+  --color-unread-badge-text: #ffffff;
+  
+  --color-error: #e53935;
+  --color-warning: #fb8c00;
+  --color-success: #4caf50;
+  
+  --chat-bg-image: url('../images/chat-bg-light.svg');
+}
+
+/* Dark Theme Colors */
+[data-theme="dark"] {
+  --color-primary: #8774e1;
+  --color-primary-hover: #7562ca;
+  --color-primary-light: #2c244d;
+  
+  --color-bg: #1e1e1e;
+  --color-sidebar-bg: #212121;
+  --color-search-bg: #2b2b2b;
+  --color-search-focus-bg: #1a1a1a;
+  
+  --color-text-main: #f1f1f1;
+  --color-text-secondary: #a0a0a0;
+  --color-border: #333333;
+  
+  --color-bubble-self: #766ac8;
+  --color-bubble-other: #2b2b2b;
+  --color-bubble-self-text: #ffffff;
+  --color-bubble-other-text: #f1f1f1;
+  
+  --color-active-state: #2c2c2c;
+  --color-hover-state: #292929;
+  --color-online: #00e676;
+  --color-unread-badge: #8774e1;
+  --color-unread-badge-text: #ffffff;
+  
+  --color-error: #ff5252;
+  --color-warning: #ffd740;
+  --color-success: #69f0ae;
+  
+  --chat-bg-image: url('../images/chat-bg-dark.svg');
+}
+
+/* ==========================================================================
+   Global Reset & Base HTML Elements
+   ========================================================================== */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--color-bg);
+  color: var(--color-text-main);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.24);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* Input elements default override */
+input, textarea, button, select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  outline: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+   Transitions and Animations Helper Classes
+   ========================================================================== */
+.transition-all {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.transition-fast {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.transition-colors {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.transition-transform {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Keyframe Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(6px); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes pulseHighlight {
+  0% { box-shadow: 0 0 0 0 rgba(51, 144, 236, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(51, 144, 236, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(51, 144, 236, 0); }
+}
+
+[data-theme="dark"] @keyframes pulseHighlight {
+  0% { box-shadow: 0 0 0 0 rgba(135, 116, 225, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(135, 116, 225, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(135, 116, 225, 0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.animate-slide-left {
+  animation: slideInLeft 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.animate-slide-right {
+  animation: slideInRight 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.pulse-primary {
+  animation: pulseHighlight 1.5s infinite;
+}
+
+/* ==========================================================================
+   Helper Classes
+   ========================================================================== */
+.shadow-sm { box-shadow: var(--shadow-sm); }
+.shadow-md { box-shadow: var(--shadow-md); }
+.shadow-lg { box-shadow: var(--shadow-lg); }
+
+.rounded-sm { border-radius: var(--radius-sm); }
+.rounded-md { border-radius: var(--radius-md); }
+.rounded-lg { border-radius: var(--radius-lg); }
+.rounded-full { border-radius: var(--radius-full); }
+
+.text-main { color: var(--color-text-main); }
+.text-secondary { color: var(--color-text-secondary); }
+.text-primary { color: var(--color-primary); }
+
+.bg-main { background-color: var(--color-bg); }
+.bg-sidebar { background-color: var(--color-sidebar-bg); }
+.bg-search { background-color: var(--color-search-bg); }
+
+.border-main { border: 1px solid var(--color-border); }
+.border-b-main { border-bottom: 1px solid var(--color-border); }
+.border-t-main { border-top: 1px solid var(--color-border); }
+.border-r-main { border-right: 1px solid var(--color-border); }
+.border-l-main { border-left: 1px solid var(--color-border); }

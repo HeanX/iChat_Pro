@@ -1,0 +1,260 @@
+<!-- chat_window.html - Primary Chat Area for iChat Pro -->
+<div class="flex-1 flex flex-row h-full bg-bgMain relative overflow-hidden">
+  
+  <!-- Left Side: Active Chat Content Column -->
+  <div class="flex-1 flex flex-col h-full min-w-0 relative">
+    
+    <!-- 1. Top Navigation & Status Bar -->
+    <div id="chat-header-select-mode" class="hidden h-[60px] border-b border-borderColor px-6 items-center justify-between bg-bgSidebar select-none flex-shrink-0 z-10 w-full animate-fadeIn">
+      <div class="flex items-center space-x-3">
+        <button onclick="exitSelectMode()" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none">
+          <i data-lucide="x" class="w-5.5 h-5.5"></i>
+        </button>
+        <span id="select-mode-count" class="text-sm font-bold text-textMain">已选择 0 条消息</span>
+      </div>
+      <button onclick="exitSelectMode()" class="px-4 py-1.5 hover:bg-bgSearch text-sm font-bold rounded-custom-md text-brand-light dark:text-brand-dark transition-colors" data-i18n="cancel">取消</button>
+    </div>
+
+    <header id="chat-header-normal" class="h-[60px] border-b border-borderColor px-4 flex items-center justify-between bg-bgSidebar select-none flex-shrink-0 z-10 w-full">
+      <div class="flex items-center space-x-3">
+        
+        <!-- Back Arrow for Mobile Viewports -->
+        <button onclick="backToSidebar()" class="md:hidden p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chat List" data-i18n-title="back_to_sidebar">
+          <i data-lucide="arrow-left" class="w-5.5 h-5.5"></i>
+        </button>
+
+        <!-- Active Chat Avatar -->
+        <div id="chat-header-avatar" class="w-10 h-10 rounded-full bg-brand-light text-white flex items-center justify-center font-bold text-sm shadow-sm">
+          AV
+        </div>
+
+        <!-- Identity Name and Encryption Badge -->
+        <div class="leading-tight cursor-pointer" id="chat-header-details">
+          <div class="flex items-center space-x-1.5">
+            <span id="chat-header-name" class="text-sm font-bold text-textMain hover:underline">Alice Vance</span>
+            <!-- Lock Icon indicating E2E Encryption Status -->
+            <button id="chat-header-lock" class="text-brand-light dark:text-brand-dark p-0.5 rounded-full hover:bg-bgSearch transition-colors" title="E2E Encrypted. Click to verify fingerprint." data-i18n-title="verify_fp_desc">
+              <i data-lucide="lock" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <span id="chat-header-status" class="text-xs text-textSecondary">online</span>
+        </div>
+      </div>
+
+      <!-- Extra Action Icons -->
+      <div class="flex items-center space-x-1 relative">
+        <button class="p-2 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="Search Chat" data-i18n-title="search_chat">
+          <i data-lucide="search" class="w-5 h-5"></i>
+        </button>
+        <button onclick="window.toggleRightPanel()" class="p-2 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="Chat Info" data-i18n-title="view_info">
+          <i data-lucide="info" class="w-5 h-5"></i>
+        </button>
+        <div class="relative">
+          <button id="chat-header-more-btn" onclick="toggleMoreMenu(event)" class="p-2 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="More Operations" data-i18n-title="more_operations">
+            <i data-lucide="more-vertical" class="w-5 h-5"></i>
+          </button>
+          
+          <!-- More Operations Dropdown Menu -->
+          <div id="chat-header-more-dropdown" class="hidden absolute right-0 mt-1.5 w-[230px] bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[20px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
+            <!-- Boost Group -->
+            <button onclick="triggerBoostGroupAction(event)" class="menu-item-custom">
+              <i data-lucide="zap"></i>
+              <span data-i18n="menu_boost_group">Boost Group</span>
+            </button>
+            <!-- Mute -->
+            <button onclick="triggerMuteAction(event)" class="menu-item-custom">
+              <i id="menu-mute-group-icon" data-lucide="bell-off"></i>
+              <span id="menu-mute-group-text" data-i18n="menu_mute_group">Mute...</span>
+            </button>
+            <!-- Select messages -->
+            <button onclick="triggerSelectMessagesAction(event)" class="menu-item-custom">
+              <i data-lucide="check-circle"></i>
+              <span data-i18n="menu_select_messages">Select messages</span>
+            </button>
+            <!-- Report -->
+            <button onclick="triggerReportAction(event)" class="menu-item-custom">
+              <i data-lucide="flag"></i>
+              <span data-i18n="menu_report">Report</span>
+            </button>
+            <!-- Divider -->
+            <div class="h-px bg-borderColor/50 my-1"></div>
+            <!-- Delete Chat -->
+            <button onclick="triggerDeleteChatAction(event)" class="menu-item-custom danger">
+              <i data-lucide="trash-2"></i>
+              <span id="menu-delete-chat-text" data-i18n="menu_delete_chat">Delete Chat</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- 2. Message History Area -->
+    <main id="message-history-container" class="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar chat-bg-pattern flex flex-col">
+      <!-- Messages are dynamically populated by chat.js -->
+    </main>
+
+    <!-- 3. Dynamic Emoji Picker Panel -->
+    <div id="emoji-picker-mock" class="hidden absolute bottom-[72px] right-6 p-3 bg-bgSidebar border border-borderColor rounded-custom-lg shadow-xl z-20 w-[240px]">
+      <div class="text-xs font-bold text-textSecondary mb-2 border-b border-borderColor/40 pb-1">Quick Emojis</div>
+      <div class="grid grid-cols-5 gap-2 text-center text-xl">
+        <button onclick="insertEmoji('😀')" class="hover:scale-125 transition-transform p-1">😀</button>
+        <button onclick="insertEmoji('😂')" class="hover:scale-125 transition-transform p-1">😂</button>
+        <button onclick="insertEmoji('😍')" class="hover:scale-125 transition-transform p-1">😍</button>
+        <button onclick="insertEmoji('👍')" class="hover:scale-125 transition-transform p-1">👍</button>
+        <button onclick="insertEmoji('🔥')" class="hover:scale-125 transition-transform p-1">🔥</button>
+        <button onclick="insertEmoji('🎉')" class="hover:scale-125 transition-transform p-1">🎉</button>
+        <button onclick="insertEmoji('🚀')" class="hover:scale-125 transition-transform p-1">🚀</button>
+        <button onclick="insertEmoji('🔒')" class="hover:scale-125 transition-transform p-1">🔒</button>
+        <button onclick="insertEmoji('🔑')" class="hover:scale-125 transition-transform p-1">🔑</button>
+        <button onclick="insertEmoji('🛡️')" class="hover:scale-125 transition-transform p-1">🛡️</button>
+      </div>
+    </div>
+
+    <!-- 4. Message Input & Composition Area -->
+    <footer class="chat-footer select-none flex-shrink-0 z-10 w-full">
+      
+      <!-- Selection Mode Footer Banner -->
+      <div id="chat-input-select-mode-banner" class="hidden h-[54px] bg-bgSidebar border-t border-borderColor items-center justify-center text-textSecondary text-xs font-semibold select-none w-full">
+        <span data-i18n="select_mode_input_disabled">多选模式下输入已禁用</span>
+      </div>
+
+      <div id="chat-input-normal-wrapper" class="w-full flex flex-col items-center">
+        <!-- E2EE security micro-banner -->
+        <div id="chat-input-security-banner" class="chat-input-security-banner select-none">
+          <i data-lucide="lock" class="w-3.5 h-3.5 text-emerald-500"></i>
+          <span data-i18n="e2ee_banner">🔒 Messages are secured with end-to-end encryption.</span>
+        </div>
+
+        <div class="chat-input-capsule">
+        <!-- File Attachment Button -->
+        <button class="p-2.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all focus:outline-none flex-shrink-0" title="Attach Document" data-i18n-title="attach_document">
+          <i data-lucide="paperclip" class="w-5.5 h-5.5"></i>
+        </button>
+        
+        <!-- Auto-Growing Messaging Input Area -->
+        <div class="flex-1 bg-bgSearch border border-borderColor/50 rounded-custom-lg px-4 py-2 flex items-end space-x-2">
+          <textarea id="chat-input-textarea" rows="1" oninput="adjustTextareaHeight(this)"
+            class="flex-1 bg-transparent text-textMain placeholder-textSecondary/70 focus:outline-none resize-none max-h-[160px] text-sm py-1 font-sans custom-scrollbar"
+            placeholder="Write an encrypted message..."
+            data-i18n-placeholder="write_placeholder"></textarea>
+          
+          <!-- Emoji Trigger Button -->
+          <button onclick="toggleEmojiDropdown()" class="p-1 rounded-full text-textSecondary hover:text-textMain transition-colors focus:outline-none" title="Insert Emoji" data-i18n-title="insert_emoji">
+            <i data-lucide="smile" class="w-5.5 h-5.5"></i>
+          </button>
+        </div>
+
+        <!-- Message Dispatcher Button -->
+        <button onclick="sendMessage()"
+          class="p-3 bg-brand-light dark:bg-brand-dark hover:opacity-95 text-white rounded-full shadow-md hover:scale-105 transition-all focus:outline-none flex items-center justify-center flex-shrink-0"
+          title="Send Ciphertext">
+          <i data-lucide="send" class="w-5 h-5 pl-0.5"></i>
+        </button>
+      </div>
+      </div> <!-- Close chat-input-normal-wrapper -->
+
+    </footer>
+
+    <!-- 5. E2E Cryptographic Fingerprint Verification Modal (Overlayed inside active chat container) -->
+    <div id="fingerprint-modal" class="hidden absolute inset-0 bg-black/55 backdrop-blur-[2px] z-50 items-center justify-center p-4">
+      <div class="bg-bgSidebar border border-borderColor rounded-custom-lg shadow-2xl w-full max-w-[420px] p-6 text-center select-none flex flex-col items-center">
+        
+        <!-- Shield verify header -->
+        <div class="w-12 h-12 bg-green-500/10 text-green-500 rounded-full flex items-center justify-center mb-3">
+          <i data-lucide="shield-check" class="w-6 h-6"></i>
+        </div>
+        
+        <h3 class="text-base font-bold text-textMain" data-i18n="verify_fp_title">Verify Security Fingerprint</h3>
+        <p class="text-xs text-textSecondary mt-1" data-i18n="verify_fp_desc">Comparing keys prevents potential interception.</p>
+
+        <!-- Mock QR code pattern -->
+        <div class="my-5 p-2 bg-white rounded-lg border border-gray-200">
+          <svg class="w-36 h-36" viewBox="0 0 100 100" fill="currentColor">
+            <path d="M5,5 h20 v20 h-20 z M9,9 h12 v12 h-12 z" />
+            <path d="M75,5 h20 v20 h-20 z M79,9 h12 v12 h-12 z" />
+            <path d="M5,75 h20 v20 h-20 z M9,79 h12 v12 h-12 z" />
+            <path d="M35,15 h10 v5 h5 v-10 h-15 z" />
+            <path d="M55,10 h10 v15 h-5 v-10 h-5 z" />
+            <path d="M30,35 h5 v5 h-5 z M45,35 h15 v5 h-15 z M70,35 h10 v10 h-10 z" />
+            <path d="M10,45 h15 v5 h-15 z M35,45 h5 v10 h-5 z M50,55 h10 v10 h-10 z" />
+            <path d="M70,60 h15 v5 h-15 z M85,75 h10 v15 h-5 v-10 h-5 z" />
+            <path d="M30,75 h10 v10 h-10 z M45,85 h20 v5 h-20 z" />
+          </svg>
+        </div>
+
+        <!-- Explanatory note -->
+        <p class="text-[11px] text-textSecondary px-2 leading-relaxed" id="fp-modal-explain-container">
+          Verify with <strong id="fp-modal-name">Alice Vance</strong> that the fingerprints in their security panel matches the string below:
+        </p>
+
+        <!-- Encrypted fingerprint string -->
+        <div class="mt-3.5 p-3 bg-bgSearch rounded-custom-md border border-borderColor w-full">
+          <code id="fp-modal-key" class="text-xs font-mono font-bold text-textMain break-all tracking-wider block">
+            ECC: 9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A
+          </code>
+        </div>
+
+        <!-- Confirmation control button -->
+        <button onclick="closeFingerprintModal()"
+          class="w-full mt-5 py-2.5 bg-brand-light dark:bg-brand-dark text-white font-semibold text-sm rounded-custom-md hover:opacity-95 focus:outline-none transition-all">
+          <span data-i18n="fp_match_btn">Fingerprints Match</span>
+        </button>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right Side: Details & Security Dashboard Drawer Panel -->
+  <div id="right-details-panel" class="hidden w-[350px] border-l border-borderColor bg-bgSidebar h-full flex flex-col flex-shrink-0 z-20 overflow-y-auto custom-scrollbar select-none">
+    
+    <!-- Drawer Header -->
+    <div class="p-4 border-b border-borderColor flex items-center justify-between bg-search-op-10">
+      <h3 class="font-bold text-textMain text-sm">Contact Info</h3>
+      <button id="close-details-btn" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="Close Panel">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+    
+    <!-- Profile Hero Info -->
+    <div class="p-6 flex flex-col items-center border-b border-borderColor">
+      <div id="details-avatar" class="w-20 h-20 rounded-full bg-brand-light text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3">
+        AV
+      </div>
+      <h4 id="details-name" class="font-bold text-textMain text-base">Alice Vance</h4>
+      <p id="details-status" class="text-xs text-[#31B545] font-semibold mt-0.5">online</p>
+    </div>
+    
+    <!-- E2EE security description & Fingerprint -->
+    <div class="p-4 border-b border-borderColor">
+      <h4 class="text-xs font-bold text-brand-light dark:text-brand-dark uppercase tracking-wider mb-2">E2EE Security Info</h4>
+      <div class="space-y-2">
+        <div class="flex items-center space-x-2 text-textSecondary text-xs">
+          <i data-lucide="shield-check" class="w-4 h-4 text-emerald-500 fill-emerald-500/10"></i>
+          <span>End-to-End Encrypted (ECDH P-256 + AES-GCM)</span>
+        </div>
+        <div class="p-2.5 bg-bgSearch rounded border border-borderColor text-[10px] font-mono text-textMain break-all" id="details-fingerprint">
+          ECC: 9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A
+        </div>
+      </div>
+    </div>
+    
+    <!-- Crypto Pipeline Console Section -->
+    <div class="p-4 flex-1 flex flex-col min-h-[300px]">
+      <div class="flex items-center justify-between mb-2">
+        <h4 class="text-xs font-bold text-brand-light dark:text-brand-dark uppercase tracking-wider">
+          【Crypto Pipeline Console】
+        </h4>
+        <button id="clear-crypto-console-btn" class="text-[10px] text-brand-light dark:text-brand-dark hover:underline font-semibold focus:outline-none">
+          Clear
+        </button>
+      </div>
+      <div id="crypto-console-log" class="flex-1 font-mono text-[10.5px] bg-black text-green-400 p-3 overflow-y-auto rounded border border-zinc-800 max-h-[350px] leading-relaxed whitespace-pre-wrap select-text">
+[System Initialization] E2E encryption subsystem active.
+Waiting for message transmission...
+      </div>
+    </div>
+
+  </div>
+
+</div>

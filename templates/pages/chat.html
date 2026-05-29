@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Workspace - iChat Pro{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/chat.css' %}">
+{% endblock %}
+
+{% block content %}
+<!-- Main Application Workspace Viewport -->
+<div class="chat-layout flex h-screen w-screen overflow-hidden bg-bgMain text-textMain relative select-none">
+  
+  <!-- Left Side: Collapsible Search, Contacts & Settings Sidebar -->
+  {% include 'components/sidebar.html' %}
+  
+  <!-- Right Side: Chat Window Workspace Container -->
+  <!-- On mobile, this container is hidden by default and shown when selecting a chat. On desktop, it is always visible. -->
+  <div id="chat-window-container" class="hidden md:flex flex-1 flex-row h-full bg-bgMain relative transition-all duration-200">
+    
+    <!-- Left Column: Messages & Input -->
+    <div class="flex-1 flex flex-col h-full min-w-0">
+      <!-- Empty State Window (Shown when no chat active) -->
+      {% include 'components/empty_state.html' %}
+      
+      <!-- Active Message Window (Hidden initially, toggled visible by selectChat in chat.js) -->
+      <div id="active-chat-window" class="hidden h-full flex flex-col">
+        {% include 'components/chat_window.html' %}
+      </div>
+    </div>
+
+    <!-- Right Column: Chat Info details panel -->
+    {% include 'components/right_panel.html' %}
+    
+  </div>
+
+  <!-- Left-sliding Drawer Navigation Overlay -->
+  {% include 'components/drawer_menu.html' %}
+
+</div>
+
+<!-- NEW GROUP MODAL -->
+<div class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4" id="group-modal">
+    <div class="bg-bgSidebar border border-borderColor rounded-custom-lg shadow-2xl w-full max-w-[420px] p-6 select-none flex flex-col">
+        <div class="text-base font-bold text-textMain mb-4">Create New Group</div>
+        <div class="space-y-4">
+            <div class="flex flex-col space-y-1">
+                <label class="text-xs text-textSecondary font-semibold" for="group-name">Group Name</label>
+                <input type="text" id="group-name" class="w-full px-3.5 py-2 rounded-custom-md bg-bgSearch border border-borderColor text-textMain text-sm focus:outline-none focus:ring-1 focus:ring-brand-light" placeholder="e.g. Project Devs">
+            </div>
+            <div class="flex flex-col space-y-1">
+                <label class="text-xs text-textSecondary font-semibold">Select Members</label>
+                <div class="max-h-36 overflow-y-auto border border-borderColor rounded p-2 space-y-1 bg-search-op-30 custom-scrollbar text-sm" id="group-members-list">
+                    <!-- Dynamic contact list for group selection will go here -->
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center justify-end space-x-3 mt-6">
+            <button class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" id="close-group-modal-btn">Cancel</button>
+            <button class="px-4 py-2 text-xs font-semibold bg-brand-light dark:bg-brand-dark text-white rounded-custom-md hover:opacity-90 transition-opacity" id="submit-group-modal-btn">Create Group</button>
+        </div>
+    </div>
+</div>
+
+<!-- CONTACTS MODAL -->
+<div class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4" id="contacts-modal">
+    <div class="bg-bgSidebar border border-borderColor rounded-custom-lg shadow-2xl w-full max-w-[420px] p-6 select-none flex flex-col">
+        <div class="text-base font-bold text-textMain mb-4">Add Contact</div>
+        <div class="space-y-4">
+            <div class="flex flex-col space-y-1">
+                <label class="text-xs text-textSecondary font-semibold" for="contact-username">Username or Account ID</label>
+                <input type="text" id="contact-username" class="w-full px-3.5 py-2 rounded-custom-md bg-bgSearch border border-borderColor text-textMain text-sm focus:outline-none focus:ring-1 focus:ring-brand-light" placeholder="e.g. charlie_brown">
+            </div>
+        </div>
+        <div class="flex items-center justify-end space-x-3 mt-6">
+            <button class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" id="close-contacts-modal-btn">Cancel</button>
+            <button class="px-4 py-2 text-xs font-semibold bg-brand-light dark:bg-brand-dark text-white rounded-custom-md hover:opacity-90 transition-opacity" id="submit-contacts-modal-btn">Add Contact</button>
+        </div>
+    </div>
+</div>
+<!-- Toast Container -->
+<div id="toast-container" class="fixed top-5 left-1/2 -translate-x-1/2 z-[100] pointer-events-none flex flex-col items-center space-y-2"></div>
+
+<!-- REPORT MODAL -->
+<div id="report-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
+  <div class="bg-bgSidebar/95 dark:bg-bgSidebar/98 border border-borderColor rounded-[20px] shadow-2xl w-full max-w-[360px] p-6 select-none flex flex-col">
+    <div class="text-base font-bold text-textMain mb-3" data-i18n="report_title">举报会话</div>
+    <div class="text-xs text-textSecondary mb-4" data-i18n="report_reason_prompt">请选择举报原因：</div>
+    <div class="space-y-3 text-sm text-textMain" id="report-reasons-list">
+      <label class="flex items-center space-x-3 cursor-pointer">
+        <input type="radio" name="report-reason" value="spam" checked class="accent-brand-light dark:accent-brand-dark">
+        <span data-i18n="report_spam">垃圾信息</span>
+      </label>
+      <label class="flex items-center space-x-3 cursor-pointer">
+        <input type="radio" name="report-reason" value="harassment" class="accent-brand-light dark:accent-brand-dark">
+        <span data-i18n="report_harassment">骚扰</span>
+      </label>
+      <label class="flex items-center space-x-3 cursor-pointer">
+        <input type="radio" name="report-reason" value="attack" class="accent-brand-light dark:accent-brand-dark">
+        <span data-i18n="report_attack">人身攻击</span>
+      </label>
+      <label class="flex items-center space-x-3 cursor-pointer">
+        <input type="radio" name="report-reason" value="illegal" class="accent-brand-light dark:accent-brand-dark">
+        <span data-i18n="report_illegal">违法内容</span>
+      </label>
+      <label class="flex items-center space-x-3 cursor-pointer">
+        <input type="radio" name="report-reason" value="other" class="accent-brand-light dark:accent-brand-dark">
+        <span data-i18n="report_other">其他</span>
+      </label>
+    </div>
+    <div class="flex items-center justify-end space-x-3 mt-6">
+      <button onclick="closeReportModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
+      <button onclick="submitReport()" class="px-4 py-2 text-xs font-semibold bg-brand-light dark:bg-brand-dark text-white rounded-custom-md hover:opacity-90 transition-opacity" data-i18n="submit">提交</button>
+    </div>
+  </div>
+</div>
+
+<!-- DELETE CHAT CONFIRM MODAL -->
+<div id="delete-conversation-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
+  <div class="bg-bgSidebar/95 dark:bg-bgSidebar/98 border border-borderColor rounded-[20px] shadow-2xl w-full max-w-[360px] p-6 select-none flex flex-col">
+    <div class="text-base font-bold text-textMain mb-2" data-i18n="delete_chat_confirm_title">删除聊天？</div>
+    <div class="text-xs text-textSecondary leading-relaxed mb-6" data-i18n="delete_chat_confirm_desc">
+      删除后，本地会话记录将从列表中移除。该操作不会删除其他成员的聊天记录。
+    </div>
+    <div class="flex items-center justify-end space-x-3">
+      <button onclick="closeDeleteConfirmModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
+      <button onclick="confirmDeleteChat()" class="px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-custom-md hover:bg-red-600 transition-colors" data-i18n="delete">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOGOUT CONFIRM MODAL -->
+<div id="logout-confirm-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
+  <div class="bg-bgSidebar/95 dark:bg-bgSidebar/98 border border-borderColor rounded-[20px] shadow-2xl w-full max-w-[340px] p-6 select-none flex flex-col">
+    <div class="text-base font-bold text-textMain mb-2" data-i18n="logout_confirm_title">退出登录</div>
+    <div class="text-xs text-textSecondary leading-relaxed mb-6" data-i18n="logout_confirm_desc">
+      确定要退出登录吗？
+    </div>
+    <div class="flex items-center justify-end space-x-3">
+      <button onclick="closeLogoutConfirmModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
+      <a href="{% url 'logout' %}" class="px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-custom-md hover:bg-red-600 transition-colors text-center flex items-center justify-center" data-i18n="logout_confirm_btn">确认</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Main Chat Interaction JavaScript -->
+<script src="{% static 'js/chat.js' %}"></script>
+{% endblock %}

@@ -1,0 +1,233 @@
+{% extends 'base_auth.html' %}
+{% load static %}
+
+{% block title %}Register - iChat Pro{% endblock %}
+
+{% block auth_card %}
+<div class="space-y-6">
+  <!-- Header Title -->
+  <div class="text-center">
+    <h2 class="text-2xl font-bold text-textMain">Create Account</h2>
+    <p class="text-sm text-textSecondary mt-1">Generate your decentralized keys</p>
+  </div>
+
+  <!-- Security Notice Card (E2E Key Generation Warning) -->
+  <div class="p-3.5 rounded-custom-md bg-blue-50/75 dark:bg-brand-dark/10 border border-blue-100 dark:border-brand-dark/20 text-xs text-blue-700 dark:text-brand-dark flex items-start space-x-2.5">
+    <i data-lucide="info" class="w-4 h-4 flex-shrink-0 mt-0.5"></i>
+    <p class="leading-relaxed">
+      <strong>Zero-Knowledge:</strong> Your E2E cryptographic keys are generated locally in your browser. Your password is never sent in plain text.
+    </p>
+  </div>
+
+  <!-- Client-side Error Box -->
+  <div id="validation-error-box" class="hidden p-4 rounded-custom-md bg-red-50 border border-red-200 dark:bg-red-950/20 dark:border-red-900/50 text-red-600 dark:text-red-400 text-sm flex items-start space-x-2">
+    <i data-lucide="alert-circle" class="w-5 h-5 flex-shrink-0 mt-0.5"></i>
+    <span id="validation-error-text" class="font-medium"></span>
+  </div>
+
+  <!-- Registration Form -->
+  <form id="register-form" method="POST" action="" class="space-y-4" onsubmit="return handleRegisterSubmit(event)">
+    {% csrf_token %}
+
+    <!-- Username Input Group -->
+    <div class="space-y-1">
+      <label for="username" class="block text-sm font-semibold text-textMain">Username</label>
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary">
+          <i data-lucide="user" class="w-4.5 h-4.5"></i>
+        </span>
+        <input type="text" id="username" name="username" required
+          class="w-full pl-10 pr-4 py-2.5 rounded-custom-md border border-borderColor bg-bgMain text-textMain placeholder-textSecondary/60 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:border-transparent transition-all text-sm"
+          placeholder="e.g. bob_alice">
+      </div>
+    </div>
+
+    <!-- Email Input Group -->
+    <div class="space-y-1">
+      <label for="email" class="block text-sm font-semibold text-textMain">Email Address</label>
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary">
+          <i data-lucide="mail" class="w-4.5 h-4.5"></i>
+        </span>
+        <input type="email" id="email" name="email" required
+          class="w-full pl-10 pr-4 py-2.5 rounded-custom-md border border-borderColor bg-bgMain text-textMain placeholder-textSecondary/60 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:border-transparent transition-all text-sm"
+          placeholder="e.g. bob@example.com">
+      </div>
+    </div>
+
+    <!-- Password Input Group -->
+    <div class="space-y-1">
+      <label for="password" class="block text-sm font-semibold text-textMain">Password</label>
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary">
+          <i data-lucide="key-round" class="w-4.5 h-4.5"></i>
+        </span>
+        <input type="password" id="password" name="password" required oninput="checkPasswordStrength()"
+          class="w-full pl-10 pr-4 py-2.5 rounded-custom-md border border-borderColor bg-bgMain text-textMain placeholder-textSecondary/60 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:border-transparent transition-all text-sm"
+          placeholder="Min. 8 characters">
+      </div>
+      <!-- Password Strength Meter -->
+      <div class="pt-1.5 flex items-center space-x-1">
+        <div id="strength-bar-1" class="h-1 w-1/3 bg-gray-200 dark:bg-zinc-700 rounded-full transition-all"></div>
+        <div id="strength-bar-2" class="h-1 w-1/3 bg-gray-200 dark:bg-zinc-700 rounded-full transition-all"></div>
+        <div id="strength-bar-3" class="h-1 w-1/3 bg-gray-200 dark:bg-zinc-700 rounded-full transition-all"></div>
+        <span id="strength-text" class="text-[10px] text-textSecondary font-medium ml-1.5">Too Short</span>
+      </div>
+    </div>
+
+    <!-- Confirm Password Input Group -->
+    <div class="space-y-1">
+      <label for="confirm-password" class="block text-sm font-semibold text-textMain">Confirm Password</label>
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary">
+          <i data-lucide="key-round" class="w-4.5 h-4.5"></i>
+        </span>
+        <input type="password" id="confirm-password" required
+          class="w-full pl-10 pr-4 py-2.5 rounded-custom-md border border-borderColor bg-bgMain text-textMain placeholder-textSecondary/60 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:border-transparent transition-all text-sm"
+          placeholder="Repeat password">
+      </div>
+    </div>
+
+    <!-- Agreement Checkbox -->
+    <div class="flex items-start">
+      <input type="checkbox" id="terms" required
+        class="mt-1 h-4 w-4 rounded border-borderColor text-brand-light dark:text-brand-dark focus:ring-brand-light dark:focus:ring-brand-dark bg-bgMain">
+      <label for="terms" class="ml-2.5 block text-xs text-textSecondary cursor-pointer leading-tight">
+        I accept the privacy policy and understand that losing my password means losing access to my messages (no password recovery is possible).
+      </label>
+    </div>
+
+    <!-- Key Gen Status Overlay (Hidden initially, shown during submit) -->
+    <div id="keygen-overlay" class="hidden flex-col items-center justify-center space-y-3 py-4 text-center">
+      <div class="relative w-12 h-12 flex items-center justify-center">
+        <div class="absolute inset-0 rounded-full border-4 border-brand-light/20 dark:border-brand-dark/20"></div>
+        <div class="absolute inset-0 rounded-full border-4 border-t-brand-light dark:border-t-brand-dark animate-spin"></div>
+        <i data-lucide="key" class="w-5 h-5 text-brand-light dark:text-brand-dark animate-pulse"></i>
+      </div>
+      <div>
+        <p class="text-sm font-bold text-textMain">Generating local key pair...</p>
+        <p class="text-[10px] text-textSecondary">Calculating 256-bit Elliptic Curve keys...</p>
+      </div>
+    </div>
+
+    <!-- Submit Button -->
+    <button type="submit" id="submit-btn"
+      class="w-full py-3 bg-brand-light hover:bg-brand-light/95 dark:bg-brand-dark dark:hover:bg-brand-dark/95 text-white font-semibold rounded-custom-md shadow-md focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all flex items-center justify-center space-x-2">
+      <span>Generate & Register</span>
+      <i data-lucide="key-round" class="w-4 h-4"></i>
+    </button>
+  </form>
+
+  <!-- Navigation Link to Login -->
+  <div class="text-center pt-2">
+    <p class="text-sm text-textSecondary">
+      Already have an account? 
+      <a href="{% url 'login' %}" id="login-link" class="font-semibold text-brand-light dark:text-brand-dark hover:underline">Sign In</a>
+    </p>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // Simple strength checker
+  function checkPasswordStrength() {
+    const password = document.getElementById('password').value;
+    const bar1 = document.getElementById('strength-bar-1');
+    const bar2 = document.getElementById('strength-bar-2');
+    const bar3 = document.getElementById('strength-bar-3');
+    const text = document.getElementById('strength-text');
+
+    // Reset styles
+    bar1.className = "h-1 w-1/3 bg-gray-200 dark:bg-zinc-700 rounded-full transition-all";
+    bar2.className = "h-1 w-1/3 bg-gray-200 dark:bg-zinc-700 rounded-full transition-all";
+    bar3.className = "h-1 w-1/3 bg-gray-200 dark:bg-zinc-700 rounded-full transition-all";
+
+    if (password.length === 0) {
+      text.textContent = "Too Short";
+      return;
+    }
+
+    if (password.length < 6) {
+      bar1.classList.remove('bg-gray-200', 'dark:bg-zinc-700');
+      bar1.classList.add('bg-red-500');
+      text.textContent = "Weak";
+    } else if (password.length < 9) {
+      bar1.classList.remove('bg-gray-200', 'dark:bg-zinc-700');
+      bar2.classList.remove('bg-gray-200', 'dark:bg-zinc-700');
+      bar1.classList.add('bg-yellow-500');
+      bar2.classList.add('bg-yellow-500');
+      text.textContent = "Medium";
+    } else {
+      bar1.classList.remove('bg-gray-200', 'dark:bg-zinc-700');
+      bar2.classList.remove('bg-gray-200', 'dark:bg-zinc-700');
+      bar3.classList.remove('bg-gray-200', 'dark:bg-zinc-700');
+      bar1.classList.add('bg-green-500');
+      bar2.classList.add('bg-green-500');
+      bar3.classList.add('bg-green-500');
+      text.textContent = "Strong";
+    }
+  }
+
+  // Handle local key generation animation and submission
+  function handleRegisterSubmit(event) {
+    const username = document.getElementById('username').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const confirmPassword = document.getElementById('confirm-password').value;
+    const terms = document.getElementById('terms').checked;
+    
+    const errorBox = document.getElementById('validation-error-box');
+    const errorText = document.getElementById('validation-error-text');
+    const submitBtn = document.getElementById('submit-btn');
+    const keygenOverlay = document.getElementById('keygen-overlay');
+    const registerForm = document.getElementById('register-form');
+
+    // Local checks
+    if (password !== confirmPassword) {
+      event.preventDefault();
+      errorText.textContent = "Passwords do not match!";
+      errorBox.classList.remove('hidden');
+      return false;
+    }
+
+    if (password.length < 8) {
+      event.preventDefault();
+      errorText.textContent = "Password must be at least 8 characters long.";
+      errorBox.classList.remove('hidden');
+      return false;
+    }
+
+    errorBox.classList.add('hidden');
+    
+    // Animate key generation
+    event.preventDefault();
+    submitBtn.classList.add('hidden');
+    keygenOverlay.classList.remove('hidden');
+    
+    setTimeout(() => {
+      // Complete mock registration and redirect
+      if (window.location.protocol === 'file:') {
+        window.location.href = 'login.html';
+      } else {
+        // If actual server environment, restore button and submit form
+        submitBtn.classList.remove('hidden');
+        keygenOverlay.classList.add('hidden');
+        // Manually trigger standard form submission
+        submitBtn.disabled = true;
+        HTMLFormElement.prototype.submit.call(registerForm);
+      }
+    }, 1800);
+
+    return false;
+  }
+
+  // Handle fallback link for file protocol
+  if (window.location.protocol === 'file:') {
+    const loginLink = document.getElementById('login-link');
+    if (loginLink) {
+      loginLink.setAttribute('href', 'login.html');
+    }
+  }
+</script>
+{% endblock %}

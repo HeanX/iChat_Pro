@@ -1,4 +1,5 @@
 from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -30,10 +31,19 @@ class ChatConsumerTests(TransactionTestCase):
     def test_invalid_json_returns_error(self):
         async_to_sync(self._assert_invalid_json_returns_error)()
 
+    def test_cross_site_origin_is_rejected(self):
+        async_to_sync(self._assert_cross_site_origin_is_rejected)()
+
+    def test_disconnect_removes_user_group(self):
+        async_to_sync(self._assert_disconnect_removes_user_group)()
+
     def _session_cookie_header(self):
         self.client.force_login(self.user)
         session_id = self.client.cookies[settings.SESSION_COOKIE_NAME].value
-        return [(b'cookie', f'{settings.SESSION_COOKIE_NAME}={session_id}'.encode())]
+        return [
+            (b'origin', b'http://testserver'),
+            (b'cookie', f'{settings.SESSION_COOKIE_NAME}={session_id}'.encode()),
+        ]
 
     async def _assert_authenticated_user_can_connect(self):
         communicator = WebsocketCommunicator(
@@ -53,7 +63,11 @@ class ChatConsumerTests(TransactionTestCase):
         await communicator.disconnect()
 
     async def _assert_anonymous_user_is_rejected(self):
-        communicator = WebsocketCommunicator(application, '/ws/chat/')
+        communicator = WebsocketCommunicator(
+            application,
+            '/ws/chat/',
+            headers=[(b'origin', b'http://testserver')],
+        )
         connected, close_code = await communicator.connect()
         self.assertFalse(connected)
         self.assertEqual(close_code, 4401)
@@ -106,6 +120,32 @@ class ChatConsumerTests(TransactionTestCase):
         self.assertFalse(error['data']['retryable'])
 
         await communicator.disconnect()
+
+    async def _assert_cross_site_origin_is_rejected(self):
+        communicator = WebsocketCommunicator(
+            application,
+            '/ws/chat/',
+            headers=[(b'origin', b'https://attacker.example')],
+        )
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+
+    async def _assert_disconnect_removes_user_group(self):
+        communicator = WebsocketCommunicator(
+            application,
+            '/ws/chat/',
+            headers=self.session_cookie_header,
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        await communicator.receive_json_from()
+
+        channel_layer = get_channel_layer()
+        user_group_name = f'user_{self.user.pk}'
+        self.assertIn(user_group_name, channel_layer.groups)
+
+        await communicator.disconnect()
+        self.assertNotIn(user_group_name, channel_layer.groups)
 
     async def _assert_invalid_json_returns_error(self):
         communicator = WebsocketCommunicator(

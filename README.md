@@ -2,6 +2,8 @@
 
 iChat Pro is a Django-based secure chat project. The repository is organized for team development through Issues, feature branches, and Pull Requests.
 
+> 项目状态：目前仍在开发中，暂未完成。
+
 ## Requirements
 
 - Python 3.13+

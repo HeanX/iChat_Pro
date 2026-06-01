@@ -446,6 +446,7 @@ sent → delivered → read
 | `unauthenticated` | 用户未登录或 Session 已失效 | 登录后重连 |
 | `forbidden` | 无权访问会话或群聊 | 否 |
 | `not_found` | 会话、群聊、用户或密钥版本不存在 | 否 |
+| `not_implemented` | 事件已预留但当前任务阶段尚未实现 | 否 |
 | `conflict` | 群成员列表或密钥版本已变化 | 重新拉取后重试 |
 | `rate_limited` | 发送过于频繁 | 延迟重试 |
 | `internal_error` | 服务端异常 | 可有限重试 |

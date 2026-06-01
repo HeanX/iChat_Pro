@@ -1,4 +1,5 @@
 Django==6.0.5
+channels[daphne]==4.3.2
 asgiref==3.11.1
 sqlparse==0.5.5
 tzdata==2026.2

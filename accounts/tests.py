@@ -1,3 +1,4 @@
+
 """Tests for authentication views: registration, login, and logout."""
 
 from django.contrib.auth.models import User

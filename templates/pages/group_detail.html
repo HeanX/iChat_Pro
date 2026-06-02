@@ -29,7 +29,6 @@
     </div>
     {% endif %}
 
-    <!-- Group Info -->
     <section class="p-5 bg-bgSidebar border border-borderColor rounded-custom-md space-y-2">
       <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide">About</h2>
       <p class="text-sm text-textMain">{{ group.description|default:"No description." }}</p>
@@ -38,7 +37,6 @@
       </div>
     </section>
 
-    <!-- Members -->
     <section>
       <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide mb-3">
         Members ({{ members|length }})
@@ -63,7 +61,6 @@
       </div>
     </section>
 
-    <!-- Add Member (admins only) -->
     {% if is_admin %}
     <section>
       <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide mb-3">Add Member</h2>
@@ -81,7 +78,6 @@
     </section>
     {% endif %}
 
-    <!-- Leave Group -->
     <section class="pt-4 border-t border-borderColor">
       <form method="POST" action="{% url 'group_leave' group.id %}"
         onsubmit="return confirm('Leave this group?')">

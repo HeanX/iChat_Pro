@@ -43,10 +43,15 @@
               <span data-i18n="menu_saved_messages">Saved Messages</span>
             </button>
             <!-- Contacts -->
-            <button id="menu-contacts-btn" onclick="toggleMainMenu(event);" class="main-menu-item-custom">
+            <a href="{% url 'contacts' %}" class="main-menu-item-custom" onclick="toggleMainMenu(event);">
               <i data-lucide="users"></i>
               <span data-i18n="menu_contacts">Contacts</span>
-            </button>
+            </a>
+            <!-- Groups -->
+            <a href="{% url 'groups' %}" class="main-menu-item-custom" onclick="toggleMainMenu(event);">
+              <i data-lucide="users-round"></i>
+              <span>Groups</span>
+            </a>
             <!-- Settings -->
             <button id="menu-settings-btn" onclick="toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="settings"></i>

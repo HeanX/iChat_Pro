@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import Contact, FriendRequest, UserProfile, UserPublicKey
+from .models import (
+    Contact,
+    FriendRequest,
+    Group,
+    GroupMember,
+    UserProfile,
+    UserPublicKey,
+)
 
 
 @admin.register(UserProfile)
@@ -25,6 +32,27 @@ class UserPublicKeyAdmin(admin.ModelAdmin):
     @admin.display(description='Fingerprint')
     def fingerprint_short(self, obj):
         return obj.fingerprint[:32] + '…'
+
+
+class GroupMemberInline(admin.TabularInline):
+    model = GroupMember
+    extra = 0
+    fields = ('user', 'role', 'joined_at')
+    readonly_fields = ('joined_at',)
+
+
+@admin.register(Group)
+class GroupAdmin(admin.ModelAdmin):
+    list_display = ('name', 'creator', 'member_count', 'created_at')
+    search_fields = ('name', 'creator__username')
+    inlines = [GroupMemberInline]
+
+
+@admin.register(GroupMember)
+class GroupMemberAdmin(admin.ModelAdmin):
+    list_display = ('group', 'user', 'role', 'joined_at')
+    list_filter = ('role',)
+    search_fields = ('group__name', 'user__username')
 
 
 @admin.register(Contact)

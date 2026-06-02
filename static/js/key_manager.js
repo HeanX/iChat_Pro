@@ -19,8 +19,6 @@
     const STORAGE_KEY_PUBLIC = 'ichat_ecdh_public_spki';
     const STORAGE_KEY_FINGERPRINT = 'ichat_ecdh_fingerprint';
 
-    // ── helpers ────────────────────────────────────────────────────
-
     function arrayBufferToBase64(buffer) {
         let binary = '';
         const bytes = new Uint8Array(buffer);
@@ -53,49 +51,34 @@
         return match ? decodeURIComponent(match[1]) : '';
     }
 
-    // ── KeyManager ─────────────────────────────────────────────────
-
     class KeyManager {
         constructor() {
             this._ready = false;
         }
 
-        /**
-         * True if a private key exists in localStorage.
-         */
         hasExistingKeys() {
             return !!localStorage.getItem(STORAGE_KEY_PRIVATE);
         }
 
-        /**
-         * Generate a fresh ECDH P-256 key pair and persist to localStorage.
-         * Returns { publicKeySpki, fingerprint } — private key NEVER returned.
-         */
         async generateKeyPair() {
             const keyPair = await window.crypto.subtle.generateKey(
                 { name: 'ECDH', namedCurve: 'P-256' },
-                true, // extractable
+                true,
                 ['deriveKey', 'deriveBits'],
             );
 
-            // Export public key as SPKI (SubjectPublicKeyInfo)
             const spkiRaw = await window.crypto.subtle.exportKey(
-                'spki',
-                keyPair.publicKey,
+                'spki', keyPair.publicKey,
             );
             const publicKeySpki = arrayBufferToBase64(spkiRaw);
 
-            // Export private key as PKCS#8 — stored ONLY in localStorage
             const pkcs8Raw = await window.crypto.subtle.exportKey(
-                'pkcs8',
-                keyPair.privateKey,
+                'pkcs8', keyPair.privateKey,
             );
             const privateKeyPkcs8 = arrayBufferToBase64(pkcs8Raw);
 
-            // Compute SHA-256 fingerprint of the SPKI public key
             const fingerprint = await this._computeFingerprint(spkiRaw);
 
-            // Persist to localStorage
             localStorage.setItem(STORAGE_KEY_PRIVATE, privateKeyPkcs8);
             localStorage.setItem(STORAGE_KEY_PUBLIC, publicKeySpki);
             localStorage.setItem(STORAGE_KEY_FINGERPRINT, fingerprint);
@@ -104,132 +87,79 @@
             return { publicKeySpki, fingerprint };
         }
 
-        /**
-         * Load existing keys from localStorage.
-         * Returns { publicKeySpki, fingerprint, privateKeyPkcs8 } or null.
-         */
         loadKeys() {
             const priv = localStorage.getItem(STORAGE_KEY_PRIVATE);
             const pub = localStorage.getItem(STORAGE_KEY_PUBLIC);
             const fp = localStorage.getItem(STORAGE_KEY_FINGERPRINT);
-
             if (!priv || !pub || !fp) return null;
-
             this._ready = true;
-            return {
-                publicKeySpki: pub,
-                fingerprint: fp,
-                privateKeyPkcs8: priv, // for backup only
-            };
+            return { publicKeySpki: pub, fingerprint: fp, privateKeyPkcs8: priv };
         }
 
-        /**
-         * Get the CryptoKey object for the local private key.
-         */
         async getPrivateCryptoKey() {
             const pkcs8B64 = localStorage.getItem(STORAGE_KEY_PRIVATE);
             if (!pkcs8B64) return null;
-
             const buffer = base64ToArrayBuffer(pkcs8B64);
             return window.crypto.subtle.importKey(
-                'pkcs8',
-                buffer,
+                'pkcs8', buffer,
                 { name: 'ECDH', namedCurve: 'P-256' },
-                true,
-                ['deriveKey', 'deriveBits'],
+                true, ['deriveKey', 'deriveBits'],
             );
         }
 
-        /**
-         * Get the CryptoKey object for the local public key.
-         */
         async getPublicCryptoKey() {
             const spkiB64 = localStorage.getItem(STORAGE_KEY_PUBLIC);
             if (!spkiB64) return null;
-
             const buffer = base64ToArrayBuffer(spkiB64);
             return window.crypto.subtle.importKey(
-                'spki',
-                buffer,
+                'spki', buffer,
                 { name: 'ECDH', namedCurve: 'P-256' },
-                true,
-                [],
+                true, [],
             );
         }
 
-        /**
-         * Import a remote user's public key from SPKI Base64 → CryptoKey.
-         */
         async importRemotePublicKey(spkiBase64) {
             const buffer = base64ToArrayBuffer(spkiBase64);
             return window.crypto.subtle.importKey(
-                'spki',
-                buffer,
+                'spki', buffer,
                 { name: 'ECDH', namedCurve: 'P-256' },
-                true,
-                [],
+                true, [],
             );
         }
 
-        /**
-         * SHA-256 hex fingerprint of an ArrayBuffer (SPKI public key).
-         */
         async _computeFingerprint(spkiBuffer) {
             const digest = await window.crypto.subtle.digest('SHA-256', spkiBuffer);
             return arrayBufferToHex(digest);
         }
 
-        /**
-         * Recompute fingerprint from stored SPKI (verification aid).
-         */
         async getFingerprint() {
             const spkiB64 = localStorage.getItem(STORAGE_KEY_PUBLIC);
             if (!spkiB64) return null;
-
             const buffer = base64ToArrayBuffer(spkiB64);
             return this._computeFingerprint(buffer);
         }
 
-        // ── server sync ────────────────────────────────────────────
-
-        /**
-         * Upload the public key + fingerprint to the Django backend.
-         * Requires the user to be authenticated (CSRF cookie present).
-         */
         async uploadPublicKey() {
             const spki = localStorage.getItem(STORAGE_KEY_PUBLIC);
             const fp = localStorage.getItem(STORAGE_KEY_FINGERPRINT);
-
-            if (!spki || !fp) {
-                throw new Error('No local key pair found. Generate keys first.');
-            }
-
+            if (!spki || !fp) throw new Error('No local key pair found. Generate keys first.');
             const formData = new FormData();
             formData.append('public_key', spki);
             formData.append('fingerprint', fp);
-
             const response = await fetch('/keys/upload/', {
                 method: 'POST',
                 headers: { 'X-CSRFToken': getCsrfToken() },
                 body: formData,
             });
-
             const data = await response.json();
-            if (!data.ok) {
-                throw new Error(data.error || 'Upload failed.');
-            }
+            if (!data.ok) throw new Error(data.error || 'Upload failed.');
             return data;
         }
 
-        /**
-         * Fetch a user's public key from the server.
-         */
         async fetchPublicKey(username) {
             const response = await fetch(`/keys/${encodeURIComponent(username)}/`);
             const data = await response.json();
-            if (!data.ok) {
-                throw new Error(data.error || 'Public key not found.');
-            }
+            if (!data.ok) throw new Error(data.error || 'Public key not found.');
             return {
                 username: data.username,
                 publicKey: data.public_key,
@@ -238,22 +168,11 @@
             };
         }
 
-        // ── backup / import ─────────────────────────────────────────
-
-        /**
-         * Export the local key pair as a downloadable JSON file.
-         * The file contains the SPKI public key, PKCS#8 private key,
-         * and fingerprint — meant for user-controlled backup.
-         */
         exportBackup(filename = null) {
             const priv = localStorage.getItem(STORAGE_KEY_PRIVATE);
             const pub = localStorage.getItem(STORAGE_KEY_PUBLIC);
             const fp = localStorage.getItem(STORAGE_KEY_FINGERPRINT);
-
-            if (!priv || !pub || !fp) {
-                throw new Error('No key pair to export.');
-            }
-
+            if (!priv || !pub || !fp) throw new Error('No key pair to export.');
             const backup = {
                 version: 1,
                 algorithm: 'ECDH-P256',
@@ -262,12 +181,10 @@
                 privateKeyPkcs8: priv,
                 exportedAt: new Date().toISOString(),
             };
-
             const blob = new Blob(
                 [JSON.stringify(backup, null, 2)],
                 { type: 'application/json' },
             );
-
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -276,88 +193,39 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-
             return backup;
         }
 
-        /**
-         * Import a key pair from a backup JSON file.
-         * @param {File} file — the JSON backup file from <input type="file">
-         * @returns {Promise<{fingerprint: string}>}
-         */
         async importBackup(file) {
             const text = await file.text();
             let backup;
-            try {
-                backup = JSON.parse(text);
-            } catch {
-                throw new Error('Invalid backup file: not valid JSON.');
-            }
-
-            if (!backup.version || !backup.publicKeySpki || !backup.privateKeyPkcs8) {
+            try { backup = JSON.parse(text); } catch { throw new Error('Invalid backup file: not valid JSON.'); }
+            if (!backup.version || !backup.publicKeySpki || !backup.privateKeyPkcs8)
                 throw new Error('Invalid backup file: missing required fields.');
-            }
-
-            if (backup.algorithm !== 'ECDH-P256') {
-                throw new Error(
-                    `Unsupported algorithm: ${backup.algorithm}. Expected ECDH-P256.`,
-                );
-            }
-
-            // Validate that the private key parses correctly
-            try {
-                const pkcs8Buf = base64ToArrayBuffer(backup.privateKeyPkcs8);
-                await window.crypto.subtle.importKey(
-                    'pkcs8',
-                    pkcs8Buf,
-                    { name: 'ECDH', namedCurve: 'P-256' },
-                    true,
-                    ['deriveKey', 'deriveBits'],
-                );
-            } catch {
-                throw new Error(
-                    'Invalid backup: private key could not be imported.',
-                );
-            }
-
-            // Validate that the public key parses correctly
-            try {
-                const spkiBuf = base64ToArrayBuffer(backup.publicKeySpki);
-                await window.crypto.subtle.importKey(
-                    'spki',
-                    spkiBuf,
-                    { name: 'ECDH', namedCurve: 'P-256' },
-                    true,
-                    [],
-                );
-            } catch {
-                throw new Error(
-                    'Invalid backup: public key could not be imported.',
-                );
-            }
-
-            // Verify fingerprint matches
+            if (backup.algorithm !== 'ECDH-P256')
+                throw new Error(`Unsupported algorithm: ${backup.algorithm}.`);
+            const pkcs8Buf = base64ToArrayBuffer(backup.privateKeyPkcs8);
+            await window.crypto.subtle.importKey(
+                'pkcs8', pkcs8Buf,
+                { name: 'ECDH', namedCurve: 'P-256' },
+                true, ['deriveKey', 'deriveBits'],
+            );
             const spkiBuf = base64ToArrayBuffer(backup.publicKeySpki);
+            await window.crypto.subtle.importKey(
+                'spki', spkiBuf,
+                { name: 'ECDH', namedCurve: 'P-256' },
+                true, [],
+            );
             const computedFp = await this._computeFingerprint(spkiBuf);
-            if (computedFp !== backup.fingerprint) {
-                throw new Error(
-                    'Fingerprint mismatch: the backup may be corrupted.',
-                );
-            }
-
-            // Restore to localStorage
+            if (computedFp !== backup.fingerprint)
+                throw new Error('Fingerprint mismatch: the backup may be corrupted.');
             localStorage.setItem(STORAGE_KEY_PRIVATE, backup.privateKeyPkcs8);
             localStorage.setItem(STORAGE_KEY_PUBLIC, backup.publicKeySpki);
             localStorage.setItem(STORAGE_KEY_FINGERPRINT, backup.fingerprint);
-
             this._ready = true;
             return { fingerprint: backup.fingerprint };
         }
 
-        /**
-         * Delete all locally stored keys (dangerous — user should
-         * export a backup first).
-         */
         deleteLocalKeys() {
             localStorage.removeItem(STORAGE_KEY_PRIVATE);
             localStorage.removeItem(STORAGE_KEY_PUBLIC);
@@ -365,14 +233,8 @@
             this._ready = false;
         }
 
-        /**
-         * True after generateKeyPair() or loadKeys() has succeeded.
-         */
-        get isReady() {
-            return this._ready;
-        }
+        get isReady() { return this._ready; }
     }
 
-    // Expose globally
     window.KeyManager = KeyManager;
 })();

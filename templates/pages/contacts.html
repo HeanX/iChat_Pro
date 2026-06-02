@@ -5,7 +5,6 @@
 
 {% block content %}
 <div class="min-h-screen bg-bgMain text-textMain">
-  <!-- Top bar -->
   <header class="flex items-center justify-between px-6 py-4 border-b border-borderColor bg-bgSidebar">
     <div class="flex items-center space-x-4">
       <a href="{% url 'index' %}" class="p-2 rounded-full hover:bg-bgSearch text-textMain transition-colors" title="Back to chat">
@@ -16,8 +15,6 @@
   </header>
 
   <div class="max-w-2xl mx-auto px-4 py-6 space-y-8">
-
-    <!-- Messages (Django messages framework) -->
     {% if messages %}
     <div class="space-y-2">
       {% for message in messages %}
@@ -50,7 +47,6 @@
               oninput="liveSearchContacts(this.value)"
               onfocus="liveSearchContacts(this.value)"
             >
-            <!-- Search Results Dropdown -->
             <div id="search-results-dropdown"
               class="hidden absolute top-full left-0 right-0 mt-1 bg-bgSidebar border border-borderColor rounded-custom-md shadow-lg z-20 max-h-60 overflow-y-auto">
             </div>
@@ -86,17 +82,11 @@
           <div class="flex items-center space-x-2">
             <form method="POST" action="{% url 'friend_request_accept' req.id %}">
               {% csrf_token %}
-              <button type="submit"
-                class="px-3 py-1.5 bg-green-500 text-white text-xs font-semibold rounded-custom-md hover:bg-green-600 transition-colors">
-                Accept
-              </button>
+              <button type="submit" class="px-3 py-1.5 bg-green-500 text-white text-xs font-semibold rounded-custom-md hover:bg-green-600 transition-colors">Accept</button>
             </form>
             <form method="POST" action="{% url 'friend_request_reject' req.id %}">
               {% csrf_token %}
-              <button type="submit"
-                class="px-3 py-1.5 bg-red-500 text-white text-xs font-semibold rounded-custom-md hover:bg-red-600 transition-colors">
-                Reject
-              </button>
+              <button type="submit" class="px-3 py-1.5 bg-red-500 text-white text-xs font-semibold rounded-custom-md hover:bg-red-600 transition-colors">Reject</button>
             </form>
           </div>
         </div>
@@ -157,10 +147,7 @@
           </div>
           <form method="POST" action="{% url 'contact_delete' entry.id %}">
             {% csrf_token %}
-            <button type="submit"
-              class="px-3 py-1.5 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 text-xs font-semibold rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
-              Remove
-            </button>
+            <button type="submit" class="px-3 py-1.5 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 text-xs font-semibold rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">Remove</button>
           </form>
         </div>
         {% endfor %}
@@ -173,7 +160,6 @@
       </div>
       {% endif %}
     </section>
-
   </div>
 </div>
 {% endblock %}
@@ -185,13 +171,10 @@
   async function liveSearchContacts(query) {
     clearTimeout(_searchTimer);
     const dropdown = document.getElementById('search-results-dropdown');
-    const input = document.getElementById('contact-search-input');
-
     if (!query || query.trim().length < 2) {
       dropdown.classList.add('hidden');
       return;
     }
-
     _searchTimer = setTimeout(async () => {
       try {
         const resp = await fetch(`/contacts/search/?q=${encodeURIComponent(query.trim())}`);
@@ -210,24 +193,18 @@
       dropdown.classList.remove('hidden');
       return;
     }
-
     dropdown.innerHTML = results.map(r => {
       let badge = '';
-      let action = '';
       if (r.is_contact) {
         badge = '<span class="text-[10px] px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">Contact</span>';
       } else if (r.has_pending_out) {
         badge = '<span class="text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 font-medium">Requested</span>';
       } else if (r.has_pending_in) {
         badge = '<span class="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">Wants to add you</span>';
-        action = `<form method="POST" action="/contacts/request/send/" class="inline" onsubmit="event.stopPropagation()">
-          <input type="hidden" name="username" value="${r.username}">
-        </form>`;
       }
-
       return `
         <div class="flex items-center justify-between px-4 py-3 hover:bg-bgSearch transition-colors cursor-pointer"
-          onclick="document.getElementById('contact-search-input').value='${r.username}'; document.getElementById('search-results-dropdown').classList.add('hidden');">
+          onclick="document.getElementById('contact-search-input').value='${r.username}'; dropdown.classList.add('hidden');">
           <div class="flex items-center space-x-3">
             <div class="w-8 h-8 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-xs">
               ${r.username.charAt(0).toUpperCase()}
@@ -235,15 +212,12 @@
             <span class="text-sm font-medium text-textMain">${r.username}</span>
             ${badge}
           </div>
-          ${action}
         </div>
       `;
     }).join('');
-
     dropdown.classList.remove('hidden');
   }
 
-  // Close dropdown when clicking outside
   document.addEventListener('click', (e) => {
     const dropdown = document.getElementById('search-results-dropdown');
     const input = document.getElementById('contact-search-input');

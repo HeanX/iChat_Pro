@@ -8,8 +8,15 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
-from .forms import RegistrationForm
-from .models import Contact, FriendRequest, UserPublicKey
+from .forms import ProfileForm, RegistrationForm
+from .models import (
+    Contact,
+    FriendRequest,
+    Group,
+    GroupMember,
+    UserProfile,
+    UserPublicKey,
+)
 
 
 def register_view(request):
@@ -366,3 +373,135 @@ def get_public_key(request, username):
             {'ok': False, 'error': 'No public key found for this user.'},
             status=404,
         )
+
+
+# ── Profile views ──────────────────────────────────────────────────
+
+
+@login_required(login_url='login')
+def profile_edit_view(request):
+    """Edit nickname, bio, and avatar."""
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    if request.method == 'POST':
+        form = ProfileForm(request.POST, request.FILES, instance=profile)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Profile updated.')
+            return redirect('index')
+        for field, errors in form.errors.items():
+            for error in errors:
+                messages.error(request, error)
+    else:
+        form = ProfileForm(instance=profile)
+
+    return render(request, 'pages/profile_edit.html', {
+        'form': form,
+        'profile': profile,
+    })
+
+
+# ── Group views ────────────────────────────────────────────────────
+
+
+@login_required(login_url='login')
+def group_list_view(request):
+    """Show all groups the user is a member of."""
+    memberships = GroupMember.objects.filter(
+        user=request.user,
+    ).select_related('group')
+    groups = [m.group for m in memberships]
+    return render(request, 'pages/groups.html', {'groups': groups})
+
+
+@login_required(login_url='login')
+def group_create_view(request):
+    """Create a new group."""
+    if request.method == 'POST':
+        name = request.POST.get('name', '').strip()
+        description = request.POST.get('description', '').strip()
+
+        if not name:
+            messages.error(request, 'Group name is required.')
+            return redirect('groups')
+
+        group = Group.objects.create(
+            name=name,
+            description=description,
+            creator=request.user,
+        )
+        GroupMember.objects.create(
+            group=group,
+            user=request.user,
+            role=GroupMember.Role.ADMIN,
+        )
+        messages.success(request, f'Group "{name}" created.')
+        return redirect('group_detail', group_id=group.id)
+
+    return render(request, 'pages/groups.html', {'show_create': True})
+
+
+@login_required(login_url='login')
+def group_detail_view(request, group_id):
+    """Show group details and member list."""
+    group = get_object_or_404(Group, id=group_id)
+    members = group.members.select_related('user')
+    is_member = members.filter(user=request.user).exists()
+
+    if not is_member:
+        messages.error(request, 'You are not a member of this group.')
+        return redirect('groups')
+
+    return render(request, 'pages/group_detail.html', {
+        'group': group,
+        'members': members,
+        'is_admin': members.filter(
+            user=request.user, role=GroupMember.Role.ADMIN,
+        ).exists(),
+    })
+
+
+@login_required(login_url='login')
+@require_http_methods(['POST'])
+def group_add_member_view(request, group_id):
+    """Add a contact to a group."""
+    group = get_object_or_404(Group, id=group_id)
+    username = request.POST.get('username', '').strip()
+    user_to_add = get_object_or_404(User, username=username)
+
+    # Must be a contact
+    is_contact = Contact.objects.filter(
+        (models.Q(user=request.user) & models.Q(contact=user_to_add))
+        | (models.Q(user=user_to_add) & models.Q(contact=request.user)),
+    ).exists()
+    if not is_contact:
+        messages.error(request, f'{username} is not in your contacts.')
+        return redirect('group_detail', group_id=group.id)
+
+    _, created = GroupMember.objects.get_or_create(
+        group=group, user=user_to_add,
+        defaults={'role': GroupMember.Role.MEMBER},
+    )
+    if created:
+        messages.success(request, f'{username} added to {group.name}.')
+    else:
+        messages.info(request, f'{username} is already a member.')
+    return redirect('group_detail', group_id=group.id)
+
+
+@login_required(login_url='login')
+@require_http_methods(['POST'])
+def group_leave_view(request, group_id):
+    """Leave a group."""
+    group = get_object_or_404(Group, id=group_id)
+    membership = get_object_or_404(
+        GroupMember, group=group, user=request.user,
+    )
+    membership.delete()
+    messages.info(request, f'You left "{group.name}".')
+
+    # Delete group if no members remain
+    if not group.members.exists():
+        group.delete()
+
+    return redirect('groups')

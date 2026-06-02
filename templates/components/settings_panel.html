@@ -10,9 +10,9 @@
     <div class="flex-1">
       <h2 class="text-lg font-bold text-textMain" data-i18n="settings">Settings</h2>
     </div>
-    <button class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
+    <a href="{% url 'profile_edit' %}" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
       <i data-lucide="edit-3" class="w-5 h-5"></i>
-    </button>
+    </a>
   </div>
 
   <!-- Scrollable Panel Body -->
@@ -190,6 +190,39 @@
           </div>
         </div>
         
+        <!-- Security Status Overview (expandable) -->
+        <div class="py-2">
+          <button id="security-status-toggle-btn"
+            class="w-full py-2.5 flex items-center space-x-3.5 hover:opacity-85 text-left transition-opacity"
+            onclick="toggleSecurityStatus()">
+            <div class="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
+              <i data-lucide="shield-check" class="w-4 h-4"></i>
+            </div>
+            <div class="flex-1 leading-snug">
+              <div class="text-sm font-semibold text-textMain">Security Status</div>
+              <div class="text-[10px] text-textSecondary">E2EE key setup and contact verification</div>
+            </div>
+            <i id="security-status-chevron" data-lucide="chevron-down" class="w-4 h-4 text-textSecondary transition-transform"></i>
+          </button>
+
+          <div id="security-status-panel" class="hidden mt-3 px-1 space-y-3">
+            <div class="grid grid-cols-2 gap-2">
+              <div class="p-3 bg-bgSearch rounded-custom-md text-center">
+                <div id="sec-keys-status" class="text-lg font-bold text-green-500">—</div>
+                <div class="text-[10px] text-textSecondary mt-0.5">Local Keys</div>
+              </div>
+              <div class="p-3 bg-bgSearch rounded-custom-md text-center">
+                <div id="sec-server-status" class="text-lg font-bold text-gray-400">—</div>
+                <div class="text-[10px] text-textSecondary mt-0.5">Server Synced</div>
+              </div>
+            </div>
+            <button onclick="refreshSecurityStatus()"
+              class="w-full py-2 text-xs font-medium text-brand-light dark:text-brand-dark hover:underline">
+              Refresh Status
+            </button>
+          </div>
+        </div>
+
         <!-- Active Devices -->
         <button class="w-full py-2.5 flex items-center space-x-3.5 hover:opacity-85 text-left transition-opacity">
           <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg">
@@ -352,6 +385,53 @@
       _showKeyMsg('Import failed: ' + err.message, true);
     } finally {
       event.target.value = '';
+    }
+  }
+
+  // ── Security status UI ──────────────────────────────────────────
+  function toggleSecurityStatus() {
+    const panel = document.getElementById('security-status-panel');
+    const chevron = document.getElementById('security-status-chevron');
+    const isHidden = panel.classList.contains('hidden');
+    if (isHidden) {
+      panel.classList.remove('hidden');
+      chevron.style.transform = 'rotate(180deg)';
+      refreshSecurityStatus();
+    } else {
+      panel.classList.add('hidden');
+      chevron.style.transform = 'rotate(0deg)';
+    }
+  }
+
+  async function refreshSecurityStatus() {
+    const keysEl = document.getElementById('sec-keys-status');
+    const serverEl = document.getElementById('sec-server-status');
+
+    // Check local keys
+    const mgr = _getKeyMgr();
+    if (mgr.hasExistingKeys()) {
+      keysEl.textContent = '✓';
+      keysEl.classList.replace('text-gray-400', 'text-green-500');
+    } else {
+      keysEl.textContent = '✗';
+      keysEl.classList.replace('text-green-500', 'text-red-400');
+    }
+
+    // Check server sync — try to fetch own public key
+    try {
+      const username = document.querySelector('#sidebar-container')?.dataset?.username
+        || '{{ request.user.username|default:"" }}';
+      const resp = await fetch(`/keys/${encodeURIComponent(username || 'unknown')}/`);
+      const data = await resp.json();
+      if (data.ok) {
+        serverEl.textContent = '✓';
+        serverEl.classList.replace('text-gray-400', 'text-green-500');
+      } else {
+        serverEl.textContent = '✗';
+        serverEl.classList.replace('text-green-500', 'text-red-400');
+      }
+    } catch {
+      serverEl.textContent = '—';
     }
   }
 

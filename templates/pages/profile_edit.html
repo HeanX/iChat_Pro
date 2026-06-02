@@ -29,7 +29,6 @@
     <form method="POST" enctype="multipart/form-data" class="space-y-6">
       {% csrf_token %}
 
-      <!-- Avatar Preview -->
       <div class="flex flex-col items-center">
         <div class="w-24 h-24 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md mb-3">
           {{ request.user.username|slice:":1"|upper }}
@@ -37,34 +36,23 @@
         <div class="text-xs text-textSecondary mb-4">Avatar upload coming soon</div>
       </div>
 
-      <!-- Nickname -->
       <div class="space-y-1.5">
-        <label for="{{ form.nickname.id_for_label }}" class="block text-sm font-semibold text-textMain">
-          Nickname
-        </label>
+        <label for="{{ form.nickname.id_for_label }}" class="block text-sm font-semibold text-textMain">Nickname</label>
         <input type="text" name="nickname" id="{{ form.nickname.id_for_label }}"
           value="{{ form.nickname.value|default:'' }}"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
           placeholder="How others see you">
-        {% if form.nickname.errors %}
-        <p class="text-xs text-red-500">{{ form.nickname.errors.0 }}</p>
-        {% endif %}
+        {% if form.nickname.errors %}<p class="text-xs text-red-500">{{ form.nickname.errors.0 }}</p>{% endif %}
       </div>
 
-      <!-- Bio -->
       <div class="space-y-1.5">
-        <label for="{{ form.bio.id_for_label }}" class="block text-sm font-semibold text-textMain">
-          Bio
-        </label>
+        <label for="{{ form.bio.id_for_label }}" class="block text-sm font-semibold text-textMain">Bio</label>
         <textarea name="bio" id="{{ form.bio.id_for_label }}" rows="4"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all resize-none"
           placeholder="Tell people about yourself…">{{ form.bio.value|default:'' }}</textarea>
-        {% if form.bio.errors %}
-        <p class="text-xs text-red-500">{{ form.bio.errors.0 }}</p>
-        {% endif %}
+        {% if form.bio.errors %}<p class="text-xs text-red-500">{{ form.bio.errors.0 }}</p>{% endif %}
       </div>
 
-      <!-- Current Avatar (hidden input — we keep avatar upload working later) -->
       {% if form.avatar.value %}
       <input type="hidden" name="avatar" value="{{ form.avatar.value }}">
       {% endif %}

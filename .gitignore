@@ -28,3 +28,6 @@ Thumbs.db
 .DS_Store
 
 .codex-aether-review/
+.claude/
+.codex-pr29-fix/
+.codex-t02-worktree/

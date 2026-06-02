@@ -62,7 +62,7 @@
         <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary">
           <i data-lucide="key-round" class="w-4.5 h-4.5"></i>
         </span>
-        <input type="password" id="password" name="password" required oninput="checkPasswordStrength()"
+        <input type="password" id="password1" name="password1" required oninput="checkPasswordStrength()"
           class="w-full pl-10 pr-4 py-2.5 rounded-custom-md border border-borderColor bg-bgMain text-textMain placeholder-textSecondary/60 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:border-transparent transition-all text-sm"
           placeholder="Min. 8 characters">
       </div>
@@ -82,7 +82,7 @@
         <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary">
           <i data-lucide="key-round" class="w-4.5 h-4.5"></i>
         </span>
-        <input type="password" id="confirm-password" required
+        <input type="password" id="password2" name="password2" required
           class="w-full pl-10 pr-4 py-2.5 rounded-custom-md border border-borderColor bg-bgMain text-textMain placeholder-textSecondary/60 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:border-transparent transition-all text-sm"
           placeholder="Repeat password">
       </div>
@@ -132,7 +132,7 @@
 <script>
   // Simple strength checker
   function checkPasswordStrength() {
-    const password = document.getElementById('password').value;
+    const password = document.getElementById('password1').value;
     const bar1 = document.getElementById('strength-bar-1');
     const bar2 = document.getElementById('strength-bar-2');
     const bar3 = document.getElementById('strength-bar-3');
@@ -173,17 +173,19 @@
   function handleRegisterSubmit(event) {
     const username = document.getElementById('username').value.trim();
     const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const confirmPassword = document.getElementById('confirm-password').value;
-    const terms = document.getElementById('terms').checked;
-    
+    const password = document.getElementById('password1').value;
+    const confirmPassword = document.getElementById('password2').value;
+
     const errorBox = document.getElementById('validation-error-box');
     const errorText = document.getElementById('validation-error-text');
     const submitBtn = document.getElementById('submit-btn');
     const keygenOverlay = document.getElementById('keygen-overlay');
     const registerForm = document.getElementById('register-form');
 
-    // Local checks
+    // Reset error state
+    errorBox.classList.add('hidden');
+
+    // Client-side checks
     if (password !== confirmPassword) {
       event.preventDefault();
       errorText.textContent = "Passwords do not match!";
@@ -198,24 +200,24 @@
       return false;
     }
 
-    errorBox.classList.add('hidden');
-    
-    // Animate key generation
+    if (username.length < 3) {
+      event.preventDefault();
+      errorText.textContent = "Username must be at least 3 characters long.";
+      errorBox.classList.remove('hidden');
+      return false;
+    }
+
+    // Animate key generation then submit
     event.preventDefault();
     submitBtn.classList.add('hidden');
     keygenOverlay.classList.remove('hidden');
-    
+
     setTimeout(() => {
-      // Complete mock registration and redirect
       if (window.location.protocol === 'file:') {
         window.location.href = 'login.html';
       } else {
-        // If actual server environment, restore button and submit form
-        submitBtn.classList.remove('hidden');
-        keygenOverlay.classList.add('hidden');
-        // Manually trigger standard form submission
         submitBtn.disabled = true;
-        HTMLFormElement.prototype.submit.call(registerForm);
+        registerForm.submit();
       }
     }, 1800);
 

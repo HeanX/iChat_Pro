@@ -1,10 +1,17 @@
 import json
 
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.http import JsonResponse
 from django.shortcuts import render
 
-from .models import Conversation, ConversationMember, EncryptedMessage
+from .models import (
+    Conversation,
+    ConversationMember,
+    EncryptedMessage,
+    GroupMessage,
+    GroupMessageRecipient,
+)
 
 
 def _mock_chats():
@@ -287,3 +294,67 @@ def disband_group_view(request, conversation_id):
     conversation.save(update_fields=["status", "updated_at"])
 
     return JsonResponse({"status": "ok"})
+
+
+# ---------------------------------------------------------------------------
+# Group message history API
+# ---------------------------------------------------------------------------
+
+@login_required(login_url='login')
+def group_messages_view(request, conversation_id):
+    """Return paginated group messages for the current user.
+
+    Only group members may read messages.  Messages created before the
+    user joined are excluded so that new members cannot see history
+    from before they were added.
+    """
+    member = _get_member(conversation_id, request.user)
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse(
+            {"error": "You are not a member of this group."},
+            status=403,
+        )
+
+    page_number = request.GET.get("page", 1)
+    per_page = min(int(request.GET.get("per_page", 30)), 100)
+
+    # Only return messages sent on or after the user joined.
+    joined_at = member.joined_at
+    recipient_queryset = (
+        GroupMessageRecipient.objects.filter(
+            receiver=request.user,
+            group_message__conversation_id=conversation_id,
+            group_message__created_at__gte=joined_at,
+        )
+        .select_related("group_message")
+        .order_by("-group_message__created_at")
+    )
+    paginator = Paginator(recipient_queryset, per_page)
+    page_obj = paginator.get_page(page_number)
+
+    messages_data = [
+        {
+            "id": r.group_message.id,
+            "sender_id": r.group_message.sender_id,
+            "message_type": r.group_message.message_type,
+            "ciphertext": r.ciphertext,
+            "nonce": r.nonce,
+            "auth_tag": r.auth_tag,
+            "algorithm": r.algorithm,
+            "sender_key_version": r.sender_key_version,
+            "receiver_key_version": r.receiver_key_version,
+            "status": r.status,
+            "created_at": r.group_message.created_at.isoformat(),
+        }
+        for r in page_obj
+    ]
+
+    return JsonResponse({
+        "conversation_id": conversation_id,
+        "page": page_obj.number,
+        "total_pages": paginator.num_pages,
+        "total_messages": paginator.count,
+        "has_next": page_obj.has_next(),
+        "has_previous": page_obj.has_previous(),
+        "messages": messages_data,
+    })

@@ -4,7 +4,13 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.test import TestCase
 
-from .models import Conversation, ConversationMember, EncryptedMessage
+from .models import (
+    Conversation,
+    ConversationMember,
+    EncryptedMessage,
+    GroupMessage,
+    GroupMessageRecipient,
+)
 
 
 class ConversationModelTests(TestCase):
@@ -427,3 +433,170 @@ class GroupAPITests(TestCase):
             content_type="application/json",
         )
         self.assertIn(resp.status_code, [302, 301])
+
+
+class GroupMessageModelTests(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(username="alice", password="test1234")
+        self.conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name="GMTest"
+        )
+
+    def test_create_group_message(self):
+        msg = GroupMessage.objects.create(
+            conversation=self.conv,
+            sender=self.alice,
+            message_type=GroupMessage.MessageType.TEXT,
+        )
+        self.assertEqual(msg.status, GroupMessage.Status.ACTIVE)
+        self.assertEqual(msg.message_type, GroupMessage.MessageType.TEXT)
+
+    def test_create_recipient(self):
+        bob = User.objects.create_user(username="bob", password="test1234")
+        msg = GroupMessage.objects.create(
+            conversation=self.conv, sender=self.alice
+        )
+        recipient = GroupMessageRecipient.objects.create(
+            group_message=msg,
+            receiver=bob,
+            ciphertext="bobs-ciphertext",
+            nonce="nonce42",
+            auth_tag="tag42",
+            algorithm="AES-256-GCM",
+        )
+        self.assertEqual(recipient.status, GroupMessageRecipient.Status.SENT)
+        self.assertEqual(recipient.receiver, bob)
+
+    def test_unique_recipient_per_message(self):
+        bob = User.objects.create_user(username="bob", password="test1234")
+        msg = GroupMessage.objects.create(
+            conversation=self.conv, sender=self.alice
+        )
+        GroupMessageRecipient.objects.create(
+            group_message=msg,
+            receiver=bob,
+            algorithm="AES-256-GCM",
+        )
+        with self.assertRaises(IntegrityError):
+            GroupMessageRecipient.objects.create(
+                group_message=msg,
+                receiver=bob,
+                algorithm="AES-256-GCM",
+            )
+
+    def test_str_method(self):
+        msg = GroupMessage.objects.create(
+            conversation=self.conv, sender=self.alice
+        )
+        expected = f"GroupMessage #{msg.id} in Conversation #{self.conv.id}"
+        self.assertEqual(str(msg), expected)
+
+
+class GroupMessagesAPITests(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(username="alice", password="test1234")
+        self.bob = User.objects.create_user(username="bob", password="test1234")
+        self.eve = User.objects.create_user(username="eve", password="test1234")
+        self.conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name="TestGroup"
+        )
+
+    def _create_member(self, user, role=ConversationMember.Role.MEMBER):
+        return ConversationMember.objects.create(
+            conversation=self.conv, user=user, role=role
+        )
+
+    def _create_group_message(self, sender, recipients_ciphertexts):
+        """sender: User, recipients_ciphertexts: {user: ciphertext_str}"""
+        msg = GroupMessage.objects.create(
+            conversation=self.conv, sender=sender
+        )
+        for user, ct in recipients_ciphertexts.items():
+            GroupMessageRecipient.objects.create(
+                group_message=msg,
+                receiver=user,
+                ciphertext=ct,
+                nonce="n",
+                auth_tag="t",
+                algorithm="AES-256-GCM",
+            )
+        return msg
+
+    def _get(self, user=None, **params):
+        user = user or self.alice
+        self.client.login(username=user.username, password="test1234")
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        url = f"/api/groups/{self.conv.id}/messages/"
+        if qs:
+            url += f"?{qs}"
+        return self.client.get(url)
+
+    def test_member_can_fetch_messages(self):
+        self._create_member(self.alice)
+        self._create_member(self.bob)
+        self._create_group_message(
+            self.alice,
+            {self.alice: "alice-ct", self.bob: "bob-ct"},
+        )
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total_messages"], 1)
+        self.assertEqual(len(data["messages"]), 1)
+        msg = data["messages"][0]
+        # Only the current user's ciphertext is returned
+        self.assertEqual(msg["ciphertext"], "alice-ct")
+
+    def test_messages_exclude_other_users_ciphertexts(self):
+        self._create_member(self.alice)
+        self._create_member(self.bob)
+        self._create_group_message(
+            self.alice,
+            {self.alice: "alice-ct", self.bob: "bob-ct"},
+        )
+        resp = self._get(user=self.bob)
+        msgs = resp.json()["messages"]
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["ciphertext"], "bob-ct")
+        self.assertNotEqual(msgs[0]["ciphertext"], "alice-ct")
+
+    def test_non_member_gets_403(self):
+        resp = self._get(user=self.eve)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_new_member_cannot_see_old_messages(self):
+        self._create_member(self.alice)
+        # Alice sends a message before Bob joins
+        self._create_group_message(self.alice, {self.alice: "alice-ct"})
+        # Bob joins later
+        bob_member = ConversationMember.objects.create(
+            conversation=self.conv, user=self.bob
+        )
+        # Bob should not see the old message
+        resp = self._get(user=self.bob)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["total_messages"], 0)
+
+    def test_pagination(self):
+        self._create_member(self.alice)
+        for i in range(5):
+            self._create_group_message(self.alice, {self.alice: f"ct-{i}"})
+        resp = self._get(per_page=2, page=1)
+        data = resp.json()
+        self.assertEqual(len(data["messages"]), 2)
+        self.assertTrue(data["has_next"])
+
+    def test_empty_group_returns_empty_list(self):
+        self._create_member(self.alice)
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["messages"], [])
+
+    def test_messages_ordered_newest_first(self):
+        self._create_member(self.alice)
+        msg1 = self._create_group_message(self.alice, {self.alice: "ct-1"})
+        msg2 = self._create_group_message(self.alice, {self.alice: "ct-2"})
+        resp = self._get()
+        msgs = resp.json()["messages"]
+        self.assertEqual(msgs[0]["id"], msg2.id)
+        self.assertEqual(msgs[1]["id"], msg1.id)

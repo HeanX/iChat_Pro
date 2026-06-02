@@ -148,3 +148,87 @@ class EncryptedMessage(models.Model):
 
     def __str__(self):
         return f"Message #{self.id} from #{self.sender_id} to #{self.receiver_id}"
+
+
+class GroupMessage(models.Model):
+    """Logical group message record. Ciphertext is stored per-recipient."""
+
+    class MessageType(models.TextChoices):
+        TEXT = "text", "Text"
+        IMAGE = "image", "Image"
+        FILE = "file", "File"
+        STICKER = "sticker", "Sticker"
+        SYSTEM = "system", "System"
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DELETED = "deleted", "Deleted"
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="group_messages"
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_group_messages",
+    )
+    message_type = models.CharField(
+        max_length=20, choices=MessageType.choices, default=MessageType.TEXT
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.ACTIVE
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["conversation_id", "created_at"]),
+            models.Index(fields=["sender_id"]),
+        ]
+
+    def __str__(self):
+        return f"GroupMessage #{self.id} in Conversation #{self.conversation_id}"
+
+
+class GroupMessageRecipient(models.Model):
+    """Per-recipient encrypted copy of a group message."""
+
+    class Status(models.TextChoices):
+        SENT = "sent", "Sent"
+        DELIVERED = "delivered", "Delivered"
+        READ = "read", "Read"
+
+    group_message = models.ForeignKey(
+        GroupMessage, on_delete=models.CASCADE, related_name="recipients"
+    )
+    receiver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="group_message_copies",
+    )
+    ciphertext = models.TextField(null=True, blank=True)
+    nonce = models.CharField(max_length=64, null=True, blank=True)
+    auth_tag = models.CharField(max_length=64, null=True, blank=True)
+    algorithm = models.CharField(max_length=50)
+    sender_key_version = models.IntegerField(null=True, blank=True)
+    receiver_key_version = models.IntegerField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.SENT
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group_message", "receiver"],
+                name="unique_group_message_recipient",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["receiver_id", "created_at"]),
+            models.Index(fields=["group_message_id"]),
+        ]
+
+    def __str__(self):
+        return f"Recipient #{self.receiver_id} for GroupMessage #{self.group_message_id}"

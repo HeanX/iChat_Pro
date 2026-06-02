@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ group.name }} - iChat Pro{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-bgMain text-textMain">
+  <header class="flex items-center justify-between px-6 py-4 border-b border-borderColor bg-bgSidebar">
+    <div class="flex items-center space-x-4">
+      <a href="{% url 'groups' %}" class="p-2 rounded-full hover:bg-bgSearch text-textMain transition-colors">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </a>
+      <div>
+        <h1 class="text-xl font-bold">{{ group.name }}</h1>
+        <p class="text-xs text-textSecondary">{{ group.member_count }} member{{ group.member_count|pluralize }}</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-2xl mx-auto px-4 py-6 space-y-8">
+    {% if messages %}
+    <div class="space-y-2">
+      {% for message in messages %}
+      <div class="p-3 rounded-custom-md text-sm font-medium
+        {% if message.tags == 'error' %}bg-red-50 border border-red-200 text-red-700{% elif message.tags == 'success' %}bg-green-50 border border-green-200 text-green-700{% else %}bg-blue-50 border border-blue-200 text-blue-700{% endif %}">
+        {{ message }}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Group Info -->
+    <section class="p-5 bg-bgSidebar border border-borderColor rounded-custom-md space-y-2">
+      <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide">About</h2>
+      <p class="text-sm text-textMain">{{ group.description|default:"No description." }}</p>
+      <div class="text-xs text-textSecondary">
+        Created by <strong>{{ group.creator.username }}</strong> on {{ group.created_at|date:"M d, Y" }}
+      </div>
+    </section>
+
+    <!-- Members -->
+    <section>
+      <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide mb-3">
+        Members ({{ members|length }})
+      </h2>
+      <div class="space-y-2">
+        {% for member in members %}
+        <div class="flex items-center justify-between p-3 bg-bgSidebar border border-borderColor rounded-custom-md">
+          <div class="flex items-center space-x-3">
+            <div class="w-9 h-9 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-xs">
+              {{ member.user.username|slice:":1"|upper }}
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-textMain">
+                {{ member.user.username }}
+                {% if member.user == group.creator %}<span class="text-[10px] text-brand-light dark:text-brand-dark font-medium">(creator)</span>{% endif %}
+              </p>
+              <p class="text-[10px] text-textSecondary">{{ member.get_role_display }} · Joined {{ member.joined_at|date:"M d" }}</p>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- Add Member (admins only) -->
+    {% if is_admin %}
+    <section>
+      <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide mb-3">Add Member</h2>
+      <form method="POST" action="{% url 'group_add_member' group.id %}" class="flex space-x-3">
+        {% csrf_token %}
+        <input type="text" name="username" required
+          class="flex-1 px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
+          placeholder="Enter contact's username...">
+        <button type="submit"
+          class="px-5 py-2.5 bg-brand-light dark:bg-brand-dark text-white text-sm font-semibold rounded-custom-md hover:opacity-90 transition-opacity flex items-center space-x-2">
+          <i data-lucide="user-plus" class="w-4 h-4"></i>
+          <span>Add</span>
+        </button>
+      </form>
+    </section>
+    {% endif %}
+
+    <!-- Leave Group -->
+    <section class="pt-4 border-t border-borderColor">
+      <form method="POST" action="{% url 'group_leave' group.id %}"
+        onsubmit="return confirm('Leave this group?')">
+        {% csrf_token %}
+        <button type="submit"
+          class="w-full py-2.5 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 text-sm font-semibold rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors flex items-center justify-center space-x-2">
+          <i data-lucide="log-out" class="w-4 h-4"></i>
+          <span>Leave Group</span>
+        </button>
+      </form>
+    </section>
+  </div>
+</div>
+{% endblock %}

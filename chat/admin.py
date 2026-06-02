@@ -1,3 +1,69 @@
 from django.contrib import admin
 
-# Register chat models here when they are added.
+from .models import Conversation, ConversationMember, EncryptedMessage
+
+
+@admin.register(Conversation)
+class ConversationAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "type",
+        "created_by",
+        "status",
+        "last_message_at",
+        "created_at",
+    ]
+    list_filter = ["type", "status"]
+    search_fields = ["id", "created_by__username"]
+    readonly_fields = ["created_at", "updated_at"]
+    ordering = ["-last_message_at", "-created_at"]
+
+
+@admin.register(ConversationMember)
+class ConversationMemberAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "conversation",
+        "user",
+        "status",
+        "unread_count",
+        "joined_at",
+    ]
+    list_filter = ["status"]
+    search_fields = ["conversation__id", "user__username"]
+    readonly_fields = ["joined_at"]
+
+
+@admin.register(EncryptedMessage)
+class EncryptedMessageAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "conversation",
+        "sender",
+        "receiver",
+        "message_type",
+        "algorithm",
+        "status",
+        "created_at",
+    ]
+    list_filter = ["message_type", "status", "algorithm"]
+    search_fields = ["conversation__id", "sender__username", "receiver__username"]
+    readonly_fields = ["created_at", "updated_at"]
+    # Exclude raw ciphertext fields from detail view by default —
+    # admins only see metadata, never plaintext (there is none stored).
+    fields = [
+        "conversation",
+        "sender",
+        "receiver",
+        "message_type",
+        "algorithm",
+        "sender_key_version",
+        "receiver_key_version",
+        "ciphertext",
+        "nonce",
+        "auth_tag",
+        "status",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    ]

@@ -1,3 +1,140 @@
+from django.conf import settings
 from django.db import models
 
-# Create chat models here.
+
+class Conversation(models.Model):
+    """Unified conversation table for both private and group chats."""
+
+    class Type(models.TextChoices):
+        SINGLE = "single", "Private Chat"
+        GROUP = "group", "Group Chat"
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        ARCHIVED = "archived", "Archived"
+        DELETED = "deleted", "Deleted"
+
+    type = models.CharField(max_length=20, choices=Type.choices)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="created_conversations",
+    )
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    last_message_id = models.IntegerField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.ACTIVE
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["type"]),
+            models.Index(fields=["last_message_at"]),
+        ]
+
+    def __str__(self):
+        return f"Conversation #{self.id} ({self.get_type_display()})"
+
+
+class ConversationMember(models.Model):
+    """Membership relationship between conversations and users."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        LEFT = "left", "Left"
+        REMOVED = "removed", "Removed"
+        MUTED = "muted", "Muted"
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="members"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="conversation_memberships",
+    )
+    joined_at = models.DateTimeField(auto_now_add=True)
+    left_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.ACTIVE
+    )
+    unread_count = models.IntegerField(default=0)
+    last_read_message_id = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "user"],
+                name="unique_conversation_member",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["conversation_id"]),
+            models.Index(fields=["user_id"]),
+            models.Index(fields=["conversation_id", "status"]),
+        ]
+
+    def __str__(self):
+        return f"Member #{self.user_id} in Conversation #{self.conversation_id}"
+
+
+class EncryptedMessage(models.Model):
+    """Private chat encrypted message. NO plaintext fields allowed."""
+
+    class MessageType(models.TextChoices):
+        TEXT = "text", "Text"
+        IMAGE = "image", "Image"
+        FILE = "file", "File"
+        STICKER = "sticker", "Sticker"
+        SYSTEM = "system", "System"
+
+    class Status(models.TextChoices):
+        SENT = "sent", "Sent"
+        DELIVERED = "delivered", "Delivered"
+        READ = "read", "Read"
+        DELETED = "deleted", "Deleted"
+        FAILED = "failed", "Failed"
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="messages"
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_messages",
+    )
+    receiver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="received_messages",
+    )
+    message_type = models.CharField(
+        max_length=20, choices=MessageType.choices, default=MessageType.TEXT
+    )
+    ciphertext = models.TextField(null=True, blank=True)
+    nonce = models.CharField(max_length=64, null=True, blank=True)
+    auth_tag = models.CharField(max_length=64, null=True, blank=True)
+    algorithm = models.CharField(max_length=50)
+    sender_key_version = models.IntegerField(null=True, blank=True)
+    receiver_key_version = models.IntegerField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.SENT
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["conversation_id", "created_at"]),
+            models.Index(fields=["sender_id"]),
+            models.Index(fields=["receiver_id"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["conversation_id", "id"]),
+        ]
+
+    def __str__(self):
+        return f"Message #{self.id} from #{self.sender_id} to #{self.receiver_id}"

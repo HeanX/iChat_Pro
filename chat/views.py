@@ -1,5 +1,10 @@
+import json
+
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.shortcuts import render
+
+from .models import Conversation, ConversationMember, EncryptedMessage
 
 
 def _mock_chats():
@@ -102,3 +107,183 @@ def settings_view(request):
         'open_settings': True,
     }
     return render(request, 'pages/chat.html', context)
+
+
+# ---------------------------------------------------------------------------
+# Group chat management API
+# ---------------------------------------------------------------------------
+
+def _get_member(conversation_id, user):
+    """Return the ConversationMember instance or the user_id if user is int."""
+    try:
+        return ConversationMember.objects.get(
+            conversation_id=conversation_id, user=user
+        )
+    except ConversationMember.DoesNotExist:
+        return None
+
+
+def _json_body(request):
+    """Parse and return the JSON body of a request, or empty dict on error."""
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+
+
+@login_required(login_url='login')
+def create_group_view(request):
+    """Create a group conversation. Creator becomes owner automatically."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed."}, status=405)
+
+    data = _json_body(request)
+    name = data.get("name", "").strip()
+    if not name:
+        return JsonResponse({"error": "Group name is required."}, status=400)
+
+    conversation = Conversation.objects.create(
+        type=Conversation.Type.GROUP,
+        name=name,
+        avatar=data.get("avatar", "").strip(),
+        created_by=request.user,
+    )
+    ConversationMember.objects.create(
+        conversation=conversation,
+        user=request.user,
+        role=ConversationMember.Role.OWNER,
+    )
+
+    return JsonResponse({
+        "id": conversation.id,
+        "name": conversation.name,
+        "type": conversation.type,
+        "created_at": conversation.created_at.isoformat(),
+    }, status=201)
+
+
+@login_required(login_url='login')
+def update_group_view(request, conversation_id):
+    """Update group name / avatar. Owner only."""
+    if request.method != "PUT":
+        return JsonResponse({"error": "Method not allowed."}, status=405)
+
+    member = _get_member(conversation_id, request.user)
+    if not member or member.role != ConversationMember.Role.OWNER:
+        return JsonResponse({"error": "Only the group owner can update the group."}, status=403)
+
+    try:
+        conversation = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({"error": "Group not found."}, status=404)
+
+    data = _json_body(request)
+    if "name" in data:
+        conversation.name = data["name"].strip() or conversation.name
+    if "avatar" in data:
+        conversation.avatar = data["avatar"].strip()
+    conversation.save(update_fields=["name", "avatar", "updated_at"])
+
+    return JsonResponse({
+        "id": conversation.id,
+        "name": conversation.name,
+        "avatar": conversation.avatar,
+    })
+
+
+@login_required(login_url='login')
+def invite_member_view(request, conversation_id):
+    """Invite a user to a group. Owner / admin only."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed."}, status=405)
+
+    actor = _get_member(conversation_id, request.user)
+    if not actor or actor.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+        return JsonResponse({"error": "Permission denied."}, status=403)
+
+    try:
+        conversation = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({"error": "Group not found."}, status=404)
+
+    data = _json_body(request)
+    user_id = data.get("user_id")
+    if not user_id:
+        return JsonResponse({"error": "user_id is required."}, status=400)
+
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    try:
+        target = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "User not found."}, status=404)
+
+    if ConversationMember.objects.filter(
+        conversation=conversation, user=target
+    ).exists():
+        return JsonResponse({"error": "User is already a member."}, status=409)
+
+    ConversationMember.objects.create(
+        conversation=conversation,
+        user=target,
+        role=ConversationMember.Role.MEMBER,
+    )
+
+    return JsonResponse({"status": "ok", "user_id": target.id}, status=201)
+
+
+@login_required(login_url='login')
+def remove_member_view(request, conversation_id):
+    """Remove a member from a group. Owner / admin only. Cannot remove owner."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed."}, status=405)
+
+    actor = _get_member(conversation_id, request.user)
+    if not actor or actor.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+        return JsonResponse({"error": "Permission denied."}, status=403)
+
+    data = _json_body(request)
+    user_id = data.get("user_id")
+    if not user_id:
+        return JsonResponse({"error": "user_id is required."}, status=400)
+
+    target_member = _get_member(conversation_id, user_id)
+    if not target_member:
+        return JsonResponse({"error": "User is not a member."}, status=404)
+
+    if target_member.role == ConversationMember.Role.OWNER:
+        return JsonResponse({"error": "Cannot remove the group owner."}, status=403)
+
+    from django.utils import timezone
+    target_member.status = ConversationMember.Status.REMOVED
+    target_member.left_at = timezone.now()
+    target_member.save(update_fields=["status", "left_at"])
+
+    return JsonResponse({"status": "ok", "user_id": user_id})
+
+
+@login_required(login_url='login')
+def disband_group_view(request, conversation_id):
+    """Disband a group. Owner only."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed."}, status=405)
+
+    member = _get_member(conversation_id, request.user)
+    if not member or member.role != ConversationMember.Role.OWNER:
+        return JsonResponse({"error": "Only the group owner can disband the group."}, status=403)
+
+    try:
+        conversation = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({"error": "Group not found."}, status=404)
+
+    conversation.status = Conversation.Status.DELETED
+    conversation.save(update_fields=["status", "updated_at"])
+
+    return JsonResponse({"status": "ok"})

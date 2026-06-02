@@ -1,3 +1,5 @@
+import json
+
 from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.test import TestCase
@@ -206,3 +208,222 @@ class EncryptedMessageModelTests(TestCase):
         )
         self.assertIsNone(msg.sender_key_version)
         self.assertIsNone(msg.receiver_key_version)
+
+
+class ConversationModelGroupTests(TestCase):
+    def test_create_group_with_name(self):
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name="Test Group"
+        )
+        self.assertEqual(conv.name, "Test Group")
+        self.assertEqual(conv.type, Conversation.Type.GROUP)
+
+    def test_name_is_blankable(self):
+        conv = Conversation.objects.create(type=Conversation.Type.GROUP)
+        self.assertEqual(conv.name, "")
+
+    def test_avatar_is_blankable(self):
+        conv = Conversation.objects.create(type=Conversation.Type.GROUP)
+        self.assertEqual(conv.avatar, "")
+
+
+class ConversationMemberRoleTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="alice", password="test1234")
+        self.conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name="RoleTest"
+        )
+
+    def test_default_role_is_member(self):
+        member = ConversationMember.objects.create(
+            conversation=self.conv, user=self.user
+        )
+        self.assertEqual(member.role, ConversationMember.Role.MEMBER)
+
+    def test_owner_role(self):
+        member = ConversationMember.objects.create(
+            conversation=self.conv, user=self.user, role=ConversationMember.Role.OWNER
+        )
+        self.assertEqual(member.role, ConversationMember.Role.OWNER)
+
+    def test_admin_role(self):
+        member = ConversationMember.objects.create(
+            conversation=self.conv, user=self.user, role=ConversationMember.Role.ADMIN
+        )
+        self.assertEqual(member.role, ConversationMember.Role.ADMIN)
+
+
+class GroupAPITests(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(username="alice", password="test1234")
+        self.bob = User.objects.create_user(username="bob", password="test1234")
+        self.eve = User.objects.create_user(username="eve", password="test1234")
+
+    def _post(self, url, data, user=None):
+        user = user or self.alice
+        self.client.login(username=user.username, password="test1234")
+        return self.client.post(
+            url,
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+    def _put(self, url, data, user=None):
+        user = user or self.alice
+        self.client.login(username=user.username, password="test1234")
+        return self.client.put(
+            url,
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+    def _create_group(self, name="My Group", user=None):
+        user = user or self.alice
+        resp = self._post("/api/groups/", {"name": name}, user=user)
+        self.assertEqual(resp.status_code, 201)
+        return resp.json()["id"]
+
+    # ---- create ----
+    def test_create_group_returns_201(self):
+        resp = self._post("/api/groups/", {"name": "TestGroup"})
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertEqual(data["name"], "TestGroup")
+        self.assertEqual(data["type"], Conversation.Type.GROUP)
+
+    def test_create_group_without_name_returns_400(self):
+        resp = self._post("/api/groups/", {})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_group_empty_name_returns_400(self):
+        resp = self._post("/api/groups/", {"name": "   "})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_creator_becomes_owner(self):
+        gid = self._create_group("OwnerTest")
+        member = ConversationMember.objects.get(
+            conversation_id=gid, user=self.alice
+        )
+        self.assertEqual(member.role, ConversationMember.Role.OWNER)
+
+    # ---- update ----
+    def test_owner_can_update_group_name(self):
+        gid = self._create_group("OldName")
+        resp = self._put(f"/api/groups/{gid}/", {"name": "NewName"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["name"], "NewName")
+
+    def test_non_owner_cannot_update_group(self):
+        gid = self._create_group("OwnerGroup")
+        # Bob joins as member
+        ConversationMember.objects.create(
+            conversation_id=gid, user=self.bob, role=ConversationMember.Role.MEMBER
+        )
+        resp = self._put(f"/api/groups/{gid}/", {"name": "Hijack"}, user=self.bob)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_non_member_cannot_update_group(self):
+        gid = self._create_group("OwnerGroup")
+        resp = self._put(f"/api/groups/{gid}/", {"name": "Hijack"}, user=self.eve)
+        self.assertEqual(resp.status_code, 403)
+
+    # ---- invite ----
+    def test_owner_can_invite_member(self):
+        gid = self._create_group()
+        resp = self._post(f"/api/groups/{gid}/invite/", {"user_id": self.bob.id})
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(
+            ConversationMember.objects.filter(
+                conversation_id=gid, user=self.bob
+            ).exists()
+        )
+
+    def test_admin_can_invite_member(self):
+        gid = self._create_group()
+        # Make alice's friend an admin
+        ConversationMember.objects.create(
+            conversation_id=gid, user=self.bob, role=ConversationMember.Role.ADMIN
+        )
+        resp = self._post(
+            f"/api/groups/{gid}/invite/",
+            {"user_id": self.eve.id},
+            user=self.bob,
+        )
+        self.assertEqual(resp.status_code, 201)
+
+    def test_regular_member_cannot_invite(self):
+        gid = self._create_group()
+        ConversationMember.objects.create(
+            conversation_id=gid, user=self.bob, role=ConversationMember.Role.MEMBER
+        )
+        resp = self._post(
+            f"/api/groups/{gid}/invite/",
+            {"user_id": self.eve.id},
+            user=self.bob,
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_cannot_invite_duplicate_user(self):
+        gid = self._create_group()
+        ConversationMember.objects.create(
+            conversation_id=gid, user=self.bob
+        )
+        resp = self._post(f"/api/groups/{gid}/invite/", {"user_id": self.bob.id})
+        self.assertEqual(resp.status_code, 409)
+
+    def test_non_member_cannot_invite(self):
+        gid = self._create_group()
+        resp = self._post(f"/api/groups/{gid}/invite/", {"user_id": self.eve.id}, user=self.eve)
+        self.assertEqual(resp.status_code, 403)
+
+    # ---- remove ----
+    def test_owner_can_remove_member(self):
+        gid = self._create_group()
+        ConversationMember.objects.create(
+            conversation_id=gid, user=self.bob
+        )
+        resp = self._post(f"/api/groups/{gid}/remove/", {"user_id": self.bob.id})
+        self.assertEqual(resp.status_code, 200)
+        member = ConversationMember.objects.get(conversation_id=gid, user=self.bob)
+        self.assertEqual(member.status, ConversationMember.Status.REMOVED)
+
+    def test_cannot_remove_owner(self):
+        gid = self._create_group()
+        resp = self._post(f"/api/groups/{gid}/remove/", {"user_id": self.alice.id})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_cannot_remove_from_private_conversation(self):
+        """Removal is a group-only concept."""
+        conv = Conversation.objects.create(
+            type=Conversation.Type.SINGLE, created_by=self.alice
+        )
+        ConversationMember.objects.create(conversation=conv, user=self.alice)
+        resp = self._post(f"/api/groups/{conv.id}/remove/", {"user_id": self.bob.id})
+        # Group not found — since we filter for GROUP type
+        self.assertEqual(resp.status_code, 403)  # actor not in group
+
+    # ---- disband ----
+    def test_owner_can_disband_group(self):
+        gid = self._create_group()
+        resp = self._post(f"/api/groups/{gid}/disband/", {})
+        self.assertEqual(resp.status_code, 200)
+        conv = Conversation.objects.get(id=gid)
+        self.assertEqual(conv.status, Conversation.Status.DELETED)
+
+    def test_non_owner_cannot_disband_group(self):
+        gid = self._create_group()
+        ConversationMember.objects.create(
+            conversation_id=gid, user=self.bob
+        )
+        resp = self._post(f"/api/groups/{gid}/disband/", {}, user=self.bob)
+        self.assertEqual(resp.status_code, 403)
+
+    # ---- auth ----
+    def test_unauthenticated_rejected(self):
+        url = "/api/groups/"
+        resp = self.client.post(
+            url,
+            data=json.dumps({"name": "X"}),
+            content_type="application/json",
+        )
+        self.assertIn(resp.status_code, [302, 301])

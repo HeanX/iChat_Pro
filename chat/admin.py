@@ -7,6 +7,7 @@ from .models import Conversation, ConversationMember, EncryptedMessage
 class ConversationAdmin(admin.ModelAdmin):
     list_display = [
         "id",
+        "name",
         "type",
         "created_by",
         "status",
@@ -14,7 +15,7 @@ class ConversationAdmin(admin.ModelAdmin):
         "created_at",
     ]
     list_filter = ["type", "status"]
-    search_fields = ["id", "created_by__username"]
+    search_fields = ["id", "name", "created_by__username"]
     readonly_fields = ["created_at", "updated_at"]
     ordering = ["-last_message_at", "-created_at"]
 
@@ -25,11 +26,12 @@ class ConversationMemberAdmin(admin.ModelAdmin):
         "id",
         "conversation",
         "user",
+        "role",
         "status",
         "unread_count",
         "joined_at",
     ]
-    list_filter = ["status"]
+    list_filter = ["role", "status"]
     search_fields = ["conversation__id", "user__username"]
     readonly_fields = ["joined_at"]
 

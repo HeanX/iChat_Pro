@@ -15,6 +15,8 @@ class Conversation(models.Model):
         DELETED = "deleted", "Deleted"
 
     type = models.CharField(max_length=20, choices=Type.choices)
+    name = models.CharField(max_length=100, blank=True, help_text="Group chat name; empty for private chats.")
+    avatar = models.CharField(max_length=255, blank=True, help_text="Group avatar URL.")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -42,6 +44,11 @@ class Conversation(models.Model):
 class ConversationMember(models.Model):
     """Membership relationship between conversations and users."""
 
+    class Role(models.TextChoices):
+        OWNER = "owner", "Owner"
+        ADMIN = "admin", "Admin"
+        MEMBER = "member", "Member"
+
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         LEFT = "left", "Left"
@@ -55,6 +62,9 @@ class ConversationMember(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="conversation_memberships",
+    )
+    role = models.CharField(
+        max_length=20, choices=Role.choices, default=Role.MEMBER
     )
     joined_at = models.DateTimeField(auto_now_add=True)
     left_at = models.DateTimeField(null=True, blank=True)

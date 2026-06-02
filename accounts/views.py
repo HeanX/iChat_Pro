@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from .forms import RegistrationForm
-from .models import Contact, FriendRequest
+from .models import Contact, FriendRequest, UserPublicKey
 
 
 def register_view(request):
@@ -313,3 +313,56 @@ def contact_delete(request, contact_id):
         f'{other.username} has been removed from your contacts.',
     )
     return redirect('contacts')
+
+
+# ── Public‑key management API ──────────────────────────────────────
+
+
+@login_required(login_url='login')
+@require_http_methods(['POST'])
+def upload_public_key(request):
+    """Store (or replace) the authenticated userʼs ECDH public key."""
+    public_key = request.POST.get('public_key', '').strip()
+    fingerprint = request.POST.get('fingerprint', '').strip()
+
+    if not public_key or not fingerprint:
+        return JsonResponse(
+            {'ok': False, 'error': 'public_key and fingerprint are required.'},
+            status=400,
+        )
+
+    if len(fingerprint) != 64:
+        return JsonResponse(
+            {'ok': False, 'error': 'fingerprint must be a 64-char hex string.'},
+            status=400,
+        )
+
+    UserPublicKey.objects.update_or_create(
+        user=request.user,
+        defaults={
+            'public_key': public_key,
+            'fingerprint': fingerprint,
+            'algorithm': 'ECDH-P256',
+        },
+    )
+
+    return JsonResponse({'ok': True})
+
+
+def get_public_key(request, username):
+    """Return the public key for the given username (JSON)."""
+    user = get_object_or_404(User, username=username)
+    try:
+        pk_entry = user.public_key
+        return JsonResponse({
+            'ok': True,
+            'username': user.username,
+            'public_key': pk_entry.public_key,
+            'fingerprint': pk_entry.fingerprint,
+            'algorithm': pk_entry.algorithm,
+        })
+    except UserPublicKey.DoesNotExist:
+        return JsonResponse(
+            {'ok': False, 'error': 'No public key found for this user.'},
+            status=404,
+        )

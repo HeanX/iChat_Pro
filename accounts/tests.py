@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Contact, FriendRequest
+from .models import Contact, FriendRequest, UserPublicKey
 
 
 class RegistrationViewTests(TestCase):
@@ -496,3 +496,145 @@ class ContactViewTests(TestCase):
                 user=self.alice, contact=self.charlie,
             ).exists(),
         )
+
+
+class UserPublicKeyModelTests(TestCase):
+    """Test UserPublicKey model constraints."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.alice = User.objects.create_user(username='alice', password='p')
+
+    def test_create_public_key(self):
+        pk_entry = UserPublicKey.objects.create(
+            user=self.alice,
+            public_key='Zm9vYmFyCg==',
+            fingerprint='A' * 64,
+        )
+        self.assertEqual(UserPublicKey.objects.count(), 1)
+        self.assertEqual(pk_entry.algorithm, 'ECDH-P256')
+
+    def test_one_to_one_constraint(self):
+        UserPublicKey.objects.create(
+            user=self.alice,
+            public_key='key1',
+            fingerprint='B' * 64,
+        )
+        with self.assertRaises(Exception):
+            UserPublicKey.objects.create(
+                user=self.alice,
+                public_key='key2',
+                fingerprint='C' * 64,
+            )
+
+    def test_str_contains_username(self):
+        pk_entry = UserPublicKey.objects.create(
+            user=self.alice,
+            public_key='Zm9v',
+            fingerprint='D' * 64,
+        )
+        self.assertIn('alice', str(pk_entry))
+
+    def test_fingerprint_unique(self):
+        UserPublicKey.objects.create(
+            user=self.alice,
+            public_key='key1',
+            fingerprint='E' * 64,
+        )
+        bob = User.objects.create_user(username='bob', password='p')
+        with self.assertRaises(Exception):
+            UserPublicKey.objects.create(
+                user=bob,
+                public_key='key2',
+                fingerprint='E' * 64,
+            )
+
+
+class PublicKeyAPITests(TestCase):
+    """Test key upload / retrieval API endpoints."""
+
+    UPLOAD_URL = reverse('upload_public_key')
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.alice = User.objects.create_user(username='alice', password='p')
+        cls.bob = User.objects.create_user(username='bob', password='q')
+
+    def setUp(self):
+        self.client.login(username='alice', password='p')
+
+    def test_upload_requires_login(self):
+        self.client.post(reverse('logout'))
+        response = self.client.post(self.UPLOAD_URL, {})
+        # Should redirect to login
+        self.assertEqual(response.status_code, 302)
+
+    def test_upload_missing_fields(self):
+        response = self.client.post(self.UPLOAD_URL, {})
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertFalse(data['ok'])
+
+    def test_upload_bad_fingerprint_length(self):
+        response = self.client.post(self.UPLOAD_URL, {
+            'public_key': 'foo',
+            'fingerprint': 'short',
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_success(self):
+        fp = 'A' * 64
+        response = self.client.post(self.UPLOAD_URL, {
+            'public_key': 'test-spki-base64',
+            'fingerprint': fp,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        self.assertTrue(
+            UserPublicKey.objects.filter(
+                user=self.alice, fingerprint=fp,
+            ).exists(),
+        )
+
+    def test_upload_updates_existing(self):
+        fp1 = '1' * 64
+        fp2 = '2' * 64
+        self.client.post(self.UPLOAD_URL, {
+            'public_key': 'pk1',
+            'fingerprint': fp1,
+        })
+        self.client.post(self.UPLOAD_URL, {
+            'public_key': 'pk2',
+            'fingerprint': fp2,
+        })
+        self.assertEqual(
+            UserPublicKey.objects.filter(user=self.alice).count(),
+            1,
+        )
+        pk_entry = UserPublicKey.objects.get(user=self.alice)
+        self.assertEqual(pk_entry.public_key, 'pk2')
+
+    def test_get_public_key_found(self):
+        fp = 'F' * 64
+        UserPublicKey.objects.create(
+            user=self.bob,
+            public_key='bob-spki',
+            fingerprint=fp,
+        )
+        url = reverse('get_public_key', args=['bob'])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['public_key'], 'bob-spki')
+        self.assertEqual(data['fingerprint'], fp)
+
+    def test_get_public_key_not_found(self):
+        url = reverse('get_public_key', args=['ghost'])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_public_key_user_exists_no_key(self):
+        url = reverse('get_public_key', args=['bob'])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)

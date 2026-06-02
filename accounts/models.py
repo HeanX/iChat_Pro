@@ -94,3 +94,34 @@ class Contact(models.Model):
 
     def __str__(self):
         return f'{self.user} ↔ {self.contact}'
+
+
+class UserPublicKey(models.Model):
+    """
+    Stores a userʼs ECDH P-256 public key (SPKI format) and its
+    SHA-256 fingerprint.  The private key NEVER leaves the client.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='public_key',
+    )
+    public_key = models.TextField(
+        help_text='Base64-encoded SPKI public key',
+    )
+    fingerprint = models.CharField(
+        max_length=64,
+        unique=True,
+        help_text='SHA-256 hex digest of the SPKI public key',
+    )
+    algorithm = models.CharField(
+        max_length=32,
+        default='ECDH-P256',
+        help_text='Key algorithm identifier',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'PublicKey({self.user.username})  {self.fingerprint[:16]}…'

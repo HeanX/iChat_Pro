@@ -31,4 +31,16 @@ urlpatterns = [
         views.contact_delete,
         name='contact_delete',
     ),
+
+    # Public‑key management
+    path(
+        'keys/upload/',
+        views.upload_public_key,
+        name='upload_public_key',
+    ),
+    path(
+        'keys/<str:username>/',
+        views.get_public_key,
+        name='get_public_key',
+    ),
 ]

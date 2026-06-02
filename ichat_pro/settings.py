@@ -35,6 +35,8 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'accounts',
     'chat',
     'django.contrib.admin',
@@ -74,6 +76,13 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'ichat_pro.wsgi.application'
+ASGI_APPLICATION = 'ichat_pro.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 
 # Database
@@ -123,4 +132,8 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+# Media files (user uploads like avatars)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 

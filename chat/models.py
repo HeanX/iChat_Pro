@@ -25,6 +25,7 @@ class Conversation(models.Model):
     )
     last_message_at = models.DateTimeField(null=True, blank=True)
     last_message_id = models.IntegerField(null=True, blank=True)
+    membership_version = models.IntegerField(default=1)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.ACTIVE
     )
@@ -175,6 +176,7 @@ class GroupMessage(models.Model):
     message_type = models.CharField(
         max_length=20, choices=MessageType.choices, default=MessageType.TEXT
     )
+    client_message_id = models.CharField(max_length=64, null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.ACTIVE
     )
@@ -185,6 +187,13 @@ class GroupMessage(models.Model):
         indexes = [
             models.Index(fields=["conversation_id", "created_at"]),
             models.Index(fields=["sender_id"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sender", "client_message_id"],
+                name="unique_client_group_message",
+                condition=models.Q(client_message_id__isnull=False),
+            ),
         ]
 
     def __str__(self):

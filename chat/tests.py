@@ -37,6 +37,12 @@ class ChatConsumerTests(TransactionTestCase):
     def test_disconnect_removes_user_group(self):
         async_to_sync(self._assert_disconnect_removes_user_group)()
 
+    def test_chat_page_loads_private_chat_e2ee_module(self):
+        response = self.client.get('/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'js/private-chat-e2ee.js')
+
     def _session_cookie_header(self):
         self.client.force_login(self.user)
         session_id = self.client.cookies[settings.SESSION_COOKIE_NAME].value

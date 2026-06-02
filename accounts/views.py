@@ -153,6 +153,18 @@ def public_key_view(request, user_id):
 
 
 @login_required
+@require_GET
+def public_key_version_view(request, user_id, key_version):
+    public_key = UserPublicKey.objects.filter(
+        user_id=user_id,
+        key_version=key_version,
+    ).first()
+    if public_key is None:
+        return JsonResponse({'error': 'public_key_not_found'}, status=404)
+    return JsonResponse({'key': _serialize_key(public_key)})
+
+
+@login_required
 @require_POST
 def batch_public_keys_view(request):
     payload = _json_body(request)

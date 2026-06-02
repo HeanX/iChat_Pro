@@ -110,6 +110,24 @@ class UserPublicKeyApiTests(TestCase):
         self.assertEqual(fingerprint.json()['key_fingerprint'], expected['key_fingerprint'])
         self.assertEqual(fingerprint.json()['key_version'], 1)
 
+    def test_key_version_endpoint_returns_inactive_historical_key(self):
+        first = self.client.post(
+            reverse('upload-public-key'),
+            self._payload(),
+            content_type='application/json',
+        ).json()['key']
+        self.client.post(
+            reverse('upload-public-key'),
+            self._payload(b'public-key-v2'),
+            content_type='application/json',
+        )
+
+        response = self.client.get(reverse('public-key-version', args=[self.user.pk, 1]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['key']['identity_public_key'], first['identity_public_key'])
+        self.assertFalse(response.json()['key']['is_active'])
+
     def test_anonymous_user_cannot_access_key_api(self):
         self.client.logout()
 

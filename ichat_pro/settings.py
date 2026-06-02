@@ -35,6 +35,8 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'accounts',
     'chat',
     'django.contrib.admin',
@@ -74,6 +76,13 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'ichat_pro.wsgi.application'
+ASGI_APPLICATION = 'ichat_pro.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 
 # Database

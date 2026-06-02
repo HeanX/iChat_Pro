@@ -97,8 +97,7 @@ class EncryptedMessageAdmin(admin.ModelAdmin):
     list_filter = ["message_type", "status", "algorithm"]
     search_fields = ["conversation__id", "sender__username", "receiver__username"]
     readonly_fields = ["created_at", "updated_at"]
-    # Exclude raw ciphertext fields from detail view by default —
-    # admins only see metadata, never plaintext (there is none stored).
+    # Admins inspect routing and encryption metadata, not encrypted payloads.
     fields = [
         "conversation",
         "sender",
@@ -107,9 +106,6 @@ class EncryptedMessageAdmin(admin.ModelAdmin):
         "algorithm",
         "sender_key_version",
         "receiver_key_version",
-        "ciphertext",
-        "nonce",
-        "auth_tag",
         "status",
         "created_at",
         "updated_at",
@@ -151,9 +147,6 @@ class GroupMessageRecipientAdmin(admin.ModelAdmin):
         "algorithm",
         "sender_key_version",
         "receiver_key_version",
-        "ciphertext",
-        "nonce",
-        "auth_tag",
         "status",
         "created_at",
     ]

@@ -123,7 +123,7 @@
       
       <div class="space-y-2">
         <!-- Cryptographic Keys -->
-        <button class="w-full py-2.5 flex items-center space-x-3.5 hover:opacity-85 text-left transition-opacity">
+        <div class="w-full py-2.5 flex items-center space-x-3.5">
           <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg">
             <i data-lucide="key" class="w-4 h-4"></i>
           </div>
@@ -131,7 +131,9 @@
             <div class="text-sm font-semibold text-textMain" data-i18n="manage_keys">Manage Cryptographic Keys</div>
             <div class="text-[10px] text-textSecondary" data-i18n="manage_keys_desc">View and verify Elliptic Curve key pairs</div>
           </div>
-        </button>
+          <button onclick="exportLocalKeyBackup()" class="text-[10px] font-bold text-brand-light dark:text-brand-dark hover:underline">Export</button>
+          <button onclick="chooseLocalKeyBackup()" class="text-[10px] font-bold text-brand-light dark:text-brand-dark hover:underline">Import</button>
+        </div>
         
         <!-- Active Devices -->
         <button class="w-full py-2.5 flex items-center space-x-3.5 hover:opacity-85 text-left transition-opacity">

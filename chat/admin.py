@@ -1,4 +1,7 @@
 from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.models import User
+from django.utils.translation import gettext_lazy as _
 
 from .models import (
     Conversation,
@@ -7,6 +10,43 @@ from .models import (
     GroupMessage,
     GroupMessageRecipient,
 )
+
+# ---------------------------------------------------------------------------
+# Admin site branding
+# ---------------------------------------------------------------------------
+admin.site.site_header = "iChat Pro 管理后台"
+admin.site.site_title = "iChat Pro"
+admin.site.index_title = _("注意：后台不存储、不展示消息明文 — 所有消息以密文形式保存。")
+
+# ---------------------------------------------------------------------------
+# User admin — manage accounts and enable/disable status
+# ---------------------------------------------------------------------------
+admin.site.unregister(User)
+
+
+@admin.register(User)
+class CustomUserAdmin(BaseUserAdmin):
+    list_display = [
+        "id",
+        "username",
+        "email",
+        "is_active",
+        "is_staff",
+        "date_joined",
+    ]
+    list_filter = ["is_active", "is_staff", "is_superuser"]
+    search_fields = ["username", "email"]
+    actions = ["activate_users", "deactivate_users"]
+
+    @admin.action(description=_("Activate selected users"))
+    def activate_users(self, request, queryset):
+        updated = queryset.update(is_active=True)
+        self.message_user(request, _(f"{updated} user(s) activated."))
+
+    @admin.action(description=_("Deactivate selected users"))
+    def deactivate_users(self, request, queryset):
+        updated = queryset.update(is_active=False)
+        self.message_user(request, _(f"{updated} user(s) deactivated."))
 
 
 @admin.register(Conversation)

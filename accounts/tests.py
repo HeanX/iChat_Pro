@@ -4,7 +4,14 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Contact, FriendRequest, UserPublicKey
+from .models import (
+    Contact,
+    FriendRequest,
+    Group,
+    GroupMember,
+    UserProfile,
+    UserPublicKey,
+)
 
 
 class RegistrationViewTests(TestCase):
@@ -638,3 +645,192 @@ class PublicKeyAPITests(TestCase):
         url = reverse('get_public_key', args=['bob'])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 404)
+
+
+class ProfileEditTests(TestCase):
+    """Test profile editing."""
+
+    PROFILE_EDIT_URL = reverse('profile_edit')
+    INDEX_URL = reverse('index')
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.alice = User.objects.create_user(
+            username='alice', password='alicepass',
+        )
+
+    def setUp(self):
+        self.client.login(username='alice', password='alicepass')
+
+    def test_profile_edit_page_loads(self):
+        response = self.client.get(self.PROFILE_EDIT_URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'pages/profile_edit.html')
+
+    def test_profile_edit_requires_login(self):
+        self.client.post(reverse('logout'))
+        response = self.client.get(self.PROFILE_EDIT_URL)
+        self.assertEqual(response.status_code, 302)
+
+    def test_profile_edit_creates_profile(self):
+        self.assertFalse(
+            UserProfile.objects.filter(user=self.alice).exists(),
+        )
+        self.client.post(self.PROFILE_EDIT_URL, {
+            'nickname': 'Ally',
+            'bio': 'Hello world',
+        })
+        self.assertTrue(
+            UserProfile.objects.filter(user=self.alice).exists(),
+        )
+
+    def test_profile_edit_updates_nickname(self):
+        UserProfile.objects.create(user=self.alice, nickname='Old')
+        self.client.post(self.PROFILE_EDIT_URL, {
+            'nickname': 'NewName',
+            'bio': '',
+        })
+        self.alice.profile.refresh_from_db()
+        self.assertEqual(self.alice.profile.nickname, 'NewName')
+
+    def test_profile_edit_success_redirect(self):
+        response = self.client.post(self.PROFILE_EDIT_URL, {
+            'nickname': 'Ally',
+            'bio': 'Hi',
+        })
+        self.assertRedirects(response, self.INDEX_URL)
+
+
+class GroupModelTests(TestCase):
+    """Test Group and GroupMember models."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.alice = User.objects.create_user(username='alice', password='p')
+        cls.bob = User.objects.create_user(username='bob', password='p')
+
+    def test_create_group(self):
+        group = Group.objects.create(name='Test', creator=self.alice)
+        self.assertEqual(group.member_count, 0)
+
+    def test_add_member(self):
+        group = Group.objects.create(name='G1', creator=self.alice)
+        gm = GroupMember.objects.create(
+            group=group, user=self.bob, role=GroupMember.Role.MEMBER,
+        )
+        self.assertEqual(group.member_count, 1)
+        self.assertIn(gm, group.members.all())
+
+    def test_unique_member_constraint(self):
+        group = Group.objects.create(name='G2', creator=self.alice)
+        GroupMember.objects.create(group=group, user=self.bob)
+        with self.assertRaises(Exception):
+            GroupMember.objects.create(group=group, user=self.bob)
+
+    def test_group_str(self):
+        group = Group.objects.create(name='MyGroup', creator=self.alice)
+        self.assertEqual(str(group), 'MyGroup')
+
+
+class GroupViewTests(TestCase):
+    """Test group CRUD views."""
+
+    GROUPS_URL = reverse('groups')
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.alice = User.objects.create_user(username='alice', password='p')
+        cls.bob = User.objects.create_user(username='bob', password='q')
+        # Make them contacts
+        Contact.objects.create(user=cls.alice, contact=cls.bob)
+
+    def setUp(self):
+        self.client.login(username='alice', password='p')
+
+    def test_groups_page_loads(self):
+        response = self.client.get(self.GROUPS_URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'pages/groups.html')
+
+    def test_groups_requires_login(self):
+        self.client.post(reverse('logout'))
+        response = self.client.get(self.GROUPS_URL)
+        self.assertEqual(response.status_code, 302)
+
+    def test_create_group(self):
+        self.client.post(reverse('group_create'), {'name': 'Alpha'})
+        self.assertTrue(Group.objects.filter(name='Alpha').exists())
+        group = Group.objects.get(name='Alpha')
+        self.assertTrue(
+            GroupMember.objects.filter(
+                group=group, user=self.alice, role='admin',
+            ).exists(),
+        )
+
+    def test_create_group_empty_name(self):
+        self.client.post(reverse('group_create'), {'name': ''})
+        self.assertFalse(Group.objects.exists())
+
+    def test_group_detail_loads(self):
+        group = Group.objects.create(name='Beta', creator=self.alice)
+        GroupMember.objects.create(
+            group=group, user=self.alice, role=GroupMember.Role.ADMIN,
+        )
+        response = self.client.get(
+            reverse('group_detail', args=[group.id]),
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_group_detail_redirects_non_member(self):
+        group = Group.objects.create(name='Secret', creator=self.bob)
+        response = self.client.get(
+            reverse('group_detail', args=[group.id]),
+        )
+        self.assertRedirects(response, self.GROUPS_URL)
+
+    def test_add_member_to_group(self):
+        group = Group.objects.create(name='Gamma', creator=self.alice)
+        GroupMember.objects.create(
+            group=group, user=self.alice, role=GroupMember.Role.ADMIN,
+        )
+        response = self.client.post(
+            reverse('group_add_member', args=[group.id]),
+            {'username': 'bob'},
+        )
+        self.assertRedirects(
+            response, reverse('group_detail', args=[group.id]),
+        )
+        self.assertTrue(
+            GroupMember.objects.filter(
+                group=group, user=self.bob,
+            ).exists(),
+        )
+
+    def test_add_non_contact_to_group(self):
+        stranger = User.objects.create_user(username='stranger', password='x')
+        group = Group.objects.create(name='Delta', creator=self.alice)
+        GroupMember.objects.create(
+            group=group, user=self.alice, role=GroupMember.Role.ADMIN,
+        )
+        response = self.client.post(
+            reverse('group_add_member', args=[group.id]),
+            {'username': 'stranger'},
+        )
+        self.assertFalse(
+            GroupMember.objects.filter(
+                group=group, user=stranger,
+            ).exists(),
+        )
+
+    def test_leave_group(self):
+        group = Group.objects.create(name='Epsilon', creator=self.alice)
+        GroupMember.objects.create(group=group, user=self.alice)
+        response = self.client.post(
+            reverse('group_leave', args=[group.id]),
+        )
+        self.assertRedirects(response, self.GROUPS_URL)
+        self.assertFalse(
+            GroupMember.objects.filter(
+                group=group, user=self.alice,
+            ).exists(),
+        )

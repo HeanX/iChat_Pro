@@ -143,28 +143,87 @@
             const spki = localStorage.getItem(STORAGE_KEY_PUBLIC);
             const fp = localStorage.getItem(STORAGE_KEY_FINGERPRINT);
             if (!spki || !fp) throw new Error('No local key pair found. Generate keys first.');
-            const formData = new FormData();
-            formData.append('public_key', spki);
-            formData.append('fingerprint', fp);
-            const response = await fetch('/keys/upload/', {
+            const response = await fetch('/api/keys/upload/', {
                 method: 'POST',
-                headers: { 'X-CSRFToken': getCsrfToken() },
-                body: formData,
+                headers: {
+                    'X-CSRFToken': getCsrfToken(),
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    identity_public_key: spki,
+                    key_fingerprint: fp,
+                    algorithm: 'ECDH-P256',
+                }),
             });
             const data = await response.json();
-            if (!data.ok) throw new Error(data.error || 'Upload failed.');
-            return data;
+            if (!response.ok || !data.key) {
+                throw new Error(data.error || 'Upload failed.');
+            }
+            return data.key;
         }
 
-        async fetchPublicKey(username) {
-            const response = await fetch(`/keys/${encodeURIComponent(username)}/`);
+        async fetchPublicKey(userId) {
+            const response = await fetch(`/api/keys/${encodeURIComponent(userId)}/`);
             const data = await response.json();
-            if (!data.ok) throw new Error(data.error || 'Public key not found.');
+            if (!response.ok || !data.key) {
+                throw new Error(data.error || 'Public key not found.');
+            }
             return {
-                username: data.username,
-                publicKey: data.public_key,
-                fingerprint: data.fingerprint,
-                algorithm: data.algorithm,
+                userId: data.key.user_id,
+                identityPublicKey: data.key.identity_public_key,
+                fingerprint: data.key.key_fingerprint,
+                algorithm: data.key.algorithm,
+                keyVersion: data.key.key_version,
+                isActive: data.key.is_active,
+            };
+        }
+
+        async fetchPublicKeyByVersion(userId, keyVersion) {
+            const response = await fetch(
+                `/api/keys/${encodeURIComponent(userId)}/${encodeURIComponent(keyVersion)}/`,
+            );
+            const data = await response.json();
+            if (!response.ok || !data.key) {
+                throw new Error(data.error || 'Public key version not found.');
+            }
+            return {
+                userId: data.key.user_id,
+                identityPublicKey: data.key.identity_public_key,
+                fingerprint: data.key.key_fingerprint,
+                algorithm: data.key.algorithm,
+                keyVersion: data.key.key_version,
+                isActive: data.key.is_active,
+            };
+        }
+
+        async fetchPublicKeysBatch(userIds) {
+            const response = await fetch('/api/keys/batch/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCsrfToken(),
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ user_ids: userIds }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Batch fetch failed.');
+            }
+            return data.keys || [];
+        }
+
+        async fetchFingerprint(userId) {
+            const response = await fetch(
+                `/api/keys/fingerprint/${encodeURIComponent(userId)}/`,
+            );
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Fingerprint not found.');
+            }
+            return {
+                userId: data.user_id,
+                fingerprint: data.key_fingerprint,
+                keyVersion: data.key_version,
             };
         }
 

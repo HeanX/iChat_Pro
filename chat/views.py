@@ -2,6 +2,7 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.db.models import F
 from django.http import JsonResponse
 from django.shortcuts import render
 
@@ -239,6 +240,8 @@ def invite_member_view(request, conversation_id):
         user=target,
         role=ConversationMember.Role.MEMBER,
     )
+    conversation.membership_version = F('membership_version') + 1
+    conversation.save(update_fields=['membership_version', 'updated_at'])
 
     return JsonResponse({"status": "ok", "user_id": target.id}, status=201)
 
@@ -270,6 +273,15 @@ def remove_member_view(request, conversation_id):
     target_member.left_at = timezone.now()
     target_member.save(update_fields=["status", "left_at"])
 
+    try:
+        conversation = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({"error": "Group not found."}, status=404)
+    conversation.membership_version = F('membership_version') + 1
+    conversation.save(update_fields=['membership_version', 'updated_at'])
+
     return JsonResponse({"status": "ok", "user_id": user_id})
 
 
@@ -291,9 +303,49 @@ def disband_group_view(request, conversation_id):
         return JsonResponse({"error": "Group not found."}, status=404)
 
     conversation.status = Conversation.Status.DELETED
-    conversation.save(update_fields=["status", "updated_at"])
+    conversation.membership_version = F('membership_version') + 1
+    conversation.save(update_fields=["status", "membership_version", "updated_at"])
 
     return JsonResponse({"status": "ok"})
+
+
+# ---------------------------------------------------------------------------
+# Group member detail API
+# ---------------------------------------------------------------------------
+
+@login_required(login_url='login')
+def group_members_view(request, conversation_id):
+    """Return active group members and the current membership_version.
+
+    Only active group members may access this endpoint.
+    """
+    member = _get_member(conversation_id, request.user)
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse(
+            {"error": "You are not a member of this group."},
+            status=403,
+        )
+
+    try:
+        conversation = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({"error": "Group not found."}, status=404)
+
+    active_members = ConversationMember.objects.filter(
+        conversation=conversation,
+        status=ConversationMember.Status.ACTIVE,
+    ).select_related('user')
+
+    return JsonResponse({
+        "group_id": conversation.id,
+        "membership_version": conversation.membership_version,
+        "members": [
+            {"user_id": m.user_id, "role": m.role}
+            for m in active_members
+        ],
+    })
 
 
 # ---------------------------------------------------------------------------

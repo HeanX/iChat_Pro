@@ -25,27 +25,23 @@ class FriendRequestAdmin(admin.ModelAdmin):
 
 @admin.register(UserPublicKey)
 class UserPublicKeyAdmin(admin.ModelAdmin):
-    list_display = ('user', 'fingerprint_short', 'algorithm', 'created_at')
-    search_fields = ('user__username', 'fingerprint')
-    readonly_fields = ('fingerprint', 'public_key')
-
-    @admin.display(description='Fingerprint')
-    def fingerprint_short(self, obj):
-        return obj.fingerprint[:32] + '…'
-
-
-class GroupMemberInline(admin.TabularInline):
-    model = GroupMember
-    extra = 0
-    fields = ('user', 'role', 'joined_at')
-    readonly_fields = ('joined_at',)
+    list_display = (
+        'user',
+        'algorithm',
+        'key_version',
+        'key_fingerprint',
+        'is_active',
+        'created_at',
+    )
+    list_filter = ('algorithm', 'is_active')
+    search_fields = ('user__username', 'key_fingerprint')
+    readonly_fields = ('created_at', 'updated_at')
 
 
 @admin.register(Group)
 class GroupAdmin(admin.ModelAdmin):
     list_display = ('name', 'creator', 'member_count', 'created_at')
     search_fields = ('name', 'creator__username')
-    inlines = [GroupMemberInline]
 
 
 @admin.register(GroupMember)

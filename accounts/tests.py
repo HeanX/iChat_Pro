@@ -1,5 +1,9 @@
-"""Tests for authentication views: registration, login, and logout."""
+"""Tests for accounts: registration, login, contacts, profile, groups, E2EE keys."""
 
+import base64
+import hashlib
+
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
@@ -12,6 +16,178 @@ from .models import (
     UserProfile,
     UserPublicKey,
 )
+
+
+# ─── E2EE multi-version public-key API ─────────────────────────────────
+
+
+class UserPublicKeyApiTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='alice',
+            password='test-password',
+        )
+        self.other_user = get_user_model().objects.create_user(
+            username='bob',
+            password='test-password',
+        )
+        self.client.force_login(self.user)
+
+    def _payload(self, key_bytes=b'public-key-v1'):
+        return {
+            'identity_public_key': base64.b64encode(key_bytes).decode(),
+            'key_fingerprint': hashlib.sha256(key_bytes).hexdigest().upper(),
+            'algorithm': UserPublicKey.ALGORITHM_ECDH_P256,
+        }
+
+    def test_upload_creates_public_key_without_private_material(self):
+        response = self.client.post(
+            reverse('upload-public-key'),
+            self._payload(),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        public_key = UserPublicKey.objects.get(user=self.user)
+        self.assertEqual(public_key.key_version, 1)
+        self.assertNotIn('private', response.json()['key'])
+        self.assertFalse(hasattr(public_key, 'private_key'))
+
+    def test_upload_same_key_is_idempotent(self):
+        payload = self._payload()
+        first = self.client.post(reverse('upload-public-key'), payload, content_type='application/json')
+        second = self.client.post(reverse('upload-public-key'), payload, content_type='application/json')
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(UserPublicKey.objects.filter(user=self.user).count(), 1)
+
+    def test_upload_new_key_rotates_active_version(self):
+        self.client.post(reverse('upload-public-key'), self._payload(), content_type='application/json')
+        response = self.client.post(
+            reverse('upload-public-key'),
+            self._payload(b'public-key-v2'),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['key']['key_version'], 2)
+        self.assertEqual(UserPublicKey.objects.filter(user=self.user, is_active=True).count(), 1)
+        self.assertFalse(UserPublicKey.objects.get(user=self.user, key_version=1).is_active)
+
+    def test_upload_rejects_private_key_material(self):
+        payload = self._payload()
+        payload['private_key'] = 'must-never-reach-server'
+
+        response = self.client.post(
+            reverse('upload-public-key'),
+            payload,
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'private_key_material_not_allowed')
+        self.assertFalse(UserPublicKey.objects.exists())
+
+    def test_upload_rejects_incorrect_fingerprint(self):
+        payload = self._payload()
+        payload['key_fingerprint'] = '0' * 64
+
+        response = self.client.post(
+            reverse('upload-public-key'),
+            payload,
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'fingerprint_mismatch')
+
+    def test_key_query_batch_and_fingerprint_endpoints_return_active_key(self):
+        upload = self.client.post(
+            reverse('upload-public-key'),
+            self._payload(),
+            content_type='application/json',
+        )
+        expected = upload.json()['key']
+
+        detail = self.client.get(reverse('public-key', args=[self.user.pk]))
+        batch = self.client.post(
+            reverse('batch-public-keys'),
+            {'user_ids': [self.user.pk, self.other_user.pk]},
+            content_type='application/json',
+        )
+        fingerprint = self.client.get(reverse('public-key-fingerprint', args=[self.user.pk]))
+
+        self.assertEqual(detail.json()['key'], expected)
+        self.assertEqual(batch.json()['keys'], [expected])
+        self.assertEqual(fingerprint.json()['key_fingerprint'], expected['key_fingerprint'])
+        self.assertEqual(fingerprint.json()['key_version'], 1)
+
+    def test_key_version_endpoint_returns_inactive_historical_key(self):
+        first = self.client.post(
+            reverse('upload-public-key'),
+            self._payload(),
+            content_type='application/json',
+        ).json()['key']
+        self.client.post(
+            reverse('upload-public-key'),
+            self._payload(b'public-key-v2'),
+            content_type='application/json',
+        )
+
+        response = self.client.get(reverse('public-key-version', args=[self.user.pk, 1]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['key']['identity_public_key'], first['identity_public_key'])
+        self.assertFalse(response.json()['key']['is_active'])
+
+    def test_anonymous_user_cannot_access_key_api(self):
+        self.client.logout()
+
+        response = self.client.get(reverse('public-key', args=[self.user.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response.url)
+
+
+class UserPublicKeyModelTests(TestCase):
+    """Test UserPublicKey multi-version model constraints."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.alice = User.objects.create_user(username='alice', password='p')
+
+    def _make(self, user, version, key_bytes=b'k'):
+        return UserPublicKey.objects.create(
+            user=user,
+            identity_public_key=base64.b64encode(key_bytes).decode(),
+            key_fingerprint=hashlib.sha256(key_bytes).hexdigest().upper(),
+            key_version=version,
+        )
+
+    def test_create_public_key(self):
+        pk = self._make(self.alice, 1)
+        self.assertEqual(UserPublicKey.objects.count(), 1)
+        self.assertEqual(pk.algorithm, 'ECDH-P256')
+        self.assertTrue(pk.is_active)
+
+    def test_unique_user_version(self):
+        self._make(self.alice, 1, b'k1')
+        with self.assertRaises(Exception):
+            self._make(self.alice, 1, b'k2')
+
+    def test_multiple_versions_per_user_allowed(self):
+        self._make(self.alice, 1, b'k1')
+        self._make(self.alice, 2, b'k2')
+        self.assertEqual(UserPublicKey.objects.filter(user=self.alice).count(), 2)
+
+    def test_str_contains_username_and_version(self):
+        pk = self._make(self.alice, 3)
+        self.assertIn('alice', str(pk))
+        self.assertIn('v3', str(pk))
+
+
+# ─── Registration ─────────────────────────────────────────────────────
 
 
 class RegistrationViewTests(TestCase):
@@ -46,7 +222,6 @@ class RegistrationViewTests(TestCase):
     def test_register_logs_user_in(self):
         response = self.client.post(self.REGISTER_URL, self.VALID_DATA)
         self.assertRedirects(response, self.INDEX_URL)
-        # After registration the user should be authenticated
         response = self.client.get(self.INDEX_URL)
         self.assertEqual(response.status_code, 200)
 
@@ -128,6 +303,9 @@ class RegistrationViewTests(TestCase):
         }
         response = self.client.post(self.REGISTER_URL, data)
         self.assertEqual(response.status_code, 200)
+
+
+# ─── Login / Logout ───────────────────────────────────────────────────
 
 
 class LoginViewTests(TestCase):
@@ -235,8 +413,10 @@ class LogoutViewTests(TestCase):
     def test_logout_clears_session(self):
         self.client.post(self.LOGOUT_URL)
         response = self.client.get(reverse('index'))
-        # Should redirect to login since user is logged out
         self.assertRedirects(response, f'{self.LOGIN_URL}?next={reverse("index")}')
+
+
+# ─── Contacts ─────────────────────────────────────────────────────────
 
 
 class ContactModelTests(TestCase):
@@ -296,8 +476,6 @@ class ContactViewTests(TestCase):
     def setUp(self):
         self.client.login(username='alice', password='alicepass')
 
-    # ── contact list page ──────────────────────────────────────────
-
     def test_contacts_page_requires_login(self):
         self.client.post(reverse('logout'))
         response = self.client.get(self.CONTACTS_URL)
@@ -314,8 +492,6 @@ class ContactViewTests(TestCase):
     def test_contacts_page_shows_no_contacts_initially(self):
         response = self.client.get(self.CONTACTS_URL)
         self.assertContains(response, 'No contacts yet')
-
-    # ── send friend request ────────────────────────────────────────
 
     def test_send_friend_request(self):
         response = self.client.post(
@@ -374,8 +550,6 @@ class ContactViewTests(TestCase):
         )
         self.assertRedirects(response, self.CONTACTS_URL)
 
-    # ── accept / reject ────────────────────────────────────────────
-
     def test_accept_friend_request_creates_contact(self):
         req = FriendRequest.objects.create(
             sender=self.bob, receiver=self.alice,
@@ -425,8 +599,6 @@ class ContactViewTests(TestCase):
         req.refresh_from_db()
         self.assertEqual(req.status, 'pending')
 
-    # ── delete contact ─────────────────────────────────────────────
-
     def test_delete_contact(self):
         contact = Contact.objects.create(user=self.alice, contact=self.bob)
         response = self.client.post(
@@ -442,8 +614,6 @@ class ContactViewTests(TestCase):
         )
         self.assertRedirects(response, self.CONTACTS_URL)
         self.assertTrue(Contact.objects.filter(id=contact.id).exists())
-
-    # ── search users (JSON endpoint) ───────────────────────────────
 
     def test_search_users_finds_match(self):
         response = self.client.get(
@@ -468,8 +638,6 @@ class ContactViewTests(TestCase):
         )
         data = response.json()
         self.assertEqual(len(data['results']), 0)
-
-    # ── full flow integration ──────────────────────────────────────
 
     def test_full_friend_flow(self):
         # Alice sends request to Charlie
@@ -505,146 +673,7 @@ class ContactViewTests(TestCase):
         )
 
 
-class UserPublicKeyModelTests(TestCase):
-    """Test UserPublicKey model constraints."""
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.alice = User.objects.create_user(username='alice', password='p')
-
-    def test_create_public_key(self):
-        pk_entry = UserPublicKey.objects.create(
-            user=self.alice,
-            public_key='Zm9vYmFyCg==',
-            fingerprint='A' * 64,
-        )
-        self.assertEqual(UserPublicKey.objects.count(), 1)
-        self.assertEqual(pk_entry.algorithm, 'ECDH-P256')
-
-    def test_one_to_one_constraint(self):
-        UserPublicKey.objects.create(
-            user=self.alice,
-            public_key='key1',
-            fingerprint='B' * 64,
-        )
-        with self.assertRaises(Exception):
-            UserPublicKey.objects.create(
-                user=self.alice,
-                public_key='key2',
-                fingerprint='C' * 64,
-            )
-
-    def test_str_contains_username(self):
-        pk_entry = UserPublicKey.objects.create(
-            user=self.alice,
-            public_key='Zm9v',
-            fingerprint='D' * 64,
-        )
-        self.assertIn('alice', str(pk_entry))
-
-    def test_fingerprint_unique(self):
-        UserPublicKey.objects.create(
-            user=self.alice,
-            public_key='key1',
-            fingerprint='E' * 64,
-        )
-        bob = User.objects.create_user(username='bob', password='p')
-        with self.assertRaises(Exception):
-            UserPublicKey.objects.create(
-                user=bob,
-                public_key='key2',
-                fingerprint='E' * 64,
-            )
-
-
-class PublicKeyAPITests(TestCase):
-    """Test key upload / retrieval API endpoints."""
-
-    UPLOAD_URL = reverse('upload_public_key')
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.alice = User.objects.create_user(username='alice', password='p')
-        cls.bob = User.objects.create_user(username='bob', password='q')
-
-    def setUp(self):
-        self.client.login(username='alice', password='p')
-
-    def test_upload_requires_login(self):
-        self.client.post(reverse('logout'))
-        response = self.client.post(self.UPLOAD_URL, {})
-        # Should redirect to login
-        self.assertEqual(response.status_code, 302)
-
-    def test_upload_missing_fields(self):
-        response = self.client.post(self.UPLOAD_URL, {})
-        self.assertEqual(response.status_code, 400)
-        data = response.json()
-        self.assertFalse(data['ok'])
-
-    def test_upload_bad_fingerprint_length(self):
-        response = self.client.post(self.UPLOAD_URL, {
-            'public_key': 'foo',
-            'fingerprint': 'short',
-        })
-        self.assertEqual(response.status_code, 400)
-
-    def test_upload_success(self):
-        fp = 'A' * 64
-        response = self.client.post(self.UPLOAD_URL, {
-            'public_key': 'test-spki-base64',
-            'fingerprint': fp,
-        })
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()['ok'])
-        self.assertTrue(
-            UserPublicKey.objects.filter(
-                user=self.alice, fingerprint=fp,
-            ).exists(),
-        )
-
-    def test_upload_updates_existing(self):
-        fp1 = '1' * 64
-        fp2 = '2' * 64
-        self.client.post(self.UPLOAD_URL, {
-            'public_key': 'pk1',
-            'fingerprint': fp1,
-        })
-        self.client.post(self.UPLOAD_URL, {
-            'public_key': 'pk2',
-            'fingerprint': fp2,
-        })
-        self.assertEqual(
-            UserPublicKey.objects.filter(user=self.alice).count(),
-            1,
-        )
-        pk_entry = UserPublicKey.objects.get(user=self.alice)
-        self.assertEqual(pk_entry.public_key, 'pk2')
-
-    def test_get_public_key_found(self):
-        fp = 'F' * 64
-        UserPublicKey.objects.create(
-            user=self.bob,
-            public_key='bob-spki',
-            fingerprint=fp,
-        )
-        url = reverse('get_public_key', args=['bob'])
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data['ok'])
-        self.assertEqual(data['public_key'], 'bob-spki')
-        self.assertEqual(data['fingerprint'], fp)
-
-    def test_get_public_key_not_found(self):
-        url = reverse('get_public_key', args=['ghost'])
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, 404)
-
-    def test_get_public_key_user_exists_no_key(self):
-        url = reverse('get_public_key', args=['bob'])
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, 404)
+# ─── Profile ──────────────────────────────────────────────────────────
 
 
 class ProfileEditTests(TestCase):
@@ -701,6 +730,9 @@ class ProfileEditTests(TestCase):
         self.assertRedirects(response, self.INDEX_URL)
 
 
+# ─── Groups ───────────────────────────────────────────────────────────
+
+
 class GroupModelTests(TestCase):
     """Test Group and GroupMember models."""
 
@@ -741,7 +773,6 @@ class GroupViewTests(TestCase):
     def setUpTestData(cls):
         cls.alice = User.objects.create_user(username='alice', password='p')
         cls.bob = User.objects.create_user(username='bob', password='q')
-        # Make them contacts
         Contact.objects.create(user=cls.alice, contact=cls.bob)
 
     def setUp(self):

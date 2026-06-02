@@ -177,6 +177,10 @@ function renderChatList() {
 // 1. Initialize E2E Cryptographic Engine & Load Stored Data
 async function initializeE2EEngine() {
   try {
+    if (window.iChatKeyManager) {
+      await window.iChatKeyManager.initialize();
+    }
+
     // A. Generate/load active user's ECDH key pair
     let privKeyJwk = localStorage.getItem('ichat_ecdh_private_key');
     let pubKeyJwk = localStorage.getItem('ichat_ecdh_public_key');
@@ -1733,6 +1737,9 @@ function insertEmoji(emoji) {
 
 // Initialize on DOM load
 document.addEventListener("DOMContentLoaded", () => {
+  window.addEventListener('ichat:key-missing', () => {
+    window.showToast('Local private key was missing. A new key was created; import your backup to decrypt older messages.');
+  });
   setupEventListeners();
   setupSidebarResizer();
   initializeE2EEngine();

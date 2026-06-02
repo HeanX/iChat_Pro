@@ -1,12 +1,17 @@
+import base64
+import binascii
+import hashlib
+import json
+
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import User
-from django.db import models
+from django.db import models, transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from .forms import ProfileForm, RegistrationForm
 from .models import (
@@ -19,6 +24,35 @@ from .models import (
 )
 
 
+MAX_PUBLIC_KEY_BYTES = 512
+
+
+def _json_body(request):
+    try:
+        return json.loads(request.body or '{}')
+    except json.JSONDecodeError:
+        return None
+
+
+def _serialize_key(public_key):
+    return {
+        'user_id': public_key.user_id,
+        'identity_public_key': public_key.identity_public_key,
+        'key_fingerprint': public_key.key_fingerprint,
+        'algorithm': public_key.algorithm,
+        'key_version': public_key.key_version,
+        'is_active': public_key.is_active,
+        'created_at': public_key.created_at.isoformat(),
+    }
+
+
+def _active_key(user_id):
+    return UserPublicKey.objects.filter(
+        user_id=user_id,
+        is_active=True,
+    ).first()
+
+
 def register_view(request):
     if request.user.is_authenticated:
         return redirect('index')
@@ -27,6 +61,8 @@ def register_view(request):
         form = RegistrationForm(request.POST)
         if form.is_valid():
             user = form.save()
+            user.email = request.POST.get('email', '').strip()
+            user.save(update_fields=['email'])
             login(request, user)
             messages.success(
                 request,
@@ -131,18 +167,15 @@ def logout_view(request):
 def contact_list_view(request):
     """Show the user's contacts and pending incoming friend requests."""
 
-    # Accepted contacts — any row where the current user is either party
     contacts = Contact.objects.filter(
         models.Q(user=request.user) | models.Q(contact=request.user),
     ).select_related('user', 'contact')
 
-    # Incoming pending requests
     incoming = FriendRequest.objects.filter(
         receiver=request.user,
         status=FriendRequest.Status.PENDING,
     ).select_related('sender')
 
-    # Outgoing pending requests (so we can show "Requested" status)
     outgoing = FriendRequest.objects.filter(
         sender=request.user,
         status=FriendRequest.Status.PENDING,
@@ -171,7 +204,6 @@ def search_users(request):
 
         current_user = request.user
         for user in users:
-            # Check relationship status
             is_contact = Contact.objects.filter(
                 (models.Q(user=current_user) & models.Q(contact=user))
                 | (models.Q(user=user) & models.Q(contact=current_user)),
@@ -216,7 +248,6 @@ def friend_request_send(request):
         messages.error(request, 'You cannot add yourself as a contact.')
         return redirect('contacts')
 
-    # Check if already contacts
     already_contacts = Contact.objects.filter(
         (models.Q(user=request.user) & models.Q(contact=receiver))
         | (models.Q(user=receiver) & models.Q(contact=request.user)),
@@ -226,7 +257,6 @@ def friend_request_send(request):
         messages.info(request, f'{username} is already in your contacts.')
         return redirect('contacts')
 
-    # Check for existing pending request in either direction
     existing = FriendRequest.objects.filter(
         (
             models.Q(sender=request.user, receiver=receiver)
@@ -265,7 +295,6 @@ def friend_request_accept(request, request_id):
     friend_request.status = FriendRequest.Status.ACCEPTED
     friend_request.save()
 
-    # Create bidirectional contact record
     Contact.objects.get_or_create(
         user=friend_request.sender,
         contact=friend_request.receiver,
@@ -308,7 +337,6 @@ def contact_delete(request, contact_id):
         id=contact_id,
     )
 
-    # Ensure the requesting user is one of the two parties
     if request.user not in (contact.user, contact.contact):
         messages.error(request, 'You are not part of this contact.')
         return redirect('contacts')
@@ -320,59 +348,6 @@ def contact_delete(request, contact_id):
         f'{other.username} has been removed from your contacts.',
     )
     return redirect('contacts')
-
-
-# ── Public‑key management API ──────────────────────────────────────
-
-
-@login_required(login_url='login')
-@require_http_methods(['POST'])
-def upload_public_key(request):
-    """Store (or replace) the authenticated userʼs ECDH public key."""
-    public_key = request.POST.get('public_key', '').strip()
-    fingerprint = request.POST.get('fingerprint', '').strip()
-
-    if not public_key or not fingerprint:
-        return JsonResponse(
-            {'ok': False, 'error': 'public_key and fingerprint are required.'},
-            status=400,
-        )
-
-    if len(fingerprint) != 64:
-        return JsonResponse(
-            {'ok': False, 'error': 'fingerprint must be a 64-char hex string.'},
-            status=400,
-        )
-
-    UserPublicKey.objects.update_or_create(
-        user=request.user,
-        defaults={
-            'public_key': public_key,
-            'fingerprint': fingerprint,
-            'algorithm': 'ECDH-P256',
-        },
-    )
-
-    return JsonResponse({'ok': True})
-
-
-def get_public_key(request, username):
-    """Return the public key for the given username (JSON)."""
-    user = get_object_or_404(User, username=username)
-    try:
-        pk_entry = user.public_key
-        return JsonResponse({
-            'ok': True,
-            'username': user.username,
-            'public_key': pk_entry.public_key,
-            'fingerprint': pk_entry.fingerprint,
-            'algorithm': pk_entry.algorithm,
-        })
-    except UserPublicKey.DoesNotExist:
-        return JsonResponse(
-            {'ok': False, 'error': 'No public key found for this user.'},
-            status=404,
-        )
 
 
 # ── Profile views ──────────────────────────────────────────────────
@@ -469,7 +444,6 @@ def group_add_member_view(request, group_id):
     username = request.POST.get('username', '').strip()
     user_to_add = get_object_or_404(User, username=username)
 
-    # Must be a contact
     is_contact = Contact.objects.filter(
         (models.Q(user=request.user) & models.Q(contact=user_to_add))
         | (models.Q(user=user_to_add) & models.Q(contact=request.user)),
@@ -500,8 +474,107 @@ def group_leave_view(request, group_id):
     membership.delete()
     messages.info(request, f'You left "{group.name}".')
 
-    # Delete group if no members remain
     if not group.members.exists():
         group.delete()
 
     return redirect('groups')
+
+
+# ── Public-key management API (multi-version E2EE) ─────────────────
+
+
+@login_required
+@require_POST
+def upload_public_key_view(request):
+    """Upload a new public key, rotating the active version atomically."""
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    forbidden_fields = {'private_key', 'session_key', 'file_key'}
+    if forbidden_fields.intersection(payload):
+        return JsonResponse({'error': 'private_key_material_not_allowed'}, status=400)
+
+    identity_public_key = payload.get('identity_public_key', '')
+    algorithm = payload.get('algorithm', UserPublicKey.ALGORITHM_ECDH_P256)
+    if algorithm != UserPublicKey.ALGORITHM_ECDH_P256:
+        return JsonResponse({'error': 'unsupported_algorithm'}, status=400)
+
+    try:
+        decoded_key = base64.b64decode(identity_public_key, validate=True)
+    except (ValueError, binascii.Error):
+        return JsonResponse({'error': 'invalid_public_key'}, status=400)
+    if not decoded_key or len(decoded_key) > MAX_PUBLIC_KEY_BYTES:
+        return JsonResponse({'error': 'invalid_public_key'}, status=400)
+
+    fingerprint = hashlib.sha256(decoded_key).hexdigest().upper()
+    supplied_fingerprint = payload.get('key_fingerprint', '').replace(':', '').upper()
+    if supplied_fingerprint and supplied_fingerprint != fingerprint:
+        return JsonResponse({'error': 'fingerprint_mismatch'}, status=400)
+
+    with transaction.atomic():
+        existing = _active_key(request.user.pk)
+        if existing and existing.identity_public_key == identity_public_key:
+            return JsonResponse({'key': _serialize_key(existing)})
+
+        latest = UserPublicKey.objects.filter(user=request.user).first()
+        next_version = latest.key_version + 1 if latest else 1
+        UserPublicKey.objects.filter(user=request.user, is_active=True).update(is_active=False)
+        public_key = UserPublicKey.objects.create(
+            user=request.user,
+            identity_public_key=identity_public_key,
+            key_fingerprint=fingerprint,
+            algorithm=algorithm,
+            key_version=next_version,
+        )
+
+    return JsonResponse({'key': _serialize_key(public_key)}, status=201)
+
+
+@login_required
+@require_GET
+def public_key_view(request, user_id):
+    public_key = _active_key(user_id)
+    if public_key is None:
+        return JsonResponse({'error': 'public_key_not_found'}, status=404)
+    return JsonResponse({'key': _serialize_key(public_key)})
+
+
+@login_required
+@require_GET
+def public_key_version_view(request, user_id, key_version):
+    public_key = UserPublicKey.objects.filter(
+        user_id=user_id,
+        key_version=key_version,
+    ).first()
+    if public_key is None:
+        return JsonResponse({'error': 'public_key_not_found'}, status=404)
+    return JsonResponse({'key': _serialize_key(public_key)})
+
+
+@login_required
+@require_POST
+def batch_public_keys_view(request):
+    payload = _json_body(request)
+    if payload is None or not isinstance(payload.get('user_ids'), list):
+        return JsonResponse({'error': 'user_ids_must_be_a_list'}, status=400)
+
+    user_ids = list(dict.fromkeys(payload['user_ids']))
+    if len(user_ids) > 100 or any(not isinstance(user_id, int) for user_id in user_ids):
+        return JsonResponse({'error': 'invalid_user_ids'}, status=400)
+
+    public_keys = UserPublicKey.objects.filter(user_id__in=user_ids, is_active=True)
+    return JsonResponse({'keys': [_serialize_key(public_key) for public_key in public_keys]})
+
+
+@login_required
+@require_GET
+def public_key_fingerprint_view(request, user_id):
+    public_key = _active_key(user_id)
+    if public_key is None:
+        return JsonResponse({'error': 'public_key_not_found'}, status=404)
+    return JsonResponse({
+        'user_id': public_key.user_id,
+        'key_fingerprint': public_key.key_fingerprint,
+        'key_version': public_key.key_version,
+    })

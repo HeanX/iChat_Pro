@@ -97,7 +97,8 @@ class EncryptedMessageAdmin(admin.ModelAdmin):
     list_filter = ["message_type", "status", "algorithm"]
     search_fields = ["conversation__id", "sender__username", "receiver__username"]
     readonly_fields = ["created_at", "updated_at"]
-    # Admins inspect routing and encryption metadata, not encrypted payloads.
+    # Exclude ciphertext / nonce / auth_tag from admin (PR #19): admins only
+    # see routing and encryption metadata, never the encrypted payload itself.
     fields = [
         "conversation",
         "sender",
@@ -141,6 +142,7 @@ class GroupMessageRecipientAdmin(admin.ModelAdmin):
     list_filter = ["status", "algorithm"]
     search_fields = ["group_message__id", "receiver__username"]
     readonly_fields = ["created_at"]
+    # Same E2EE policy: hide ciphertext / nonce / auth_tag from admin view.
     fields = [
         "group_message",
         "receiver",

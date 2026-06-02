@@ -80,6 +80,7 @@
 </div>
 <!-- Toast Container -->
 <div id="toast-container" class="fixed top-5 left-1/2 -translate-x-1/2 z-[100] pointer-events-none flex flex-col items-center space-y-2"></div>
+<input id="key-backup-import-input" type="file" accept="application/json" class="hidden">
 
 <!-- REPORT MODAL -->
 <div id="report-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
@@ -146,5 +147,36 @@
 
 {% block extra_js %}
 <!-- Main Chat Interaction JavaScript -->
+<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}" data-current-user-id="{{ request.user.pk }}"></script>
+<script src="{% static 'js/private-chat-e2ee.js' %}"></script>
+<script src="{% static 'js/group-chat-e2ee.js' %}"></script>
 <script src="{% static 'js/chat.js' %}"></script>
+<script>
+  function exportLocalKeyBackup() {
+    try {
+      window.iChatKeyManager.exportBackup();
+      window.showToast('Encrypted identity-key backup downloaded.');
+    } catch (error) {
+      window.showToast(error.message);
+    }
+  }
+
+  function chooseLocalKeyBackup() {
+    document.getElementById('key-backup-import-input').click();
+  }
+
+  document.getElementById('key-backup-import-input').addEventListener('change', async (event) => {
+    const [file] = event.target.files;
+    if (!file) return;
+    try {
+      await window.iChatKeyManager.importBackup(file);
+      window.showToast('Identity-key backup imported. Reloading encryption state...');
+      window.location.reload();
+    } catch (error) {
+      window.showToast(error.message);
+    } finally {
+      event.target.value = '';
+    }
+  });
+</script>
 {% endblock %}

@@ -54,15 +54,18 @@ urlpatterns = [
         name='group_leave',
     ),
 
-    # Public-key management
+    # Public-key management (multi-version E2EE API)
+    path('api/keys/upload/', views.upload_public_key_view, name='upload-public-key'),
+    path('api/keys/batch/', views.batch_public_keys_view, name='batch-public-keys'),
     path(
-        'keys/upload/',
-        views.upload_public_key,
-        name='upload_public_key',
+        'api/keys/fingerprint/<int:user_id>/',
+        views.public_key_fingerprint_view,
+        name='public-key-fingerprint',
     ),
     path(
-        'keys/<str:username>/',
-        views.get_public_key,
-        name='get_public_key',
+        'api/keys/<int:user_id>/<int:key_version>/',
+        views.public_key_version_view,
+        name='public-key-version',
     ),
+    path('api/keys/<int:user_id>/', views.public_key_view, name='public-key'),
 ]

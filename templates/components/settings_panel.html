@@ -417,13 +417,14 @@
       keysEl.classList.replace('text-green-500', 'text-red-400');
     }
 
-    // Check server sync — try to fetch own public key
+    // Check server sync — fetch the current user's active public key via the
+    // multi-version E2EE API.
     try {
-      const username = document.querySelector('#sidebar-container')?.dataset?.username
-        || '{{ request.user.username|default:"" }}';
-      const resp = await fetch(`/keys/${encodeURIComponent(username || 'unknown')}/`);
+      const userId = document.querySelector('#sidebar-container')?.dataset?.userId
+        || '{{ request.user.id|default:"" }}';
+      const resp = await fetch(`/api/keys/${encodeURIComponent(userId || '0')}/`);
       const data = await resp.json();
-      if (data.ok) {
+      if (resp.ok && data.key) {
         serverEl.textContent = '✓';
         serverEl.classList.replace('text-gray-400', 'text-green-500');
       } else {

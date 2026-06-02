@@ -114,7 +114,7 @@ class ChatConsumerTests(TransactionTestCase):
 
         await communicator.send_json_to({
             'protocol_version': '1.0',
-            'event': 'message.single.send',
+            'event': 'unknown.event',
             'request_id': 'message-request',
             'data': {},
         })

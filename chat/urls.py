@@ -5,6 +5,12 @@ from . import views
 urlpatterns = [
     path('', views.index_view, name='index'),
     path('settings/', views.settings_view, name='settings'),
+    # Private chat history
+    path(
+        'api/conversations/<int:conversation_id>/messages/',
+        views.conversation_messages_view,
+        name='api_conversation_messages',
+    ),
     # Group management
     path('api/groups/', views.create_group_view, name='api_create_group'),
     path('api/groups/<int:conversation_id>/', views.update_group_view, name='api_update_group'),

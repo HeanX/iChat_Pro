@@ -358,3 +358,65 @@ def group_messages_view(request, conversation_id):
         "has_previous": page_obj.has_previous(),
         "messages": messages_data,
     })
+
+
+# ---------------------------------------------------------------------------
+# Private chat history API
+# ---------------------------------------------------------------------------
+
+@login_required(login_url='login')
+def conversation_messages_view(request, conversation_id):
+    """Return paginated encrypted messages for a conversation.
+
+    Only conversation participants may access the history.
+    Messages are ordered newest-first so the frontend can
+    load the most recent page by default.
+    """
+    if not ConversationMember.objects.filter(
+        conversation_id=conversation_id,
+        user=request.user,
+        status=ConversationMember.Status.ACTIVE,
+    ).exists():
+        return JsonResponse(
+            {"error": "You are not a participant of this conversation."},
+            status=403,
+        )
+
+    page_number = request.GET.get("page", 1)
+    per_page = min(int(request.GET.get("per_page", 30)), 100)
+
+    queryset = (
+        EncryptedMessage.objects
+        .filter(conversation_id=conversation_id)
+        .order_by("-created_at")
+    )
+    paginator = Paginator(queryset, per_page)
+    page_obj = paginator.get_page(page_number)
+
+    messages_data = [
+        {
+            "id": msg.id,
+            "sender_id": msg.sender_id,
+            "receiver_id": msg.receiver_id,
+            "message_type": msg.message_type,
+            "ciphertext": msg.ciphertext,
+            "nonce": msg.nonce,
+            "auth_tag": msg.auth_tag,
+            "algorithm": msg.algorithm,
+            "sender_key_version": msg.sender_key_version,
+            "receiver_key_version": msg.receiver_key_version,
+            "status": msg.status,
+            "created_at": msg.created_at.isoformat(),
+        }
+        for msg in page_obj
+    ]
+
+    return JsonResponse({
+        "conversation_id": conversation_id,
+        "page": page_obj.number,
+        "total_pages": paginator.num_pages,
+        "total_messages": paginator.count,
+        "has_next": page_obj.has_next(),
+        "has_previous": page_obj.has_previous(),
+        "messages": messages_data,
+    })

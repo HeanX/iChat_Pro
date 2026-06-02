@@ -17,7 +17,10 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
+
+The current development settings read `DJANGO_SECRET_KEY` from the environment when it is available. Never commit real secrets or local `.env` files.
 
 ## Run Locally
 
@@ -27,6 +30,16 @@ python manage.py runserver 127.0.0.1:8000
 ```
 
 Open http://127.0.0.1:8000/ in your browser.
+
+## Local Checks
+
+Run the same Django checks used by CI before opening a Pull Request:
+
+```powershell
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py test
+```
 
 ## Project Structure
 

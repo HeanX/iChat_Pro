@@ -441,10 +441,20 @@ def group_detail_view(request, group_id):
 @login_required(login_url='login')
 @require_http_methods(['POST'])
 def group_add_member_view(request, group_id):
-    """Add a contact to a group."""
+    """Add a contact to a group. Requires owner/admin role (T23)."""
     conversation = get_object_or_404(
         Conversation, id=group_id, type=Conversation.Type.GROUP,
     )
+
+    current = ChatMember.objects.filter(
+        conversation=conversation,
+        user=request.user,
+        status=ChatMember.Status.ACTIVE,
+    ).first()
+    if not current or current.role not in (ChatMember.Role.OWNER, ChatMember.Role.ADMIN):
+        messages.error(request, 'Only group admins can add members.')
+        return redirect('group_detail', group_id=conversation.id)
+
     username = request.POST.get('username', '').strip()
     user_to_add = get_object_or_404(User, username=username)
 

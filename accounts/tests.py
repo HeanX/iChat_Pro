@@ -899,3 +899,57 @@ class GroupViewTests(TestCase):
             conversation=conv, user=self.alice,
         )
         self.assertEqual(membership.status, ConversationMember.Status.LEFT)
+
+    # ── T23: authorization tests ───────────────────────────────────
+
+    def test_non_member_cannot_add_member(self):
+        """Outsider cannot add members by guessing a group ID."""
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Outsider', created_by=self.bob,
+        )
+        # alice is not a member
+        response = self.client.post(
+            reverse('group_add_member', args=[conv.id]),
+            {'username': 'bob'},
+        )
+        self.assertFalse(
+            ConversationMember.objects.filter(
+                conversation=conv, user=self.bob,
+            ).exists(),
+        )
+
+    def test_regular_member_cannot_add_member(self):
+        """Regular member without admin role cannot add others."""
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Regular', created_by=self.bob,
+        )
+        ConversationMember.objects.create(
+            conversation=conv, user=self.bob, role=ConversationMember.Role.OWNER,
+        )
+        ConversationMember.objects.create(
+            conversation=conv, user=self.alice, role=ConversationMember.Role.MEMBER,
+        )
+        self.client.login(username='alice', password='p')
+        response = self.client.post(
+            reverse('group_add_member', args=[conv.id]),
+            {'username': 'stranger'},
+        )
+        # alice is a member but not an admin — should be blocked
+        stranger = User.objects.filter(username='stranger').first()
+        self.assertFalse(
+            ConversationMember.objects.filter(
+                conversation=conv, user=stranger,
+            ).exists(),
+        )
+
+    def test_add_member_requires_login(self):
+        """Unauthenticated user cannot add members."""
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Auth', created_by=self.alice,
+        )
+        self.client.post(reverse('logout'))
+        response = self.client.post(
+            reverse('group_add_member', args=[conv.id]),
+            {'username': 'bob'},
+        )
+        self.assertTrue(response.status_code in (301, 302))

@@ -19,6 +19,22 @@
     </p>
   </div>
 
+  {% if messages or form.errors %}
+  <div class="p-4 rounded-custom-md bg-red-50 border border-red-200 dark:bg-red-950/20 dark:border-red-900/50 text-red-600 dark:text-red-400 text-sm flex items-start space-x-2">
+    <i data-lucide="alert-circle" class="w-5 h-5 flex-shrink-0 mt-0.5"></i>
+    <div class="space-y-1">
+      {% for message in messages %}
+        <p class="font-medium">{{ message }}</p>
+      {% endfor %}
+      {% for field, errors in form.errors.items %}
+        {% for error in errors %}
+          <p class="font-medium">{{ error }}</p>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Client-side Error Box -->
   <div id="validation-error-box" class="hidden p-4 rounded-custom-md bg-red-50 border border-red-200 dark:bg-red-950/20 dark:border-red-900/50 text-red-600 dark:text-red-400 text-sm flex items-start space-x-2">
     <i data-lucide="alert-circle" class="w-5 h-5 flex-shrink-0 mt-0.5"></i>
@@ -200,9 +216,23 @@
       return false;
     }
 
+    if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      event.preventDefault();
+      errorText.textContent = "Password must contain at least one letter and one digit.";
+      errorBox.classList.remove('hidden');
+      return false;
+    }
+
     if (username.length < 3) {
       event.preventDefault();
       errorText.textContent = "Username must be at least 3 characters long.";
+      errorBox.classList.remove('hidden');
+      return false;
+    }
+
+    if (username && password.toLowerCase().includes(username.toLowerCase())) {
+      event.preventDefault();
+      errorText.textContent = "Password cannot be too similar to your username.";
       errorBox.classList.remove('hidden');
       return false;
     }

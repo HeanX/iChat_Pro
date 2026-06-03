@@ -226,6 +226,24 @@ class RegistrationViewTests(TestCase):
         response = self.client.get(self.INDEX_URL)
         self.assertEqual(response.status_code, 200)
 
+    def test_registered_user_can_login_again_with_username_or_email(self):
+        response = self.client.post(self.REGISTER_URL, self.VALID_DATA)
+        self.assertRedirects(response, self.INDEX_URL)
+
+        self.client.get(reverse('logout'))
+        username_login = self.client.post(reverse('login'), {
+            'username': self.VALID_DATA['username'],
+            'password': self.VALID_DATA['password1'],
+        })
+        self.assertRedirects(username_login, self.INDEX_URL)
+
+        self.client.get(reverse('logout'))
+        email_login = self.client.post(reverse('login'), {
+            'username': self.VALID_DATA['email'],
+            'password': self.VALID_DATA['password1'],
+        })
+        self.assertRedirects(email_login, self.INDEX_URL)
+
     def test_register_username_too_short(self):
         data = {**self.VALID_DATA, 'username': 'ab'}
         response = self.client.post(self.REGISTER_URL, data)
@@ -242,12 +260,14 @@ class RegistrationViewTests(TestCase):
         data = {**self.VALID_DATA, 'password1': '12345678', 'password2': '12345678'}
         response = self.client.post(self.REGISTER_URL, data)
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Password must contain at least one letter.')
         self.assertFalse(User.objects.filter(username='newuser').exists())
 
     def test_register_password_no_digit(self):
         data = {**self.VALID_DATA, 'password1': 'abcdefgh', 'password2': 'abcdefgh'}
         response = self.client.post(self.REGISTER_URL, data)
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Password must contain at least one digit.')
         self.assertFalse(User.objects.filter(username='newuser').exists())
 
     def test_register_passwords_do_not_match(self):

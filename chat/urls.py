@@ -5,6 +5,9 @@ from . import views
 urlpatterns = [
     path('', views.index_view, name='index'),
     path('settings/', views.settings_view, name='settings'),
+    # Conversation list & creation
+    path('api/conversations/', views.conversations_list_view, name='api_conversations'),
+    path('api/conversations/create/', views.get_or_create_single_conversation_view, name='api_conversation_create'),
     # Private chat history
     path(
         'api/conversations/<int:conversation_id>/messages/',

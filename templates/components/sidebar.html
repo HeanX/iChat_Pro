@@ -117,20 +117,8 @@
     </div>
     
     <!-- Scrollable Conversations List -->
-    <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-borderColor/30">
-      
-      <!-- Include Active Chat List Item 1: Alice (E2E, Online) -->
-      {% include 'components/chat_list_item.html' with chat_id=1 chat_name="Alice Vance" chat_avatar="AV" chat_avatar_bg="bg-purple-600" last_message="Did you verify the security fingerprint yet?" last_message_time="10:35 AM" unread_count=1 is_online=True is_encrypted=True %}
-      
-      <!-- Include Active Chat List Item 2: Bob (E2E, Offline) -->
-      {% include 'components/chat_list_item.html' with chat_id=2 chat_name="Bob Builder" chat_avatar="BB" chat_avatar_bg="bg-blue-600" last_message="File: ichat_pro_design.pdf" last_message_time="Yesterday" unread_count=0 is_online=False is_encrypted=True %}
-      
-      <!-- Include Active Chat List Item 3: Core Dev Team (Group, Offline) -->
-      {% include 'components/chat_list_item.html' with chat_id=3 chat_name="Core Development Team" chat_avatar="CD" chat_avatar_bg="bg-green-600" last_message="Alice: Let's review the code." last_message_time="11:07 AM" unread_count=0 is_online=False is_encrypted=False %}
-      
-      <!-- Include Active Chat List Item 4: Sentinel Bot (E2E, Online, Bot) -->
-      {% include 'components/chat_list_item.html' with chat_id=4 chat_name="Security Sentinel Bot" chat_avatar="🛡️" chat_avatar_bg="bg-zinc-700" last_message="Welcome! Send me a message..." last_message_time="12:00 PM" unread_count=0 is_online=True is_encrypted=True %}
-      
+    <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-borderColor/30" id="sidebar-chat-list">
+      <!-- Dynamically populated by chat.js -->
     </div>
   </div>
 

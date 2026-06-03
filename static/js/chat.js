@@ -1,91 +1,21 @@
 // iChat Pro - Client-side Encrypted Chat Engine
 // Vanilla JavaScript utilizing Web Crypto API for ECDH + HKDF + AES-GCM
+// Connects to real backend API, WebSocket, and E2EE modules
 
-// Mock Database of Initial Chats
-const defaultMockChats = {
-  1: {
-    id: 1,
-    name: "Alice Vance",
-    avatar: "AV",
-    avatarBg: "bg-purple-600",
-    status: "online",
-    isEncrypted: true,
-    fingerprint: "ECC: 9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A",
-    messages: [
-      { id: 100, text: "Today", isSystem: true },
-      { id: 101, text: "Hey! Did you verify the security fingerprint yet?", time: "10:30", isSelf: false },
-      { id: 102, text: "Not yet, let's open the profile details to check.", time: "10:32", isSelf: true },
-      { id: 103, text: "Sounds good, make sure the SHA-256 hash matches.", time: "10:35", isSelf: false }
-    ],
-    unread: 1
-  },
-  2: {
-    id: 2,
-    name: "Bob Builder",
-    avatar: "BB",
-    avatarBg: "bg-blue-600",
-    status: "offline",
-    isEncrypted: true,
-    fingerprint: "ECC: A1B2 C3D4 E5F6 7890 0987 6543 21FE DCBA",
-    messages: [
-      { id: 200, text: "Yesterday", isSystem: true },
-      { id: 201, text: "The staging environment is deployed with secure WebSockets.", time: "16:45", isSelf: false, sender: "Bob Builder" },
-      { id: 202, text: "Excellent. Did you configure AES-GCM 256-bit keys?", time: "16:48", isSelf: true },
-      { id: 203, text: "Yes, HKDF handles the derivation properly.", time: "16:50", isSelf: false, sender: "Bob Builder" }
-    ],
-    unread: 0
-  },
-  3: {
-    id: 3,
-    name: "Core Dev Team",
-    avatar: "CD",
-    avatarBg: "bg-emerald-600",
-    status: "3 members",
-    isEncrypted: true,
-    fingerprint: "ECC: DE3F 8A9B 7C6D 5E4F 3A2B 1C0D 9E8F 7A6B",
-    messages: [
-      { id: 300, text: "Monday", isSystem: true },
-      { id: 3001, text: "🔒 Channel secured with ECDH + HKDF. Zero-knowledge active.", isSystem: true },
-      { id: 3002, text: "Alice Vance created group \"Core Dev Team\"", isSystem: true },
-      { id: 3003, text: "Alice Vance added Bob Builder to the group", isSystem: true },
-      { id: 301, text: "Weekly sync starts in 10 minutes.", time: "10:35", isSelf: false, sender: "Alice Vance" },
-      { id: 302, text: "Bring the latest WebSocket logs too.", time: "10:36", isSelf: false, sender: "Alice Vance" },
-      { id: 303, text: "I'll join shortly. Finishing up the cryptographic pipeline.", time: "10:38", isSelf: true },
-      { id: 304, text: "I'll bring the deployment checklist.", time: "10:39", isSelf: false, sender: "Bob Builder" },
-      { id: 305, text: "Owner review is done on my side.", time: "10:40", isSelf: false, sender: "Bob Builder" }
-    ],
-    unread: 0
-  },
-  4: {
-    id: 4,
-    name: "Security Sentinel Bot",
-    avatar: "SB",
-    avatarBg: "bg-zinc-700",
-    status: "online",
-    isEncrypted: true,
-    fingerprint: "ECC: 55AA BB66 CC77 DD88 EE99 FF00 1122 3344",
-    messages: [
-      { id: 400, text: "Today", isSystem: true },
-      { id: 401, text: "Hello! I am the iChat Pro Cryptographic Test Bot.", time: "10:00", isSelf: false },
-      { id: 402, text: "Send any message, and I will reply with an integrity signature.", time: "10:01", isSelf: false }
-    ],
-    unread: 2
-  }
-};
-
-// Global Interactive States
-let mockChats = {};
+// Global State — populated from API instead of mock data
+let conversations = [];          // Array of conversation objects from GET /api/conversations/
+let conversationsById = {};      // ID → conversation lookup map
 let activeChatId = null;
 let currentLanguage = localStorage.getItem('ichat_lang') || 'en';
 let isSelectingMessages = false;
 let selectedMessageIds = [];
-
-// Cryptographic engine states
-let localPrivateKeyCrypto = null;
-let localPublicKeyCrypto = null;
-let activeSessionKey = null;
-let activeSessionKeyHexHash = null;
-let contactKeys = {}; // Key map: { chatId: { privateKey: JWK, publicKey: JWK } }
+let messages = [];               // Decrypted messages for the currently active conversation
+let messagePage = 1;
+let hasMoreMessages = false;
+let isLoadingMessages = false;
+let sessionKeys = {};            // Cache: conversationId → derived CryptoKey
+let myUserId = null;             // Current authenticated user PK
+let wsClient = null;             // iChatWebSocketClient instance
 
 function formatClockTime(date = new Date()) {
   return date.toLocaleTimeString([], {
@@ -113,11 +43,6 @@ function normalizeTimeLabel(label) {
 function normalizeChatData(chat) {
   if (!chat) return chat;
   chat.unread = Number.isFinite(Number(chat.unread)) ? Number(chat.unread) : 0;
-  if (Array.isArray(chat.messages)) {
-    chat.messages.forEach(message => {
-      if (message.time) message.time = normalizeTimeLabel(message.time);
-    });
-  }
   return chat;
 }
 
@@ -140,272 +65,91 @@ function logToCryptoConsole(message) {
   }
 }
 
-// Helper: Calculate mock thumbprint of public key (visual aid)
-async function getJwkThumbprint(jwk) {
-  if (!jwk || !jwk.x) return "N/A";
-  const encoder = new TextEncoder();
-  const data = encoder.encode(jwk.x + ":" + jwk.y);
-  const hash = await window.crypto.subtle.digest("SHA-256", data);
-  return arrayBufferToHex(hash).substring(0, 16) + "...";
-}
+// ============================================================================
+// 1. API Helpers
+// ============================================================================
 
-// Helper: Generate random security fingerprint string
-function generateFingerprint() {
-  const hexChars = "0123456789ABCDEF";
-  let fp = "ECC:";
-  for (let i = 0; i < 8; i++) {
-    let chunk = "";
-    for (let j = 0; j < 4; j++) {
-      chunk += hexChars[Math.floor(Math.random() * 16)];
+function getCookie(name) {
+  let cookieValue = null;
+  if (document.cookie && document.cookie !== '') {
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.substring(0, name.length + 1) === (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+        break;
+      }
     }
-    fp += " " + chunk;
   }
-  return fp;
+  return cookieValue;
 }
 
-// Render Sidebar Chat List
+async function apiFetch(url, options = {}) {
+  const csrf = getCookie('csrftoken');
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-CSRFToken': csrf,
+    ...(options.headers || {}),
+  };
+  const resp = await fetch(url, { ...options, headers });
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { const body = await resp.json(); detail = body.error || body.detail || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  return resp.json();
+}
+
+// ============================================================================
+// 2. Render Sidebar Chat List
+// ============================================================================
+
 function renderChatList() {
-  const chatListContainer = document.querySelector('#sidebar-chat-view .overflow-y-auto');
-  if (chatListContainer) {
-    chatListContainer.innerHTML = "";
-    Object.values(mockChats).forEach(chat => {
-      appendChatItemToSidebar(chat);
-    });
-  }
+  const chatListContainer = document.getElementById("sidebar-chat-list");
+  if (!chatListContainer) return;
+  chatListContainer.innerHTML = "";
+  conversations.forEach(conv => {
+    appendChatItemToSidebar(conv);
+  });
 }
 
-// 1. Initialize E2E Cryptographic Engine & Load Stored Data
-async function initializeE2EEngine() {
-  try {
-    if (window.iChatKeyManager) {
-      await window.iChatKeyManager.initialize();
-    }
-
-    // A. Generate/load active user's ECDH key pair
-    let privKeyJwk = localStorage.getItem('ichat_ecdh_private_key');
-    let pubKeyJwk = localStorage.getItem('ichat_ecdh_public_key');
-
-    if (!privKeyJwk || !pubKeyJwk) {
-      logToCryptoConsole("[Engine Initialization] Generating new ECDH P-256 key pair...");
-      const keyPair = await window.crypto.subtle.generateKey(
-        { name: 'ECDH', namedCurve: 'P-256' },
-        true,
-        ['deriveKey', 'deriveBits']
-      );
-      
-      const priv = await window.crypto.subtle.exportKey('jwk', keyPair.privateKey);
-      const pub = await window.crypto.subtle.exportKey('jwk', keyPair.publicKey);
-
-      localStorage.setItem('ichat_ecdh_private_key', JSON.stringify(priv));
-      localStorage.setItem('ichat_ecdh_public_key', JSON.stringify(pub));
-
-      localPrivateKeyCrypto = keyPair.privateKey;
-      localPublicKeyCrypto = keyPair.publicKey;
-      logToCryptoConsole("[Engine Initialization] Successfully generated and stored new local key pair.");
-    } else {
-      logToCryptoConsole("[Engine Initialization] Found existing local key pair in localStorage.");
-      localPrivateKeyCrypto = await window.crypto.subtle.importKey(
-        'jwk',
-        JSON.parse(privKeyJwk),
-        { name: 'ECDH', namedCurve: 'P-256' },
-        true,
-        ['deriveKey', 'deriveBits']
-      );
-      localPublicKeyCrypto = await window.crypto.subtle.importKey(
-        'jwk',
-        JSON.parse(pubKeyJwk),
-        { name: 'ECDH', namedCurve: 'P-256' },
-        true,
-        []
-      );
-    }
-
-    logToCryptoConsole(`[Engine Initialization] Local Public Key Fingerprint: ${await getJwkThumbprint(JSON.parse(localStorage.getItem('ichat_ecdh_public_key')))}`);
-
-    // B. Initialize/load mock remote contact keys for simulating exchange
-    let contactKeysStr = localStorage.getItem('ichat_contact_keys');
-    if (contactKeysStr) {
-      contactKeys = JSON.parse(contactKeysStr);
-    } else {
-      contactKeys = {};
-    }
-
-    // Populate default contacts with valid keys if not present
-    const defaultIds = [1, 2, 3, 4];
-    let keysUpdated = false;
-    for (const id of defaultIds) {
-      if (!contactKeys[id]) {
-        logToCryptoConsole(`[Engine Initialization] Generating mock ECDH P-256 key pair for contact ID ${id}...`);
-        const pair = await window.crypto.subtle.generateKey(
-          { name: 'ECDH', namedCurve: 'P-256' },
-          true,
-          ['deriveKey', 'deriveBits']
-        );
-        const privJwk = await window.crypto.subtle.exportKey('jwk', pair.privateKey);
-        const pubJwk = await window.crypto.subtle.exportKey('jwk', pair.publicKey);
-
-        contactKeys[id] = {
-          privateKey: privJwk,
-          publicKey: pubJwk
-        };
-        keysUpdated = true;
-      }
-    }
-    if (keysUpdated) {
-      localStorage.setItem('ichat_contact_keys', JSON.stringify(contactKeys));
-    }
-
-    // C. Initialize/load mockChats from localStorage
-    const storedChats = localStorage.getItem('ichat_chats');
-    if (storedChats) {
-      mockChats = JSON.parse(storedChats);
-      // Ensure group messages are always updated to contain E2EE system messages for Core Dev Team (id 3)
-      if (mockChats[3]) {
-        mockChats[3].isEncrypted = true;
-        mockChats[3].messages = defaultMockChats[3].messages;
-      }
-    } else {
-      mockChats = defaultMockChats;
-      localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-    }
-
-    Object.values(mockChats).forEach(normalizeChatData);
-    localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-    
-    // Dynamically append chats to sidebar list
-    renderChatList();
-
-    logToCryptoConsole("[Engine Initialization] Cryptographic system online.");
-  } catch (err) {
-    console.error("Failed to initialize cryptographic engine:", err);
-    logToCryptoConsole(`[Engine Error] Initialization failed: ${err.message}`);
-  }
-}
-
-// 2. Perform ECDH Key Agreement on Select Chat
-async function deriveActiveSessionKey(chatId) {
-  const chat = mockChats[chatId];
-  if (!chat || !chat.isEncrypted) {
-    activeSessionKey = null;
-    activeSessionKeyHexHash = null;
-    logToCryptoConsole(`[ECDH Key Agreement] Selected non-encrypted channel: ${chat ? chat.name : "N/A"}`);
-    return;
-  }
-
-  try {
-    logToCryptoConsole(`[ECDH Key Agreement] Computing shared secret for conversation ID: ${chatId} (${chat.name})`);
-    
-    const contactKeyData = contactKeys[chatId];
-    if (!contactKeyData) {
-      throw new Error(`Public key for contact ID ${chatId} is not initialized.`);
-    }
-
-    // Import remote public key
-    const remotePubKey = await window.crypto.subtle.importKey(
-      'jwk',
-      contactKeyData.publicKey,
-      { name: 'ECDH', namedCurve: 'P-256' },
-      true,
-      []
-    );
-
-    // 1. Perform ECDH Key Agreement to derive shared secret bits
-    const sharedSecretBits = await window.crypto.subtle.deriveBits(
-      {
-        name: 'ECDH',
-        public: remotePubKey
-      },
-      localPrivateKeyCrypto,
-      256
-    );
-
-    // 2. Import shared secret bits as an HKDF master key
-    const hkdfMasterKey = await window.crypto.subtle.importKey(
-      'raw',
-      sharedSecretBits,
-      { name: 'HKDF' },
-      false,
-      ['deriveKey']
-    );
-
-    // 3. Derive 256-bit AES-GCM session key using HKDF
-    const saltBytes = new TextEncoder().encode(chatId.toString());
-    const infoBytes = new TextEncoder().encode('chat-message-encryption-v1');
-
-    const derivedKey = await window.crypto.subtle.deriveKey(
-      {
-        name: 'HKDF',
-        hash: 'SHA-256',
-        salt: saltBytes,
-        info: infoBytes
-      },
-      hkdfMasterKey,
-      {
-        name: 'AES-GCM',
-        length: 256
-      },
-      true, // extractable to calculate visual hash
-      ['encrypt', 'decrypt']
-    );
-
-    activeSessionKey = derivedKey;
-
-    // Calculate derived key SHA-256 hash for logging
-    const rawKey = await window.crypto.subtle.exportKey("raw", derivedKey);
-    const hashBuffer = await window.crypto.subtle.digest("SHA-256", rawKey);
-    activeSessionKeyHexHash = arrayBufferToHex(hashBuffer);
-
-    logToCryptoConsole(`[ECDH Key Agreement] Handshake completed successfully.`);
-    logToCryptoConsole(`[HKDF Key Derivation] Session key derived with salt: "${chatId}"`);
-    logToCryptoConsole(`[HKDF Key Derivation] Derived Key Hash (SHA-256): ${activeSessionKeyHexHash}`);
-  } catch (err) {
-    console.error("ECDH + HKDF session key derivation failed:", err);
-    logToCryptoConsole(`[ECDH Error] Derivation failed: ${err.message}`);
-    activeSessionKey = null;
-    activeSessionKeyHexHash = null;
-  }
-}
-
-// 3. Append Chat Item UI to Sidebar List
-function appendChatItemToSidebar(chat) {
-  const chatListContainer = document.querySelector('#sidebar-chat-view .overflow-y-auto');
+function appendChatItemToSidebar(conv) {
+  const chatListContainer = document.getElementById("sidebar-chat-list");
   if (!chatListContainer) return;
 
   const wrapper = document.createElement("div");
-  wrapper.id = `chat-item-wrapper-${chat.id}`;
+  wrapper.id = `chat-item-wrapper-${conv.id}`;
   wrapper.className = "w-full";
 
-  const lastMsg = chat.messages.length ? chat.messages[chat.messages.length - 1] : null;
-  const lastMsgText = lastMsg ? (lastMsg.isSystem ? getSystemMessageTranslation(lastMsg.text) : lastMsg.text) : (currentLanguage === 'zh' ? "暂无消息" : "No messages");
-  const lastMsgTime = lastMsg ? getSystemMessageTranslation(normalizeTimeLabel(lastMsg.time)) : "";
-  const unreadCount = Number(chat.unread || 0);
+  const lastMsgText = conv.last_message_preview || '';
+  const lastMsgTime = conv.last_message_at ? formatClockTime(new Date(conv.last_message_at)) : '';
+  const unreadCount = Number(conv.unread || 0);
 
   wrapper.innerHTML = `
-    <button id="chat-item-${chat.id}" onclick="selectChat('${chat.id}')"
+    <button id="chat-item-${conv.id}" onclick="selectChat('${conv.id}')"
       class="chat-item-btn w-full flex items-center px-4 py-3 border-b border-borderColor hover:bg-bgSearch transition-all text-left focus:outline-none relative group select-none">
-      
+
       <div class="relative flex-shrink-0">
-        <div class="w-12 h-12 rounded-full ${chat.avatarBg} text-white flex items-center justify-center font-bold text-base shadow-sm">
-          ${chat.avatar}
+        <div class="w-12 h-12 rounded-full text-white flex items-center justify-center font-bold text-base shadow-sm" style="background-color: ${conv.avatar_color || '#5c6bc0'}">
+          ${conv.initials || '??'}
         </div>
-        ${chat.status === 'online' ? '<span class="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full bg-green-500 border-2 border-bgSidebar" title="Online"></span>' : ''}
       </div>
 
       <div class="ml-3.5 flex-1 min-w-0">
         <div class="flex items-center justify-between">
           <h3 class="text-sm font-bold text-textMain truncate flex items-center space-x-1">
-            <span>${chat.name}</span>
-            ${chat.isEncrypted ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark inline-block flex-shrink-0" title="End-to-End Encrypted" data-i18n-title="e2ee_badge"></i>' : ''}
+            <span>${conv.name || 'Unknown'}</span>
+            ${conv.is_secure ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark inline-block flex-shrink-0" title="End-to-End Encrypted" data-i18n-title="e2ee_badge"></i>' : ''}
           </h3>
-          <span id="chat-time-${chat.id}" class="chat-item-time flex-shrink-0">${lastMsgTime}</span>
+          <span id="chat-time-${conv.id}" class="chat-item-time flex-shrink-0">${lastMsgTime}</span>
         </div>
-        
+
         <div class="flex items-center justify-between mt-1">
-          <p id="last-msg-${chat.id}" class="text-xs text-textSecondary truncate pr-4 leading-tight">
+          <p id="last-msg-${conv.id}" class="text-xs text-textSecondary truncate pr-4 leading-tight">
             ${lastMsgText}
           </p>
-          
-          <span id="unread-badge-${chat.id}" class="${unreadCount > 0 ? "" : "hidden"} unread-badge flex-shrink-0">
+
+          <span id="unread-badge-${conv.id}" class="${unreadCount > 0 ? "" : "hidden"} unread-badge flex-shrink-0">
             ${unreadCount}
           </span>
         </div>
@@ -417,123 +161,389 @@ function appendChatItemToSidebar(chat) {
   lucide.createIcons();
 }
 
-function updateSidebarPreview(chat, text, time) {
-  if (!chat) return;
-  const lastMsgEl = document.getElementById(`last-msg-${chat.id}`);
-  const timeEl = document.getElementById(`chat-time-${chat.id}`);
-  if (lastMsgEl) lastMsgEl.textContent = text.includes("You removed") || text.includes("created group") ? getSystemMessageTranslation(text) : text;
-  if (timeEl) timeEl.textContent = getSystemMessageTranslation(normalizeTimeLabel(time));
+function updateSidebarPreview(conv, text, time) {
+  if (!conv) return;
+  const lastMsgEl = document.getElementById(`last-msg-${conv.id}`);
+  const timeEl = document.getElementById(`chat-time-${conv.id}`);
+  if (lastMsgEl) lastMsgEl.textContent = text;
+  if (timeEl) timeEl.textContent = time;
 }
 
-// 4. Handle Chat Selecting
+// ============================================================================
+// 3. API Data Loading
+// ============================================================================
+
+async function fetchConversations() {
+  try {
+    const data = await apiFetch('/api/conversations/');
+    conversations = data.conversations || [];
+    conversationsById = {};
+    conversations.forEach(c => { conversationsById[c.id] = c; });
+    renderChatList();
+    // Auto-select first conversation if none active
+    if (!activeChatId && conversations.length > 0) {
+      selectChat(conversations[0].id.toString());
+    }
+  } catch (err) {
+    console.error('Failed to fetch conversations:', err);
+    logToCryptoConsole(`[API] Failed to load conversations: ${err.message}`);
+  }
+}
+
+async function fetchMessages(conversationId, page = 1) {
+  const conv = conversationsById[parseInt(conversationId)];
+  if (!conv) return;
+
+  let url;
+  if (conv.type === 'group') {
+    url = `/api/groups/${conversationId}/messages/?page=${page}&per_page=30`;
+  } else {
+    url = `/api/conversations/${conversationId}/messages/?page=${page}&per_page=30`;
+  }
+
+  try {
+    const data = await apiFetch(url);
+    hasMoreMessages = data.has_next;
+    messagePage = data.page;
+
+    // Decrypt each message client-side
+    const decrypted = [];
+    for (const msg of data.messages) {
+      try {
+        let plaintext;
+        if (conv.type === 'group') {
+          plaintext = await window.iChatGroupE2EE.decryptGroupMessage({
+            algorithm: msg.algorithm,
+            ciphertext: msg.ciphertext,
+            nonce: msg.nonce,
+            auth_tag: msg.auth_tag,
+            group_id: conv.id,
+            membership_version: conv.membership_version,
+            sender_id: msg.sender_id,
+            sender_key_version: msg.sender_key_version,
+            receiver_key_version: msg.receiver_key_version,
+          });
+        } else {
+          plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
+            algorithm: msg.algorithm,
+            ciphertext: msg.ciphertext,
+            nonce: msg.nonce,
+            auth_tag: msg.auth_tag,
+            sender_id: msg.sender_id,
+            sender_key_version: msg.sender_key_version,
+            receiver_key_version: msg.receiver_key_version,
+          });
+        }
+        decrypted.push({
+          id: msg.id,
+          text: plaintext,
+          time: formatClockTime(new Date(msg.created_at)),
+          isSelf: msg.sender_id === myUserId,
+          sender: msg.sender_id,
+          sender_name: conv.type === 'group' ? `User #${msg.sender_id}` : undefined,
+          status: msg.status,
+          isSystem: msg.message_type === 'system',
+        });
+      } catch (decryptErr) {
+        console.warn(`Failed to decrypt message ${msg.id}:`, decryptErr);
+        decrypted.push({
+          id: msg.id,
+          text: '[Decryption failed]',
+          time: formatClockTime(new Date(msg.created_at)),
+          isSelf: msg.sender_id === myUserId,
+          sender: msg.sender_id,
+          status: msg.status,
+          decryptError: true,
+        });
+      }
+    }
+
+    // For page 1, replace; for higher pages, prepend (older messages)
+    if (page === 1) {
+      messages = decrypted.reverse(); // API returns newest-first
+    } else {
+      // Prepend older messages
+      messages = [...decrypted.reverse(), ...messages];
+    }
+  } catch (err) {
+    console.error('Failed to fetch messages:', err);
+    logToCryptoConsole(`[API] Failed to load messages: ${err.message}`);
+  }
+}
+
+// ============================================================================
+// 4. WebSocket Connection
+// ============================================================================
+
+function connectWebSocket() {
+  if (!window.iChatWebSocketClient) {
+    console.warn('WebSocket client not loaded');
+    return;
+  }
+
+  wsClient = new window.iChatWebSocketClient('/ws/chat/', {
+    reconnect: true,
+    maxRetries: 10,
+    initialDelay: 1000,
+    maxDelay: 30000,
+  });
+
+  wsClient.onConnect = () => {
+    logToCryptoConsole('[WebSocket] Connected');
+  };
+
+  wsClient.onDisconnect = (reason) => {
+    logToCryptoConsole(`[WebSocket] Disconnected: ${reason}`);
+  };
+
+  wsClient.onMessageReceived = (data) => {
+    handleIncomingMessage(data);
+  };
+
+  wsClient.connect();
+}
+
+function handleIncomingMessage(data) {
+  const event = data.event || data.type;
+
+  if (event === 'message.single.received') {
+    handlePrivateMessageReceived(data);
+  } else if (event === 'message.single.status') {
+    handleMessageStatusUpdate(data);
+  } else if (event === 'message.group.new') {
+    handleGroupMessageReceived(data);
+  } else {
+    console.log('[WebSocket] Unknown event:', event, data);
+  }
+}
+
+async function handlePrivateMessageReceived(data) {
+  const payload = data.data || data;
+  const convId = payload.conversation_id;
+  const conv = conversationsById[convId];
+
+  try {
+    let plaintext;
+    if (window.iChatPrivateE2EE) {
+      plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
+        algorithm: payload.algorithm,
+        ciphertext: payload.ciphertext,
+        nonce: payload.nonce,
+        auth_tag: payload.auth_tag,
+        sender_id: payload.sender_id,
+        sender_key_version: payload.sender_key_version,
+        receiver_key_version: payload.receiver_key_version,
+      });
+    } else {
+      plaintext = '[Encrypted message — E2EE module not loaded]';
+    }
+
+    const newMsg = {
+      id: payload.message_id,
+      text: plaintext,
+      time: formatClockTime(new Date(payload.created_at || Date.now())),
+      isSelf: false,
+      sender: payload.sender_id,
+      status: 'received',
+    };
+
+    if (activeChatId === convId) {
+      messages.push(newMsg);
+      renderMessages();
+      scrollToBottom();
+      // Send delivery receipt
+      if (wsClient) {
+        wsClient.sendPayload({
+          event: 'message.single.delivered',
+          data: { message_id: payload.message_id },
+        });
+      }
+    } else {
+      // Increment unread badge
+      if (conv) {
+        conv.unread = (conv.unread || 0) + 1;
+        const badge = document.getElementById(`unread-badge-${convId}`);
+        if (badge) {
+          badge.textContent = conv.unread;
+          badge.classList.remove('hidden');
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to decrypt incoming message:', err);
+  }
+}
+
+async function handleGroupMessageReceived(data) {
+  const payload = data.data || data;
+  const convId = payload.group_id;
+  const conv = conversationsById[convId];
+
+  try {
+    let plaintext;
+    if (window.iChatGroupE2EE) {
+      plaintext = await window.iChatGroupE2EE.decryptGroupMessage({
+        algorithm: payload.algorithm,
+        ciphertext: payload.ciphertext,
+        nonce: payload.nonce,
+        auth_tag: payload.auth_tag,
+        group_id: convId,
+        membership_version: payload.membership_version,
+        sender_id: payload.sender_id,
+        sender_key_version: payload.sender_key_version,
+        receiver_key_version: payload.receiver_key_version,
+      });
+    } else {
+      plaintext = '[Encrypted group message — E2EE module not loaded]';
+    }
+
+    const newMsg = {
+      id: payload.message_id,
+      text: plaintext,
+      time: formatClockTime(new Date(payload.created_at || Date.now())),
+      isSelf: payload.sender_id === myUserId,
+      sender: payload.sender_id,
+      status: 'received',
+    };
+
+    if (activeChatId === convId) {
+      messages.push(newMsg);
+      renderMessages();
+      scrollToBottom();
+    } else {
+      if (conv) {
+        conv.unread = (conv.unread || 0) + 1;
+        const badge = document.getElementById(`unread-badge-${convId}`);
+        if (badge) {
+          badge.textContent = conv.unread;
+          badge.classList.remove('hidden');
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to decrypt incoming group message:', err);
+  }
+}
+
+function handleMessageStatusUpdate(data) {
+  const payload = data.data || data;
+  const msg = messages.find(m => m.id === payload.message_id);
+  if (msg) {
+    msg.status = payload.status;
+    renderMessages();
+  }
+}
+
+// ============================================================================
+// 5. ECDH Key Agreement on Select Chat
+// ============================================================================
+
+async function deriveActiveSessionKey(convId) {
+  const conv = conversationsById[parseInt(convId)];
+  if (!conv || !conv.is_secure) {
+    sessionKeys[convId] = null;
+    logToCryptoConsole(`[ECDH] Selected non-encrypted channel: ${conv ? conv.name : "N/A"}`);
+    return;
+  }
+
+  // Check cache
+  if (sessionKeys[convId]) return;
+
+  try {
+    logToCryptoConsole(`[ECDH] Computing shared secret for conversation ${convId} (${conv.name})`);
+
+    if (conv.type === 'group') {
+      // For groups, use the group E2EE module
+      if (window.iChatGroupE2EE && window.iChatGroupE2EE.fetchGroupMemberKeys) {
+        await window.iChatGroupE2EE.fetchGroupMemberKeys(convId);
+      }
+    } else {
+      // For private chats, derive session key via the private E2EE module
+      if (window.iChatPrivateE2EE && window.iChatPrivateE2EE.derivePrivateSessionKey) {
+        const keyRecord = window.iChatKeyManager ? window.iChatKeyManager.loadCurrentRecord() : null;
+        if (keyRecord && conv.peer_id) {
+          const key = await window.iChatPrivateE2EE.derivePrivateSessionKey(
+            keyRecord.privateKey,
+            null, // peer public key will be fetched internally by the module
+            { conversation_id: convId, sender_id: myUserId, receiver_id: conv.peer_id }
+          );
+          sessionKeys[convId] = key;
+        }
+      }
+    }
+
+    logToCryptoConsole(`[ECDH] Handshake completed for conversation ${convId}.`);
+  } catch (err) {
+    console.error('ECDH session key derivation failed:', err);
+    logToCryptoConsole(`[ECDH Error] Derivation failed: ${err.message}`);
+    sessionKeys[convId] = null;
+  }
+}
+
+// 6. Chat Selection & Rendering
 async function selectChat(chatId) {
   activeChatId = parseInt(chatId);
-  const chat = mockChats[activeChatId];
-  if (!chat) return;
+  const conv = conversationsById[activeChatId];
+  if (!conv) return;
 
-  // Highlight active chat in sidebar list in Telegram Web style
-  document.querySelectorAll(".chat-item-btn").forEach(item => {
-    item.classList.remove("active");
-  });
+  // Highlight active chat
+  document.querySelectorAll(".chat-item-btn").forEach(item => item.classList.remove("active"));
   const activeItem = document.getElementById(`chat-item-${chatId}`);
-  if (activeItem) {
-    activeItem.classList.add("active");
-  }
+  if (activeItem) activeItem.classList.add("active");
 
-  // Clear unread indicator badge
+  // Clear unread badge
   const badge = document.getElementById(`unread-badge-${chatId}`);
-  if (badge) {
-    badge.classList.add("hidden");
-    badge.textContent = "0";
-  }
-  chat.unread = 0;
-  localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
+  if (badge) { badge.classList.add("hidden"); badge.textContent = "0"; }
+  conv.unread = 0;
 
-  // Close header operations dropdown if open
+  // Close header dropdown
   const headerDropdown = document.getElementById("chat-header-more-dropdown");
   const headerMoreBtn = document.getElementById("chat-header-more-btn");
   if (headerDropdown) headerDropdown.classList.add("hidden");
   if (headerMoreBtn) headerMoreBtn.classList.remove("bg-bgSearch", "text-textMain");
 
-  // Run ECDH key agreement to derive active session key
+  // Derive session key
   await deriveActiveSessionKey(activeChatId);
 
-  // Populate header details
-  document.getElementById("chat-header-avatar").textContent = chat.avatar;
-  // Clear any dynamic background classes and apply specific one
-  document.getElementById("chat-header-avatar").className = `w-10 h-10 rounded-full ${chat.avatarBg} text-white flex items-center justify-center font-bold text-sm shadow-sm`;
-  document.getElementById("chat-header-name").textContent = chat.name;
+  // Populate header
+  document.getElementById("chat-header-avatar").textContent = conv.initials || '??';
+  document.getElementById("chat-header-avatar").className = `w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm shadow-sm`;
+  document.getElementById("chat-header-avatar").style.backgroundColor = conv.avatar_color || '#5c6bc0';
+  document.getElementById("chat-header-name").textContent = conv.name || 'Unknown';
 
-  // Update header operations leave/delete group wording dynamically
+  // Update delete/leave text
   const leaveTextEl = document.getElementById("menu-delete-chat-text");
   if (leaveTextEl) {
-    const isGroup = chat.status && chat.status.includes("members");
-    if (isGroup) {
-      leaveTextEl.setAttribute("data-i18n", "menu_leave_group");
-      leaveTextEl.textContent = currentLanguage === 'zh' ? "退出群聊" : "Leave Group";
-    } else {
-      leaveTextEl.setAttribute("data-i18n", "menu_delete_chat");
-      leaveTextEl.textContent = currentLanguage === 'zh' ? "删除聊天" : "Delete Chat";
-    }
-  }
-
-  // Update header operations mute wording dynamically
-  const muteTextEl = document.getElementById("menu-mute-group-text");
-  const muteIconEl = document.getElementById("menu-mute-group-icon");
-  if (muteTextEl) {
-    if (chat.isMuted) {
-      muteTextEl.setAttribute("data-i18n", "menu_unmute_group");
-      muteTextEl.textContent = currentLanguage === 'zh' ? "取消静音" : "Unmute";
-      if (muteIconEl) {
-        muteIconEl.setAttribute("data-lucide", "bell");
-      }
-    } else {
-      muteTextEl.setAttribute("data-i18n", "menu_mute_group");
-      muteTextEl.textContent = currentLanguage === 'zh' ? "静音免打扰" : "Mute...";
-      if (muteIconEl) {
-        muteIconEl.setAttribute("data-lucide", "bell-off");
-      }
-    }
-    if (window.lucide) window.lucide.createIcons();
+    const isGroup = conv.type === 'group';
+    leaveTextEl.setAttribute("data-i18n", isGroup ? "menu_leave_group" : "menu_delete_chat");
+    leaveTextEl.textContent = isGroup
+      ? (currentLanguage === 'zh' ? "退出群聊" : "Leave Group")
+      : (currentLanguage === 'zh' ? "删除聊天" : "Delete Chat");
   }
   
-  // Custom header status displaying E2EE dynamically for group/private chat
-  if (chat.isEncrypted) {
-    const statusText = getStatusTranslation(chat.status);
+  // Header status
+  const statusText = conv.type === 'group'
+    ? (currentLanguage === 'zh' ? `${conv.member_count || 0} 位成员` : `${conv.member_count || 0} members`)
+    : (currentLanguage === 'zh' ? '联系人' : 'Contact');
+  if (conv.is_secure) {
     const e2eeText = currentLanguage === 'zh' ? '🔒 端到端加密' : '🔒 End-to-end encrypted';
     document.getElementById("chat-header-status").innerHTML = `${statusText} &middot; <span class='text-brand-light dark:text-brand-dark font-semibold'>${e2eeText}</span>`;
   } else {
-    document.getElementById("chat-header-status").textContent = getStatusTranslation(chat.status);
+    document.getElementById("chat-header-status").textContent = statusText;
   }
 
-  // Toggle E2EE input security banner
+  // E2EE UI
   const securityBanner = document.getElementById("chat-input-security-banner");
-  if (securityBanner) {
-    if (chat.isEncrypted) {
-      securityBanner.classList.remove("hidden");
-    } else {
-      securityBanner.classList.add("hidden");
-    }
-  }
-
-  // Handle lock icon visual state
+  if (securityBanner) securityBanner.classList.toggle("hidden", !conv.is_secure);
   const lockBtn = document.getElementById("chat-header-lock");
-  if (lockBtn) {
-    if (chat.isEncrypted) {
-      lockBtn.classList.remove("hidden");
-    } else {
-      lockBtn.classList.add("hidden");
-    }
-  }
+  if (lockBtn) lockBtn.classList.toggle("hidden", !conv.is_secure);
 
-  // Show Chat Viewport and Hide Empty State
+  // Show chat, hide empty state
   document.getElementById("active-chat-window").classList.remove("hidden");
   const emptyState = document.getElementById("empty-state-window");
-  if (emptyState) {
-    emptyState.classList.add("hidden");
-  }
+  if (emptyState) emptyState.classList.add("hidden");
 
-  // Adjust responsive layout for mobile viewport
+  // Mobile layout
   if (window.innerWidth < 768) {
     document.getElementById("sidebar-container").classList.add("hidden");
     document.getElementById("chat-window-container").classList.remove("hidden");
@@ -541,143 +551,60 @@ async function selectChat(chatId) {
     window.location.hash = 'chat-open';
   }
 
-  // Update profile details panel
-  updateDetailsPanel(chat);
-
-  // Render conversation history
+  // Load messages
+  messages = [];
+  messagePage = 1;
+  hasMoreMessages = true;
+  await fetchMessages(activeChatId);
   renderMessages();
   scrollToBottom();
+  updateDetailsPanel(conv);
 }
 
-// 5. Update Contact Info & Details Panel
-function updateDetailsPanel(chat) {
+function updateDetailsPanel(conv) {
   const avatar = document.getElementById("details-avatar");
   const name = document.getElementById("details-name");
   const status = document.getElementById("details-status");
   const fp = document.getElementById("details-fingerprint");
   const fpWrapper = document.getElementById("right-panel-fingerprint-wrapper");
   const groupSection = document.getElementById("right-panel-group-section");
-  const membersList = document.getElementById("right-panel-members-list");
-  const membersCount = document.getElementById("right-panel-members-count");
   const protocol = document.getElementById("right-panel-protocol");
-  
+
   if (avatar) {
-    avatar.className = `w-20 h-20 rounded-full ${chat.avatarBg} text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3`;
-    avatar.textContent = chat.avatar;
+    avatar.className = 'w-20 h-20 rounded-full text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3';
+    avatar.style.backgroundColor = conv.avatar_color || '#5c6bc0';
+    avatar.textContent = conv.initials || '??';
   }
-  if (name) name.textContent = chat.name;
-  if (status) status.textContent = getStatusTranslation(chat.status);
-  
-  if (chat.isEncrypted) {
+  if (name) name.textContent = conv.name || '';
+  if (status) status.textContent = getStatusTranslation(conv.type === 'group' ? `${conv.member_count || 0} members` : 'Contact');
+
+  if (conv.is_secure) {
     if (fpWrapper) fpWrapper.classList.remove("hidden");
-    if (fp) fp.textContent = chat.fingerprint || `ECC: 9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A`;
+    if (fp) fp.textContent = 'ECDH + HKDF + AES-GCM';
     if (protocol) protocol.textContent = "ECDH + HKDF + AES-GCM";
   } else {
     if (fpWrapper) fpWrapper.classList.add("hidden");
   }
 
-  // Populate dynamic group members in right details panel
-  const isGroup = chat.status && chat.status.includes("members");
-  if (isGroup) {
+  if (conv.type === 'group') {
     if (groupSection) groupSection.classList.remove("hidden");
-    
-    // Calculate actual active member count by filtering out removed members
-    const isAliceRemoved = chat.messages.some(m => m.text && m.text.includes("removed Alice Vance"));
-    const isBobRemoved = chat.messages.some(m => m.text && m.text.includes("removed Bob Builder"));
-    
-    let activeMemberCount = 3;
-    if (isAliceRemoved) activeMemberCount--;
-    if (isBobRemoved) activeMemberCount--;
-    
-    if (membersCount) {
-      membersCount.textContent = currentLanguage === 'zh' ? `群组成员 (${activeMemberCount})` : `Group Members (${activeMemberCount})`;
-    }
-    
-    if (membersList) {
-      membersList.innerHTML = "";
-      
-      const mockMembers = [
-        { name: "You (Owner)", role: "Creator", status: "online", avatar: "U", bg: "bg-brand-light" }
-      ];
-      if (!isAliceRemoved) {
-        mockMembers.push({ name: "Alice Vance", role: "Admin", status: "online", avatar: "AV", bg: "bg-purple-600" });
-      }
-      if (!isBobRemoved) {
-        mockMembers.push({ name: "Bob Builder", role: "Member", status: "offline", avatar: "BB", bg: "bg-blue-600" });
-      }
-      
-      mockMembers.forEach(m => {
-        const item = document.createElement("div");
-        item.className = "flex items-center justify-between py-2 border-b border-borderColor/30 last:border-none";
-        
-        let actionHtml = "";
-        const displayName = m.name === "You (Owner)" && currentLanguage === 'zh' ? "你 (所有者)" : m.name;
-        const translatedStatus = getStatusTranslation(m.status);
-        const translatedRole = getRoleTranslation(m.role);
-        
-        if (m.name !== "You (Owner)") {
-          const removeBtnText = currentLanguage === 'zh' ? '移除' : 'Remove';
-          actionHtml = `<button onclick="window.removeGroupMember('${m.name}')" class="text-[10px] text-red-500 hover:underline hover:text-red-600 transition-colors font-medium">${removeBtnText}</button>`;
-        } else {
-          actionHtml = `<span class="text-[9px] bg-bgSearch text-textSecondary px-2 py-0.5 rounded font-mono">${translatedRole}</span>`;
-        }
-
-        item.innerHTML = `
-          <div class="flex items-center space-x-2.5">
-            <div class="w-8 h-8 rounded-full ${m.bg} text-white flex items-center justify-center font-bold text-xs">
-              ${m.avatar}
-            </div>
-            <div class="leading-tight">
-              <div class="text-xs font-semibold text-textMain">${displayName}</div>
-              <div class="text-[9px] text-textSecondary">${translatedStatus}</div>
-            </div>
-          </div>
-          ${actionHtml}
-        `;
-        membersList.appendChild(item);
-      });
-    }
+    const mc = document.getElementById("right-panel-members-count");
+    if (mc) mc.textContent = currentLanguage === 'zh' ? `群组成员 (${conv.member_count || 0})` : `Group Members (${conv.member_count || 0})`;
   } else {
     if (groupSection) groupSection.classList.add("hidden");
   }
 }
 
-// Global Group Member Removal Action
-window.removeGroupMember = function(memberName) {
-  const confirmMsg = currentLanguage === 'zh'
-    ? `您确定要将 ${memberName} 从群组中移除吗？`
-    : `Are you sure you want to remove ${memberName} from the group?`;
-    
-  if (confirm(confirmMsg)) {
-    logToCryptoConsole(`[Group Admin Action] Removing member: "${memberName}"`);
-    const chat = mockChats[activeChatId];
-    if (chat) {
-      const time = formatClockTime();
-      chat.messages.push({
-        id: Date.now(),
-        text: `You removed ${memberName} from the group`,
-        time: time,
-        isSystem: true
-      });
-      localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-      renderMessages();
-      scrollToBottom();
-      
-      // Recalculate member count
-      let currentCount = 3;
-      if (chat.messages.some(m => m.text && m.text.includes("removed Alice Vance"))) currentCount--;
-      if (chat.messages.some(m => m.text && m.text.includes("removed Bob Builder"))) currentCount--;
-      
-      chat.status = `${currentCount} members`;
-      const statusText = getStatusTranslation(chat.status);
-      const e2eeText = currentLanguage === 'zh' ? '🔒 端到端加密' : '🔒 End-to-end encrypted';
-      document.getElementById("chat-header-status").innerHTML = `${statusText} &middot; <span class="text-brand-light dark:text-brand-dark font-semibold">${e2eeText}</span>`;
-      
-      // Refresh Details panel
-      updateDetailsPanel(chat);
-    }
-  }
-};
+function renderMessages() {
+  const container = document.getElementById("message-history-container");
+  if (!container) return;
+  container.innerHTML = "";
+  const conv = conversationsById[activeChatId];
+  messages.forEach((msg, index) => {
+    const gm = getMessageGroupMetaNew(messages, index, conv);
+    container.appendChild(createMessageBubbleElementNew(msg, gm, conv));
+  });
+}
 
 // 6. Mobile Layout Back Button Handler
 function backToSidebar() {
@@ -693,21 +620,6 @@ function handleMobileNavigation() {
     document.getElementById("sidebar-container").classList.remove("hidden");
     document.getElementById("sidebar-container").classList.add("w-full");
   }
-}
-
-// 7. Render Messages into Viewport
-function renderMessages() {
-  const container = document.getElementById("message-history-container");
-  if (!container) return;
-  container.innerHTML = "";
-
-  const chat = mockChats[activeChatId];
-  if (!chat) return;
-
-  chat.messages.forEach((msg, index) => {
-    const groupMeta = getMessageGroupMeta(chat.messages, index, chat);
-    container.appendChild(createMessageBubbleElement(msg, groupMeta));
-  });
 }
 
 // Helper to derive initials and background color for user avatars based on name
@@ -737,8 +649,6 @@ function getSenderAvatarInfo(senderName) {
 
 // Helper to look up member role in a group chat
 function getGroupMemberRole(senderName) {
-  if (senderName === "Alice Vance") return "Admin";
-  if (senderName === "Bob Builder") return "Owner";
   return "Member";
 }
 
@@ -751,413 +661,220 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function getMessageSenderKey(msg, chat) {
-  if (msg.isSystem) return "System";
-  if (msg.isSelf) return "Self";
-  const isGroup = chat && chat.status && chat.status.includes("members");
-  return isGroup ? (msg.sender || "Unknown") : (chat ? chat.name : "Peer");
-}
-
-function isConsecutiveMessage(msg) {
-  const chat = mockChats[activeChatId];
-  if (!chat || msg.isSystem) return false;
-
-  const index = chat.messages.findIndex(item => item.id === msg.id);
-  if (index <= 0) return false;
-
-  const prev = chat.messages[index - 1];
-  if (!prev || prev.isSystem) return false;
-
-  return getMessageSenderKey(prev, chat) === getMessageSenderKey(msg, chat);
-}
-
-function getMessageGroupMeta(messages, index, chat) {
-  const msg = messages[index];
-  if (!msg || msg.isSystem) {
-    return { isConsecutive: false, isFirstInGroup: true, isLastInGroup: true };
-  }
-
-  const prev = messages[index - 1];
-  const next = messages[index + 1];
-  const senderKey = getMessageSenderKey(msg, chat);
-  const hasSamePrev = prev && !prev.isSystem && getMessageSenderKey(prev, chat) === senderKey;
-  const hasSameNext = next && !next.isSystem && getMessageSenderKey(next, chat) === senderKey;
-
-  return {
-    isConsecutive: Boolean(hasSamePrev),
-    isFirstInGroup: !hasSamePrev,
-    isLastInGroup: !hasSameNext
-  };
-}
-
 // 8. Create Message Bubble DOM Node
-function createMessageBubbleElement(msg, groupMeta) {
-  if (typeof groupMeta === "boolean") {
-    groupMeta = {
-      isConsecutive: groupMeta,
-      isFirstInGroup: !groupMeta,
-      isLastInGroup: true
-    };
-  } else if (!groupMeta) {
-    const isConsecutive = isConsecutiveMessage(msg);
-    groupMeta = {
-      isConsecutive,
-      isFirstInGroup: !isConsecutive,
-      isLastInGroup: true
-    };
-  }
-
-  const { isConsecutive, isFirstInGroup, isLastInGroup } = groupMeta;
-
-  const div = document.createElement("div");
-  div.className = `message-row ${isConsecutive ? "message-row-grouped" : ""} ${isFirstInGroup ? "message-row-group-first" : ""} ${isLastInGroup ? "message-row-group-last" : ""}`;
-
-  if (msg.isSystem) {
-    div.className += " message-row-system";
-    const isCrypto = msg.text.includes("🔒") || msg.text.includes("secured") || msg.text.includes("encrypted");
-    const translatedText = getSystemMessageTranslation(msg.text);
-    if (isCrypto) {
-      div.innerHTML = `
-        <div class="system-capsule system-capsule-secure">
-          <i data-lucide="lock" class="w-3.5 h-3.5 text-emerald-500 inline-block"></i>
-          <span>${escapeHtml(translatedText)}</span>
-        </div>
-      `;
-    } else {
-      div.innerHTML = `
-        <div class="system-capsule">
-          <span>${escapeHtml(translatedText)}</span>
-        </div>
-      `;
-    }
-    
-    // Instantly initialize lucide icons inside the system badge if needed
-    setTimeout(() => {
-      if (div.querySelector("[data-lucide]")) {
-        lucide.createIcons();
-      }
-    }, 0);
-    
-    return div;
-  }
-
-  if (!msg.isSystem) {
-    div.onclick = (e) => {
-      if (isSelectingMessages) {
-        e.stopPropagation();
-        toggleMessageSelection(msg.id);
-      }
-    };
-  }
-
-  const checkboxHtml = `<div class="message-select-checkbox select-none ${isSelectingMessages ? '' : 'hidden'}" id="msg-select-check-${msg.id}"><i data-lucide="${selectedMessageIds.includes(msg.id) ? 'check-circle-2' : 'circle'}" class="w-5 h-5 text-textSecondary"></i></div>`;
-
-  const chat = mockChats[activeChatId];
-  const isGroup = chat && chat.status && chat.status.includes("members");
-  const senderName = getMessageSenderKey(msg, chat);
-  const messageText = escapeHtml(msg.text);
-  const messageTime = escapeHtml(msg.time || "");
-
-  if (msg.isSelf) {
-    div.className += " message-row-self";
-    if (isSelectingMessages) div.className += " message-row-selecting";
-    div.innerHTML = `
-      ${checkboxHtml}
-      <div class="message-bubble-custom bubble-self" data-message-id="${msg.id}">
-        <p class="message-text-content">${messageText}</p>
-        <div class="message-meta-line">
-          <span>${messageTime}</span>
-          <i data-lucide="check-check" class="w-3.5 h-3.5"></i>
-        </div>
-      </div>
-    `;
-  } else {
-    div.className += " message-row-peer";
-    if (isSelectingMessages) div.className += " message-row-selecting";
-    
-    let avatarHtml = "";
-    if (isLastInGroup) {
-      const avatarInfo = getSenderAvatarInfo(senderName);
-      avatarHtml = `
-        <div class="message-avatar ${avatarInfo.colorClass}" title="${escapeHtml(senderName)}">
-          ${avatarInfo.initials}
-        </div>
-      `;
-    } else {
-      avatarHtml = `<div class="message-avatar-spacer" aria-hidden="true"></div>`;
-    }
-    
-    let senderNameHtml = "";
-    if (isFirstInGroup) {
-      const senderDisplayId = isGroup ? senderName : getSenderAvatarInfo(senderName).initials;
-      const role = getGroupMemberRole(senderName);
-      const translatedRole = getRoleTranslation(role);
-      const roleClass = role === "Owner" ? "role-owner" : role === "Admin" ? "role-admin" : "role-member";
-      senderNameHtml = `
-        <div class="message-sender-line">
-          <span class="message-sender-name">${escapeHtml(senderDisplayId)}</span>
-          ${isGroup ? `<span class="message-role-tag ${roleClass}">${translatedRole}</span>` : ""}
-        </div>
-      `;
-    }
-
-    div.innerHTML = `
-      ${checkboxHtml}
-      ${avatarHtml}
-      <div class="message-bubble-custom bubble-peer" data-message-id="${msg.id}">
-        ${senderNameHtml}
-        <p class="message-text-content">${messageText}</p>
-        <div class="message-meta-line">
-          <span>${messageTime}</span>
-        </div>
-      </div>
-    `;
-  }
-
-  // Instantly initialize newly appended Lucide icons inside the bubble
-  setTimeout(() => {
-    if (div.querySelector("[data-lucide]")) {
-      lucide.createIcons();
-    }
-  }, 0);
-
-  return div;
-}
 
 // 9. Encrypt & Send Message
+
+// Helper: Handle Unread Message Badge increment
+
+// 11. Add Contact Modal Logic
+
+// 12. Create Group Modal Logic
+
+// Populate contact list inside the Create Group modal
+
+// ============================================================================
+// Message sending
+// ============================================================================
+
 async function sendMessage() {
   const textarea = document.getElementById("chat-input-textarea");
   if (!textarea) return;
-
   const text = textarea.value.trim();
   if (!text) return;
 
-  const chat = mockChats[activeChatId];
-  if (!chat) return;
+  const conv = conversationsById[activeChatId];
+  if (!conv) return;
 
   const time = formatClockTime();
-  let textToDisplay = text;
+  const clientMsgId = "temp_" + Date.now();
 
-  // Perform cryptographic encryption pipeline if chat is E2EE
-  if (chat.isEncrypted) {
-    if (!activeSessionKey) {
-      logToCryptoConsole("[Encryption Error] Session key not derived. Message cannot be encrypted.");
-      alert("Cryptographic session key not derived yet. Please wait.");
-      return;
-    }
-
-    try {
-      logToCryptoConsole(`[Encryption Pipeline] Initializing AES-GCM encryption...`);
-      logToCryptoConsole(`[Encryption Pipeline] Plaintext input: "${text}"`);
-
-      // Generate a random 12-byte initialization vector (IV)
-      const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      const ivHex = arrayBufferToHex(iv.buffer);
-
-      const plaintextEncoded = new TextEncoder().encode(text);
-
-      // Perform encryption
-      const encryptedBuffer = await window.crypto.subtle.encrypt(
-        {
-          name: "AES-GCM",
-          iv: iv,
-          tagLength: 128
-        },
-        activeSessionKey,
-        plaintextEncoded
-      );
-
-      const fullBytes = new Uint8Array(encryptedBuffer);
-      const ciphertextBytes = fullBytes.slice(0, fullBytes.length - 16);
-      const authTagBytes = fullBytes.slice(fullBytes.length - 16);
-
-      const ciphertextHex = arrayBufferToHex(ciphertextBytes.buffer);
-      const authTagHex = arrayBufferToHex(authTagBytes.buffer);
-
-      logToCryptoConsole(`[Encryption Pipeline] IV (Nonce) generated: ${ivHex}`);
-      logToCryptoConsole(`[Encryption Pipeline] Derived Session Key Hash: ${activeSessionKeyHexHash}`);
-      logToCryptoConsole(`[Encryption Pipeline] Ciphertext: ${ciphertextHex}`);
-      logToCryptoConsole(`[Encryption Pipeline] Authentication Tag (MAC): ${authTagHex}`);
-      logToCryptoConsole(`[Encryption Pipeline] Encryption successful.`);
-    } catch (err) {
-      console.error("AES-GCM encryption failed:", err);
-      logToCryptoConsole(`[Encryption Error] Encryption failed: ${err.message}`);
-      return;
-    }
-  }
-
-  // Store and render local decrypted bubble (simulates user sending & decrypting)
-  const newMsg = {
-    id: Date.now(),
-    text: textToDisplay,
+  // Optimistic render
+  const tempMsg = {
+    id: clientMsgId,
+    text: text,
     time: time,
-    isSelf: true
+    isSelf: true,
+    status: "sending",
   };
+  messages.push(tempMsg);
+  renderMessages();
+  scrollToBottom();
+  updateSidebarPreview(conv, text, time);
 
-  chat.messages.push(newMsg);
-  localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-
-  // Reset Input
   textarea.value = "";
   textarea.style.height = "auto";
 
-  // Render and update sidebar
-  const container = document.getElementById("message-history-container");
-  if (container) {
-    container.appendChild(createMessageBubbleElement(newMsg));
-    scrollToBottom();
-  }
-
-  updateSidebarPreview(chat, textToDisplay, time);
-
-  // Simulate Remote Automated Reply
-  simulateReply(chat, text);
-}
-
-// 10. Simulate Remote Cryptographic Automated Reply
-function simulateReply(chat, userText) {
-  const replyDelay = 1200;
-
-  if (!chat.isEncrypted) {
-    // Standard Plaintext Automated reply simulation
-    setTimeout(() => {
-      const time = formatClockTime();
-      const replyMsg = {
-        id: Date.now(),
-        text: `Automated reply from ${chat.name} regarding: "${userText}"`,
-        time: time,
-        isSelf: false
-      };
-      
-      chat.messages.push(replyMsg);
-      localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-
-      if (activeChatId === chat.id) {
-        const container = document.getElementById("message-history-container");
-        if (container) {
-          container.appendChild(createMessageBubbleElement(replyMsg));
-          scrollToBottom();
+  try {
+    if (conv.type === "group") {
+      if (window.iChatGroupE2EE && window.iChatGroupE2EE.encryptGroupMessage) {
+        const result = await window.iChatGroupE2EE.encryptGroupMessage({
+          plaintext: text,
+          groupId: conv.id,
+          membershipVersion: conv.membership_version || 1,
+          memberIds: []
+        });
+        if (wsClient && wsClient.sendPayload) {
+          wsClient.sendPayload({
+            event: "message.group.send",
+            request_id: clientMsgId,
+            data: {
+              group_id: conv.id,
+              membership_version: result.membership_version,
+              sender_key_version: result.sender_key_version,
+              message_type: "text",
+              algorithm: result.algorithm,
+              client_message_id: clientMsgId,
+              recipients: result.recipients
+            }
+          });
         }
-      } else {
-        triggerUnreadCount(chat.id);
       }
-
-      updateSidebarPreview(chat, replyMsg.text, time);
-    }, replyDelay);
-    return;
-  }
-
-  // Encrypted Reply Simulation
-  setTimeout(async () => {
-    try {
-      let plaintextReply = "";
-      if (chat.id === 4) {
-        // Test Bot reply: Compute real SHA-256 signature of user's message
-        const encodedText = new TextEncoder().encode(userText);
-        const digestBuffer = await window.crypto.subtle.digest("SHA-256", encodedText);
-        const digestHex = arrayBufferToHex(digestBuffer);
-        plaintextReply = `🔒 E2E Integrity Secured.\n\nPayload Integrity: ${digestHex.substring(0, 32)}...\nVerification Timestamp: ${new Date().toISOString()}`;
-      } else {
-        plaintextReply = `Security handshake verified. Processing payload: "${userText.substring(0, 10)}${userText.length > 10 ? '...' : ''}"`;
-      }
-
-      logToCryptoConsole(`[Simulation: ${chat.name} Sends Encrypted Response]`);
-      logToCryptoConsole(`[Simulation] Plaintext payload to encrypt: "${plaintextReply}"`);
-
-      // Encrypt reply using derived session key
-      const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      const ivHex = arrayBufferToHex(iv.buffer);
-      const plaintextEncoded = new TextEncoder().encode(plaintextReply);
-
-      const encryptedBuffer = await window.crypto.subtle.encrypt(
-        {
-          name: "AES-GCM",
-          iv: iv,
-          tagLength: 128
-        },
-        activeSessionKey,
-        plaintextEncoded
-      );
-
-      const fullBytes = new Uint8Array(encryptedBuffer);
-      const ciphertextBytes = fullBytes.slice(0, fullBytes.length - 16);
-      const authTagBytes = fullBytes.slice(fullBytes.length - 16);
-
-      const ciphertextHex = arrayBufferToHex(ciphertextBytes.buffer);
-      const authTagHex = arrayBufferToHex(authTagBytes.buffer);
-
-      logToCryptoConsole(`[Simulation] Encrypted Response Payload successfully generated.`);
-      logToCryptoConsole(`[Simulation] IV: ${ivHex}`);
-      logToCryptoConsole(`[Simulation] Ciphertext: ${ciphertextHex}`);
-      logToCryptoConsole(`[Simulation] Auth Tag (MAC): ${authTagHex}`);
-
-      // Now client receives the ciphertext payload and runs actual decryption
-      logToCryptoConsole(`[Decryption Pipeline] Received encrypted response payload from ${chat.name}...`);
-      logToCryptoConsole(`[Decryption Pipeline] Ciphertext Input (Hex): ${ciphertextHex}`);
-      logToCryptoConsole(`[Decryption Pipeline] IV (Nonce): ${ivHex}`);
-      logToCryptoConsole(`[Decryption Pipeline] Authentication Tag: ${authTagHex}`);
-
-      // Reassemble ciphertext & tag for SubtleCrypto input
-      const combinedPayload = new Uint8Array(ciphertextBytes.length + authTagBytes.length);
-      combinedPayload.set(ciphertextBytes, 0);
-      combinedPayload.set(authTagBytes, ciphertextBytes.length);
-
-      // Decrypt
-      const decryptedBuffer = await window.crypto.subtle.decrypt(
-        {
-          name: "AES-GCM",
-          iv: iv,
-          tagLength: 128
-        },
-        activeSessionKey,
-        combinedPayload.buffer
-      );
-
-      const decryptedText = new TextDecoder().decode(decryptedBuffer);
-
-      logToCryptoConsole(`[Decryption Pipeline] Authentication Tag verified. Decrypted successfully.`);
-      logToCryptoConsole(`[Decryption Pipeline] Plaintext Output: "${decryptedText}"`);
-
-      // Store in memory & render
-      const time = formatClockTime();
-      const replyMsg = {
-        id: Date.now(),
-        text: decryptedText,
-        time: time,
-        isSelf: false,
-        sender: chat.status && chat.status.includes("members") ? "Alice Vance" : undefined
-      };
-
-      chat.messages.push(replyMsg);
-      localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-
-      if (activeChatId === chat.id) {
-        const container = document.getElementById("message-history-container");
-        if (container) {
-          container.appendChild(createMessageBubbleElement(replyMsg));
-          scrollToBottom();
+    } else {
+      if (window.iChatPrivateE2EE && window.iChatPrivateE2EE.encryptPrivateMessage && conv.peer_id) {
+        const result = await window.iChatPrivateE2EE.encryptPrivateMessage({
+          plaintext: text,
+          conversationId: conv.id,
+          receiverId: conv.peer_id
+        });
+        if (wsClient && wsClient.sendPayload) {
+          wsClient.sendPayload({
+            event: "message.single.send",
+            request_id: clientMsgId,
+            data: {
+              conversation_id: conv.id,
+              sender_id: myUserId,
+              receiver_id: conv.peer_id,
+              ciphertext: result.ciphertext,
+              nonce: result.nonce,
+              auth_tag: result.auth_tag,
+              algorithm: result.algorithm,
+              sender_key_version: result.sender_key_version,
+              receiver_key_version: result.receiver_key_version,
+              message_type: "text",
+            }
+          });
         }
-      } else {
-        triggerUnreadCount(chat.id);
       }
-
-      updateSidebarPreview(chat, decryptedText, time);
-    } catch (err) {
-      console.error("Simulation decryption failed:", err);
-      logToCryptoConsole(`[Decryption Pipeline Error] Decryption failed / Auth Tag mismatch: ${err.message}`);
     }
-  }, replyDelay);
+    const idx = messages.findIndex(m => m.id === clientMsgId);
+    if (idx >= 0) messages[idx].status = "sent";
+    renderMessages();
+  } catch (err) {
+    console.error("Send failed:", err);
+    logToCryptoConsole("[Send Error] " + err.message);
+    const idx = messages.findIndex(m => m.id === clientMsgId);
+    if (idx >= 0) messages[idx].status = "failed";
+    renderMessages();
+  }
 }
 
-// Helper: Handle Unread Message Badge increment
+// ============================================================================
+// Add contact
+// ============================================================================
+
+async function handleAddContact(username) {
+  try {
+    const resp = await apiFetch("/contacts/search/?q=" + encodeURIComponent(username));
+    const results = resp.results || [];
+    const target = results.find(r => r.username === username);
+    if (!target) {
+      window.showToast(currentLanguage === "zh" ? "未找到该用户" : "User not found");
+      return;
+    }
+    const data = await apiFetch("/api/conversations/create/", {
+      method: "POST",
+      body: JSON.stringify({ peer_id: target.user_id || target.id })
+    });
+    logToCryptoConsole("[Contact] Conversation ready: " + data.conversation_id);
+    await fetchConversations();
+    if (data.conversation_id) {
+      selectChat(data.conversation_id.toString());
+    }
+    window.showToast(currentLanguage === "zh" ? "会话已创建" : "Conversation ready");
+  } catch (err) {
+    console.error("Add contact failed:", err);
+    logToCryptoConsole("[Contact Error] " + err.message);
+  }
+}
+
+// ============================================================================
+// Create group
+// ============================================================================
+
+async function handleCreateGroup(groupName) {
+  try {
+    const checkedBoxes = document.querySelectorAll(".group-member-checkbox:checked");
+    const memberIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+    const data = await apiFetch("/api/groups/", {
+      method: "POST",
+      body: JSON.stringify({ name: groupName })
+    });
+    logToCryptoConsole("[Group] Created: " + data.id);
+    for (const uid of memberIds) {
+      try {
+        await apiFetch("/api/groups/" + data.id + "/invite/", {
+          method: "POST",
+          body: JSON.stringify({ user_id: uid })
+        });
+      } catch (e) { console.warn("Failed to invite", uid, e); }
+    }
+    await fetchConversations();
+    if (data.id) selectChat(data.id.toString());
+    window.showToast(currentLanguage === "zh" ? "群组已创建" : "Group created");
+  } catch (err) {
+    console.error("Create group failed:", err);
+    logToCryptoConsole("[Group Error] " + err.message);
+  }
+}
+
+// ============================================================================
+// Populate group member selection list
+// ============================================================================
+
+function populateGroupMembersList() {
+  const listEl = document.getElementById("group-members-list");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  conversations.forEach(conv => {
+    if (conv.type === "single" && conv.peer_id) {
+      const item = document.createElement("div");
+      item.className = "flex items-center space-x-3 py-1.5 px-2 hover:bg-bgSearch/40 rounded cursor-pointer";
+      item.innerHTML = '<input type="checkbox" class="group-member-checkbox rounded border-borderColor text-brand-light focus:ring-brand-light w-4 h-4" value="' + conv.peer_id + '" id="member-chk-' + conv.peer_id + '">'
+        + '<div class="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs" style="background-color: ' + (conv.avatar_color || "#5c6bc0") + '">'
+        + (conv.initials || "??") + '</div>'
+        + '<label class="text-sm font-medium text-textMain cursor-pointer flex-1" for="member-chk-' + conv.peer_id + '">'
+        + (conv.name || conv.peer_username || "Unknown") + '</label>';
+      listEl.appendChild(item);
+    }
+  });
+}
+
+// ============================================================================
+// Fingerprint modal
+// ============================================================================
+
+function showFingerprintModal() {
+  if (!activeChatId) return;
+  const conv = conversationsById[activeChatId];
+  if (!conv || !conv.is_secure) return;
+  document.getElementById("fp-modal-name").textContent = conv.name || "Unknown";
+  document.getElementById("fp-modal-key").textContent = "ECDH + HKDF + AES-GCM";
+  const modal = document.getElementById("fingerprint-modal");
+  if (modal) { modal.classList.remove("hidden"); modal.classList.add("flex"); }
+}
+
+// ============================================================================
+// Unread badge helper
+// ============================================================================
+
 function triggerUnreadCount(chatId) {
-  const badge = document.getElementById(`unread-badge-${chatId}`);
+  const badge = document.getElementById("unread-badge-" + chatId);
   if (badge) {
-    const chat = mockChats[chatId];
-    if (chat) {
-      chat.unread = Number(chat.unread || 0) + 1;
-      localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-      badge.textContent = chat.unread;
+    const conv = conversationsById[chatId];
+    if (conv) {
+      conv.unread = Number(conv.unread || 0) + 1;
+      badge.textContent = conv.unread;
     } else {
       badge.textContent = parseInt(badge.textContent || "0", 10) + 1;
     }
@@ -1165,118 +882,114 @@ function triggerUnreadCount(chatId) {
   }
 }
 
-// 11. Add Contact Modal Logic
-async function handleAddContact(username) {
-  const newId = Date.now().toString(); // Consistent string keys
+// ============================================================================
+// Infinite scroll
+// ============================================================================
 
-  logToCryptoConsole(`[ECDH Key Exchange] Initiating E2EE identity handshake with dynamic contact: ${username}...`);
-
-  try {
-    // Generate new keys for contact to simulate exchange
-    const pair = await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-256' },
-      true,
-      ['deriveKey', 'deriveBits']
-    );
-    const privJwk = await window.crypto.subtle.exportKey('jwk', pair.privateKey);
-    const pubJwk = await window.crypto.subtle.exportKey('jwk', pair.publicKey);
-
-    contactKeys[newId] = {
-      privateKey: privJwk,
-      publicKey: pubJwk
-    };
-    localStorage.setItem('ichat_contact_keys', JSON.stringify(contactKeys));
-
-    logToCryptoConsole(`[ECDH Key Exchange] Exchanged public identity keys with ${username}.`);
-    logToCryptoConsole(`[ECDH Key Exchange] E2E crypt link ready. Fingerprints computed.`);
-
-    const fpStr = generateFingerprint();
-
-    const newChat = {
-      id: parseInt(newId),
-      name: username,
-      avatar: username.substring(0, 2).toUpperCase(),
-      avatarBg: "bg-orange-600",
-      status: "online",
-      isEncrypted: true,
-      fingerprint: fpStr,
-      messages: [
-        {
-          id: Date.now(),
-          text: `System: End-to-end encrypted channel initialized with ${username}. Safety keys verified.`,
-          time: formatClockTime(),
-          isSystem: true
-        }
-      ]
-    };
-
-    mockChats[newId] = newChat;
-    localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-
-    appendChatItemToSidebar(newChat);
-    selectChat(newId);
-  } catch (err) {
-    console.error("Add contact failed:", err);
-    logToCryptoConsole(`[ECDH Error] Dynamic key exchange failed: ${err.message}`);
-  }
-}
-
-// 12. Create Group Modal Logic
-function handleCreateGroup(groupName) {
-  const newId = Date.now().toString();
-
-  const checkedBoxes = document.querySelectorAll(".group-member-checkbox:checked");
-  const memberIds = Array.from(checkedBoxes).map(cb => cb.value);
-  const memberNames = memberIds.map(id => mockChats[id].name);
-
-  const membersTextList = ["You", ...memberNames].join(", ");
-
-  const newChat = {
-    id: parseInt(newId),
-    name: groupName,
-    avatar: groupName.substring(0, 2).toUpperCase(),
-    avatarBg: "bg-emerald-600",
-    status: `${memberIds.length + 1} members`,
-    isEncrypted: false,
-    messages: [
-      {
-        id: Date.now(),
-        text: `System: Group chat "${groupName}" created. Members: ${membersTextList}`,
-        time: formatClockTime(),
-        isSystem: true
-      }
-    ]
-  };
-
-  mockChats[newId] = newChat;
-  localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-
-  appendChatItemToSidebar(newChat);
-  selectChat(newId);
-}
-
-// Populate contact list inside the Create Group modal
-function populateGroupMembersList() {
-  const listEl = document.getElementById("group-members-list");
-  if (!listEl) return;
-  listEl.innerHTML = "";
-
-  Object.values(mockChats).forEach(chat => {
-    if (chat.isEncrypted && chat.id !== 4) { // Only real human contacts
-      const item = document.createElement("div");
-      item.className = "flex items-center space-x-3 py-1.5 px-2 hover:bg-bgSearch/40 rounded cursor-pointer";
-      item.innerHTML = `
-        <input type="checkbox" class="group-member-checkbox rounded border-borderColor text-brand-light focus:ring-brand-light w-4 h-4" value="${chat.id}" id="member-chk-${chat.id}">
-        <div class="w-8 h-8 rounded-full ${chat.avatarBg} text-white flex items-center justify-center font-bold text-xs">
-          ${chat.avatar}
-        </div>
-        <label class="text-sm font-medium text-textMain cursor-pointer flex-1" for="member-chk-${chat.id}">
-          ${chat.name}
-        </label>
-      `;
-      listEl.appendChild(item);
+function setupInfiniteScroll() {
+  const container = document.getElementById("message-history-container");
+  if (!container) return;
+  container.addEventListener("scroll", () => {
+    if (container.scrollTop < 100 && hasMoreMessages && !isLoadingMessages && activeChatId) {
+      isLoadingMessages = true;
+      const prevScrollHeight = container.scrollHeight;
+      fetchMessages(activeChatId, messagePage + 1).then(() => {
+        requestAnimationFrame(() => {
+          container.scrollTop = container.scrollHeight - prevScrollHeight;
+        });
+        isLoadingMessages = false;
+      });
     }
   });
+}
+
+// ============================================================================
+// Message group meta & bubble rendering
+// ============================================================================
+
+function getMessageGroupMetaNew(msgs, index, conv) {
+  const msg = msgs[index];
+  if (!msg || msg.isSystem) return { isConsecutive: false, isFirstInGroup: true, isLastInGroup: true };
+  const prev = msgs[index - 1];
+  const next = msgs[index + 1];
+  const key = msg.isSelf ? "self" : (msg.sender || "peer");
+  const prevKey = prev && !prev.isSystem ? (prev.isSelf ? "self" : (prev.sender || "peer")) : null;
+  const nextKey = next && !next.isSystem ? (next.isSelf ? "self" : (next.sender || "peer")) : null;
+  return {
+    isConsecutive: Boolean(prevKey && prevKey === key),
+    isFirstInGroup: !prevKey || prevKey !== key,
+    isLastInGroup: !nextKey || nextKey !== key,
+  };
+}
+
+function createMessageBubbleElementNew(msg, groupMeta, conv) {
+  if (typeof groupMeta === "boolean") {
+    groupMeta = { isConsecutive: groupMeta, isFirstInGroup: !groupMeta, isLastInGroup: true };
+  } else if (!groupMeta) {
+    groupMeta = { isConsecutive: false, isFirstInGroup: true, isLastInGroup: true };
+  }
+  var _a = groupMeta, isConsecutive = _a.isConsecutive, isFirstInGroup = _a.isFirstInGroup, isLastInGroup = _a.isLastInGroup;
+  var div = document.createElement("div");
+  div.className = "message-row " + (isConsecutive ? "message-row-grouped " : "") + (isFirstInGroup ? "message-row-group-first " : "") + (isLastInGroup ? "message-row-group-last" : "");
+
+  if (msg.isSystem || msg.decryptError) {
+    div.className += " message-row-system";
+    var text = msg.decryptError ? "[Decryption failed]" : getSystemMessageTranslation(msg.text);
+    div.innerHTML = '<div class="system-capsule"><span>' + escapeHtml(text) + '</span></div>';
+    setTimeout(function() { if (div.querySelector("[data-lucide]")) lucide.createIcons(); }, 0);
+    return div;
+  }
+
+  if (!msg.isSystem) {
+    div.onclick = function(e) {
+      if (isSelectingMessages) { e.stopPropagation(); toggleMessageSelection(msg.id); }
+    };
+  }
+
+  var checkboxHtml = '<div class="message-select-checkbox select-none ' + (isSelectingMessages ? "" : "hidden") + '" id="msg-select-check-' + msg.id + '"><i data-lucide="' + (selectedMessageIds.includes(msg.id) ? "check-circle-2" : "circle") + '" class="w-5 h-5 text-textSecondary"></i></div>';
+
+  var isGroup = conv && conv.type === "group";
+  var senderName = msg.isSelf ? "You" : (msg.sender_name || ("User #" + msg.sender));
+  var messageText = escapeHtml(msg.text);
+  var messageTime = escapeHtml(msg.time || "");
+
+  if (msg.isSelf) {
+    div.className += " message-row-self";
+    if (isSelectingMessages) div.className += " message-row-selecting";
+    var statusIcon = "check";
+    if (msg.status === "delivered" || msg.status === "sent") statusIcon = "check-check";
+    if (msg.status === "read") statusIcon = "check-check";
+    var statusClass = msg.status === "read" ? "text-brand-light dark:text-brand-dark" : "";
+    div.innerHTML = checkboxHtml
+      + '<div class="message-bubble-custom bubble-self" data-message-id="' + msg.id + '">'
+      + '<p class="message-text-content">' + messageText + '</p>'
+      + '<div class="message-meta-line">'
+      + '<span>' + messageTime + '</span>'
+      + '<i data-lucide="' + statusIcon + '" class="w-3.5 h-3.5 ' + statusClass + '"></i>'
+      + '</div></div>';
+  } else {
+    div.className += " message-row-peer";
+    if (isSelectingMessages) div.className += " message-row-selecting";
+    var avatarHtml = "";
+    if (isLastInGroup) {
+      var avatarInfo = getSenderAvatarInfo(senderName);
+      avatarHtml = '<div class="message-avatar ' + avatarInfo.colorClass + '" title="' + escapeHtml(senderName) + '">' + avatarInfo.initials + '</div>';
+    } else {
+      avatarHtml = '<div class="message-avatar-spacer" aria-hidden="true"></div>';
+    }
+    var senderNameHtml = "";
+    if (isFirstInGroup) {
+      senderNameHtml = '<div class="message-sender-line"><span class="message-sender-name">' + escapeHtml(senderName) + '</span></div>';
+    }
+    div.innerHTML = checkboxHtml + avatarHtml
+      + '<div class="message-bubble-custom bubble-peer" data-message-id="' + msg.id + '">'
+      + senderNameHtml
+      + '<p class="message-text-content">' + messageText + '</p>'
+      + '<div class="message-meta-line"><span>' + messageTime + '</span></div>'
+      + '</div>';
+  }
+  setTimeout(function() { if (div.querySelector("[data-lucide]")) lucide.createIcons(); }, 0);
+  return div;
 }
 
 // 13. UI Setup & Listeners
@@ -1548,7 +1261,7 @@ function scrollToBottom() {
 
 function filterChatList(query) {
   const cleaned = query.toLowerCase();
-  Object.values(mockChats).forEach(chat => {
+  conversations.forEach(chat => {
     const el = document.getElementById(`chat-item-wrapper-${chat.id}`);
     if (!el) return;
     if (chat.name.toLowerCase().includes(cleaned)) {
@@ -1665,21 +1378,6 @@ function setupSidebarResizer() {
   });
 }
 
-function showFingerprintModal() {
-  if (!activeChatId) return;
-  const chat = mockChats[activeChatId];
-  if (!chat || !chat.isEncrypted) return;
-
-  document.getElementById("fp-modal-name").textContent = chat.name;
-  document.getElementById("fp-modal-key").textContent = chat.fingerprint || "N/A";
-  
-  const modal = document.getElementById("fingerprint-modal");
-  if (modal) {
-    modal.classList.remove("hidden");
-    modal.classList.add("flex");
-  }
-}
-
 function closeFingerprintModal() {
   const modal = document.getElementById("fingerprint-modal");
   if (modal) {
@@ -1736,13 +1434,33 @@ function insertEmoji(emoji) {
 }
 
 // Initialize on DOM load
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener('ichat:key-missing', () => {
     window.showToast('Local private key was missing. A new key was created; import your backup to decrypt older messages.');
   });
+
+  var keyScript = document.getElementById('ichat-key-manager-script');
+  myUserId = keyScript ? parseInt(keyScript.dataset.currentUserId) : null;
+
   setupEventListeners();
   setupSidebarResizer();
-  initializeE2EEngine();
+
+  try {
+    if (window.iChatKeyManager) {
+      await window.iChatKeyManager.initialize();
+    }
+  } catch (err) {
+    console.error('Key init failed:', err);
+  }
+
+  await fetchConversations();
+
+  if (window.iChatWebSocketClient) {
+    connectWebSocket();
+  }
+
+  setupInfiniteScroll();
+
   applyLanguage();
 });
 
@@ -1923,8 +1641,8 @@ function applyLanguage() {
   });
 
   // Re-render sidebar previews and selected chat UI
-  if (activeChatId && mockChats[activeChatId]) {
-    const chat = mockChats[activeChatId];
+  if (activeChatId && conversationsById[activeChatId]) {
+    const conv = conversationsById[activeChatId];
     selectChat(activeChatId.toString());
     updateDetailsPanel(chat);
   }
@@ -2108,12 +1826,11 @@ window.triggerMuteAction = async function(e) {
   const btn = document.getElementById("chat-header-more-btn");
   if (btn) btn.classList.remove("active");
   
-  const chat = mockChats[activeChatId];
+  const chat = conversationsById[activeChatId];
   if (!chat) return;
   
   chat.isMuted = !chat.isMuted;
-  localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-  
+    
   // Sync mute state via simulated API or actual POST
   try {
     const response = await fetch(`/api/conversations/${activeChatId}/mute/`, {
@@ -2339,9 +2056,8 @@ window.confirmDeleteChat = async function() {
   }
   
   // Local deletion
-  delete mockChats[chatIdToDelete];
-  localStorage.setItem('ichat_chats', JSON.stringify(mockChats));
-  
+  conversations = conversations.filter(c => c.id !== chatIdToDelete); conversationsById = {}; conversations.forEach(c => { conversationsById[c.id] = c; });
+    
   window.closeDeleteConfirmModal();
   
   // Reset active chat ID
@@ -2435,17 +2151,4 @@ window.checkForUpdates = function(e) {
 };
 
 // Helper function to extract cookies (e.g. csrftoken for Django)
-function getCookie(name) {
-  let cookieValue = null;
-  if (document.cookie && document.cookie !== '') {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.substring(0, name.length + 1) === (name + '=')) {
-        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-        break;
-      }
-    }
-  }
-  return cookieValue;
-}
+

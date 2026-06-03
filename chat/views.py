@@ -1,10 +1,14 @@
+import hashlib
 import json
 
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import F
+from django.db import transaction
+from django.db.models import F, Q
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.utils import timezone
 
 from .models import (
     Conversation,
@@ -14,107 +18,218 @@ from .models import (
     GroupMessageRecipient,
 )
 
+User = get_user_model()
 
-def _mock_chats():
-    return [
-        {
-            'id': 1,
-            'name': 'Alice Vance',
-            'initials': 'AV',
-            'avatar_color': '#5c6bc0',
-            'last_message': 'Hey, did you generate your E2EE key pairs?',
-            'time': '18:12',
-            'unread': 2,
-            'is_online': True,
-            'is_secure': True,
-        },
-        {
-            'id': 2,
-            'name': 'Dev Team Group',
-            'initials': 'DT',
-            'avatar_color': '#26a69a',
-            'last_message': 'Bob: I pushed the updated Electron config today.',
-            'time': '16:45',
-            'unread': 0,
-            'is_online': False,
-            'is_secure': False,
-        },
-        {
-            'id': 3,
-            'name': 'Telegram Bot',
-            'initials': 'TB',
-            'avatar_color': '#42a5f5',
-            'last_message': 'Welcome to iChat Pro! End-to-end encryption is enabled for private chats.',
-            'time': 'Yesterday',
-            'unread': 0,
-            'is_online': True,
-            'is_secure': False,
-        },
-        {
-            'id': 4,
-            'name': 'Charlie Brown',
-            'initials': 'CB',
-            'avatar_color': '#ffa726',
-            'last_message': 'My safety fingerprint matches yours.',
-            'time': 'May 26',
-            'unread': 1,
-            'is_online': False,
-            'is_secure': True,
-        },
-    ]
+AVATAR_COLORS = [
+    '#5c6bc0', '#26a69a', '#42a5f5', '#ffa726', '#ef5350',
+    '#ab47bc', '#66bb6a', '#ec407a', '#8d6e63', '#78909c',
+]
 
+
+def _avatar_color(name: str) -> str:
+    """Return a deterministic colour for a display name."""
+    digest = hashlib.md5(name.encode()).hexdigest()
+    return AVATAR_COLORS[int(digest, 16) % len(AVATAR_COLORS)]
+
+
+def _initials(name: str) -> str:
+    """Derive 1-2 uppercase initials from a display name."""
+    parts = name.strip().split()
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[-1][0]).upper()
+    return (name.strip()[:2] or '?').upper()
+
+
+def _display_name(user_or_profile, username: str) -> str:
+    """Return the best human-readable name for a user."""
+    if hasattr(user_or_profile, 'profile'):
+        nick = user_or_profile.profile.nickname
+        if nick:
+            return nick
+    return username
+
+
+def _json_body(request):
+    """Parse and return the JSON body of a request, or empty dict on error."""
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Page views
+# ---------------------------------------------------------------------------
 
 @login_required(login_url='login')
 def index_view(request):
-    chats = _mock_chats()
-    active_chat_messages = [
-        {
-            'sender': 'Alice Vance',
-            'is_self': False,
-            'text': 'Hello! Welcome to our secure chat room. Under the E2EE protocol, all messages are encrypted on my device and decrypted on yours.',
-            'time': '18:05',
-        },
-        {
-            'sender': 'Alice Vance',
-            'is_self': False,
-            'text': 'Here is my public key fingerprint:\n9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A',
-            'time': '18:06',
-        },
-        {
-            'sender': 'You',
-            'is_self': True,
-            'text': "Hi Alice! That looks correct. I've verified your key and my browser has automatically generated my session AES-GCM key.",
-            'time': '18:10',
-            'status': 'read',
-        },
-        {
-            'sender': 'Alice Vance',
-            'is_self': False,
-            'text': 'Hey, did you generate your E2EE key pairs?',
-            'time': '18:12',
-        },
-    ]
-
-    context = {
-        'chats': chats,
-        'active_chat': chats[0],
-        'messages': active_chat_messages,
-        'open_settings': False,
-    }
-
-    return render(request, 'pages/chat.html', context)
+    return render(request, 'pages/chat.html', {'open_settings': False})
 
 
 @login_required(login_url='login')
 def settings_view(request):
-    chats = _mock_chats()[:2]
-    context = {
-        'chats': chats,
-        'active_chat': chats[0],
-        'messages': [],
-        'open_settings': True,
-    }
-    return render(request, 'pages/chat.html', context)
+    return render(request, 'pages/chat.html', {'open_settings': True})
+
+
+# ---------------------------------------------------------------------------
+# Conversation list & creation API
+# ---------------------------------------------------------------------------
+
+@login_required(login_url='login')
+def conversations_list_view(request):
+    """Return the authenticated user's active conversations for the sidebar.
+
+    GET /api/conversations/
+    """
+    memberships = (
+        ConversationMember.objects
+        .filter(
+            user=request.user,
+            status=ConversationMember.Status.ACTIVE,
+            conversation__status=Conversation.Status.ACTIVE,
+        )
+        .select_related('conversation')
+        .order_by('-conversation__last_message_at')
+    )
+
+    conversations = []
+    for m in memberships:
+        conv = m.conversation
+        item = {
+            'id': conv.id,
+            'type': conv.type,
+            'unread': m.unread_count,
+            'last_message_at': (
+                conv.last_message_at.isoformat() if conv.last_message_at else None
+            ),
+        }
+
+        if conv.type == Conversation.Type.SINGLE:
+            # Find the peer (the other member)
+            peer_member = (
+                ConversationMember.objects
+                .filter(
+                    conversation=conv,
+                    status=ConversationMember.Status.ACTIVE,
+                )
+                .exclude(user=request.user)
+                .select_related('user__profile')
+                .first()
+            )
+            if peer_member:
+                peer = peer_member.user
+                item['peer_id'] = peer.id
+                item['peer_username'] = peer.username
+                item['name'] = _display_name(peer, peer.username)
+                item['initials'] = _initials(item['name'])
+                item['avatar_color'] = _avatar_color(item['name'])
+                # Check if peer has an active public key
+                item['is_secure'] = (
+                    peer.public_keys.filter(is_active=True).exists()
+                )
+            else:
+                item['name'] = 'Unknown User'
+                item['initials'] = '??'
+                item['avatar_color'] = AVATAR_COLORS[0]
+                item['peer_id'] = None
+                item['peer_username'] = None
+                item['is_secure'] = False
+
+            item['last_message_preview'] = 'Encrypted message'
+
+        else:  # GROUP
+            member_count = ConversationMember.objects.filter(
+                conversation=conv,
+                status=ConversationMember.Status.ACTIVE,
+            ).count()
+            item['name'] = conv.name or f'Group #{conv.id}'
+            item['initials'] = _initials(item['name'])
+            item['avatar_color'] = _avatar_color(item['name'])
+            item['member_count'] = member_count
+            item['membership_version'] = conv.membership_version
+            item['last_message_preview'] = 'Encrypted message'
+            # Group is secure if creator has uploaded keys (rough heuristic)
+            item['is_secure'] = (
+                conv.created_by
+                and conv.created_by.public_keys.filter(is_active=True).exists()
+            )
+
+        conversations.append(item)
+
+    return JsonResponse({'conversations': conversations})
+
+
+@login_required(login_url='login')
+def get_or_create_single_conversation_view(request):
+    """Find an existing private conversation or create one.
+
+    POST /api/conversations/
+    Body: {"peer_id": <int>}
+
+    Returns 200 with the conversation id if it already exists,
+    201 if a new conversation was created.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    data = _json_body(request)
+    peer_id = data.get('peer_id')
+    if not peer_id:
+        return JsonResponse({'error': 'peer_id is required.'}, status=400)
+
+    try:
+        peer = User.objects.get(id=peer_id)
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'User not found.'}, status=404)
+
+    if peer == request.user:
+        return JsonResponse({'error': 'Cannot chat with yourself.'}, status=400)
+
+    # Search for an existing SINGLE conversation where both users are members
+    my_convs = ConversationMember.objects.filter(
+        user=request.user,
+        status=ConversationMember.Status.ACTIVE,
+        conversation__type=Conversation.Type.SINGLE,
+        conversation__status=Conversation.Status.ACTIVE,
+    ).values_list('conversation_id', flat=True)
+
+    existing = (
+        ConversationMember.objects.filter(
+            user=peer,
+            status=ConversationMember.Status.ACTIVE,
+            conversation_id__in=my_convs,
+        )
+        .select_related('conversation')
+        .first()
+    )
+
+    if existing:
+        return JsonResponse({
+            'conversation_id': existing.conversation_id,
+            'created': False,
+        })
+
+    # Create new conversation
+    with transaction.atomic():
+        conv = Conversation.objects.create(
+            type=Conversation.Type.SINGLE,
+            created_by=request.user,
+        )
+        ConversationMember.objects.create(
+            conversation=conv,
+            user=request.user,
+            role=ConversationMember.Role.MEMBER,
+        )
+        ConversationMember.objects.create(
+            conversation=conv,
+            user=peer,
+            role=ConversationMember.Role.MEMBER,
+        )
+
+    return JsonResponse({
+        'conversation_id': conv.id,
+        'created': True,
+    }, status=201)
 
 
 # ---------------------------------------------------------------------------
@@ -129,14 +244,6 @@ def _get_member(conversation_id, user):
         )
     except ConversationMember.DoesNotExist:
         return None
-
-
-def _json_body(request):
-    """Parse and return the JSON body of a request, or empty dict on error."""
-    try:
-        return json.loads(request.body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return {}
 
 
 @login_required(login_url='login')

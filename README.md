@@ -114,3 +114,51 @@ This project now contains two Django apps:
 
 - `accounts`
 - `chat`
+
+## Desktop Client (Electron)
+
+iChat Pro can be packaged as a standalone desktop application using Electron.
+
+### Prerequisites
+
+- Node.js 18+ and npm
+- Python virtual environment with Django dependencies installed
+
+### Quick Start
+
+```powershell
+# 1. Start the Django backend (in one terminal)
+.\.venv\Scripts\Activate.ps1
+python manage.py runserver 127.0.0.1:8000
+
+# 2. Launch the Electron desktop app (in another terminal)
+cd desktop
+npm install
+npm start
+```
+
+### Development Mode
+
+Open DevTools alongside the app window:
+
+```powershell
+npm run dev
+```
+
+### Skip Built-in Django Server
+
+If you already have Django running independently:
+
+```powershell
+$env:ICHAT_SKIP_DJANGO = "1"
+npm start
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ICHAT_HOST` | `127.0.0.1` | Django server hostname |
+| `ICHAT_PORT` | `8000` | Django server port |
+| `ICHAT_SKIP_DJANGO` | (unset) | Set to `"1"` to prevent Electron from spawning Django |
+| `ICHAT_READY_TIMEOUT` | `30` | Seconds to wait for Django to become ready |

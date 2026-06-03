@@ -267,28 +267,39 @@
     if (payload.algorithm !== MESSAGE_ALGORITHM) {
       throw new PrivateChatCryptoError('unsupported_algorithm', 'Unsupported private-message algorithm.');
     }
-    if (requireInteger(payload.receiver_id, 'receiver_id') !== requireInteger(local.user_id, 'user_id')) {
+    const localUserId = requireInteger(local.user_id, 'user_id');
+    const senderId = requireInteger(payload.sender_id, 'sender_id');
+    const receiverId = requireInteger(payload.receiver_id, 'receiver_id');
+    let remoteUserId;
+    let remoteKeyVersion;
+    let localKeyVersion;
+
+    if (receiverId === localUserId) {
+      remoteUserId = senderId;
+      remoteKeyVersion = requireInteger(payload.sender_key_version, 'sender_key_version');
+      localKeyVersion = requireInteger(payload.receiver_key_version, 'receiver_key_version');
+    } else if (senderId === localUserId) {
+      remoteUserId = receiverId;
+      remoteKeyVersion = requireInteger(payload.receiver_key_version, 'receiver_key_version');
+      localKeyVersion = requireInteger(payload.sender_key_version, 'sender_key_version');
+    } else {
       throw new PrivateChatCryptoError('wrong_receiver', 'This encrypted message belongs to another user.');
     }
-    if (
-      requireInteger(payload.receiver_key_version, 'receiver_key_version') !==
-      requireInteger(local.key_version, 'local_key_version')
-    ) {
+
+    if (localKeyVersion !== requireInteger(local.key_version, 'local_key_version')) {
       throw new PrivateChatCryptoError(
         'local_key_changed',
         'Your current device key cannot decrypt this message. Import the matching key backup.'
       );
     }
-    const senderKey = await fetchPublicKey(
-      requireInteger(payload.sender_id, 'sender_id'),
-      requireInteger(payload.sender_key_version, 'sender_key_version')
-    );
-    if (requireInteger(senderKey.key_version, 'sender_key_version') !== requireInteger(payload.sender_key_version, 'sender_key_version')) {
-      throw new PrivateChatCryptoError('peer_key_changed', 'The sender security key changed after this message was encrypted.');
+
+    const remoteKey = await fetchPublicKey(remoteUserId, remoteKeyVersion);
+    if (requireInteger(remoteKey.key_version, 'remote_key_version') !== remoteKeyVersion) {
+      throw new PrivateChatCryptoError('peer_key_changed', 'The contact security key changed after this message was encrypted.');
     }
-    rememberPeerIdentity(senderKey);
+    rememberPeerIdentity(remoteKey);
     const privateKey = await importPrivateKey(local.private_key);
-    const sessionKey = await derivePrivateSessionKey(privateKey, senderKey.identity_public_key, payload);
+    const sessionKey = await derivePrivateSessionKey(privateKey, remoteKey.identity_public_key, payload);
     return decryptText(payload, sessionKey);
   }
 

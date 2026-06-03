@@ -86,6 +86,7 @@ async function run() {
   assert.equal(encrypted.receiver_id, 2);
   assert.equal(JSON.stringify(encrypted).includes('secret hello'), false);
   assert.equal(await bobBrowser.iChatPrivateE2EE.decryptPrivateMessage(encrypted), 'secret hello');
+  assert.equal(await aliceBrowser.iChatPrivateE2EE.decryptPrivateMessage(encrypted), 'secret hello');
 
   // Bob sends a message to Alice (v1)
   const encryptedFromBob = await bobBrowser.iChatPrivateE2EE.encryptPrivateMessage({
@@ -94,6 +95,7 @@ async function run() {
     receiverId: 1
   });
   assert.equal(await aliceBrowser.iChatPrivateE2EE.decryptPrivateMessage(encryptedFromBob), 'hello from bob v1');
+  assert.equal(await bobBrowser.iChatPrivateE2EE.decryptPrivateMessage(encryptedFromBob), 'hello from bob v1');
 
   const tampered = { ...encrypted, ciphertext: bytesToBase64(Buffer.from('tampered')) };
   await assert.rejects(

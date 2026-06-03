@@ -31,3 +31,7 @@ Thumbs.db
 .claude/
 .codex-pr29-fix/
 .codex-t02-worktree/
+
+# Electron desktop
+desktop/node_modules/
+desktop/out/

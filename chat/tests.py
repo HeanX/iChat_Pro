@@ -611,6 +611,7 @@ class GroupMessagesAPITests(TestCase):
 
 class ConversationMessagesAPITests(TestCase):
     def setUp(self):
+        from accounts.models import Contact
         self.alice = User.objects.create_user(username="alice", password="test1234")
         self.bob = User.objects.create_user(username="bob", password="test1234")
         self.eve = User.objects.create_user(username="eve", password="test1234")
@@ -623,6 +624,7 @@ class ConversationMessagesAPITests(TestCase):
         ConversationMember.objects.create(
             conversation=self.conv, user=self.bob
         )
+        Contact.objects.create(user=self.alice, contact=self.bob)
         self.msg1 = EncryptedMessage.objects.create(
             conversation=self.conv,
             sender=self.alice,
@@ -718,6 +720,31 @@ class ConversationMessagesAPITests(TestCase):
         response = self.client.get(url)
         self.assertIn(response.status_code, [302, 301])
         self.assertIn("login", response.url)
+
+    # ── T29: contact enforcement ───────────────────────────────────
+
+    def test_non_contact_cannot_access_private_messages(self):
+        """Even if a member, non-contacts get 403 (T29)."""
+        from accounts.models import Contact
+        # Eve is not a contact of alice
+        conv_eve = Conversation.objects.create(
+            type=Conversation.Type.SINGLE, created_by=self.alice,
+        )
+        ConversationMember.objects.create(conversation=conv_eve, user=self.alice)
+        ConversationMember.objects.create(conversation=conv_eve, user=self.eve)
+        # No Contact between alice and eve
+        response = self._get(conv_eve.id)
+        self.assertEqual(response.status_code, 403)
+
+    def test_removed_contact_cannot_access_private_messages(self):
+        """After contact is removed, access is denied (T29)."""
+        from accounts.models import Contact
+        # Create conv with bob as contact, then remove contact
+        response = self._get(self.conv.id)
+        self.assertEqual(response.status_code, 200)  # still contacts
+        Contact.objects.filter(user=self.alice, contact=self.bob).delete()
+        response = self._get(self.conv.id)
+        self.assertEqual(response.status_code, 403)
 
 
 class ChatConsumerTests(TransactionTestCase):

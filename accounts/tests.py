@@ -724,16 +724,16 @@ class ProfileEditTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
     def test_profile_edit_creates_profile(self):
-        self.assertFalse(
+        # T27: profile is now auto-created on user creation.
+        self.assertTrue(
             UserProfile.objects.filter(user=self.alice).exists(),
         )
         self.client.post(self.PROFILE_EDIT_URL, {
             'nickname': 'Ally',
             'bio': 'Hello world',
         })
-        self.assertTrue(
-            UserProfile.objects.filter(user=self.alice).exists(),
-        )
+        profile = UserProfile.objects.get(user=self.alice)
+        self.assertEqual(profile.nickname, 'Ally')
 
     def test_profile_edit_updates_nickname(self):
         UserProfile.objects.create(user=self.alice, nickname='Old')

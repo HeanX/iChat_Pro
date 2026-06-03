@@ -736,7 +736,9 @@ class ProfileEditTests(TestCase):
         self.assertEqual(profile.nickname, 'Ally')
 
     def test_profile_edit_updates_nickname(self):
-        UserProfile.objects.create(user=self.alice, nickname='Old')
+        # T27: profile is auto-created on user creation; update it.
+        self.alice.profile.nickname = 'Old'
+        self.alice.profile.save()
         self.client.post(self.PROFILE_EDIT_URL, {
             'nickname': 'NewName',
             'bio': '',

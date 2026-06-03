@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}iChat Pro{% endblock %}</title>
-    <!-- Tailwind CSS CDN -->
+    {% if use_tailwind_cdn %}
+    <!-- Tailwind CSS Play CDN (development) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -34,8 +35,14 @@
             }
         }
     </script>
-    <!-- Lucide Icons CDN -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    {% else %}
+    <!-- Tailwind CSS static build (production) — built via: npm run build:css -->
+    <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+    {% endif %}
+    <!-- Lucide Icons CDN (pinned version with SRI) -->
+    <script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.min.js"
+            integrity="sha384-8nT3SpButyvenpAdKYPJzXdSz3zidMGduMoaMvwjKnAWVv238n6P1mhveiJJQWrV"
+            crossorigin="anonymous"></script>
     <!-- Custom Base Stylesheet -->
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
     {% block extra_css %}{% endblock %}

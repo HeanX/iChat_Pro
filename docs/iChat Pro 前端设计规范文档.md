@@ -346,7 +346,9 @@ frontend/
 │   │   └── chat.css
 │   ├── js/
 │   │   ├── chat.js
-│   │   ├── websocket.js
+│   │   ├── key-manager.js
+│   │   ├── private-chat-e2ee.js
+│   │   ├── group-chat-e2ee.js
 │   │   └── theme.js
 │   └── images/
 │       └── chat-bg.svg

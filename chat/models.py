@@ -131,6 +131,7 @@ class EncryptedMessage(models.Model):
     algorithm = models.CharField(max_length=50)
     sender_key_version = models.IntegerField(null=True, blank=True)
     receiver_key_version = models.IntegerField(null=True, blank=True)
+    client_message_id = models.CharField(max_length=64, null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.SENT
     )
@@ -145,6 +146,13 @@ class EncryptedMessage(models.Model):
             models.Index(fields=["receiver_id"]),
             models.Index(fields=["status"]),
             models.Index(fields=["conversation_id", "id"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sender", "client_message_id"],
+                name="unique_client_private_message",
+                condition=models.Q(client_message_id__isnull=False),
+            ),
         ]
 
     def __str__(self):

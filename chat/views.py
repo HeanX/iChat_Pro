@@ -1,11 +1,17 @@
 import json
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import F
+from django.db import transaction
+from django.db.models import F, Q
 from django.http import JsonResponse
 from django.shortcuts import render
 
+from accounts.models import Contact
+from .consumers import ChatConsumer
 from .models import (
     Conversation,
     ConversationMember,
@@ -14,107 +20,206 @@ from .models import (
     GroupMessageRecipient,
 )
 
+User = get_user_model()
 
-def _mock_chats():
-    return [
-        {
-            'id': 1,
-            'name': 'Alice Vance',
-            'initials': 'AV',
-            'avatar_color': '#5c6bc0',
-            'last_message': 'Hey, did you generate your E2EE key pairs?',
-            'time': '18:12',
-            'unread': 2,
-            'is_online': True,
-            'is_secure': True,
-        },
-        {
-            'id': 2,
-            'name': 'Dev Team Group',
-            'initials': 'DT',
-            'avatar_color': '#26a69a',
-            'last_message': 'Bob: I pushed the updated Electron config today.',
-            'time': '16:45',
-            'unread': 0,
-            'is_online': False,
-            'is_secure': False,
-        },
-        {
-            'id': 3,
-            'name': 'Telegram Bot',
-            'initials': 'TB',
-            'avatar_color': '#42a5f5',
-            'last_message': 'Welcome to iChat Pro! End-to-end encryption is enabled for private chats.',
-            'time': 'Yesterday',
-            'unread': 0,
-            'is_online': True,
-            'is_secure': False,
-        },
-        {
-            'id': 4,
-            'name': 'Charlie Brown',
-            'initials': 'CB',
-            'avatar_color': '#ffa726',
-            'last_message': 'My safety fingerprint matches yours.',
-            'time': 'May 26',
-            'unread': 1,
-            'is_online': False,
-            'is_secure': True,
-        },
-    ]
+AVATAR_COLORS = [
+    '#5c6bc0', '#26a69a', '#42a5f5', '#ffa726', '#ef5350',
+    '#ab47bc', '#66bb6a', '#ec407a', '#8d6e63', '#78909c',
+]
+
+
+def _broadcast_member_change(group_id, change, actor_id, affected_user_id, membership_version):
+    """Sync wrapper around ChatConsumer.broadcast_group_members_changed."""
+    channel_layer = get_channel_layer()
+    async_to_sync(ChatConsumer.broadcast_group_members_changed)(
+        channel_layer, group_id, change, actor_id, affected_user_id, membership_version,
+    )
+
+
+def _avatar_color(name: str) -> str:
+    checksum = sum(ord(char) for char in name)
+    return AVATAR_COLORS[checksum % len(AVATAR_COLORS)]
+
+
+def _initials(name: str) -> str:
+    parts = name.strip().split()
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[-1][0]).upper()
+    return (name.strip()[:2] or '?').upper()
+
+
+def _display_name(user):
+    try:
+        nickname = user.profile.nickname
+    except Exception:
+        nickname = ''
+    return nickname or user.get_full_name() or user.username
+
+
+def _are_contacts(user, peer):
+    return Contact.objects.filter(
+        (Q(user=user) & Q(contact=peer))
+        | (Q(user=peer) & Q(contact=user)),
+    ).exists()
 
 
 @login_required(login_url='login')
 def index_view(request):
-    chats = _mock_chats()
-    active_chat_messages = [
-        {
-            'sender': 'Alice Vance',
-            'is_self': False,
-            'text': 'Hello! Welcome to our secure chat room. Under the E2EE protocol, all messages are encrypted on my device and decrypted on yours.',
-            'time': '18:05',
-        },
-        {
-            'sender': 'Alice Vance',
-            'is_self': False,
-            'text': 'Here is my public key fingerprint:\n9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A',
-            'time': '18:06',
-        },
-        {
-            'sender': 'You',
-            'is_self': True,
-            'text': "Hi Alice! That looks correct. I've verified your key and my browser has automatically generated my session AES-GCM key.",
-            'time': '18:10',
-            'status': 'read',
-        },
-        {
-            'sender': 'Alice Vance',
-            'is_self': False,
-            'text': 'Hey, did you generate your E2EE key pairs?',
-            'time': '18:12',
-        },
-    ]
-
-    context = {
-        'chats': chats,
-        'active_chat': chats[0],
-        'messages': active_chat_messages,
-        'open_settings': False,
-    }
-
-    return render(request, 'pages/chat.html', context)
+    return render(request, 'pages/chat.html', {'open_settings': False})
 
 
 @login_required(login_url='login')
 def settings_view(request):
-    chats = _mock_chats()[:2]
-    context = {
-        'chats': chats,
-        'active_chat': chats[0],
-        'messages': [],
-        'open_settings': True,
-    }
-    return render(request, 'pages/chat.html', context)
+    return render(request, 'pages/chat.html', {'open_settings': True})
+
+
+# ---------------------------------------------------------------------------
+# Conversation list & creation API
+# ---------------------------------------------------------------------------
+
+@login_required(login_url='login')
+def conversations_list_view(request):
+    """Return active conversations for the authenticated user's sidebar."""
+    memberships = (
+        ConversationMember.objects
+        .filter(
+            user=request.user,
+            status=ConversationMember.Status.ACTIVE,
+            conversation__status=Conversation.Status.ACTIVE,
+        )
+        .select_related('conversation', 'conversation__created_by')
+        .order_by('-conversation__last_message_at', '-conversation__updated_at')
+    )
+
+    conversations = []
+    for membership in memberships:
+        conversation = membership.conversation
+        item = {
+            'id': conversation.id,
+            'type': conversation.type,
+            'unread': membership.unread_count,
+            'last_message_at': (
+                conversation.last_message_at.isoformat()
+                if conversation.last_message_at
+                else None
+            ),
+            'last_message_preview': 'Encrypted message' if conversation.last_message_at else '',
+        }
+
+        if conversation.type == Conversation.Type.SINGLE:
+            peer_member = (
+                ConversationMember.objects
+                .filter(
+                    conversation=conversation,
+                    status=ConversationMember.Status.ACTIVE,
+                )
+                .exclude(user=request.user)
+                .select_related('user__profile')
+                .first()
+            )
+            if not peer_member:
+                item.update({
+                    'name': 'Unknown User',
+                    'initials': '??',
+                    'avatar_color': AVATAR_COLORS[0],
+                    'peer_id': None,
+                    'peer_username': None,
+                    'is_secure': False,
+                })
+            else:
+                peer = peer_member.user
+                name = _display_name(peer)
+                item.update({
+                    'peer_id': peer.id,
+                    'peer_username': peer.username,
+                    'name': name,
+                    'initials': _initials(name),
+                    'avatar_color': _avatar_color(name),
+                    'is_secure': peer.public_keys.filter(is_active=True).exists(),
+                })
+        else:
+            name = conversation.name or f'Group #{conversation.id}'
+            item.update({
+                'name': name,
+                'initials': _initials(name),
+                'avatar_color': _avatar_color(name),
+                'member_count': ConversationMember.objects.filter(
+                    conversation=conversation,
+                    status=ConversationMember.Status.ACTIVE,
+                ).count(),
+                'membership_version': conversation.membership_version,
+                'is_secure': True,
+            })
+
+        conversations.append(item)
+
+    return JsonResponse({'conversations': conversations})
+
+
+@login_required(login_url='login')
+def get_or_create_single_conversation_view(request):
+    """Create or reuse a private conversation, limited to established contacts."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    peer_id = _json_body(request).get('peer_id')
+    if not peer_id:
+        return JsonResponse({'error': 'peer_id is required.'}, status=400)
+
+    try:
+        peer = User.objects.get(id=peer_id, is_active=True)
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'User not found.'}, status=404)
+
+    if peer == request.user:
+        return JsonResponse({'error': 'Cannot chat with yourself.'}, status=400)
+    if not _are_contacts(request.user, peer):
+        return JsonResponse({'error': 'Private chats are limited to contacts.'}, status=403)
+
+    my_conversation_ids = ConversationMember.objects.filter(
+        user=request.user,
+        status=ConversationMember.Status.ACTIVE,
+        conversation__type=Conversation.Type.SINGLE,
+        conversation__status=Conversation.Status.ACTIVE,
+    ).values_list('conversation_id', flat=True)
+    existing = (
+        ConversationMember.objects
+        .filter(
+            user=peer,
+            status=ConversationMember.Status.ACTIVE,
+            conversation_id__in=my_conversation_ids,
+        )
+        .select_related('conversation')
+        .first()
+    )
+    if existing:
+        return JsonResponse({
+            'conversation_id': existing.conversation_id,
+            'created': False,
+        })
+
+    with transaction.atomic():
+        conversation = Conversation.objects.create(
+            type=Conversation.Type.SINGLE,
+            created_by=request.user,
+        )
+        ConversationMember.objects.bulk_create([
+            ConversationMember(
+                conversation=conversation,
+                user=request.user,
+                role=ConversationMember.Role.MEMBER,
+            ),
+            ConversationMember(
+                conversation=conversation,
+                user=peer,
+                role=ConversationMember.Role.MEMBER,
+            ),
+        ])
+
+    return JsonResponse({
+        'conversation_id': conversation.id,
+        'created': True,
+    }, status=201)
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +347,14 @@ def invite_member_view(request, conversation_id):
     )
     conversation.membership_version = F('membership_version') + 1
     conversation.save(update_fields=['membership_version', 'updated_at'])
+    conversation.refresh_from_db(fields=['membership_version'])
+    _broadcast_member_change(
+        group_id=conversation.pk,
+        change='member_added',
+        actor_id=request.user.pk,
+        affected_user_id=target.id,
+        membership_version=conversation.membership_version,
+    )
 
     return JsonResponse({"status": "ok", "user_id": target.id}, status=201)
 
@@ -281,6 +394,14 @@ def remove_member_view(request, conversation_id):
         return JsonResponse({"error": "Group not found."}, status=404)
     conversation.membership_version = F('membership_version') + 1
     conversation.save(update_fields=['membership_version', 'updated_at'])
+    conversation.refresh_from_db(fields=['membership_version'])
+    _broadcast_member_change(
+        group_id=conversation.pk,
+        change='member_removed',
+        actor_id=request.user.pk,
+        affected_user_id=user_id,
+        membership_version=conversation.membership_version,
+    )
 
     return JsonResponse({"status": "ok", "user_id": user_id})
 
@@ -305,6 +426,14 @@ def disband_group_view(request, conversation_id):
     conversation.status = Conversation.Status.DELETED
     conversation.membership_version = F('membership_version') + 1
     conversation.save(update_fields=["status", "membership_version", "updated_at"])
+    conversation.refresh_from_db(fields=['membership_version'])
+    _broadcast_member_change(
+        group_id=conversation.pk,
+        change='group_dissolved',
+        actor_id=request.user.pk,
+        affected_user_id=None,
+        membership_version=conversation.membership_version,
+    )
 
     return JsonResponse({"status": "ok"})
 

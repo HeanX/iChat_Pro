@@ -424,155 +424,257 @@
         // ==========================================
 
         /**
-         * Subscribe to a conversation or group room
+         * Subscribe to a conversation or group room.
+         * Deprecated: v1.0 protocol uses single /ws/chat/ connection with user_{id} groups.
+         * No explicit subscribe messages needed — the server handles routing automatically.
          */
         subscribeToRoom(roomId) {
             this.activeRooms.add(roomId);
-            
-            // Routing event to join group/channel in Django consumer
-            this.sendPayload({
-                action: 'join',
-                room_id: roomId,
-                timestamp: new Date().toISOString()
-            });
-            console.log(`[iChat WebSocket] Requested join channel room: ${roomId}`);
+            console.log(`[iChat WebSocket] Tracking room: ${roomId} (server handles routing via user group)`);
         }
 
         /**
-         * Unsubscribe from a conversation or group room
+         * Unsubscribe from a conversation or group room.
+         * Deprecated: v1.0 protocol uses single /ws/chat/ connection with user_{id} groups.
          */
         unsubscribeFromRoom(roomId) {
             this.activeRooms.delete(roomId);
-            
-            this.sendPayload({
-                action: 'leave',
-                room_id: roomId,
-                timestamp: new Date().toISOString()
-            });
-            console.log(`[iChat WebSocket] Requested leave channel room: ${roomId}`);
+            console.log(`[iChat WebSocket] Untracking room: ${roomId}`);
         }
 
         /**
-         * Process and route incoming messages based on their structural event type
+         * Process and route incoming messages based on protocol event type.
+         * Aligned with iChat Pro v1.0 WebSocket protocol.
          */
         processReceivedPayload(data) {
-            const eventType = data.type || data.action || 'message';
+            const eventType = data.event || data.type || '';
 
             switch (eventType) {
+                // Connection lifecycle
+                case 'connection.ready':
+                    console.log(`[iChat WebSocket] Ready. User ID: ${data.data.user_id}`);
+                    this.options.onConnect(data);
+                    break;
+                case 'connection.pong':
+                    break; // heartbeat acknowledgment, no action needed
+
+                // Private chat (single)
+                case 'message.single.new':
+                    this.handleSingleChatMessage(data.data);
+                    break;
+                case 'message.single.accepted':
+                    this.handleSingleChatAccepted(data.data);
+                    break;
+
+                // Group chat
+                case 'message.group.new':
+                    this.handleGroupChatMessage(data.data);
+                    break;
+                case 'message.group.accepted':
+                    this.handleGroupChatAccepted(data.data);
+                    break;
+
+                // Receipts
+                case 'message.receipt.updated':
+                    this.handleReceiptUpdated(data.data);
+                    break;
+
+                // Group membership changes
+                case 'group.members.changed':
+                    this.handleGroupMembersChanged(data.data);
+                    break;
+
+                // Errors
+                case 'error':
+                    console.error(`[iChat WebSocket] Error: ${data.data.code} - ${data.data.message}`);
+                    this.handleError(data.data);
+                    break;
+
+                // Legacy compatibility for older-style payloads
                 case 'chat_message':
                 case 'single_chat':
-                    this.handleSingleChatMessageTemplate(data);
-                    break;
                 case 'group_message':
                 case 'group_chat':
-                    this.handleGroupChatMessageTemplate(data);
-                    break;
                 case 'system_message':
-                    this.handleSystemMessageTemplate(data);
-                    break;
                 case 'key_exchange':
-                    this.handleKeyExchangeTemplate(data);
+                    this.handleLegacyPayload(eventType, data);
                     break;
+
                 default:
-                    console.warn(`[iChat WebSocket] Unknown event type: '${eventType}'`);
+                    console.warn(`[iChat WebSocket] Unknown event: '${eventType}'`);
                     this.options.onMessageReceived(data);
             }
         }
 
         /**
-         * Template Handler: Received Single Chat Encrypted Payload
+         * Handle incoming private chat encrypted message (message.single.new).
+         * The server already pushed only the current user's ciphertext.
          */
-        handleSingleChatMessageTemplate(data) {
-            console.log('--- Processing Single Chat Message ---');
+        handleSingleChatMessage(data) {
+            console.log('--- Processing Private Chat Message (message.single.new) ---');
+            console.log(`Message ID: ${data.message_id}`);
             console.log(`Sender ID: ${data.sender_id}`);
-            console.log(`Receiver ID: ${data.receiver_id}`);
+            console.log(`Conversation ID: ${data.conversation_id}`);
             console.log(`Ciphertext: ${data.ciphertext}`);
-            console.log(`Nonce: ${data.nonce}`);
-            console.log(`Auth Tag: ${data.auth_tag}`);
-            console.log(`Encryption Version: ${data.receiver_public_key_version}`);
+            console.log(`Algorithm: ${data.algorithm}`);
+            console.log(`Sender Key Version: ${data.sender_key_version}`);
+            console.log(`Receiver Key Version: ${data.receiver_key_version}`);
 
             /*
-             * IMPLEMENTATION NOTE (Phase 2 Integration):
-             * Here you would retrieve the local User private key and the Sender's public key,
-             * derive the session key, and call:
-             * 
-             * const sessionKey = await iChatCryptor.deriveSessionKey(myPrivateKey, data.sender_public_key, conversationId);
-             * const plaintext = await iChatCryptor.decryptMessage(data.ciphertext, data.nonce, data.auth_tag, sessionKey);
-             * 
-             * Then append the decrypted string to the UI.
+             * IMPLEMENTATION NOTE (T16 integration):
+             * 1. Retrieve local private key from IndexedDB.
+             * 2. Fetch sender's public key via HTTP API (key version = data.sender_key_version).
+             * 3. Derive session key: iChatCryptor.deriveSessionKey(myPrivateKey, senderPublicKey, hkdfContext).
+             * 4. Decrypt: iChatCryptor.decryptMessage(data.ciphertext, data.nonce, data.auth_tag, sessionKey).
+             * 5. Append decrypted text to the UI.
+             * 6. Send receipt: message.receipt.update { conversation_type: 'single', message_id, status: 'delivered' }.
              */
 
-            // Trigger fallback hook to notify UI layer
             this.options.onMessageReceived({
                 category: 'single',
+                message_id: data.message_id,
+                conversation_id: data.conversation_id,
                 sender_id: data.sender_id,
                 ciphertext: data.ciphertext,
+                nonce: data.nonce,
+                auth_tag: data.auth_tag,
+                algorithm: data.algorithm,
+                sender_key_version: data.sender_key_version,
+                receiver_key_version: data.receiver_key_version,
+                status: data.status,
+                created_at: data.created_at,
                 is_encrypted: true,
-                raw_payload: data
+                raw_payload: data,
             });
         }
 
         /**
-         * Template Handler: Received Group Chat Encrypted Payload
+         * Handle private message accepted acknowledgment (message.single.accepted).
          */
-        handleGroupChatMessageTemplate(data) {
-            console.log('--- Processing Group Chat Message ---');
+        handleSingleChatAccepted(data) {
+            console.log(`[iChat] Private message accepted: client=${data.client_message_id} server=${data.message_id}`);
+            this.options.onMessageReceived({
+                category: 'single_accepted',
+                client_message_id: data.client_message_id,
+                message_id: data.message_id,
+                conversation_id: data.conversation_id,
+                status: data.status,
+                created_at: data.created_at,
+                raw_payload: data,
+            });
+        }
+
+        /**
+         * Handle incoming group chat per-recipient encrypted message (message.group.new).
+         * The server already pushed only the current user's ciphertext.
+         */
+        handleGroupChatMessage(data) {
+            console.log('--- Processing Group Chat Message (message.group.new) ---');
+            console.log(`Message ID: ${data.message_id}`);
             console.log(`Group ID: ${data.group_id}`);
             console.log(`Sender ID: ${data.sender_id}`);
-            
+            console.log(`Membership Version: ${data.membership_version}`);
+            console.log(`Ciphertext: ${data.ciphertext}`);
+            console.log(`Algorithm: ${data.algorithm}`);
+
             /*
-             * Under the group E2EE design:
-             * The group payload includes a "recipients" array.
-             * The client filters the array for their own receiver_id, extracts the custom 
-             * ciphertext/nonce/auth_tag mapped specifically to them, and decrypts it.
+             * IMPLEMENTATION NOTE (T16 integration):
+             * The server pushes one ciphertext per user via user_{user_id}.
+             * Client uses HKDF context: group:{group_id}:{membership_version}:{sender_id}:{receiver_id}:{sender_key_version}:{receiver_key_version}
+             * to derive the session key, then decrypts.
              */
-            const myUserId = window.currentUserId || 1; // Example fallback
-            const myEncryptedPackage = data.recipients.find(r => r.receiver_id === myUserId);
-
-            if (myEncryptedPackage) {
-                console.log(`Matched encrypted block for Current User (${myUserId}):`);
-                console.log(`- Ciphertext: ${myEncryptedPackage.ciphertext}`);
-                console.log(`- Nonce: ${myEncryptedPackage.nonce}`);
-                console.log(`- Auth Tag: ${myEncryptedPackage.auth_tag}`);
-
-                // Decrypt using recipient sessionKey...
-            } else {
-                console.error('[iChat WebSocket] Critical: Current user was omitted from group recipient payload.');
-            }
 
             this.options.onMessageReceived({
                 category: 'group',
+                message_id: data.message_id,
                 group_id: data.group_id,
+                membership_version: data.membership_version,
                 sender_id: data.sender_id,
+                receiver_id: data.receiver_id,
+                ciphertext: data.ciphertext,
+                nonce: data.nonce,
+                auth_tag: data.auth_tag,
+                algorithm: data.algorithm,
+                sender_key_version: data.sender_key_version,
+                receiver_key_version: data.receiver_key_version,
+                status: data.status,
+                created_at: data.created_at,
                 is_encrypted: true,
-                raw_payload: data
+                raw_payload: data,
             });
         }
 
         /**
-         * Template Handler: System notice (e.g. member joins, encryption toggled)
+         * Handle group message accepted acknowledgment (message.group.accepted).
          */
-        handleSystemMessageTemplate(data) {
-            console.log(`[iChat System Notice] ${data.content || data.text}`);
+        handleGroupChatAccepted(data) {
+            console.log(`[iChat] Group message accepted: client=${data.client_message_id} server=${data.message_id}`);
             this.options.onMessageReceived({
-                category: 'system',
-                text: data.content || data.text,
-                raw_payload: data
+                category: 'group_accepted',
+                client_message_id: data.client_message_id,
+                message_id: data.message_id,
+                group_id: data.group_id,
+                membership_version: data.membership_version,
+                status: data.status,
+                created_at: data.created_at,
+                raw_payload: data,
             });
         }
 
         /**
-         * Template Handler: Key Exchange (ECDH pre-key setups / identity verification)
+         * Handle message receipt update (message.receipt.updated).
          */
-        handleKeyExchangeTemplate(data) {
-            console.log('--- E2EE Public Key Exchange Event ---');
-            console.log(`Key Exchange Initiator: ${data.sender_id}`);
-            console.log(`Public Key Received: ${data.public_key}`);
-            
-            // Save key to local registry or localStorage
-            if (window.iChatApp && window.iChatApp.showToast) {
-                window.iChatApp.showToast(`Updated E2EE security verification for User #${data.sender_id}`, 'info');
-            }
+        handleReceiptUpdated(data) {
+            console.log(`[iChat] Receipt updated: msg=${data.message_id} user=${data.user_id} status=${data.status}`);
+            this.options.onMessageReceived({
+                category: 'receipt',
+                conversation_type: data.conversation_type,
+                message_id: data.message_id,
+                user_id: data.user_id,
+                status: data.status,
+                raw_payload: data,
+            });
+        }
+
+        /**
+         * Handle group membership change notification (group.members.changed).
+         */
+        handleGroupMembersChanged(data) {
+            console.log(`[iChat] Group members changed: group=${data.group_id} change=${data.change}`);
+            this.options.onMessageReceived({
+                category: 'group_members_changed',
+                group_id: data.group_id,
+                change: data.change,
+                actor_id: data.actor_id,
+                affected_user_id: data.affected_user_id,
+                membership_version: data.membership_version,
+                raw_payload: data,
+            });
+        }
+
+        /**
+         * Handle server error event.
+         */
+        handleError(data) {
+            console.error(`[iChat WebSocket] Server error [${data.code}]: ${data.message}`);
+            this.options.onMessageReceived({
+                category: 'error',
+                code: data.code,
+                message: data.message,
+                retryable: data.retryable,
+                raw_payload: data,
+            });
+        }
+
+        /**
+         * Legacy handler fallback for older template event types.
+         */
+        handleLegacyPayload(eventType, data) {
+            console.warn(`[iChat WebSocket] Legacy event: '${eventType}'`);
+            this.options.onMessageReceived({
+                category: eventType,
+                raw_payload: data,
+            });
         }
     }
 

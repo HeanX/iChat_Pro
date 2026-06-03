@@ -1,6 +1,8 @@
 # iChat Pro TODO List
 
-本文档用于确定一期开发范围。团队确认后，将每个任务创建为 GitHub Issue，由负责人认领并从独立分支提交 Pull Request。
+本文档用于确定 Phase 1 基础软件功能范围。团队确认后，将每个任务创建为 GitHub Issue，由负责人认领并从独立分支提交 Pull Request。
+
+> 状态说明：本文档中的 T01-T21 复选框是初始规划记录，不等同于当前 GitHub Issue 状态。实际进度以 GitHub Issues、已合并 PR 和 `docs/iChat Pro Phase 规划与一期交付审查文档.md` 为准。
 
 ## 0. 协作约定
 
@@ -393,14 +395,14 @@
 - 新协作者可以根据 README 启动项目
 - 演示流程可以稳定复现
 
-## 10. 一期不做
+## 10. Phase 1 不做
 
 - [ ] 不实现真正的 P2P 网络连接
 - [ ] 不实现语音或视频通话
 - [ ] 不实现 Signal Protocol 或 Double Ratchet
 - [ ] 不实现多端同步
 - [ ] 不实现移动端 App
-- [ ] 不实现频道、机器人和小程序
+- [ ] 不在 Phase 1 实现 Channel、Bot、LLM Agent 和小程序；统一列入 Phase 2
 - [ ] 不实现大型文件传输或网盘
 
 ## 11. 四人任务分配
@@ -526,3 +528,83 @@ T20 -> T21
 - [ ] 是否将头像上传纳入一期，或先使用默认头像
 - [ ] 团队成员名单和每人的主任务
 - [ ] 一期截止日期
+
+## 14. Phase 1 收口任务
+
+GitHub 中 `phase-1` 标签用于标记完整的一期范围，包括已经关闭的基础建设 Issue 和仍待完成的收口 Issue：
+
+- 已关闭基础建设：[T01 #2](https://github.com/HeanX/iChat_Pro/issues/2) 至 [T15 #16](https://github.com/HeanX/iChat_Pro/issues/16)、[T17 #18](https://github.com/HeanX/iChat_Pro/issues/18)、[T18 #19](https://github.com/HeanX/iChat_Pro/issues/19)
+- 待分配收口任务：[#17](https://github.com/HeanX/iChat_Pro/issues/17)、[#20](https://github.com/HeanX/iChat_Pro/issues/20) 至 [#22](https://github.com/HeanX/iChat_Pro/issues/22)、[#32](https://github.com/HeanX/iChat_Pro/issues/32) 至 [#42](https://github.com/HeanX/iChat_Pro/issues/42)
+
+### Phase 1 待分配工作包
+
+以下分类只用于团队认领和分配开放任务，不表示一期功能范围。建议每个工作包由一名成员主责，减少多人同时修改同一模块。
+
+| 工作包标签 | 负责人 | GitHub Issues | 说明 |
+| --- | --- | --- | --- |
+| `p1: core-domain-auth` | [@AEther61](https://github.com/AEther61) | [#32](https://github.com/HeanX/iChat_Pro/issues/32)、[#33](https://github.com/HeanX/iChat_Pro/issues/33)、[#37](https://github.com/HeanX/iChat_Pro/issues/37)、[#39](https://github.com/HeanX/iChat_Pro/issues/39)、[#41](https://github.com/HeanX/iChat_Pro/issues/41) | 先统一群聊模型和权限边界，再补资料生命周期、私聊授权与审计 |
+| `p1: product-loop` | [@ketter1024](https://github.com/ketter1024) | [#36](https://github.com/HeanX/iChat_Pro/issues/36)、[#38](https://github.com/HeanX/iChat_Pro/issues/38)、[#17](https://github.com/HeanX/iChat_Pro/issues/17) | 先补联系人和会话 API，再让 UI 接入真实数据 |
+| `p1: realtime-e2ee` | [@HeanX](https://github.com/HeanX) | [#34](https://github.com/HeanX/iChat_Pro/issues/34)、[#35](https://github.com/HeanX/iChat_Pro/issues/35)、[#40](https://github.com/HeanX/iChat_Pro/issues/40) | 清理重复实现，强化密钥安全，最后收敛协议和测试 |
+| `p1: release-acceptance` | [@pislan](https://github.com/pislan) | [#20](https://github.com/HeanX/iChat_Pro/issues/20)、[#21](https://github.com/HeanX/iChat_Pro/issues/21)、[#22](https://github.com/HeanX/iChat_Pro/issues/22)、[#42](https://github.com/HeanX/iChat_Pro/issues/42) | 桌面打包可提前准备；完整测试、图表和演示材料在功能收口后完成 |
+
+以下新增任务来自 2026-06-03 的一期交付审查：
+
+| 任务 | GitHub Issue | 内容 | 状态 |
+| --- | --- | --- | --- |
+| T26 | [#36](https://github.com/HeanX/iChat_Pro/issues/36) | 联系人搜索支持用户名、昵称和用户 ID | [ ] |
+| T27 | [#37](https://github.com/HeanX/iChat_Pro/issues/37) | 注册后自动创建用户资料 | [ ] |
+| T28 | [#38](https://github.com/HeanX/iChat_Pro/issues/38) | 增加真实私聊创建或复用入口与会话列表 API | [ ] |
+| T29 | [#39](https://github.com/HeanX/iChat_Pro/issues/39) | 私聊发送链路强制校验联系人策略 | [ ] |
+| T30 | [#40](https://github.com/HeanX/iChat_Pro/issues/40) | 收敛 WebSocket 协议、私聊幂等和载荷限制 | [x] |
+| T31 | [#41](https://github.com/HeanX/iChat_Pro/issues/41) | 增加管理员操作日志并明确软删除策略 | [ ] |
+| T32 | [#42](https://github.com/HeanX/iChat_Pro/issues/42) | 对齐一期文档、ER 图、类图和演示材料 | [ ] |
+
+### Phase 1 收口顺序
+
+```text
+#33 -> #32
+-> #36 -> #37 -> #38 -> #39 -> #40
+-> #17 -> #34 -> #35 -> #41
+-> #20 -> #21 -> #42 + #22
+-> Phase 1 验收
+```
+
+完整审查结论和验收门槛见：
+
+```text
+docs/iChat Pro Phase 规划与一期交付审查文档.md
+```
+
+## 15. Phase 2：扩展生态
+
+Phase 2 在 Phase 1 基础软件功能通过验收后启动，不与一期收尾并行堆叠。
+
+### Phase 2 范围
+
+- [ ] Channel：公开或私有频道、订阅、管理员发布和 Bot 发布
+- [ ] Bot 身份：系统 Bot、命令 Bot、通知 Bot 和 Channel 发布角色
+- [ ] LLM Bot：问答、翻译、摘要、知识库检索和 Channel 草稿生成
+- [ ] Agent：通过 OpenClaw 等独立 Agent Gateway 接入受限工具
+- [ ] Agent 安全：最小权限、人工确认、审计日志和隔离部署
+- [ ] 高安全扩展：评估 Bot 作为 E2EE 成员和 Electron 本地 Agent
+
+### Phase 2 Backlog
+
+以下任务先进入 backlog。Phase 1 验收通过后，再创建对应 GitHub Issues 并安排负责人。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| T33 | Channel 模型、订阅关系与 API | [ ] Backlog |
+| T34 | Bot 身份、能力、角色与审计日志 | [ ] Backlog |
+| T35 | 命令 Bot 工作流与 Channel 草稿发布 | [ ] Backlog |
+| T36 | Provider 无关的 LLM Bot 接入 | [ ] Backlog |
+| T37 | Bot 异步任务处理与 WebSocket 状态事件 | [ ] Backlog |
+| T38 | OpenClaw Agent Gateway Adapter | [ ] Backlog |
+| T39 | Agent 工具审批、沙箱与策略守卫 | [ ] Backlog |
+| T40 | Electron 本地 Agent 与 E2EE Bot 成员模式评估 | [ ] Backlog |
+
+详细设计见：
+
+```text
+docs/iChat Pro Bot、LLM Agent 与 Channel 扩展方案文档.md
+```

@@ -1,5 +1,7 @@
 # iChat Pro 技术栈
 
+> Phase 说明：当前代码以 Django Templates + 原生 JavaScript 为主。HTMX 可作为后续局部刷新优化选项，但不是 Phase 1 验收的强制依赖。Channel、Bot、LLM Agent 和 OpenClaw Adapter 统一列入 Phase 2。
+
 ### 1. 总体定位
 
 你们这个项目可以定位成：

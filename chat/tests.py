@@ -12,6 +12,7 @@ from django.test import TestCase, TransactionTestCase
 from ichat_pro.asgi import application
 
 from .models import (
+    AdminOperationLog,
     Conversation,
     ConversationMember,
     EncryptedMessage,
@@ -1119,3 +1120,46 @@ class EncryptedMessageModelTests(TestCase):
         )
         self.assertIsNone(msg.sender_key_version)
         self.assertIsNone(msg.receiver_key_version)
+
+# ── T31: admin audit log ──────────────────────────────────────────
+
+
+class AdminOperationLogTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="admint31", password="test", is_staff=True,
+        )
+
+    def test_create_log_entry(self):
+        log = AdminOperationLog.objects.create(
+            admin=self.admin,
+            action=AdminOperationLog.Action.ACTIVATE_USER,
+            target_type="User",
+            target_id=5,
+            details="Test audit entry",
+        )
+        self.assertEqual(log.admin, self.admin)
+        self.assertEqual(log.action, AdminOperationLog.Action.ACTIVATE_USER)
+        self.assertIsNotNone(log.created_at)
+
+    def test_deactivate_action_creates_log(self):
+        user = User.objects.create_user(username="target31", password="x")
+        log = AdminOperationLog.objects.create(
+            admin=self.admin,
+            action=AdminOperationLog.Action.DEACTIVATE_USER,
+            target_type="User",
+            target_id=user.id,
+            details=f"Deactivated {user.username}",
+        )
+        self.assertEqual(log.action, AdminOperationLog.Action.DEACTIVATE_USER)
+        self.assertEqual(log.target_id, user.id)
+
+    def test_str_method(self):
+        log = AdminOperationLog.objects.create(
+            admin=self.admin,
+            action=AdminOperationLog.Action.ACTIVATE_USER,
+            target_type="User",
+            target_id=1,
+        )
+        expected = f"AdminOp #{log.id}: Activate User by {self.admin}"
+        self.assertEqual(str(log), expected)

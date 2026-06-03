@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
 
 from .models import (
+    AdminOperationLog,
     Conversation,
     ConversationMember,
     EncryptedMessage,
@@ -41,11 +42,27 @@ class CustomUserAdmin(BaseUserAdmin):
     @admin.action(description=_("Activate selected users"))
     def activate_users(self, request, queryset):
         updated = queryset.update(is_active=True)
+        for user in queryset:
+            AdminOperationLog.objects.create(
+                admin=request.user,
+                action=AdminOperationLog.Action.ACTIVATE_USER,
+                target_type="User",
+                target_id=user.id,
+                details=f"Admin {request.user.username} activated {user.username}",
+            )
         self.message_user(request, _(f"{updated} user(s) activated."))
 
     @admin.action(description=_("Deactivate selected users"))
     def deactivate_users(self, request, queryset):
         updated = queryset.update(is_active=False)
+        for user in queryset:
+            AdminOperationLog.objects.create(
+                admin=request.user,
+                action=AdminOperationLog.Action.DEACTIVATE_USER,
+                target_type="User",
+                target_id=user.id,
+                details=f"Admin {request.user.username} deactivated {user.username}",
+            )
         self.message_user(request, _(f"{updated} user(s) deactivated."))
 
 
@@ -152,3 +169,12 @@ class GroupMessageRecipientAdmin(admin.ModelAdmin):
         "status",
         "created_at",
     ]
+
+
+@admin.register(AdminOperationLog)
+class AdminOperationLogAdmin(admin.ModelAdmin):
+    list_display = ["id", "admin", "action", "target_type", "target_id", "created_at"]
+    list_filter = ["action", "target_type"]
+    search_fields = ["admin__username", "action", "details"]
+    readonly_fields = ["created_at"]
+    ordering = ["-created_at"]

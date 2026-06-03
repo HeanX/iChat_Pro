@@ -249,3 +249,48 @@ class GroupMessageRecipient(models.Model):
 
     def __str__(self):
         return f"Recipient #{self.receiver_id} for GroupMessage #{self.group_message_id}"
+
+
+# ── Admin audit log (T31) ─────────────────────────────────────────
+
+
+class AdminOperationLog(models.Model):
+    """Timestamped record of sensitive admin actions for audit."""
+
+    class Action(models.TextChoices):
+        ACTIVATE_USER = "activate_user", "Activate User"
+        DEACTIVATE_USER = "deactivate_user", "Deactivate User"
+        DELETE_GROUP = "delete_group", "Delete Group"
+        DELETE_MESSAGE = "delete_message", "Delete Message"
+
+    admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="admin_actions",
+    )
+    action = models.CharField(max_length=30, choices=Action.choices)
+    target_type = models.CharField(max_length=50)
+    target_id = models.IntegerField()
+    details = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["admin_id", "-created_at"]),
+            models.Index(fields=["action"]),
+        ]
+
+    def __str__(self):
+        return f"AdminOp #{self.id}: {self.get_action_display()} by {self.admin}"
+
+
+# ── Soft-delete policy (documented — T31) ─────────────────────────
+#
+# - Conversation:   status=DELETED  (soft delete; data preserved)
+# - GroupMessage:   status=DELETED  (soft delete; data preserved)
+# - EncryptedMessage: deleted_at    (soft delete; ciphertext preserved)
+#
+# Hard-deletion is never performed so that audit trails and
+# historical ciphertexts remain recoverable by administrators.

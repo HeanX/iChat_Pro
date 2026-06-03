@@ -636,6 +636,44 @@ class ContactViewTests(TestCase):
                 user=self.bob, contact=self.alice,
             ).exists(),
         )
+        conversation = Conversation.objects.get(type=Conversation.Type.SINGLE)
+        member_ids = set(
+            ConversationMember.objects
+            .filter(conversation=conversation)
+            .values_list('user_id', flat=True)
+        )
+        self.assertEqual(member_ids, {self.alice.id, self.bob.id})
+
+    def test_accept_friend_request_reuses_existing_private_conversation(self):
+        existing = Conversation.objects.create(
+            type=Conversation.Type.SINGLE,
+            created_by=self.alice,
+        )
+        ConversationMember.objects.create(conversation=existing, user=self.alice)
+        ConversationMember.objects.create(conversation=existing, user=self.bob)
+        req = FriendRequest.objects.create(sender=self.bob, receiver=self.alice)
+
+        self.client.post(reverse('friend_request_accept', args=[req.id]))
+
+        self.assertEqual(Conversation.objects.filter(type=Conversation.Type.SINGLE).count(), 1)
+
+    def test_contact_list_has_message_link(self):
+        contact = Contact.objects.create(user=self.alice, contact=self.bob)
+        response = self.client.get(self.CONTACTS_URL)
+        self.assertContains(response, reverse('contact_chat', args=[contact.id]))
+        self.assertContains(response, 'Message')
+
+    def test_contact_chat_creates_conversation_and_redirects(self):
+        contact = Contact.objects.create(user=self.alice, contact=self.bob)
+
+        response = self.client.get(reverse('contact_chat', args=[contact.id]))
+
+        conversation = Conversation.objects.get(type=Conversation.Type.SINGLE)
+        self.assertRedirects(
+            response,
+            f'{reverse("index")}?conversation={conversation.id}',
+            fetch_redirect_response=False,
+        )
 
     def test_cannot_accept_others_request(self):
         req = FriendRequest.objects.create(

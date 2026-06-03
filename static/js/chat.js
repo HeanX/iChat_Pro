@@ -189,7 +189,12 @@ async function fetchConversations() {
     renderChatList();
     // Auto-select first conversation if none active
     if (!activeChatId && conversations.length > 0) {
-      selectChat(conversations[0].id.toString());
+      const requestedConversation = new URLSearchParams(window.location.search).get("conversation");
+      if (requestedConversation && conversationsById[parseInt(requestedConversation)]) {
+        selectChat(requestedConversation);
+      } else {
+        selectChat(conversations[0].id.toString());
+      }
     }
   } catch (err) {
     console.error('Failed to fetch conversations:', err);

@@ -34,6 +34,11 @@ urlpatterns = [
         views.contact_delete,
         name='contact_delete',
     ),
+    path(
+        'contacts/<int:contact_id>/chat/',
+        views.contact_chat_view,
+        name='contact_chat',
+    ),
 
     # Groups
     path('groups/', views.group_list_view, name='groups'),

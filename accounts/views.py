@@ -11,6 +11,7 @@ from django.contrib.auth.models import User
 from django.db import models, transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
@@ -52,6 +53,47 @@ def _active_key(user_id):
         user_id=user_id,
         is_active=True,
     ).first()
+
+
+def _ensure_single_conversation(user, peer):
+    """Create or reuse the active one-to-one conversation for two contacts."""
+    my_conversation_ids = ChatMember.objects.filter(
+        user=user,
+        status=ChatMember.Status.ACTIVE,
+        conversation__type=Conversation.Type.SINGLE,
+        conversation__status=Conversation.Status.ACTIVE,
+    ).values_list('conversation_id', flat=True)
+
+    existing = (
+        ChatMember.objects
+        .filter(
+            user=peer,
+            status=ChatMember.Status.ACTIVE,
+            conversation_id__in=my_conversation_ids,
+        )
+        .select_related('conversation')
+        .first()
+    )
+    if existing:
+        return existing.conversation, False
+
+    conversation = Conversation.objects.create(
+        type=Conversation.Type.SINGLE,
+        created_by=user,
+    )
+    ChatMember.objects.bulk_create([
+        ChatMember(
+            conversation=conversation,
+            user=user,
+            role=ChatMember.Role.MEMBER,
+        ),
+        ChatMember(
+            conversation=conversation,
+            user=peer,
+            role=ChatMember.Role.MEMBER,
+        ),
+    ])
+    return conversation, True
 
 
 def register_view(request):
@@ -324,17 +366,23 @@ def friend_request_accept(request, request_id):
         status=FriendRequest.Status.PENDING,
     )
 
-    friend_request.status = FriendRequest.Status.ACCEPTED
-    friend_request.save()
+    with transaction.atomic():
+        friend_request.status = FriendRequest.Status.ACCEPTED
+        friend_request.save()
 
-    Contact.objects.get_or_create(
-        user=friend_request.sender,
-        contact=friend_request.receiver,
-    )
+        Contact.objects.get_or_create(
+            user=friend_request.sender,
+            contact=friend_request.receiver,
+        )
+        _ensure_single_conversation(
+            friend_request.sender,
+            friend_request.receiver,
+        )
 
     messages.success(
         request,
-        f'You are now contacts with {friend_request.sender.username}.',
+        f'You are now contacts with {friend_request.sender.username}. '
+        'A private conversation is ready.',
     )
     return redirect('contacts')
 
@@ -380,6 +428,20 @@ def contact_delete(request, contact_id):
         f'{other.username} has been removed from your contacts.',
     )
     return redirect('contacts')
+
+
+@login_required(login_url='login')
+def contact_chat_view(request, contact_id):
+    """Open or create a private chat with an existing contact."""
+    contact = get_object_or_404(Contact, id=contact_id)
+
+    if request.user not in (contact.user, contact.contact):
+        messages.error(request, 'You are not part of this contact.')
+        return redirect('contacts')
+
+    peer = contact.contact if contact.user == request.user else contact.user
+    conversation, _ = _ensure_single_conversation(request.user, peer)
+    return redirect(f'{reverse("index")}?conversation={conversation.id}')
 
 
 # ── Profile views ──────────────────────────────────────────────────

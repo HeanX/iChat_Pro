@@ -250,14 +250,11 @@
   </div>
 </div>
 
-<script src="{% static 'js/key_manager.js' %}"></script>
 <script>
-  // ── Key management UI ──────────────────────────────────────────
-  let _keyMgr = null;
+  // ── Key management UI (uses window.iChatKeyManager from key-manager.js) ──
 
-  function _getKeyMgr() {
-    if (!_keyMgr) _keyMgr = new KeyManager();
-    return _keyMgr;
+  function _kmgr() {
+    return window.iChatKeyManager;
   }
 
   function toggleKeyManagement() {
@@ -275,31 +272,32 @@
   }
 
   async function refreshKeyUI() {
-    const mgr = _getKeyMgr();
+    const kmgr = _kmgr();
+    const record = kmgr ? kmgr.loadCurrentRecord() : null;
     const fpEl = document.getElementById('key-fingerprint-display');
     const statusDot = document.querySelector('#key-status-badge span.w-2');
     const statusText = document.getElementById('key-status-text');
     const subtitle = document.getElementById('key-mgmt-subtitle');
+    const genBtn = document.getElementById('btn-key-generate');
     const uploadBtn = document.getElementById('btn-key-upload');
 
-    if (mgr.hasExistingKeys()) {
-      const keys = mgr.loadKeys();
-      if (keys) {
-        fpEl.textContent = keys.fingerprint;
-        subtitle.textContent = 'ECDH P-256 — keys stored locally';
-        if (statusDot) statusDot.classList.replace('bg-gray-400', 'bg-green-500');
-        statusText.textContent = 'Keys ready';
-        uploadBtn.disabled = false;
-        return;
-      }
+    if (record && record.key_fingerprint) {
+      fpEl.textContent = record.key_fingerprint;
+      subtitle.textContent = 'ECDH P-256 — keys stored locally';
+      if (statusDot) statusDot.classList.replace('bg-gray-400', 'bg-green-500');
+      statusText.textContent = record.key_version ? 'Keys synced (v' + record.key_version + ')' : 'Keys ready';
+      if (genBtn) { genBtn.disabled = false; genBtn.textContent = 'Re-initialize Keys'; }
+      if (uploadBtn) uploadBtn.disabled = false;
+      return;
     }
 
     // No keys
     fpEl.textContent = '—';
-    subtitle.textContent = 'No key pair found. Generate one to enable E2EE.';
+    subtitle.textContent = 'No key pair found. Initialize one to enable E2EE.';
     if (statusDot) statusDot.classList.replace('bg-green-500', 'bg-gray-400');
     statusText.textContent = 'No keys';
-    uploadBtn.disabled = true;
+    if (genBtn) { genBtn.disabled = false; genBtn.textContent = 'Initialize Keys'; }
+    if (uploadBtn) uploadBtn.disabled = true;
   }
 
   function _showKeyMsg(text, isError = false) {
@@ -329,17 +327,19 @@
   async function keyMgrGenerate() {
     const btn = document.getElementById('btn-key-generate');
     btn.disabled = true;
-    btn.textContent = 'Generating…';
+    btn.textContent = 'Initializing…';
     try {
-      const mgr = _getKeyMgr();
-      const { fingerprint } = await mgr.generateKeyPair();
-      _showKeyMsg('ECDH P-256 key pair generated successfully.');
+      const kmgr = _kmgr();
+      const record = await kmgr.initialize(); // generates + saves + uploads
+      _showKeyMsg('ECDH P-256 keys initialized and synced. Version: ' + record.key_version);
       refreshKeyUI();
+      // Also refresh security status panel if visible
+      if (typeof refreshSecurityStatus === 'function') refreshSecurityStatus();
     } catch (err) {
-      _showKeyMsg('Generation failed: ' + err.message, true);
+      _showKeyMsg('Initialization failed: ' + err.message, true);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Generate Keys';
+      btn.textContent = 'Initialize Keys';
     }
   }
 
@@ -348,9 +348,10 @@
     btn.disabled = true;
     btn.textContent = 'Uploading…';
     try {
-      const mgr = _getKeyMgr();
-      await mgr.uploadPublicKey();
-      _showKeyMsg('Public key uploaded to server.');
+      const kmgr = _kmgr();
+      await kmgr.initialize(); // idempotent: re-uploads if keys exist locally
+      _showKeyMsg('Public key re-synced to server.');
+      refreshKeyUI();
     } catch (err) {
       _showKeyMsg('Upload failed: ' + err.message, true);
     } finally {
@@ -361,12 +362,12 @@
 
   function keyMgrExport() {
     try {
-      const mgr = _getKeyMgr();
-      if (!mgr.hasExistingKeys()) {
-        _showKeyMsg('No keys to export. Generate them first.', true);
+      const kmgr = _kmgr();
+      if (!kmgr || !kmgr.loadCurrentRecord()) {
+        _showKeyMsg('No keys to export. Initialize them first.', true);
         return;
       }
-      mgr.exportBackup();
+      kmgr.exportBackup();
       _showKeyMsg('Backup downloaded. Keep it safe!');
     } catch (err) {
       _showKeyMsg('Export failed: ' + err.message, true);
@@ -377,10 +378,11 @@
     const file = event.target.files[0];
     if (!file) return;
     try {
-      const mgr = _getKeyMgr();
-      const result = await mgr.importBackup(file);
-      _showKeyMsg('Keys restored! Fingerprint: ' + result.fingerprint.slice(0, 16) + '…');
+      const kmgr = _kmgr();
+      const record = await kmgr.importBackup(file);
+      _showKeyMsg('Keys restored! Fingerprint: ' + record.key_fingerprint.slice(0, 16) + '…');
       refreshKeyUI();
+      if (typeof refreshSecurityStatus === 'function') refreshSecurityStatus();
     } catch (err) {
       _showKeyMsg('Import failed: ' + err.message, true);
     } finally {
@@ -408,8 +410,9 @@
     const serverEl = document.getElementById('sec-server-status');
 
     // Check local keys
-    const mgr = _getKeyMgr();
-    if (mgr.hasExistingKeys()) {
+    const kmgr = _kmgr();
+    const record = kmgr ? kmgr.loadCurrentRecord() : null;
+    if (record && record.key_fingerprint) {
       keysEl.textContent = '✓';
       keysEl.classList.replace('text-gray-400', 'text-green-500');
     } else {

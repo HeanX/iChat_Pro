@@ -458,7 +458,7 @@ sent → delivered → read
 
 ## 10. 断线重连与幂等
 
-1. 客户端使用指数退避重连，现有 `static/js/websocket.js` 模板已经具备基础能力。
+1. 客户端使用指数退避重连，`static/js/chat.js` 中的 `connectWebSocket()` 实现基础重连机制。
 2. 重连成功后等待 `connection.ready`，再恢复待发送消息。
 3. 每条消息必须携带 `client_message_id`。
 4. 服务端应对“当前发送者 + `client_message_id`”建立唯一约束或等价幂等校验。
@@ -470,7 +470,7 @@ sent → delivered → read
 
 ## 11. 加密参数约定
 
-一期浏览器端沿用现有 `static/js/websocket.js` 和 `static/js/chat.js` 中的算法组合，但 T14 接入真实消息时需要将 HKDF 上下文从简单会话 ID 调整为以下规则：
+一期浏览器端使用 `static/js/private-chat-e2ee.js`（私聊）、`static/js/group-chat-e2ee.js`（群聊）和 `static/js/key-manager.js`（身份密钥管理）实现端到端加密，使用以下算法组合：
 
 | 参数 | 一期约定 |
 | --- | --- |

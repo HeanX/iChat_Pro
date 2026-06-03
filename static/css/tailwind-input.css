@@ -1,0 +1,10 @@
+/* tailwind-input.css — entry point for Tailwind CLI production build.
+   Run: npm run build:css    (one-shot, minified)
+        npm run watch:css    (dev watch mode)
+
+   In development, base.html uses the Tailwind Play CDN (instant class changes).
+   In production, base.html loads the compiled tailwind.css.
+   See tailwind.config.js for content paths and theme customizations.
+*/
+
+@import "tailwindcss";

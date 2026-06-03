@@ -1,0 +1,14 @@
+{
+  "name": "ichat-pro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "iChat Pro — End-to-End Encrypted Secure Messaging",
+  "scripts": {
+    "build:css": "npx @tailwindcss/cli -i ./static/css/tailwind-input.css -o ./static/css/tailwind.css --minify",
+    "watch:css": "npx @tailwindcss/cli -i ./static/css/tailwind-input.css -o ./static/css/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "tailwindcss": "^4.1.0"
+  }
+}

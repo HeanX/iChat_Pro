@@ -49,6 +49,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'ichat_pro.csp_middleware.CSPMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -70,6 +71,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'ichat_pro.context_processors.tailwind',
             ],
         },
     },
@@ -138,4 +140,37 @@ LOGIN_URL = 'login'
 # Media files (user uploads like avatars)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+
+# Tailwind CSS: use Play CDN in dev, static build in production
+TAILWIND_CDN = DEBUG
+
+# =============================================================================
+# Production security settings (T25)
+# These are ONLY active when DEBUG=False.
+# See docs/iChat Pro 部署安全说明.md for full deployment guide.
+# =============================================================================
+if not DEBUG:
+    # Force HTTPS
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+    # Cookie security
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+
+    # Prevent MIME sniffing
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+
+    # Prevent clickjacking (already in middleware, but belt-and-suspenders)
+    X_FRAME_OPTIONS = 'DENY'
+
+    # Referrer policy
+    SECURE_REFERRER_POLICY = 'same-origin'
+
+    # Also enable Django's built-in security checks
+    SILENCED_SYSTEM_CHECKS = []
 

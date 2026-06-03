@@ -146,6 +146,9 @@
 {% endblock %}
 
 {% block extra_js %}
+<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}" data-current-user-id="{{ request.user.pk }}"></script>
+<script src="{% static 'js/private-chat-e2ee.js' %}"></script>
+<script src="{% static 'js/group-chat-e2ee.js' %}"></script>
 <script>
   // Overrides the back button in settings_panel.html to redirect back to the chat page
   function hideSettingsPanel() {

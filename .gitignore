@@ -34,5 +34,8 @@ Thumbs.db
 
 # Electron desktop
 desktop/node_modules/
+
+# Node / npm (Tailwind CSS build)
+node_modules/
 desktop/out/
 desktop/dist/

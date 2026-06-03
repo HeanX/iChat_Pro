@@ -694,6 +694,64 @@ class ContactViewTests(TestCase):
             ).exists(),
         )
 
+    # ── T26: multi-field search ────────────────────────────────────
+
+    def test_search_by_nickname(self):
+        # Profile already auto-created by post_save signal — update it
+        UserProfile.objects.filter(user=self.bob).update(nickname='Bobby')
+        response = self.client.get(
+            reverse('search_users'), {'q': 'Bobby'},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data['results']), 1)
+        self.assertEqual(data['results'][0]['username'], 'bob')
+
+    def test_search_by_partial_nickname(self):
+        UserProfile.objects.filter(user=self.charlie).update(nickname='Charles')
+        response = self.client.get(
+            reverse('search_users'), {'q': 'char'},
+        )
+        data = response.json()
+        self.assertTrue(any(r['username'] == 'charlie' for r in data['results']))
+
+    def test_search_by_user_id(self):
+        response = self.client.get(
+            reverse('search_users'), {'q': str(self.bob.id)},
+        )
+        data = response.json()
+        self.assertEqual(len(data['results']), 1)
+        self.assertEqual(data['results'][0]['username'], 'bob')
+
+    def test_search_result_includes_nickname(self):
+        UserProfile.objects.filter(user=self.bob).update(nickname='Bobster')
+        response = self.client.get(
+            reverse('search_users'), {'q': 'bob'},
+        )
+        data = response.json()
+        result = data['results'][0]
+        self.assertIn('nickname', result)
+        self.assertEqual(result['nickname'], 'Bobster')
+
+    def test_send_request_by_user_id(self):
+        response = self.client.post(
+            reverse('friend_request_send'),
+            {'user_id': str(self.charlie.id)},
+        )
+        self.assertRedirects(response, self.CONTACTS_URL)
+        self.assertTrue(
+            FriendRequest.objects.filter(
+                sender=self.alice, receiver=self.charlie, status='pending',
+            ).exists(),
+        )
+
+    def test_search_by_username_still_works(self):
+        response = self.client.get(
+            reverse('search_users'), {'q': 'char'},
+        )
+        data = response.json()
+        self.assertTrue(any(r['username'] == 'charlie' for r in data['results']))
+
 
 # ─── Profile ──────────────────────────────────────────────────────────
 

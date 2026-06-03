@@ -192,19 +192,39 @@ def contact_list_view(request):
 
 @login_required(login_url='login')
 def search_users(request):
-    """Search for users (JSON endpoint for the contact modal)."""
+    """Search for users by username, nickname, or user ID (JSON endpoint)."""
     query = request.GET.get('q', '').strip()
     results = []
 
     if query:
-        users = User.objects.filter(
-            username__icontains=query,
-        ).exclude(
-            id=request.user.id,
+        current_user = request.user
+
+        # Match by exact user ID
+        id_matches = User.objects.none()
+        if query.isdigit():
+            id_matches = User.objects.filter(id=int(query))
+
+        # Match by username or nickname
+        name_matches = User.objects.filter(
+            models.Q(username__icontains=query)
+            | models.Q(profile__nickname__icontains=query),
+        )
+
+        # Combine, exclude self, deduplicate, limit
+        users = (
+            (id_matches | name_matches)
+            .exclude(id=current_user.id)
+            .distinct()
+            .select_related('profile')
         )[:20]
 
-        current_user = request.user
         for user in users:
+            # Resolve nickname (UserProfile may not exist yet)
+            try:
+                nickname = user.profile.nickname or ''
+            except UserProfile.DoesNotExist:
+                nickname = ''
+
             is_contact = Contact.objects.filter(
                 (models.Q(user=current_user) & models.Q(contact=user))
                 | (models.Q(user=user) & models.Q(contact=current_user)),
@@ -225,6 +245,7 @@ def search_users(request):
             results.append({
                 'id': user.id,
                 'username': user.username,
+                'nickname': nickname,
                 'is_contact': is_contact,
                 'has_pending_out': has_pending_out,
                 'has_pending_in': has_pending_in,
@@ -236,14 +257,18 @@ def search_users(request):
 @login_required(login_url='login')
 @require_http_methods(['POST'])
 def friend_request_send(request):
-    """Send a friend request to another user."""
+    """Send a friend request to another user (by username or user ID)."""
     username = request.POST.get('username', '').strip()
+    user_id = request.POST.get('user_id', '').strip()
 
-    if not username:
-        messages.error(request, 'Please provide a username.')
+    if not username and not user_id:
+        messages.error(request, 'Please provide a username or user ID.')
         return redirect('contacts')
 
-    receiver = get_object_or_404(User, username=username)
+    if user_id and user_id.isdigit():
+        receiver = get_object_or_404(User, id=int(user_id))
+    else:
+        receiver = get_object_or_404(User, username=username)
 
     if receiver == request.user:
         messages.error(request, 'You cannot add yourself as a contact.')

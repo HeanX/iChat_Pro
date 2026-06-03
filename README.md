@@ -114,3 +114,61 @@ This project now contains two Django apps:
 
 - `accounts`
 - `chat`
+
+## Desktop Client (Electron)
+
+iChat Pro includes a lightweight Electron wrapper for Phase 1 desktop delivery.
+The desktop app loads the local Django web client and can either start Django
+for you or connect to an already running backend.
+
+### Prerequisites
+
+- Node.js 18+ and npm
+- Python virtual environment with the Django dependencies installed
+
+### Quick Start
+
+```powershell
+cd desktop
+npm install
+npm start
+```
+
+By default, Electron starts Django with:
+
+```text
+python manage.py runserver 127.0.0.1:8000
+```
+
+The launcher prefers the project virtual environment when present:
+
+- Windows: `.venv\Scripts\python.exe`
+- macOS/Linux: `.venv/bin/python`
+
+### Development Mode
+
+```powershell
+cd desktop
+npm run dev
+```
+
+This opens Chromium DevTools next to the app window.
+
+### Use an Existing Django Server
+
+If Django is already running, skip Electron's backend launcher:
+
+```powershell
+$env:ICHAT_SKIP_DJANGO = "1"
+cd desktop
+npm start
+```
+
+### Configuration
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ICHAT_HOST` | `127.0.0.1` | Django host loaded by Electron |
+| `ICHAT_PORT` | `8000` | Django port loaded by Electron |
+| `ICHAT_PYTHON` | auto-detect | Python executable used to start Django |
+| `ICHAT_SKIP_DJANGO` | unset | Set to `1` to connect to an already running backend |

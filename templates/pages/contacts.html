@@ -10,11 +10,14 @@
       <a href="{% url 'index' %}" class="p-2 rounded-full hover:bg-bgSearch text-textMain transition-colors" title="Back to chat">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </a>
-      <h1 class="text-xl font-bold">Contacts</h1>
+      <div>
+        <h1 class="text-xl font-bold">Contacts</h1>
+        <p class="text-xs text-textSecondary">Manage friend requests and private-chat contacts</p>
+      </div>
     </div>
   </header>
 
-  <div class="max-w-2xl mx-auto px-4 py-6 space-y-8">
+  <main class="max-w-2xl mx-auto px-4 py-6 space-y-8">
     {% if messages %}
     <div class="space-y-2">
       {% for message in messages %}
@@ -28,7 +31,6 @@
     </div>
     {% endif %}
 
-    <!-- Add Contact with Live Search -->
     <section>
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide">Add Contact</h2>
@@ -36,6 +38,7 @@
       <div class="relative">
         <form method="POST" action="{% url 'friend_request_send' %}" class="flex space-x-3" autocomplete="off">
           {% csrf_token %}
+          <input type="hidden" id="contact-search-user-id" name="user_id">
           <div class="flex-1 relative">
             <input
               type="text"
@@ -44,7 +47,7 @@
               placeholder="Search by username, nickname, or user ID..."
               class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain placeholder-textSecondary/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
               required
-              oninput="liveSearchContacts(this.value)"
+              oninput="clearSelectedUserId(); liveSearchContacts(this.value)"
               onfocus="liveSearchContacts(this.value)"
             >
             <div id="search-results-dropdown"
@@ -52,7 +55,6 @@
             </div>
           </div>
           <button type="submit"
-            id="add-contact-btn"
             class="px-5 py-2.5 bg-brand-light dark:bg-brand-dark text-white text-sm font-semibold rounded-custom-md hover:opacity-90 transition-opacity flex items-center space-x-2">
             <i data-lucide="user-plus" class="w-4 h-4"></i>
             <span>Add</span>
@@ -61,7 +63,6 @@
       </div>
     </section>
 
-    <!-- Incoming Friend Requests -->
     {% if incoming_requests %}
     <section>
       <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide mb-3">
@@ -95,7 +96,6 @@
     </section>
     {% endif %}
 
-    <!-- Outgoing Requests -->
     {% if outgoing_requests %}
     <section>
       <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide mb-3">
@@ -109,7 +109,7 @@
           </div>
           <div>
             <p class="text-sm font-semibold">{{ req.receiver.username }}</p>
-            <p class="text-xs text-textSecondary">Request pending…</p>
+            <p class="text-xs text-textSecondary">Request pending...</p>
           </div>
         </div>
         {% endfor %}
@@ -117,7 +117,6 @@
     </section>
     {% endif %}
 
-    <!-- My Contacts -->
     <section>
       <h2 class="text-sm font-semibold text-textSecondary uppercase tracking-wide mb-3">
         My Contacts ({{ contacts|length }})
@@ -126,25 +125,31 @@
       <div class="space-y-2">
         {% for entry in contacts %}
         <div class="flex items-center justify-between p-4 bg-bgSidebar border border-borderColor rounded-custom-md">
-          <div class="flex items-center space-x-3">
-            {% if entry.user == request.user %}
-            <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
-              {{ entry.contact.username|slice:":1"|upper }}
+          {% if entry.user == request.user %}
+            {% with other=entry.contact %}
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
+                {{ other.username|slice:":1"|upper }}
+              </div>
+              <div>
+                <p class="text-sm font-semibold">{{ other.username }}</p>
+                <p class="text-xs text-textSecondary">Contact since {{ entry.created_at|date:"M d, Y" }}</p>
+              </div>
             </div>
-            <div>
-              <p class="text-sm font-semibold">{{ entry.contact.username }}</p>
-              <p class="text-xs text-textSecondary">Contact since {{ entry.created_at|date:"M d, Y" }}</p>
+            {% endwith %}
+          {% else %}
+            {% with other=entry.user %}
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
+                {{ other.username|slice:":1"|upper }}
+              </div>
+              <div>
+                <p class="text-sm font-semibold">{{ other.username }}</p>
+                <p class="text-xs text-textSecondary">Contact since {{ entry.created_at|date:"M d, Y" }}</p>
+              </div>
             </div>
-            {% else %}
-            <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
-              {{ entry.user.username|slice:":1"|upper }}
-            </div>
-            <div>
-              <p class="text-sm font-semibold">{{ entry.user.username }}</p>
-              <p class="text-xs text-textSecondary">Contact since {{ entry.created_at|date:"M d, Y" }}</p>
-            </div>
-            {% endif %}
-          </div>
+            {% endwith %}
+          {% endif %}
           <form method="POST" action="{% url 'contact_delete' entry.id %}">
             {% csrf_token %}
             <button type="submit" class="px-3 py-1.5 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 text-xs font-semibold rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">Remove</button>
@@ -160,30 +165,51 @@
       </div>
       {% endif %}
     </section>
-  </div>
+  </main>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-  let _searchTimer = null;
+  let searchTimer = null;
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function clearSelectedUserId() {
+    document.getElementById('contact-search-user-id').value = '';
+  }
 
   async function liveSearchContacts(query) {
-    clearTimeout(_searchTimer);
+    clearTimeout(searchTimer);
     const dropdown = document.getElementById('search-results-dropdown');
     if (!query || query.trim().length < 2) {
       dropdown.classList.add('hidden');
       return;
     }
-    _searchTimer = setTimeout(async () => {
+    searchTimer = setTimeout(async () => {
       try {
         const resp = await fetch(`/contacts/search/?q=${encodeURIComponent(query.trim())}`);
+        if (!resp.ok) throw new Error(`Search failed (${resp.status})`);
         const data = await resp.json();
         renderSearchResults(data.results);
       } catch (err) {
-        console.error('Search failed:', err);
+        dropdown.innerHTML = '<div class="p-3 text-xs text-red-500 text-center">Search failed</div>';
+        dropdown.classList.remove('hidden');
       }
-    }, 300);
+    }, 250);
+  }
+
+  function selectContactSearchResult(element) {
+    document.getElementById('contact-search-input').value = element.dataset.username || '';
+    document.getElementById('contact-search-user-id').value = element.dataset.userId || '';
+    document.getElementById('search-results-dropdown').classList.add('hidden');
   }
 
   function renderSearchResults(results) {
@@ -193,40 +219,46 @@
       dropdown.classList.remove('hidden');
       return;
     }
-    dropdown.innerHTML = results.map(r => {
+
+    dropdown.innerHTML = results.map((result) => {
       let badge = '';
-      if (r.is_contact) {
+      if (result.is_contact) {
         badge = '<span class="text-[10px] px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">Contact</span>';
-      } else if (r.has_pending_out) {
+      } else if (result.has_pending_out) {
         badge = '<span class="text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 font-medium">Requested</span>';
-      } else if (r.has_pending_in) {
+      } else if (result.has_pending_in) {
         badge = '<span class="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">Wants to add you</span>';
       }
-      const displayName = r.nickname ? `${r.nickname} (@${r.username})` : r.username;
-      const subInfo = r.nickname ? `<span class="text-[10px] text-textSecondary">ID: ${r.id}</span>` : `<span class="text-[10px] text-textSecondary">ID: ${r.id}</span>`;
+
+      const username = escapeHtml(result.username);
+      const nickname = escapeHtml(result.nickname);
+      const displayName = nickname ? `${nickname} (@${username})` : username;
+      const userId = escapeHtml(result.id);
+      const initial = username.charAt(0).toUpperCase();
+
       return `
-        <div class="flex items-center justify-between px-4 py-3 hover:bg-bgSearch transition-colors cursor-pointer"
-          onclick="document.getElementById('contact-search-input').value='${r.username}'; dropdown.classList.add('hidden');">
+        <button type="button" class="w-full flex items-center justify-between px-4 py-3 hover:bg-bgSearch transition-colors text-left"
+          data-user-id="${userId}" data-username="${username}" onclick="selectContactSearchResult(this)">
           <div class="flex items-center space-x-3">
             <div class="w-8 h-8 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-xs">
-              ${r.username.charAt(0).toUpperCase()}
+              ${initial}
             </div>
             <div class="flex flex-col">
               <span class="text-sm font-medium text-textMain">${displayName}</span>
-              ${subInfo}
+              <span class="text-[10px] text-textSecondary">ID: ${userId}</span>
             </div>
-            ${badge}
           </div>
-        </div>
+          ${badge}
+        </button>
       `;
     }).join('');
     dropdown.classList.remove('hidden');
   }
 
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', (event) => {
     const dropdown = document.getElementById('search-results-dropdown');
     const input = document.getElementById('contact-search-input');
-    if (dropdown && input && !input.contains(e.target) && !dropdown.contains(e.target)) {
+    if (dropdown && input && !input.contains(event.target) && !dropdown.contains(event.target)) {
       dropdown.classList.add('hidden');
     }
   });

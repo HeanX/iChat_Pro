@@ -86,13 +86,21 @@ def login_view(request):
         return redirect('index')
 
     if request.method == 'POST':
-        form = AuthenticationForm(request, data=request.POST)
-        username = request.POST.get('username', '')
+        post_data = request.POST.copy()
+        username = post_data.get('username', '').strip()
         password = request.POST.get('password', '')
+        target = (
+            User.objects.filter(username=username).first()
+            or User.objects.filter(email__iexact=username).first()
+        )
+        if target is not None:
+            post_data['username'] = target.get_username()
+
+        form = AuthenticationForm(request, data=post_data)
 
         if form.is_valid():
             user = authenticate(
-                request, username=username, password=password,
+                request, username=post_data.get('username', ''), password=password,
             )
 
             if user is not None:
@@ -104,8 +112,7 @@ def login_view(request):
                 return redirect('index')
 
             # credentials were valid format but authenticate returned None
-            try:
-                target = User.objects.get(username=username)
+            if target is not None:
                 if not target.is_active:
                     messages.error(
                         request,
@@ -117,7 +124,7 @@ def login_view(request):
                         request,
                         'Invalid password. Please try again.',
                     )
-            except User.DoesNotExist:
+            else:
                 messages.error(
                     request,
                     'No account found with that username. '
@@ -126,8 +133,7 @@ def login_view(request):
         else:
             # Distinguish between missing fields and bad credentials
             if username and password:
-                try:
-                    target = User.objects.get(username=username)
+                if target is not None:
                     if not target.is_active:
                         messages.error(
                             request,
@@ -139,7 +145,7 @@ def login_view(request):
                             request,
                             'Invalid password. Please try again.',
                         )
-                except User.DoesNotExist:
+                else:
                     messages.error(
                         request,
                         'No account found with that username. '

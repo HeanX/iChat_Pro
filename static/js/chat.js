@@ -837,24 +837,55 @@ async function handleAddContact(username) {
   try {
     const resp = await apiFetch("/contacts/search/?q=" + encodeURIComponent(username));
     const results = resp.results || [];
-    const target = results.find(r => r.username === username);
+    const target = results.find(r => r.username === username || String(r.id) === username);
     if (!target) {
       window.showToast(currentLanguage === "zh" ? "未找到该用户" : "User not found");
       return;
     }
-    const data = await apiFetch("/api/conversations/create/", {
-      method: "POST",
-      body: JSON.stringify({ peer_id: target.user_id || target.id })
-    });
-    logToCryptoConsole("[Contact] Conversation ready: " + data.conversation_id);
-    await fetchConversations();
-    if (data.conversation_id) {
-      selectChat(data.conversation_id.toString());
+
+    if (target.is_contact) {
+      const data = await apiFetch("/api/conversations/create/", {
+        method: "POST",
+        body: JSON.stringify({ peer_id: target.user_id || target.id })
+      });
+      logToCryptoConsole("[Contact] Conversation ready: " + data.conversation_id);
+      await fetchConversations();
+      if (data.conversation_id) {
+        selectChat(data.conversation_id.toString());
+      }
+      window.showToast(currentLanguage === "zh" ? "会话已创建" : "Conversation ready");
+      return;
     }
-    window.showToast(currentLanguage === "zh" ? "会话已创建" : "Conversation ready");
+
+    if (target.has_pending_out) {
+      window.showToast(currentLanguage === "zh" ? "好友请求已发送" : "Friend request already sent");
+      return;
+    }
+
+    if (target.has_pending_in) {
+      window.location.href = "/contacts/";
+      return;
+    }
+
+    const formData = new URLSearchParams();
+    formData.set("username", target.username);
+    formData.set("user_id", String(target.id));
+    const requestResp = await fetch("/contacts/request/send/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": getCookie("csrftoken")
+      },
+      body: formData.toString()
+    });
+    if (!requestResp.ok) {
+      throw new Error("Friend request failed (" + requestResp.status + ")");
+    }
+    window.showToast(currentLanguage === "zh" ? "好友请求已发送" : "Friend request sent");
   } catch (err) {
     console.error("Add contact failed:", err);
     logToCryptoConsole("[Contact Error] " + err.message);
+    window.showToast(currentLanguage === "zh" ? "添加联系人失败" : "Could not add contact");
   }
 }
 

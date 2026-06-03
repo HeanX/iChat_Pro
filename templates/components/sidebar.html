@@ -93,10 +93,10 @@
                 </button>
                 <div class="h-px bg-borderColor/50 my-1"></div>
                 <!-- Sign Out -->
-                <button onclick="showLogoutConfirmModal(event)" class="menu-item-custom danger">
+                <a href="{% url 'logout' %}" class="menu-item-custom danger">
                   <i data-lucide="log-out"></i>
                   <span data-i18n="menu_logout">Sign Out</span>
-                </button>
+                </a>
               </div>
             </div>
             

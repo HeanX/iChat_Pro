@@ -355,10 +355,20 @@ class LoginViewTests(TestCase):
         response = self.client.get(self.LOGIN_URL)
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'pages/login.html')
+        self.assertContains(response, 'action="/login/"')
+        self.assertContains(response, 'placeholder="Enter your password"')
+        self.assertContains(response, 'href="/register/"')
 
     def test_login_with_valid_credentials(self):
         response = self.client.post(self.LOGIN_URL, {
             'username': 'alice',
+            'password': 'correctpass1',
+        })
+        self.assertRedirects(response, self.INDEX_URL)
+
+    def test_login_with_email(self):
+        response = self.client.post(self.LOGIN_URL, {
+            'username': 'alice@example.com',
             'password': 'correctpass1',
         })
         self.assertRedirects(response, self.INDEX_URL)
@@ -431,6 +441,16 @@ class LogoutViewTests(TestCase):
     def test_logout_redirects_to_login(self):
         response = self.client.post(self.LOGOUT_URL)
         self.assertRedirects(response, self.LOGIN_URL)
+
+    def test_logout_link_get_redirects_to_login(self):
+        response = self.client.get(self.LOGOUT_URL)
+        self.assertRedirects(response, self.LOGIN_URL)
+
+    def test_chat_shell_exposes_contacts_and_logout_links(self):
+        response = self.client.get(reverse('index'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/contacts/"')
+        self.assertContains(response, 'href="/logout/"')
 
     def test_logout_clears_session(self):
         self.client.post(self.LOGOUT_URL)
@@ -510,10 +530,19 @@ class ContactViewTests(TestCase):
         response = self.client.get(self.CONTACTS_URL)
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'pages/contacts.html')
+        self.assertContains(response, 'action="/contacts/request/send/"')
+        self.assertContains(response, 'id="contact-search-user-id"')
+        self.assertContains(response, 'My Contacts')
 
     def test_contacts_page_shows_no_contacts_initially(self):
         response = self.client.get(self.CONTACTS_URL)
         self.assertContains(response, 'No contacts yet')
+
+    def test_contacts_page_shows_outgoing_request_without_broken_markup(self):
+        FriendRequest.objects.create(sender=self.alice, receiver=self.bob)
+        response = self.client.get(self.CONTACTS_URL)
+        self.assertContains(response, 'Request pending...')
+        self.assertNotContains(response, 'Request pending鈥')
 
     def test_send_friend_request(self):
         response = self.client.post(

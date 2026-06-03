@@ -8,14 +8,15 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
+from chat.models import Conversation, ConversationMember
+
 from .models import (
     Contact,
     FriendRequest,
-    Group,
-    GroupMember,
     UserProfile,
     UserPublicKey,
 )
+# Group & GroupMember consolidated into chat.Conversation (T22)
 
 
 # ─── E2EE multi-version public-key API ─────────────────────────────────
@@ -734,38 +735,54 @@ class ProfileEditTests(TestCase):
 
 
 class GroupModelTests(TestCase):
-    """Test Group and GroupMember models."""
+    """Test chat.Conversation and ConversationMember as canonical group models (T22)."""
 
     @classmethod
     def setUpTestData(cls):
         cls.alice = User.objects.create_user(username='alice', password='p')
         cls.bob = User.objects.create_user(username='bob', password='p')
 
-    def test_create_group(self):
-        group = Group.objects.create(name='Test', creator=self.alice)
-        self.assertEqual(group.member_count, 0)
+    def test_create_group_conversation(self):
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Test', created_by=self.alice,
+        )
+        self.assertEqual(conv.type, Conversation.Type.GROUP)
+        self.assertEqual(conv.name, 'Test')
+        self.assertEqual(conv.members.count(), 0)
 
     def test_add_member(self):
-        group = Group.objects.create(name='G1', creator=self.alice)
-        gm = GroupMember.objects.create(
-            group=group, user=self.bob, role=GroupMember.Role.MEMBER,
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='G1', created_by=self.alice,
         )
-        self.assertEqual(group.member_count, 1)
-        self.assertIn(gm, group.members.all())
+        cm = ConversationMember.objects.create(
+            conversation=conv, user=self.bob, role=ConversationMember.Role.MEMBER,
+        )
+        self.assertEqual(conv.members.count(), 1)
+        self.assertIn(cm, conv.members.all())
 
     def test_unique_member_constraint(self):
-        group = Group.objects.create(name='G2', creator=self.alice)
-        GroupMember.objects.create(group=group, user=self.bob)
-        with self.assertRaises(Exception):
-            GroupMember.objects.create(group=group, user=self.bob)
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='G2', created_by=self.alice,
+        )
+        ConversationMember.objects.create(
+            conversation=conv, user=self.bob,
+        )
+        from django.db import IntegrityError
+        with self.assertRaises(IntegrityError):
+            ConversationMember.objects.create(
+                conversation=conv, user=self.bob,
+            )
 
     def test_group_str(self):
-        group = Group.objects.create(name='MyGroup', creator=self.alice)
-        self.assertEqual(str(group), 'MyGroup')
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='MyGroup', created_by=self.alice,
+        )
+        expected = f'Conversation #{conv.id} (Group Chat)'
+        self.assertEqual(str(conv), expected)
 
 
 class GroupViewTests(TestCase):
-    """Test group CRUD views."""
+    """Test group CRUD views using chat.Conversation (T22)."""
 
     GROUPS_URL = reverse('groups')
 
@@ -790,78 +807,95 @@ class GroupViewTests(TestCase):
 
     def test_create_group(self):
         self.client.post(reverse('group_create'), {'name': 'Alpha'})
-        self.assertTrue(Group.objects.filter(name='Alpha').exists())
-        group = Group.objects.get(name='Alpha')
         self.assertTrue(
-            GroupMember.objects.filter(
-                group=group, user=self.alice, role='admin',
+            Conversation.objects.filter(
+                name='Alpha', type=Conversation.Type.GROUP,
+            ).exists(),
+        )
+        conv = Conversation.objects.get(name='Alpha', type=Conversation.Type.GROUP)
+        self.assertTrue(
+            ConversationMember.objects.filter(
+                conversation=conv, user=self.alice, role='owner',
             ).exists(),
         )
 
     def test_create_group_empty_name(self):
         self.client.post(reverse('group_create'), {'name': ''})
-        self.assertFalse(Group.objects.exists())
+        self.assertFalse(
+            Conversation.objects.filter(type=Conversation.Type.GROUP).exists(),
+        )
 
     def test_group_detail_loads(self):
-        group = Group.objects.create(name='Beta', creator=self.alice)
-        GroupMember.objects.create(
-            group=group, user=self.alice, role=GroupMember.Role.ADMIN,
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Beta', created_by=self.alice,
+        )
+        ConversationMember.objects.create(
+            conversation=conv, user=self.alice, role=ConversationMember.Role.OWNER,
         )
         response = self.client.get(
-            reverse('group_detail', args=[group.id]),
+            reverse('group_detail', args=[conv.id]),
         )
         self.assertEqual(response.status_code, 200)
 
     def test_group_detail_redirects_non_member(self):
-        group = Group.objects.create(name='Secret', creator=self.bob)
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Secret', created_by=self.bob,
+        )
         response = self.client.get(
-            reverse('group_detail', args=[group.id]),
+            reverse('group_detail', args=[conv.id]),
         )
         self.assertRedirects(response, self.GROUPS_URL)
 
     def test_add_member_to_group(self):
-        group = Group.objects.create(name='Gamma', creator=self.alice)
-        GroupMember.objects.create(
-            group=group, user=self.alice, role=GroupMember.Role.ADMIN,
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Gamma', created_by=self.alice,
+        )
+        ConversationMember.objects.create(
+            conversation=conv, user=self.alice, role=ConversationMember.Role.OWNER,
         )
         response = self.client.post(
-            reverse('group_add_member', args=[group.id]),
+            reverse('group_add_member', args=[conv.id]),
             {'username': 'bob'},
         )
         self.assertRedirects(
-            response, reverse('group_detail', args=[group.id]),
+            response, reverse('group_detail', args=[conv.id]),
         )
         self.assertTrue(
-            GroupMember.objects.filter(
-                group=group, user=self.bob,
+            ConversationMember.objects.filter(
+                conversation=conv, user=self.bob,
             ).exists(),
         )
 
     def test_add_non_contact_to_group(self):
         stranger = User.objects.create_user(username='stranger', password='x')
-        group = Group.objects.create(name='Delta', creator=self.alice)
-        GroupMember.objects.create(
-            group=group, user=self.alice, role=GroupMember.Role.ADMIN,
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Delta', created_by=self.alice,
+        )
+        ConversationMember.objects.create(
+            conversation=conv, user=self.alice, role=ConversationMember.Role.OWNER,
         )
         response = self.client.post(
-            reverse('group_add_member', args=[group.id]),
+            reverse('group_add_member', args=[conv.id]),
             {'username': 'stranger'},
         )
         self.assertFalse(
-            GroupMember.objects.filter(
-                group=group, user=stranger,
+            ConversationMember.objects.filter(
+                conversation=conv, user=stranger,
             ).exists(),
         )
 
     def test_leave_group(self):
-        group = Group.objects.create(name='Epsilon', creator=self.alice)
-        GroupMember.objects.create(group=group, user=self.alice)
+        conv = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name='Epsilon', created_by=self.alice,
+        )
+        ConversationMember.objects.create(
+            conversation=conv, user=self.alice,
+        )
         response = self.client.post(
-            reverse('group_leave', args=[group.id]),
+            reverse('group_leave', args=[conv.id]),
         )
         self.assertRedirects(response, self.GROUPS_URL)
-        self.assertFalse(
-            GroupMember.objects.filter(
-                group=group, user=self.alice,
-            ).exists(),
+        membership = ConversationMember.objects.get(
+            conversation=conv, user=self.alice,
         )
+        self.assertEqual(membership.status, ConversationMember.Status.LEFT)

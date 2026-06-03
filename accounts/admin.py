@@ -3,11 +3,10 @@ from django.contrib import admin
 from .models import (
     Contact,
     FriendRequest,
-    Group,
-    GroupMember,
     UserProfile,
     UserPublicKey,
 )
+# Group & GroupMember consolidated into chat.Conversation (T22)
 
 
 @admin.register(UserProfile)
@@ -36,19 +35,6 @@ class UserPublicKeyAdmin(admin.ModelAdmin):
     list_filter = ('algorithm', 'is_active')
     search_fields = ('user__username', 'key_fingerprint')
     readonly_fields = ('created_at', 'updated_at')
-
-
-@admin.register(Group)
-class GroupAdmin(admin.ModelAdmin):
-    list_display = ('name', 'creator', 'member_count', 'created_at')
-    search_fields = ('name', 'creator__username')
-
-
-@admin.register(GroupMember)
-class GroupMemberAdmin(admin.ModelAdmin):
-    list_display = ('group', 'user', 'role', 'joined_at')
-    list_filter = ('role',)
-    search_fields = ('group__name', 'user__username')
 
 
 @admin.register(Contact)

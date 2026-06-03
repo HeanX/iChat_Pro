@@ -73,7 +73,7 @@
             </div>
             <div>
               <p class="text-sm font-semibold text-textMain">{{ group.name }}</p>
-              <p class="text-xs text-textSecondary">{{ group.member_count }} member{{ group.member_count|pluralize }} · Created {{ group.created_at|date:"M d, Y" }}</p>
+              <p class="text-xs text-textSecondary">{{ group.members.count }} member{{ group.members.count|pluralize }} · Created {{ group.created_at|date:"M d, Y" }}</p>
             </div>
           </div>
           <i data-lucide="chevron-right" class="w-5 h-5 text-textSecondary"></i>

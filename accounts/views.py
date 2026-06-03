@@ -11,14 +11,15 @@ from django.contrib.auth.models import User
 from django.db import models, transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
+
+from chat.models import Conversation, ConversationMember as ChatMember
 
 from .forms import ProfileForm, RegistrationForm
 from .models import (
     Contact,
     FriendRequest,
-    Group,
-    GroupMember,
     UserProfile,
     UserPublicKey,
 )
@@ -376,17 +377,19 @@ def profile_edit_view(request):
     })
 
 
-# ── Group views ────────────────────────────────────────────────────
+# ── Group views (consolidated to chat.Conversation — T22) ────────────
 
 
 @login_required(login_url='login')
 def group_list_view(request):
     """Show all groups the user is a member of."""
-    memberships = GroupMember.objects.filter(
+    memberships = ChatMember.objects.filter(
         user=request.user,
-    ).select_related('group')
-    groups = [m.group for m in memberships]
-    return render(request, 'pages/groups.html', {'groups': groups})
+        conversation__type=Conversation.Type.GROUP,
+        status=ChatMember.Status.ACTIVE,
+    ).select_related('conversation')
+    conversations = [m.conversation for m in memberships]
+    return render(request, 'pages/groups.html', {'groups': conversations})
 
 
 @login_required(login_url='login')
@@ -394,24 +397,23 @@ def group_create_view(request):
     """Create a new group."""
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()
-        description = request.POST.get('description', '').strip()
 
         if not name:
             messages.error(request, 'Group name is required.')
             return redirect('groups')
 
-        group = Group.objects.create(
+        conversation = Conversation.objects.create(
+            type=Conversation.Type.GROUP,
             name=name,
-            description=description,
-            creator=request.user,
+            created_by=request.user,
         )
-        GroupMember.objects.create(
-            group=group,
+        ChatMember.objects.create(
+            conversation=conversation,
             user=request.user,
-            role=GroupMember.Role.ADMIN,
+            role=ChatMember.Role.OWNER,
         )
         messages.success(request, f'Group "{name}" created.')
-        return redirect('group_detail', group_id=group.id)
+        return redirect('group_detail', group_id=conversation.id)
 
     return render(request, 'pages/groups.html', {'show_create': True})
 
@@ -419,20 +421,20 @@ def group_create_view(request):
 @login_required(login_url='login')
 def group_detail_view(request, group_id):
     """Show group details and member list."""
-    group = get_object_or_404(Group, id=group_id)
-    members = group.members.select_related('user')
-    is_member = members.filter(user=request.user).exists()
+    conversation = get_object_or_404(
+        Conversation, id=group_id, type=Conversation.Type.GROUP,
+    )
+    members = conversation.members.select_related('user')
+    current = members.filter(user=request.user).first()
 
-    if not is_member:
+    if not current or current.status != ChatMember.Status.ACTIVE:
         messages.error(request, 'You are not a member of this group.')
         return redirect('groups')
 
     return render(request, 'pages/group_detail.html', {
-        'group': group,
+        'group': conversation,
         'members': members,
-        'is_admin': members.filter(
-            user=request.user, role=GroupMember.Role.ADMIN,
-        ).exists(),
+        'is_admin': current.role in (ChatMember.Role.OWNER, ChatMember.Role.ADMIN),
     })
 
 
@@ -440,7 +442,9 @@ def group_detail_view(request, group_id):
 @require_http_methods(['POST'])
 def group_add_member_view(request, group_id):
     """Add a contact to a group."""
-    group = get_object_or_404(Group, id=group_id)
+    conversation = get_object_or_404(
+        Conversation, id=group_id, type=Conversation.Type.GROUP,
+    )
     username = request.POST.get('username', '').strip()
     user_to_add = get_object_or_404(User, username=username)
 
@@ -450,33 +454,49 @@ def group_add_member_view(request, group_id):
     ).exists()
     if not is_contact:
         messages.error(request, f'{username} is not in your contacts.')
-        return redirect('group_detail', group_id=group.id)
+        return redirect('group_detail', group_id=conversation.id)
 
-    _, created = GroupMember.objects.get_or_create(
-        group=group, user=user_to_add,
-        defaults={'role': GroupMember.Role.MEMBER},
+    _, created = ChatMember.objects.get_or_create(
+        conversation=conversation,
+        user=user_to_add,
+        defaults={'role': ChatMember.Role.MEMBER},
     )
     if created:
-        messages.success(request, f'{username} added to {group.name}.')
+        messages.success(request, f'{username} added to {conversation.name}.')
     else:
         messages.info(request, f'{username} is already a member.')
-    return redirect('group_detail', group_id=group.id)
+    return redirect('group_detail', group_id=conversation.id)
 
 
 @login_required(login_url='login')
 @require_http_methods(['POST'])
 def group_leave_view(request, group_id):
     """Leave a group."""
-    group = get_object_or_404(Group, id=group_id)
-    membership = get_object_or_404(
-        GroupMember, group=group, user=request.user,
+    conversation = get_object_or_404(
+        Conversation, id=group_id, type=Conversation.Type.GROUP,
     )
-    membership.delete()
-    messages.info(request, f'You left "{group.name}".')
+    membership = get_object_or_404(
+        ChatMember, conversation=conversation, user=request.user,
+    )
 
-    if not group.members.exists():
-        group.delete()
+    if membership.role == ChatMember.Role.OWNER:
+        other_members = conversation.members.filter(
+            status=ChatMember.Status.ACTIVE,
+        ).exclude(user=request.user).exists()
+        if not other_members:
+            conversation.status = Conversation.Status.DELETED
+            conversation.save(update_fields=['status', 'updated_at'])
+        else:
+            messages.error(
+                request,
+                'You are the owner. Transfer ownership or delete the group before leaving.',
+            )
+            return redirect('group_detail', group_id=conversation.id)
 
+    membership.status = ChatMember.Status.LEFT
+    membership.left_at = timezone.now()
+    membership.save(update_fields=['status', 'left_at'])
+    messages.info(request, f'You left "{conversation.name}".')
     return redirect('groups')
 
 

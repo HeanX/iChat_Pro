@@ -1,6 +1,147 @@
 # iChat Pro 数据库设计规范文档
 
 > Phase 说明：Phase 1 实际交付以文本私聊、文本群聊和逐成员密文记录为核心。本文档中的加密文件、文件分块和文件密钥表属于 Phase 2 扩展设计预留，不作为 Phase 1 实际建表验收要求。
+> T32 对齐：2026-06-03 根据最终代码模型更新 ER 图，移除已删除的 `accounts.Group`/`accounts.GroupMember` 旧表。
+
+## ER 图（Phase 1 最终模型）
+
+```mermaid
+erDiagram
+    User ||--|| UserProfile : has
+    User ||--o{ UserPublicKey : uploads
+    User ||--o{ FriendRequest : sends
+    User ||--o{ FriendRequest : receives
+    User ||--o{ Contact : initiates
+    User ||--o{ Contact : is_contact_of
+    User ||--o{ ConversationMember : belongs_to
+    User ||--o{ EncryptedMessage : sends
+    User ||--o{ EncryptedMessage : receives
+    User ||--o{ GroupMessage : sends
+    User ||--o{ GroupMessageRecipient : receives
+    User ||--o{ AdminOperationLog : triggers
+
+    Conversation ||--o{ ConversationMember : has
+    Conversation ||--o{ EncryptedMessage : contains
+    Conversation ||--o{ GroupMessage : contains
+
+    GroupMessage ||--o{ GroupMessageRecipient : has
+
+    UserProfile {
+        bigint id PK
+        bigint user_id FK "1:1→User"
+        varchar nickname
+        varchar avatar
+        text bio
+        datetime created_at
+        datetime updated_at
+    }
+
+    FriendRequest {
+        bigint id PK
+        bigint sender_id FK "→User"
+        bigint receiver_id FK "→User"
+        varchar status "pending/accepted/rejected"
+        datetime created_at
+        datetime updated_at
+    }
+
+    Contact {
+        bigint id PK
+        bigint user_id FK "→User"
+        bigint contact_id FK "→User"
+        datetime created_at
+    }
+
+    UserPublicKey {
+        bigint id PK
+        bigint user_id FK "→User"
+        text identity_public_key
+        varchar key_fingerprint
+        varchar algorithm "ECDH-P256"
+        int key_version
+        bool is_active
+        datetime created_at
+    }
+
+    Conversation {
+        bigint id PK
+        varchar type "single/group"
+        varchar name
+        varchar avatar
+        bigint created_by_id FK "→User"
+        datetime last_message_at
+        int last_message_id
+        int membership_version
+        varchar status "active/archived/deleted"
+        datetime created_at
+    }
+
+    ConversationMember {
+        bigint id PK
+        bigint conversation_id FK "→Conversation"
+        bigint user_id FK "→User"
+        varchar role "owner/admin/member"
+        datetime joined_at
+        datetime left_at
+        varchar status "active/left/removed/muted"
+        int unread_count
+        int last_read_message_id
+    }
+
+    EncryptedMessage {
+        bigint id PK
+        bigint conversation_id FK "→Conversation"
+        bigint sender_id FK "→User"
+        bigint receiver_id FK "→User"
+        varchar message_type "text/system"
+        text ciphertext
+        varchar nonce
+        varchar auth_tag
+        varchar algorithm "AES-256-GCM"
+        int sender_key_version
+        int receiver_key_version
+        varchar client_message_id
+        varchar status "sent/delivered/read/deleted/failed"
+        datetime created_at
+        datetime deleted_at
+    }
+
+    GroupMessage {
+        bigint id PK
+        bigint conversation_id FK "→Conversation"
+        bigint sender_id FK "→User"
+        varchar message_type "text/system"
+        varchar client_message_id
+        varchar status "active/deleted"
+        datetime created_at
+    }
+
+    GroupMessageRecipient {
+        bigint id PK
+        bigint group_message_id FK "→GroupMessage"
+        bigint receiver_id FK "→User"
+        text ciphertext
+        varchar nonce
+        varchar auth_tag
+        varchar algorithm "AES-256-GCM"
+        int sender_key_version
+        int receiver_key_version
+        varchar status "sent/delivered/read"
+        datetime created_at
+    }
+
+    AdminOperationLog {
+        bigint id PK
+        bigint admin_id FK "→User"
+        varchar action
+        varchar target_type
+        int target_id
+        text details
+        datetime created_at
+    }
+```
+
+> ⚠️ `accounts.Group` 和 `accounts.GroupMember` 已在 T22 中合并到 `chat.Conversation` 和 `chat.ConversationMember`，不再作为独立表存在。
 
 ## 1. 设计目标
 

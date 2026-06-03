@@ -172,3 +172,23 @@ npm start
 | `ICHAT_PORT` | `8000` | Django port loaded by Electron |
 | `ICHAT_PYTHON` | auto-detect | Python executable used to start Django |
 | `ICHAT_SKIP_DJANGO` | unset | Set to `1` to connect to an already running backend |
+
+## Demo
+
+Quick demo setup with three pre-configured users:
+
+```powershell
+python demo_setup.py
+```
+
+Demo accounts after running the script:
+
+| Username | Password |
+|----------|----------|
+| `alice` | `demo1234` |
+| `bob` | `demo1234` |
+| `carol` | `demo1234` |
+
+All three are mutual contacts, ready for private and group chat testing.
+
+See [docs/iChat Pro 演示指南.md](docs/iChat%20Pro%20演示指南.md) for a full walkthrough.

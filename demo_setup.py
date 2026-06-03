@@ -28,13 +28,12 @@ for username in ("alice", "bob", "carol"):
     action = "Created" if created else "Updated"
     print(f"  {action} {username}")
 
-# 建立双向联系人 (alice <-> bob, alice <-> carol, bob <-> carol)
+# 建立单向联系人关系（生产逻辑中一条 Contact 即表示双方互为联系人）
 pairs = [("alice", "bob"), ("alice", "carol"), ("bob", "carol")]
 for u1, u2 in pairs:
-    for a_name, b_name in [(u1, u2), (u2, u1)]:
-        Contact.objects.get_or_create(
-            user=users[a_name], contact=users[b_name],
-        )
+    Contact.objects.get_or_create(
+        user=users[u1], contact=users[u2],
+    )
 
 print("\nDemo accounts ready:")
 print("  alice / demo1234")

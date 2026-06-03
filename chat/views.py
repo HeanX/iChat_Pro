@@ -563,6 +563,22 @@ def conversation_messages_view(request, conversation_id):
             status=403,
         )
 
+    # For private chats, enforce contact relationship (T29).
+    conversation = Conversation.objects.only("type").get(id=conversation_id)
+    if conversation.type == Conversation.Type.SINGLE:
+        peer_id = (
+            ConversationMember.objects
+            .filter(conversation_id=conversation_id, status=ConversationMember.Status.ACTIVE)
+            .exclude(user=request.user)
+            .values_list("user_id", flat=True)
+            .first()
+        )
+        if peer_id and not _are_contacts(request.user, peer_id):
+            return JsonResponse(
+                {"error": "Private chats are limited to contacts."},
+                status=403,
+            )
+
     page_number = request.GET.get("page", 1)
     per_page = min(int(request.GET.get("per_page", 30)), 100)
 

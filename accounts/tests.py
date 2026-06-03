@@ -305,6 +305,27 @@ class RegistrationViewTests(TestCase):
         response = self.client.post(self.REGISTER_URL, data)
         self.assertEqual(response.status_code, 200)
 
+    # ── T27: profile auto-creation ─────────────────────────────────
+
+    def test_register_creates_profile(self):
+        """Registration must create a UserProfile immediately (T27)."""
+        from .models import UserProfile
+        response = self.client.post(self.REGISTER_URL, self.VALID_DATA)
+        self.assertEqual(response.status_code, 302)
+        user = User.objects.get(username=self.VALID_DATA['username'])
+        self.assertTrue(
+            UserProfile.objects.filter(user=user).exists(),
+            'UserProfile should be created automatically on registration.',
+        )
+
+    def test_profile_signal_is_idempotent(self):
+        """Saving a user again should not create duplicate profiles."""
+        from .models import UserProfile
+        user = User.objects.create_user(username='dupcheck', password='xxx')
+        self.assertEqual(UserProfile.objects.filter(user=user).count(), 1)
+        user.save()
+        self.assertEqual(UserProfile.objects.filter(user=user).count(), 1)
+
 
 # ─── Login / Logout ───────────────────────────────────────────────────
 
@@ -703,19 +724,21 @@ class ProfileEditTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
     def test_profile_edit_creates_profile(self):
-        self.assertFalse(
+        # T27: profile is now auto-created on user creation.
+        self.assertTrue(
             UserProfile.objects.filter(user=self.alice).exists(),
         )
         self.client.post(self.PROFILE_EDIT_URL, {
             'nickname': 'Ally',
             'bio': 'Hello world',
         })
-        self.assertTrue(
-            UserProfile.objects.filter(user=self.alice).exists(),
-        )
+        profile = UserProfile.objects.get(user=self.alice)
+        self.assertEqual(profile.nickname, 'Ally')
 
     def test_profile_edit_updates_nickname(self):
-        UserProfile.objects.create(user=self.alice, nickname='Old')
+        # T27: profile is auto-created on user creation; update it.
+        self.alice.profile.nickname = 'Old'
+        self.alice.profile.save()
         self.client.post(self.PROFILE_EDIT_URL, {
             'nickname': 'NewName',
             'bio': '',

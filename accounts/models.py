@@ -1,5 +1,7 @@
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 
 class UserProfile(models.Model):
@@ -134,6 +136,16 @@ class UserPublicKey(models.Model):
     def __str__(self):
         return f'{self.user.username} key v{self.key_version}'
 
+
+
+# ── Signal: auto-create UserProfile on user creation (T27) ─────────
+
+
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
+def create_user_profile(sender, instance, created, **kwargs):
+    """Ensure every new user gets a UserProfile immediately."""
+    if created:
+        UserProfile.objects.get_or_create(user=instance)
 
 
 # Group and GroupMember have been consolidated into chat.Conversation

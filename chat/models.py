@@ -74,6 +74,12 @@ class ConversationMember(models.Model):
     )
     unread_count = models.IntegerField(default=0)
     last_read_message_id = models.IntegerField(null=True, blank=True)
+    # T19 per-user conversation state
+    is_pinned = models.BooleanField(default=False)
+    muted_until = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    hidden_at = models.DateTimeField(null=True, blank=True)
+    cleared_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -86,6 +92,8 @@ class ConversationMember(models.Model):
             models.Index(fields=["conversation_id"]),
             models.Index(fields=["user_id"]),
             models.Index(fields=["conversation_id", "status"]),
+            models.Index(fields=["user", "hidden_at", "is_pinned"]),
+            models.Index(fields=["user", "archived_at"]),
         ]
 
     def __str__(self):
@@ -108,6 +116,7 @@ class EncryptedMessage(models.Model):
         READ = "read", "Read"
         DELETED = "deleted", "Deleted"
         FAILED = "failed", "Failed"
+        RECALLED = "recalled", "Recalled"
 
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="messages"
@@ -132,9 +141,11 @@ class EncryptedMessage(models.Model):
     sender_key_version = models.IntegerField(null=True, blank=True)
     receiver_key_version = models.IntegerField(null=True, blank=True)
     client_message_id = models.CharField(max_length=64, null=True, blank=True)
+    reply_to_message_id = models.IntegerField(null=True, blank=True, help_text="ID of the message being replied to.")
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.SENT
     )
+    recalled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -172,6 +183,7 @@ class GroupMessage(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         DELETED = "deleted", "Deleted"
+        RECALLED = "recalled", "Recalled"
 
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="group_messages"
@@ -185,9 +197,11 @@ class GroupMessage(models.Model):
         max_length=20, choices=MessageType.choices, default=MessageType.TEXT
     )
     client_message_id = models.CharField(max_length=64, null=True, blank=True)
+    reply_to_message_id = models.IntegerField(null=True, blank=True, help_text="ID of the message being replied to.")
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.ACTIVE
     )
+    recalled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -215,6 +229,8 @@ class GroupMessageRecipient(models.Model):
         SENT = "sent", "Sent"
         DELIVERED = "delivered", "Delivered"
         READ = "read", "Read"
+        FAILED = "failed", "Failed"
+        RECALLED = "recalled", "Recalled"
 
     group_message = models.ForeignKey(
         GroupMessage, on_delete=models.CASCADE, related_name="recipients"
@@ -249,6 +265,86 @@ class GroupMessageRecipient(models.Model):
 
     def __str__(self):
         return f"Recipient #{self.receiver_id} for GroupMessage #{self.group_message_id}"
+
+
+# ── T21: Per-user message deletion tracking ────────────────────────
+
+
+class UserMessageDeletion(models.Model):
+    """Tracks messages a user has hidden from their own view (T20/T21).
+
+    Messages are never hard-deleted; this record filters them from the
+    requesting user's message history queries.
+    """
+
+    class MessageType(models.TextChoices):
+        PRIVATE = "private", "Private"
+        GROUP = "group", "Group"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="message_deletions",
+    )
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="user_deletions",
+    )
+    message_type = models.CharField(
+        max_length=10, choices=MessageType.choices,
+    )
+    message_id = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "message_type", "message_id"],
+                name="unique_user_message_deletion",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "message_type", "message_id"]),
+            models.Index(fields=["conversation", "user"]),
+        ]
+
+    def __str__(self):
+        return f"User #{self.user_id} deleted {self.message_type} msg #{self.message_id}"
+
+
+# ── T22: User presence / online status ──────────────────────────────
+
+
+class UserPresence(models.Model):
+    """Tracks user online status and last-seen timestamp (T22)."""
+
+    class Status(models.TextChoices):
+        ONLINE = "online", "Online"
+        AWAY = "away", "Away"
+        BUSY = "busy", "Busy"
+        OFFLINE = "offline", "Offline"
+
+    class Visibility(models.TextChoices):
+        EVERYONE = "everyone", "Everyone"
+        CONTACTS = "contacts", "Contacts Only"
+        NOBODY = "nobody", "Nobody"
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="presence",
+    )
+    is_online = models.BooleanField(default=False)
+    last_seen = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.ONLINE,
+    )
+    presence_visibility = models.CharField(
+        max_length=20, choices=Visibility.choices, default=Visibility.EVERYONE,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username} is {self.get_status_display()}"
 
 
 # ── Admin audit log (T31) ─────────────────────────────────────────

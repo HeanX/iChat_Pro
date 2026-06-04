@@ -9,6 +9,8 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.utils import timezone
+from django.views.decorators.http import require_POST, require_GET
 
 from accounts.models import Contact
 from .consumers import ChatConsumer
@@ -18,6 +20,8 @@ from .models import (
     EncryptedMessage,
     GroupMessage,
     GroupMessageRecipient,
+    UserMessageDeletion,
+    UserPresence,
 )
 
 User = get_user_model()
@@ -63,6 +67,26 @@ def _are_contacts(user, peer):
     ).exists()
 
 
+def _json_body(request):
+    """Parse and return the JSON body of a request, or empty dict on error."""
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+
+
+def _get_active_member(conversation_id, user):
+    """Return active ConversationMember or None."""
+    try:
+        return ConversationMember.objects.get(
+            conversation_id=conversation_id,
+            user=user,
+            status=ConversationMember.Status.ACTIVE,
+        )
+    except ConversationMember.DoesNotExist:
+        return None
+
+
 @login_required(login_url='login')
 def index_view(request):
     return render(request, 'pages/chat.html', {'open_settings': False})
@@ -80,20 +104,49 @@ def settings_view(request):
 @login_required(login_url='login')
 def conversations_list_view(request):
     """Return active conversations for the authenticated user's sidebar."""
-    memberships = (
-        ConversationMember.objects
-        .filter(
+    filter_param = request.GET.get('filter', '')
+    status_filter = Q(
+        user=request.user,
+        status=ConversationMember.Status.ACTIVE,
+        conversation__status=Conversation.Status.ACTIVE,
+    )
+
+    if filter_param == 'archived':
+        status_filter = Q(
+            user=request.user,
+            status=ConversationMember.Status.ACTIVE,
+            archived_at__isnull=False,
+            hidden_at__isnull=True,
+        )
+    elif filter_param == 'hidden':
+        status_filter = Q(
+            user=request.user,
+            hidden_at__isnull=False,
+        )
+    else:
+        # Default: exclude archived and hidden
+        status_filter = Q(
             user=request.user,
             status=ConversationMember.Status.ACTIVE,
             conversation__status=Conversation.Status.ACTIVE,
+            archived_at__isnull=True,
+            hidden_at__isnull=True,
         )
+
+    memberships = (
+        ConversationMember.objects
+        .filter(status_filter)
         .select_related('conversation', 'conversation__created_by')
-        .order_by('-conversation__last_message_at', '-conversation__updated_at')
+        .order_by('-is_pinned', '-conversation__last_message_at', '-conversation__updated_at')
     )
 
     conversations = []
     for membership in memberships:
         conversation = membership.conversation
+        is_muted = (
+            membership.muted_until is not None
+            and membership.muted_until > timezone.now()
+        )
         item = {
             'id': conversation.id,
             'type': conversation.type,
@@ -104,6 +157,12 @@ def conversations_list_view(request):
                 else None
             ),
             'last_message_preview': 'Encrypted message' if conversation.last_message_at else '',
+            'last_message_id': conversation.last_message_id,
+            'is_pinned': membership.is_pinned,
+            'is_muted': is_muted,
+            'muted_until': membership.muted_until.isoformat() if membership.muted_until else None,
+            'is_archived': membership.archived_at is not None,
+            'cleared_at': membership.cleared_at.isoformat() if membership.cleared_at else None,
         }
 
         if conversation.type == Conversation.Type.SINGLE:
@@ -223,6 +282,463 @@ def get_or_create_single_conversation_view(request):
 
 
 # ---------------------------------------------------------------------------
+# T19: Conversation management API
+# ---------------------------------------------------------------------------
+
+@login_required(login_url='login')
+def pin_conversation_view(request, conversation_id):
+    """Toggle pin on a conversation. POST to pin, DELETE to unpin."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    if request.method == 'POST':
+        member.is_pinned = True
+        member.save(update_fields=['is_pinned'])
+        return JsonResponse({'status': 'ok', 'is_pinned': True})
+    elif request.method == 'DELETE':
+        member.is_pinned = False
+        member.save(update_fields=['is_pinned'])
+        return JsonResponse({'status': 'ok', 'is_pinned': False})
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@login_required(login_url='login')
+def mute_conversation_view(request, conversation_id):
+    """Mute or unmute a conversation. POST with duration_minutes to mute, DELETE to unmute."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    if request.method == 'POST':
+        data = _json_body(request)
+        duration_minutes = int(data.get('duration_minutes', 60))
+        duration_minutes = min(duration_minutes, 10080)  # max 7 days
+        member.muted_until = timezone.now() + timezone.timedelta(minutes=duration_minutes)
+        member.save(update_fields=['muted_until'])
+        return JsonResponse({
+            'status': 'ok',
+            'muted_until': member.muted_until.isoformat(),
+        })
+    elif request.method == 'DELETE':
+        member.muted_until = None
+        member.save(update_fields=['muted_until'])
+        return JsonResponse({'status': 'ok', 'muted_until': None})
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@login_required(login_url='login')
+@require_POST
+def archive_conversation_view(request, conversation_id):
+    """Archive a conversation."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    member.archived_at = timezone.now()
+    member.save(update_fields=['archived_at'])
+    return JsonResponse({'status': 'ok', 'archived_at': member.archived_at.isoformat()})
+
+
+@login_required(login_url='login')
+@require_POST
+def unarchive_conversation_view(request, conversation_id):
+    """Unarchive a conversation."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    member.archived_at = None
+    member.save(update_fields=['archived_at'])
+    return JsonResponse({'status': 'ok', 'archived_at': None})
+
+
+@login_required(login_url='login')
+def hide_conversation_view(request, conversation_id):
+    """Soft-hide a conversation for the current user only (DELETE)."""
+    if request.method != 'DELETE':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    member.hidden_at = timezone.now()
+    member.save(update_fields=['hidden_at'])
+    return JsonResponse({'status': 'ok', 'hidden_at': member.hidden_at.isoformat()})
+
+
+@login_required(login_url='login')
+@require_POST
+def clear_conversation_view(request, conversation_id):
+    """Clear chat history for the current user (sets cleared_at)."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    now = timezone.now()
+    member.cleared_at = now
+    member.unread_count = 0
+    member.save(update_fields=['cleared_at', 'unread_count'])
+    return JsonResponse({'status': 'ok', 'cleared_at': now.isoformat()})
+
+
+@login_required(login_url='login')
+@require_POST
+def read_conversation_view(request, conversation_id):
+    """Mark a conversation as read (reset unread_count, update last_read_message_id)."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    conversation = member.conversation
+    member.unread_count = 0
+    if conversation.last_message_id:
+        member.last_read_message_id = conversation.last_message_id
+    member.save(update_fields=['unread_count', 'last_read_message_id'])
+    return JsonResponse({
+        'status': 'ok',
+        'unread_count': 0,
+        'last_read_message_id': member.last_read_message_id,
+    })
+
+
+@login_required(login_url='login')
+@require_POST
+def unread_conversation_view(request, conversation_id):
+    """Mark a conversation as unread."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    data = _json_body(request)
+    count = int(data.get('unread_count', 1))
+    member.unread_count = max(1, min(count, 99))
+    member.save(update_fields=['unread_count'])
+    return JsonResponse({'status': 'ok', 'unread_count': member.unread_count})
+
+
+# ---------------------------------------------------------------------------
+# T20: Message operations API
+# ---------------------------------------------------------------------------
+
+@login_required(login_url='login')
+@require_POST
+def forward_message_view(request, conversation_id):
+    """Forward an encrypted message to the target conversation.
+
+    The client decrypts the original and re-encrypts for the target.
+    The server only stores ciphertext (E2EE preserved).
+    Accepts the same payload as a normal send but includes metadata about
+    the original message for the UI.
+    """
+    data = _json_body(request)
+    original_message_id = data.get('original_message_id')
+    original_conversation_id = data.get('original_conversation_id')
+
+    # Validate sender is member of target conversation
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Target conversation not found or not a member.'}, status=404)
+
+    # For private chat targets
+    conversation = member.conversation
+    if conversation.type == Conversation.Type.SINGLE:
+        peer_id = data.get('peer_id')
+        if not peer_id:
+            return JsonResponse({'error': 'peer_id is required for private chat.'}, status=400)
+
+        try:
+            EncryptedMessage.objects.create(
+                conversation=conversation,
+                sender=request.user,
+                receiver_id=peer_id,
+                message_type=data.get('message_type', EncryptedMessage.MessageType.TEXT),
+                ciphertext=data.get('ciphertext', ''),
+                nonce=data.get('nonce', ''),
+                auth_tag=data.get('auth_tag', ''),
+                algorithm=data.get('algorithm', 'AES-256-GCM'),
+                sender_key_version=data.get('sender_key_version'),
+                receiver_key_version=data.get('receiver_key_version'),
+                client_message_id=data.get('client_message_id', ''),
+                reply_to_message_id=original_message_id,
+            )
+            conversation.last_message_id = EncryptedMessage.objects.filter(
+                conversation=conversation,
+            ).latest('created_at').pk
+            conversation.last_message_at = timezone.now()
+            conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
+
+            # Increment unread count for the peer
+            ConversationMember.objects.filter(
+                conversation=conversation,
+                user_id=peer_id,
+                status=ConversationMember.Status.ACTIVE,
+            ).update(unread_count=F('unread_count') + 1)
+
+            return JsonResponse({'status': 'ok', 'conversation_id': conversation.id}, status=201)
+        except (ValueError, KeyError) as e:
+            return JsonResponse({'error': f'Invalid payload: {e}'}, status=400)
+
+    # For group chat targets
+    elif conversation.type == Conversation.Type.GROUP:
+        group_message = GroupMessage.objects.create(
+            conversation=conversation,
+            sender=request.user,
+            message_type=data.get('message_type', GroupMessage.MessageType.TEXT),
+            client_message_id=data.get('client_message_id', ''),
+            reply_to_message_id=original_message_id,
+        )
+        recipients = data.get('recipients', [])
+        if recipients:
+            recipient_objs = [
+                GroupMessageRecipient(
+                    group_message=group_message,
+                    receiver_id=r['receiver_id'],
+                    ciphertext=r.get('ciphertext', ''),
+                    nonce=r.get('nonce', ''),
+                    auth_tag=r.get('auth_tag', ''),
+                    algorithm=r.get('algorithm', 'AES-256-GCM'),
+                    sender_key_version=r.get('sender_key_version'),
+                    receiver_key_version=r.get('receiver_key_version'),
+                )
+                for r in recipients
+            ]
+            GroupMessageRecipient.objects.bulk_create(recipient_objs)
+
+            active_members = ConversationMember.objects.filter(
+                conversation=conversation,
+                status=ConversationMember.Status.ACTIVE,
+            )
+            active_members.exclude(user=request.user).update(
+                unread_count=F('unread_count') + 1,
+            )
+
+        conversation.last_message_id = group_message.pk
+        conversation.last_message_at = group_message.created_at
+        conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
+
+        return JsonResponse({'status': 'ok', 'conversation_id': conversation.id}, status=201)
+
+    return JsonResponse({'error': 'Invalid conversation type.'}, status=400)
+
+
+@login_required(login_url='login')
+def delete_message_view(request, conversation_id, message_id):
+    """Per-user soft-delete a message. Only affects the requesting user's view."""
+    if request.method != 'DELETE':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    conversation = member.conversation
+    if conversation.type == Conversation.Type.SINGLE:
+        try:
+            EncryptedMessage.objects.get(pk=message_id, conversation_id=conversation_id)
+        except EncryptedMessage.DoesNotExist:
+            return JsonResponse({'error': 'Message not found.'}, status=404)
+        message_type = UserMessageDeletion.MessageType.PRIVATE
+    else:
+        try:
+            GroupMessage.objects.get(pk=message_id, conversation_id=conversation_id)
+        except GroupMessage.DoesNotExist:
+            return JsonResponse({'error': 'Message not found.'}, status=404)
+        message_type = UserMessageDeletion.MessageType.GROUP
+
+    _, created = UserMessageDeletion.objects.get_or_create(
+        user=request.user,
+        message_type=message_type,
+        message_id=message_id,
+        defaults={'conversation': conversation},
+    )
+
+    # Notify the user's own sessions via WebSocket
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f'user_{request.user.pk}',
+        {
+            'type': 'message.deleted',
+            'data': {
+                'conversation_id': conversation_id,
+                'message_id': message_id,
+                'message_type': message_type,
+            },
+        },
+    )
+
+    return JsonResponse({
+        'status': 'ok',
+        'created': created,
+        'message_id': message_id,
+    })
+
+
+RECALL_LIMIT_MINUTES = 30
+
+
+@login_required(login_url='login')
+@require_POST
+def recall_message_view(request, conversation_id, message_id):
+    """Recall a sent message. Sender only, 30-minute time limit."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    conversation = member.conversation
+
+    if conversation.type == Conversation.Type.SINGLE:
+        try:
+            message = EncryptedMessage.objects.get(pk=message_id, conversation_id=conversation_id)
+        except EncryptedMessage.DoesNotExist:
+            return JsonResponse({'error': 'Message not found.'}, status=404)
+
+        if message.sender_id != request.user.pk:
+            return JsonResponse({'error': 'Only the sender can recall this message.'}, status=403)
+        if message.status == EncryptedMessage.Status.RECALLED:
+            return JsonResponse({'error': 'Message already recalled.'}, status=409)
+
+        elapsed = (timezone.now() - message.created_at).total_seconds()
+        if elapsed > RECALL_LIMIT_MINUTES * 60:
+            return JsonResponse(
+                {'error': f'Recall time limit exceeded ({RECALL_LIMIT_MINUTES} minutes).'},
+                status=400,
+            )
+
+        message.status = EncryptedMessage.Status.RECALLED
+        message.recalled_at = timezone.now()
+        message.save(update_fields=['status', 'recalled_at', 'updated_at'])
+
+        # Broadcast recall via WebSocket
+        channel_layer = get_channel_layer()
+        recall_data = {
+            'conversation_type': 'single',
+            'message_id': message.pk,
+            'conversation_id': conversation_id,
+            'sender_id': message.sender_id,
+            'other_user_id': message.receiver_id,
+            'recalled_at': message.recalled_at.isoformat(),
+        }
+        for uid in (message.sender_id, message.receiver_id):
+            async_to_sync(channel_layer.group_send)(
+                f'user_{uid}',
+                {'type': 'message.recalled', 'data': recall_data},
+            )
+
+        return JsonResponse({
+            'status': 'recalled',
+            'message_id': message.pk,
+            'recalled_at': message.recalled_at.isoformat(),
+        })
+
+    else:  # Group
+        try:
+            group_message = GroupMessage.objects.select_for_update().get(
+                pk=message_id, conversation_id=conversation_id,
+            )
+        except GroupMessage.DoesNotExist:
+            return JsonResponse({'error': 'Message not found.'}, status=404)
+
+        if group_message.sender_id != request.user.pk:
+            return JsonResponse({'error': 'Only the sender can recall this message.'}, status=403)
+        if group_message.status == GroupMessage.Status.RECALLED:
+            return JsonResponse({'error': 'Message already recalled.'}, status=409)
+
+        elapsed = (timezone.now() - group_message.created_at).total_seconds()
+        if elapsed > RECALL_LIMIT_MINUTES * 60:
+            return JsonResponse(
+                {'error': f'Recall time limit exceeded ({RECALL_LIMIT_MINUTES} minutes).'},
+                status=400,
+            )
+
+        group_message.status = GroupMessage.Status.RECALLED
+        group_message.recalled_at = timezone.now()
+        group_message.save(update_fields=['status', 'recalled_at', 'updated_at'])
+        GroupMessageRecipient.objects.filter(
+            group_message=group_message,
+        ).update(status=GroupMessageRecipient.Status.RECALLED)
+
+        # Broadcast to all active group members
+        channel_layer = get_channel_layer()
+        member_ids = list(
+            ConversationMember.objects.filter(
+                conversation_id=conversation_id,
+                status=ConversationMember.Status.ACTIVE,
+            ).values_list('user_id', flat=True)
+        )
+        recall_data = {
+            'conversation_type': 'group',
+            'message_id': group_message.pk,
+            'conversation_id': conversation_id,
+            'sender_id': group_message.sender_id,
+            'recalled_at': group_message.recalled_at.isoformat(),
+        }
+        for uid in member_ids:
+            async_to_sync(channel_layer.group_send)(
+                f'user_{uid}',
+                {'type': 'message.recalled', 'data': recall_data},
+            )
+
+        return JsonResponse({
+            'status': 'recalled',
+            'message_id': group_message.pk,
+            'recalled_at': group_message.recalled_at.isoformat(),
+        })
+
+
+@login_required(login_url='login')
+@require_GET
+def message_status_view(request, conversation_id, message_id):
+    """Query the delivery/read status of a message."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    conversation = member.conversation
+
+    if conversation.type == Conversation.Type.SINGLE:
+        try:
+            message = EncryptedMessage.objects.get(pk=message_id, conversation_id=conversation_id)
+        except EncryptedMessage.DoesNotExist:
+            return JsonResponse({'error': 'Message not found.'}, status=404)
+
+        if request.user.pk not in (message.sender_id, message.receiver_id):
+            return JsonResponse({'error': 'Permission denied.'}, status=403)
+
+        return JsonResponse({
+            'message_id': message.pk,
+            'conversation_type': 'single',
+            'status': message.status,
+            'sender_id': message.sender_id,
+            'receiver_id': message.receiver_id,
+            'created_at': message.created_at.isoformat(),
+            'updated_at': message.updated_at.isoformat(),
+        })
+    else:
+        try:
+            group_message = GroupMessage.objects.get(pk=message_id, conversation_id=conversation_id)
+        except GroupMessage.DoesNotExist:
+            return JsonResponse({'error': 'Message not found.'}, status=404)
+
+        recipients = GroupMessageRecipient.objects.filter(
+            group_message=group_message,
+        ).values_list('receiver_id', 'status')
+
+        return JsonResponse({
+            'message_id': group_message.pk,
+            'conversation_type': 'group',
+            'status': group_message.status,
+            'sender_id': group_message.sender_id,
+            'created_at': group_message.created_at.isoformat(),
+            'recipients': [
+                {'user_id': uid, 'status': s}
+                for uid, s in recipients
+            ],
+        })
+
+
+# ---------------------------------------------------------------------------
 # Group chat management API
 # ---------------------------------------------------------------------------
 
@@ -234,14 +750,6 @@ def _get_member(conversation_id, user):
         )
     except ConversationMember.DoesNotExist:
         return None
-
-
-def _json_body(request):
-    """Parse and return the JSON body of a request, or empty dict on error."""
-    try:
-        return json.loads(request.body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return {}
 
 
 @login_required(login_url='login')
@@ -328,8 +836,6 @@ def invite_member_view(request, conversation_id):
     if not user_id:
         return JsonResponse({"error": "user_id is required."}, status=400)
 
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
     try:
         target = User.objects.get(id=user_id)
     except User.DoesNotExist:
@@ -381,7 +887,6 @@ def remove_member_view(request, conversation_id):
     if target_member.role == ConversationMember.Role.OWNER:
         return JsonResponse({"error": "Cannot remove the group owner."}, status=403)
 
-    from django.utils import timezone
     target_member.status = ConversationMember.Status.REMOVED
     target_member.left_at = timezone.now()
     target_member.save(update_fields=["status", "left_at"])
@@ -499,7 +1004,15 @@ def group_messages_view(request, conversation_id):
     page_number = request.GET.get("page", 1)
     per_page = min(int(request.GET.get("per_page", 30)), 100)
 
-    # Only return messages sent on or after the user joined.
+    # Filter out deleted messages for this user
+    deleted_ids = set(
+        UserMessageDeletion.objects.filter(
+            user=request.user,
+            conversation_id=conversation_id,
+            message_type=UserMessageDeletion.MessageType.GROUP,
+        ).values_list('message_id', flat=True)
+    )
+
     joined_at = member.joined_at
     recipient_queryset = (
         GroupMessageRecipient.objects.filter(
@@ -510,6 +1023,19 @@ def group_messages_view(request, conversation_id):
         .select_related("group_message")
         .order_by("-group_message__created_at")
     )
+
+    # Apply cleared_at filter
+    if member.cleared_at:
+        recipient_queryset = recipient_queryset.filter(
+            group_message__created_at__gte=member.cleared_at,
+        )
+
+    # Apply user message deletion filter
+    if deleted_ids:
+        recipient_queryset = recipient_queryset.exclude(
+            group_message_id__in=deleted_ids,
+        )
+
     paginator = Paginator(recipient_queryset, per_page)
     page_obj = paginator.get_page(page_number)
 
@@ -524,7 +1050,9 @@ def group_messages_view(request, conversation_id):
             "algorithm": r.algorithm,
             "sender_key_version": r.sender_key_version,
             "receiver_key_version": r.receiver_key_version,
+            "reply_to_message_id": r.group_message.reply_to_message_id,
             "status": r.status,
+            "recalled_at": r.group_message.recalled_at.isoformat() if r.group_message.recalled_at else None,
             "created_at": r.group_message.created_at.isoformat(),
         }
         for r in page_obj
@@ -565,6 +1093,7 @@ def conversation_messages_view(request, conversation_id):
 
     # For private chats, enforce contact relationship (T29).
     conversation = Conversation.objects.only("type").get(id=conversation_id)
+    member = _get_active_member(conversation_id, request.user)
     if conversation.type == Conversation.Type.SINGLE:
         peer_id = (
             ConversationMember.objects
@@ -582,11 +1111,29 @@ def conversation_messages_view(request, conversation_id):
     page_number = request.GET.get("page", 1)
     per_page = min(int(request.GET.get("per_page", 30)), 100)
 
+    # Filter out deleted messages for this user
+    deleted_ids = set(
+        UserMessageDeletion.objects.filter(
+            user=request.user,
+            conversation_id=conversation_id,
+            message_type=UserMessageDeletion.MessageType.PRIVATE,
+        ).values_list('message_id', flat=True)
+    )
+
     queryset = (
         EncryptedMessage.objects
         .filter(conversation_id=conversation_id)
         .order_by("-created_at")
     )
+
+    # Apply cleared_at filter
+    if member and member.cleared_at:
+        queryset = queryset.filter(created_at__gte=member.cleared_at)
+
+    # Apply user message deletion filter
+    if deleted_ids:
+        queryset = queryset.exclude(id__in=deleted_ids)
+
     paginator = Paginator(queryset, per_page)
     page_obj = paginator.get_page(page_number)
 
@@ -602,7 +1149,9 @@ def conversation_messages_view(request, conversation_id):
             "algorithm": msg.algorithm,
             "sender_key_version": msg.sender_key_version,
             "receiver_key_version": msg.receiver_key_version,
+            "reply_to_message_id": msg.reply_to_message_id,
             "status": msg.status,
+            "recalled_at": msg.recalled_at.isoformat() if msg.recalled_at else None,
             "created_at": msg.created_at.isoformat(),
         }
         for msg in page_obj
@@ -616,4 +1165,115 @@ def conversation_messages_view(request, conversation_id):
         "has_next": page_obj.has_next(),
         "has_previous": page_obj.has_previous(),
         "messages": messages_data,
+    })
+
+
+# ---------------------------------------------------------------------------
+# T22: Presence API
+# ---------------------------------------------------------------------------
+
+@login_required(login_url='login')
+@require_GET
+def user_presence_view(request, user_id):
+    """Query another user's presence (respects visibility settings)."""
+    try:
+        target = User.objects.get(id=user_id, is_active=True)
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'User not found.'}, status=404)
+
+    try:
+        presence = target.presence
+    except UserPresence.DoesNotExist:
+        return JsonResponse({
+            'user_id': target.pk,
+            'is_online': False,
+            'last_seen': None,
+            'status': 'offline',
+        })
+
+    # Self-query always returns full data
+    if request.user.pk == target.pk:
+        return JsonResponse({
+            'user_id': target.pk,
+            'is_online': presence.is_online,
+            'last_seen': presence.last_seen.isoformat() if presence.last_seen else None,
+            'status': presence.status,
+            'presence_visibility': presence.presence_visibility,
+        })
+
+    # Apply visibility rules
+    if presence.presence_visibility == UserPresence.Visibility.NOBODY:
+        return JsonResponse({
+            'user_id': target.pk,
+            'is_online': False,
+            'last_seen': None,
+            'status': 'offline',
+        })
+
+    if presence.presence_visibility == UserPresence.Visibility.CONTACTS:
+        if not _are_contacts(request.user, target):
+            return JsonResponse({
+                'user_id': target.pk,
+                'is_online': False,
+                'last_seen': None,
+                'status': 'offline',
+            })
+
+    # Everyone or contact: return full data
+    return JsonResponse({
+        'user_id': target.pk,
+        'is_online': presence.is_online,
+        'last_seen': presence.last_seen.isoformat() if presence.last_seen else None,
+        'status': presence.status,
+    })
+
+
+@login_required(login_url='login')
+def update_presence_view(request):
+    """Update the current user's presence status and visibility."""
+    if request.method != 'PUT':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    data = _json_body(request)
+    presence, _ = UserPresence.objects.get_or_create(user=request.user)
+
+    status = data.get('status')
+    if status and status in UserPresence.Status.values:
+        presence.status = status
+        if status == UserPresence.Status.OFFLINE:
+            presence.is_online = False
+            presence.last_seen = timezone.now()
+        elif status == UserPresence.Status.ONLINE:
+            presence.is_online = True
+
+    visibility = data.get('presence_visibility')
+    if visibility and visibility in UserPresence.Visibility.values:
+        presence.presence_visibility = visibility
+
+    presence.save(update_fields=[
+        f for f in ['status', 'presence_visibility', 'is_online', 'last_seen', 'updated_at']
+        if data.get(f) or status or visibility
+    ] + ['updated_at'])
+
+    # Broadcast presence change
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f'user_{request.user.pk}',
+        {
+            'type': 'presence.updated',
+            'data': {
+                'user_id': request.user.pk,
+                'is_online': presence.is_online,
+                'status': presence.status,
+                'last_seen': presence.last_seen.isoformat() if presence.last_seen else None,
+            },
+        },
+    )
+
+    return JsonResponse({
+        'user_id': request.user.pk,
+        'is_online': presence.is_online,
+        'last_seen': presence.last_seen.isoformat() if presence.last_seen else None,
+        'status': presence.status,
+        'presence_visibility': presence.presence_visibility,
     })

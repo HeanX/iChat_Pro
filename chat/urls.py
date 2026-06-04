@@ -12,11 +12,84 @@ urlpatterns = [
         views.get_or_create_single_conversation_view,
         name='api_conversation_create',
     ),
-    # Private chat history
+    # T19: Conversation management
+    path(
+        'api/conversations/<int:conversation_id>/pin/',
+        views.pin_conversation_view,
+        name='api_pin_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/mute/',
+        views.mute_conversation_view,
+        name='api_mute_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/archive/',
+        views.archive_conversation_view,
+        name='api_archive_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/unarchive/',
+        views.unarchive_conversation_view,
+        name='api_unarchive_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/clear/',
+        views.clear_conversation_view,
+        name='api_clear_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/read/',
+        views.read_conversation_view,
+        name='api_read_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/unread/',
+        views.unread_conversation_view,
+        name='api_unread_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/',
+        views.hide_conversation_view,
+        name='api_hide_conversation',
+    ),
+    # T20: Message operations
+    path(
+        'api/conversations/<int:conversation_id>/messages/forward/',
+        views.forward_message_view,
+        name='api_forward_message',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/messages/<int:message_id>/',
+        views.delete_message_view,
+        name='api_delete_message',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/messages/<int:message_id>/recall/',
+        views.recall_message_view,
+        name='api_recall_message',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/messages/<int:message_id>/status/',
+        views.message_status_view,
+        name='api_message_status',
+    ),
+    # Private chat history (keep after T20 routes to avoid conflicts)
     path(
         'api/conversations/<int:conversation_id>/messages/',
         views.conversation_messages_view,
         name='api_conversation_messages',
+    ),
+    # T22: Presence
+    path(
+        'api/users/<int:user_id>/presence/',
+        views.user_presence_view,
+        name='api_user_presence',
+    ),
+    path(
+        'api/users/presence/',
+        views.update_presence_view,
+        name='api_update_presence',
     ),
     # Group management
     path('api/groups/', views.create_group_view, name='api_create_group'),

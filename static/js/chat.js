@@ -1389,22 +1389,33 @@ function toggleDrawer() {
   }
 }
 
-function showSettingsPanel() {
-  const sidebarChat = document.getElementById("sidebar-chat-view");
-  const sidebarSettings = document.getElementById("sidebar-settings-view");
-  if (sidebarChat && sidebarSettings) {
-    sidebarChat.classList.add("hidden");
-    sidebarSettings.classList.remove("hidden");
+// Phase 2 sidebar navigation — supports chat/settings/contacts/search views
+let lastSidebarView = 'chat';
+
+function navigateSidebar(viewName) {
+  lastSidebarView = viewName;
+  var views = ['chat', 'settings', 'contacts', 'search'];
+  views.forEach(function(name) {
+    var el = document.getElementById('sidebar-view-' + name);
+    if (el) el.classList.toggle('hidden', name !== viewName);
+  });
+  // On mobile, back to sidebar when navigating settings/contacts
+  if (window.innerWidth < 768 && viewName !== 'chat') {
+    document.getElementById('sidebar-container').classList.remove('hidden');
+    document.getElementById('chat-window-container').classList.add('hidden');
+    window.location.hash = '';
   }
+  // Re-render lucide icons after view switch
+  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
+}
+
+// Backward-compatible wrappers
+function showSettingsPanel() {
+  navigateSidebar('settings');
 }
 
 function hideSettingsPanel() {
-  const sidebarChat = document.getElementById("sidebar-chat-view");
-  const sidebarSettings = document.getElementById("sidebar-settings-view");
-  if (sidebarChat && sidebarSettings) {
-    sidebarChat.classList.remove("hidden");
-    sidebarSettings.classList.add("hidden");
-  }
+  navigateSidebar('chat');
 }
 
 function setupSidebarResizer() {
@@ -1418,8 +1429,8 @@ function setupSidebarResizer() {
   let animationFrame = null;
 
   const clampWidth = (width) => {
-    const maxByViewport = Math.max(420, window.innerWidth - 420);
-    return Math.min(Math.max(width, 280), Math.min(680, maxByViewport));
+    const maxByViewport = Math.max(440, window.innerWidth - 440);
+    return Math.min(Math.max(width, 280), Math.min(440, maxByViewport));
   };
 
   const applyWidth = (width) => {

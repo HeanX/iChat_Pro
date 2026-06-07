@@ -1496,6 +1496,27 @@ function closeFingerprintModal() {
   }
 }
 
+// QR Code modal (P2 T03)
+function showQRCodeModal() {
+  const modal = document.getElementById("qr-code-modal");
+  if (modal) { modal.classList.remove("hidden"); modal.classList.add("flex"); }
+}
+function closeQRCodeModal() {
+  const modal = document.getElementById("qr-code-modal");
+  if (modal) { modal.classList.remove("flex"); modal.classList.add("hidden"); }
+}
+function copyQRCode() {
+  const fb = document.getElementById("qr-copy-feedback");
+  navigator.clipboard.writeText(window.location.origin + "/contacts/add/").then(function() {
+    if (fb) { fb.classList.remove("hidden"); setTimeout(function() { fb.classList.add("hidden"); }, 2000); }
+  }).catch(function() {
+    window.showToast("Failed to copy QR code link");
+  });
+}
+window.showQRCodeModal = showQRCodeModal;
+window.closeQRCodeModal = closeQRCodeModal;
+window.copyQRCode = copyQRCode;
+
 function adjustTextareaHeight(textarea) {
   textarea.style.height = "auto";
   textarea.style.height = textarea.scrollHeight + "px";

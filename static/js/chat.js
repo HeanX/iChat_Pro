@@ -1418,6 +1418,25 @@ function hideSettingsPanel() {
   navigateSidebar('chat');
 }
 
+// Generic sidebar view navigation (Phase 2)
+var SIDEBAR_VIEWS = ['notifications'];
+function navigateSidebar(viewName) {
+  // Hide all sidebar content views except chat
+  var chatView = document.getElementById('sidebar-chat-view');
+  var settingsView = document.getElementById('sidebar-settings-view');
+  var targetView = document.getElementById('sidebar-view-' + viewName);
+
+  if (chatView) chatView.classList.add('hidden');
+  if (settingsView) settingsView.classList.add('hidden');
+  // Hide all other sidebar views
+  var container = document.getElementById('sidebar-container');
+  if (container) {
+    container.querySelectorAll('.sidebar-view').forEach(function(el) { el.classList.add('hidden'); });
+  }
+  if (targetView) targetView.classList.remove('hidden');
+  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
+}
+
 function setupSidebarResizer() {
   const sidebar = document.getElementById("sidebar-container");
   const handle = document.getElementById("sidebar-resize-handle");

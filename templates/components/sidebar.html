@@ -43,7 +43,7 @@
               <span data-i18n="menu_saved_messages">Saved Messages</span>
             </button>
             <!-- Contacts -->
-            <a href="{% url 'contacts' %}" class="main-menu-item-custom" onclick="toggleMainMenu(event);">
+            <a href="{% url 'contacts' %}" onclick="navigateSidebar('contacts'); toggleMainMenu(event); return false;" class="main-menu-item-custom">
               <i data-lucide="users"></i>
               <span data-i18n="menu_contacts">Contacts</span>
             </a>
@@ -122,8 +122,45 @@
     </div>
   </div>
 
-  <!-- View 2: Settings Panel View (Hidden initially) -->
-  <div id="sidebar-settings-view" class="hidden h-full">
-    {% include 'components/settings_panel.html' %}
+  <!-- View 2: Settings Panel View -->
+  <div id="sidebar-view-settings" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
+      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="settings">Settings</h2>
+      <a href="{% url 'profile_edit' %}" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
+        <i data-lucide="edit-3" class="w-5 h-5"></i>
+      </a>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-borderColor/60">
+      {% include 'components/settings_panel_body.html' %}
+    </div>
+  </div>
+
+  <!-- View 3: Contacts View -->
+  <div id="sidebar-view-contacts" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
+      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="menu_contacts">Contacts</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar" id="sidebar-contacts-content">
+      {% include 'pages/contacts_sidebar.html' %}
+    </div>
+  </div>
+
+  <!-- View 4: Search Results View -->
+  <div id="sidebar-view-search" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
+      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <h2 class="text-lg font-bold text-textMain flex-1">Search</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar" id="sidebar-search-results">
+      <p class="text-textSecondary text-sm text-center py-8">Type in the search bar above to find chats and messages.</p>
+    </div>
   </div>
 </div>

@@ -1,0 +1,17 @@
+{# sidebar_page.html — Reusable left-sidebar sub-page container for Phase 2 #}
+{# Usage: {% include 'components/sidebar_page.html' with page_id="settings" title="Settings" back_view="chat" %} #}
+<div id="sidebar-view-{{ page_id }}" class="sidebar-view h-full flex flex-col bg-bgSidebar {% if page_id != 'chat' %}hidden{% endif %}">
+  <div class="sidebar-page-header px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
+    {% if back_view %}
+    <button onclick="navigateSidebar('{{ back_view }}')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back" data-i18n-title="back_to_sidebar">
+      <i data-lucide="arrow-left" class="w-5 h-5"></i>
+    </button>
+    {% endif %}
+    <h2 class="text-lg font-bold text-textMain flex-1">{% block page_title %}{{ title }}{% endblock %}</h2>
+    {% block header_action %}{% endblock %}
+  </div>
+  <div class="sidebar-page-body flex-1 overflow-y-auto custom-scrollbar">
+    {% block page_content %}{% endblock %}
+  </div>
+  {% block page_footer %}{% endblock %}
+</div>

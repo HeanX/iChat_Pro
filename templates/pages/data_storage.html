@@ -1,5 +1,5 @@
 {# data_storage.html — P2 T05 Data & Storage Settings #}
-<div class="divide-y divide-borderColor/60">
+<div id="data-storage-settings" class="divide-y divide-borderColor/60">
   <div class="px-4 py-4 space-y-4">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Storage Usage</h4>
     <div class="p-4 bg-bgSearch rounded-custom-md space-y-2">
@@ -28,21 +28,21 @@
           <i data-lucide="wifi" class="w-4 h-4 text-textSecondary"></i>
           <span class="text-sm text-textMain">On Mobile Data</span>
         </div>
-        <label class="toggle-switch"><input type="checkbox" onchange="saveStorageSetting()"><span class="toggle-slider"></span></label>
+        <label class="toggle-switch"><input type="checkbox" data-storage-setting="mobileData" onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
       </div>
       <div class="flex items-center justify-between py-1">
         <div class="flex items-center space-x-3">
           <i data-lucide="wifi" class="w-4 h-4 text-textSecondary"></i>
           <span class="text-sm text-textMain">On Wi-Fi</span>
         </div>
-        <label class="toggle-switch"><input type="checkbox" checked onchange="saveStorageSetting()"><span class="toggle-slider"></span></label>
+        <label class="toggle-switch"><input type="checkbox" data-storage-setting="wifi" checked onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
       </div>
       <div class="flex items-center justify-between py-1">
         <div class="flex items-center space-x-3">
           <i data-lucide="wifi-off" class="w-4 h-4 text-textSecondary"></i>
           <span class="text-sm text-textMain">On Roaming</span>
         </div>
-        <label class="toggle-switch"><input type="checkbox" onchange="saveStorageSetting()"><span class="toggle-slider"></span></label>
+        <label class="toggle-switch"><input type="checkbox" data-storage-setting="roaming" onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
       </div>
     </div>
   </div>
@@ -60,10 +60,10 @@
       <span class="text-xs text-textSecondary">2.4 MB</span>
     </button>
 
-    <button onclick="clearAllData()" class="w-full py-3 flex items-center justify-between text-red-500">
+    <button onclick="clearAllCacheSettings()" class="w-full py-3 flex items-center justify-between text-red-500">
       <div class="flex items-center space-x-3">
         <div class="p-2 bg-red-500/10 rounded-lg"><i data-lucide="alert-triangle" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium">Clear All Local Data</span>
+        <span class="text-sm font-medium">Clear All Cache Settings</span>
       </div>
       <i data-lucide="chevron-right" class="w-4 h-4"></i>
     </button>
@@ -81,7 +81,37 @@
 </style>
 
 <script>
-  function saveStorageSetting() { var s={};['mobileData','wifi','roaming'].forEach(function(k,i){var el=document.querySelectorAll('.toggle-switch input')[i];if(el)s[k]=el.checked});localStorage.setItem('ichat_storage',JSON.stringify(s)) }
+  function saveDataStorageSetting() {
+    var root = document.getElementById('data-storage-settings');
+    var settings = {};
+    if (!root) return;
+    root.querySelectorAll('[data-storage-setting]').forEach(function(el) {
+      settings[el.dataset.storageSetting] = el.checked;
+    });
+    localStorage.setItem('ichat_storage', JSON.stringify(settings));
+  }
+
+  function loadDataStorageSetting() {
+    var root = document.getElementById('data-storage-settings');
+    if (!root) return;
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('ichat_storage') || '{}'); } catch (error) { saved = {}; }
+    root.querySelectorAll('[data-storage-setting]').forEach(function(el) {
+      if (Object.prototype.hasOwnProperty.call(saved, el.dataset.storageSetting)) {
+        el.checked = Boolean(saved[el.dataset.storageSetting]);
+      }
+    });
+  }
+
   function clearLocalCache(){window.showToast('Local cache cleared')}
-  function clearAllData(){if(confirm('Clear all local data? This cannot be undone.')){localStorage.clear();window.showToast('All local data cleared')}}
+
+  function clearAllCacheSettings(){
+    if (confirm('Clear cache settings? Encryption keys and required app data will be kept.')) {
+      localStorage.removeItem('ichat_storage');
+      loadDataStorageSetting();
+      window.showToast('Cache settings cleared');
+    }
+  }
+
+  loadDataStorageSetting();
 </script>

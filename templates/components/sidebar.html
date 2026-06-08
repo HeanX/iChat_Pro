@@ -209,11 +209,36 @@
   <!-- P2 T05: Data & Storage -->
   <div id="sidebar-view-data-storage" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1">Data and Storage</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/data_storage.html' %}</div>
   </div>
 
-  <!-- P2 T05-T08 placeholder views will be added by their respective branches -->
+  <!-- P2 T06: Privacy & Security -->
+  <div id="sidebar-view-privacy-security" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <h2 class="text-lg font-bold text-textMain flex-1">Privacy and Security</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/privacy_security.html' %}</div>
+  </div>
+
+  <!-- P2 T07: Chat Folders, Stickers & Emoji -->
+  <div id="sidebar-view-chat-folders" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <h2 class="text-lg font-bold text-textMain flex-1">Chat Folders</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/chat_folders.html' %}</div>
+  </div>
+
+  <!-- P2 T08: Sessions, Language & Keyboard Shortcuts -->
+  <div id="sidebar-view-sessions-shortcuts" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <h2 class="text-lg font-bold text-textMain flex-1">Devices and Shortcuts</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/sessions_shortcuts.html' %}</div>
+  </div>
 </div>

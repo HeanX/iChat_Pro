@@ -1389,14 +1389,28 @@ function toggleDrawer() {
   }
 }
 
-// Phase 2 sidebar navigation — supports chat/settings/contacts/search views
+// Phase 2 sidebar navigation — supports chat/settings/contacts/search and settings subpages.
 let lastSidebarView = 'chat';
 
 function navigateSidebar(viewName) {
   lastSidebarView = viewName;
-  var views = ['chat', 'settings-home', 'settings', 'settings-profile', 'contacts', 'search'];
+  var views = [
+    'chat',
+    'settings-home',
+    'settings',
+    'settings-profile',
+    'contacts',
+    'search',
+    'notifications',
+    'data-storage',
+    'privacy-security',
+    'chat-folders',
+    'sessions-shortcuts'
+  ];
   views.forEach(function(name) {
-    var el = document.getElementById('sidebar-view-' + name);
+    var el = name === 'chat'
+      ? document.getElementById('sidebar-chat-view')
+      : document.getElementById('sidebar-view-' + name);
     if (el) el.classList.toggle('hidden', name !== viewName);
   });
   // On mobile, back to sidebar when navigating settings/contacts
@@ -1416,25 +1430,6 @@ function showSettingsPanel() {
 
 function hideSettingsPanel() {
   navigateSidebar('chat');
-}
-
-// Generic sidebar view navigation (Phase 2)
-var SIDEBAR_VIEWS = ['notifications', 'data-storage'];
-function navigateSidebar(viewName) {
-  // Hide all sidebar content views except chat
-  var chatView = document.getElementById('sidebar-chat-view');
-  var settingsView = document.getElementById('sidebar-settings-view');
-  var targetView = document.getElementById('sidebar-view-' + viewName);
-
-  if (chatView) chatView.classList.add('hidden');
-  if (settingsView) settingsView.classList.add('hidden');
-  // Hide all other sidebar views
-  var container = document.getElementById('sidebar-container');
-  if (container) {
-    container.querySelectorAll('.sidebar-view').forEach(function(el) { el.classList.add('hidden'); });
-  }
-  if (targetView) targetView.classList.remove('hidden');
-  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
 }
 
 function setupSidebarResizer() {

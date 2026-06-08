@@ -1,0 +1,146 @@
+{# profile_edit_sidebar.html — P2 T03 sidebar profile edit with QR code #}
+{% load static %}
+<div class="divide-y divide-borderColor/60">
+
+  <!-- Messages -->
+  {% if messages %}
+  <div class="px-4 pt-4 space-y-2">
+    {% for message in messages %}
+    <div class="p-3 rounded-custom-md text-sm font-medium
+      {% if message.tags == 'error' %}bg-red-50 border border-red-200 text-red-700 dark:bg-red-950/20 dark:border-red-900/50 dark:text-red-400
+      {% elif message.tags == 'success' %}bg-green-50 border border-green-200 text-green-700 dark:bg-green-950/20 dark:border-green-900/50 dark:text-green-400
+      {% else %}bg-blue-50 border border-blue-200 text-blue-700 dark:bg-blue-950/20 dark:border-blue-900/50 dark:text-blue-400{% endif %}">
+      {{ message }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <form method="POST" action="{% url 'profile_edit' %}" enctype="multipart/form-data" class="divide-y divide-borderColor/60">
+    {% csrf_token %}
+
+    <!-- Avatar Section -->
+    <div class="flex flex-col items-center py-6 px-4 text-center bg-search-op-10">
+      <div class="relative group cursor-pointer" onclick="document.getElementById('profile-avatar-input').click()">
+        <div class="w-24 h-24 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90">
+          {{ request.user.username|slice:":1"|upper }}
+        </div>
+        <div class="absolute inset-0 w-24 h-24 rounded-full bg-black/40 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
+          <i data-lucide="camera" class="w-6 h-6"></i>
+        </div>
+      </div>
+      <input type="file" id="profile-avatar-input" name="avatar" accept="image/*" class="hidden" onchange="this.form.submit()">
+      <p class="text-xs text-textSecondary mt-2">Tap to change avatar</p>
+    </div>
+
+    <!-- Name Fields -->
+    <div class="px-4 py-4 space-y-4">
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">First Name</label>
+        <input type="text" name="first_name" value="{{ request.user.first_name }}"
+          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
+          placeholder="Your first name">
+      </div>
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Last Name</label>
+        <input type="text" name="last_name" value="{{ request.user.last_name }}"
+          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
+          placeholder="Your last name">
+      </div>
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Nickname</label>
+        <input type="text" name="nickname" value="{{ form.nickname.value|default:'' }}"
+          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
+          placeholder="How others see you">
+        {% if form.nickname.errors %}<p class="text-xs text-red-500 mt-1">{{ form.nickname.errors.0 }}</p>{% endif %}
+      </div>
+    </div>
+
+    <!-- Username -->
+    <div class="px-4 py-4 space-y-1.5">
+      <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Username</label>
+      <input type="text" name="username" id="profile-username-input" value="{{ request.user.username }}"
+        class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
+        placeholder="a-z, 0-9, underscores"
+        pattern="^[a-z0-9_]{5,}$"
+        oninput="validateUsername()">
+      <p class="text-[10px] text-textSecondary">You can use a–z, 0–9 and underscores. Minimum length is 5 characters.</p>
+      <p id="username-error" class="text-xs text-red-500 hidden"></p>
+    </div>
+
+    <!-- Bio -->
+    <div class="px-4 py-4 space-y-1.5">
+      <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Bio</label>
+      <textarea name="bio" rows="3"
+        class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all resize-none"
+        placeholder="Tell people about yourself…">{{ form.bio.value|default:'' }}</textarea>
+      {% if form.bio.errors %}<p class="text-xs text-red-500 mt-1">{{ form.bio.errors.0 }}</p>{% endif %}
+    </div>
+
+    <!-- Birthday (placeholder) -->
+    <div class="px-4 py-4 flex items-center justify-between cursor-pointer hover-bg-search-op-65 transition-colors"
+         onclick="showToast('Birthday setting coming soon')">
+      <div class="flex items-center space-x-3.5">
+        <div class="p-2 bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-lg">
+          <i data-lucide="cake" class="w-4 h-4"></i>
+        </div>
+        <span class="text-sm font-medium text-textMain">Add Birthday</span>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </div>
+
+    <!-- Personal Channel (Phase 3 placeholder) -->
+    <div class="px-4 py-4 flex items-center justify-between cursor-pointer hover-bg-search-op-65 transition-colors"
+         onclick="showToast('Personal Channel coming in Phase 3')">
+      <div class="flex items-center space-x-3.5">
+        <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg">
+          <i data-lucide="radio" class="w-4 h-4"></i>
+        </div>
+        <div class="flex-1 leading-snug">
+          <div class="text-sm font-medium text-textMain">Personal Channel</div>
+          <div class="text-[10px] text-textSecondary">Create your own broadcast channel — coming in Phase 3</div>
+        </div>
+        <span class="text-[9px] bg-brand-light/10 text-brand-light dark:bg-brand-dark/10 dark:text-brand-dark px-2 py-0.5 rounded font-semibold">Phase 3</span>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary ml-2"></i>
+    </div>
+
+    <!-- QR Code -->
+    <div class="px-4 py-4 flex items-center justify-between cursor-pointer hover-bg-search-op-65 transition-colors"
+         onclick="showQRCodeModal()">
+      <div class="flex items-center space-x-3.5">
+        <div class="p-2 bg-teal-500/10 text-teal-600 dark:text-teal-400 rounded-lg">
+          <i data-lucide="qr-code" class="w-4 h-4"></i>
+        </div>
+        <div class="flex-1 leading-snug">
+          <div class="text-sm font-medium text-textMain">QR Code</div>
+          <div class="text-[10px] text-textSecondary">Share your contact via QR code</div>
+        </div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </div>
+
+    <!-- Save Button -->
+    <div class="px-4 py-6">
+      <button type="submit"
+        class="w-full py-3 bg-brand-light dark:bg-brand-dark text-white font-semibold rounded-custom-md shadow-md hover:opacity-90 transition-opacity flex items-center justify-center space-x-2">
+        <i data-lucide="save" class="w-4 h-4"></i>
+        <span>Save Changes</span>
+      </button>
+    </div>
+  </form>
+</div>
+
+<script>
+  function validateUsername() {
+    var input = document.getElementById('profile-username-input');
+    var error = document.getElementById('username-error');
+    var val = input.value;
+    if (val.length > 0 && (val.length < 5 || !/^[a-z0-9_]+$/.test(val))) {
+      error.textContent = 'Username must be at least 5 characters using only a-z, 0-9 and underscores.';
+      error.classList.remove('hidden');
+    } else {
+      error.classList.add('hidden');
+    }
+  }
+</script>

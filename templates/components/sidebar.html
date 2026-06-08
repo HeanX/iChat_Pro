@@ -138,5 +138,14 @@
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/notifications.html' %}</div>
   </div>
 
+  <!-- P2 T05: Data & Storage -->
+  <div id="sidebar-view-data-storage" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <h2 class="text-lg font-bold text-textMain flex-1">Data and Storage</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/data_storage.html' %}</div>
+  </div>
+
   <!-- P2 T05-T08 placeholder views will be added by their respective branches -->
 </div>

@@ -1408,7 +1408,7 @@ function hideSettingsPanel() {
 }
 
 // Generic sidebar view navigation (Phase 2)
-var SIDEBAR_VIEWS = ['notifications'];
+var SIDEBAR_VIEWS = ['notifications', 'data-storage'];
 function navigateSidebar(viewName) {
   // Hide all sidebar content views except chat
   var chatView = document.getElementById('sidebar-chat-view');

@@ -65,8 +65,10 @@ function logToCryptoConsole(message) {
   }
 }
 
-// =====================================================================// 1. API Helpers
-// =====================================================================
+// ============================================================================
+// 1. API Helpers
+// ============================================================================
+
 function getCookie(name) {
   let cookieValue = null;
   if (document.cookie && document.cookie !== '') {
@@ -98,8 +100,10 @@ async function apiFetch(url, options = {}) {
   return resp.json();
 }
 
-// =====================================================================// 2. Render Sidebar Chat List
-// =====================================================================
+// ============================================================================
+// 2. Render Sidebar Chat List
+// ============================================================================
+
 function renderChatList() {
   const chatListContainer = document.getElementById("sidebar-chat-list");
   if (!chatListContainer) return;
@@ -172,8 +176,10 @@ function updateSidebarPreview(conv, text, time) {
   if (timeEl) timeEl.textContent = time;
 }
 
-// =====================================================================// 3. API Data Loading
-// =====================================================================
+// ============================================================================
+// 3. API Data Loading
+// ============================================================================
+
 async function fetchConversations() {
   try {
     const data = await apiFetch('/api/conversations/');
@@ -284,8 +290,10 @@ async function fetchGroupMemberIds(conversationId) {
   return (data.members || []).map(member => member.user_id);
 }
 
-// =====================================================================// 4. WebSocket Connection
-// =====================================================================
+// ============================================================================
+// 4. WebSocket Connection
+// ============================================================================
+
 function connectWebSocket() {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const url = `${protocol}://${window.location.host}/ws/chat/`;
@@ -490,8 +498,10 @@ function handleMessageAccepted(data) {
   }
 }
 
-// =====================================================================// 5. ECDH Key Agreement on Select Chat
-// =====================================================================
+// ============================================================================
+// 5. ECDH Key Agreement on Select Chat
+// ============================================================================
+
 async function deriveActiveSessionKey(convId) {
   const conv = conversationsById[parseInt(convId)];
   if (!conv || !conv.is_secure) {
@@ -727,8 +737,10 @@ function escapeHtml(value) {
 
 // Populate contact list inside the Create Group modal
 
-// =====================================================================// Message sending
-// =====================================================================
+// ============================================================================
+// Message sending
+// ============================================================================
+
 async function sendMessage() {
   const textarea = document.getElementById("chat-input-textarea");
   if (!textarea) return;
@@ -822,8 +834,10 @@ async function sendMessage() {
   }
 }
 
-// =====================================================================// Add contact
-// =====================================================================
+// ============================================================================
+// Add contact
+// ============================================================================
+
 async function handleAddContact(username) {
   try {
     const resp = await apiFetch("/contacts/search/?q=" + encodeURIComponent(username));
@@ -880,8 +894,10 @@ async function handleAddContact(username) {
   }
 }
 
-// =====================================================================// Create group
-// =====================================================================
+// ============================================================================
+// Create group
+// ============================================================================
+
 async function handleCreateGroup(groupName) {
   try {
     const checkedBoxes = document.querySelectorAll(".group-member-checkbox:checked");
@@ -908,8 +924,10 @@ async function handleCreateGroup(groupName) {
   }
 }
 
-// =====================================================================// Populate group member selection list
-// =====================================================================
+// ============================================================================
+// Populate group member selection list
+// ============================================================================
+
 function populateGroupMembersList() {
   const listEl = document.getElementById("group-members-list");
   if (!listEl) return;
@@ -931,8 +949,10 @@ function populateGroupMembersList() {
   });
 }
 
-// =====================================================================// Fingerprint modal
-// =====================================================================
+// ============================================================================
+// Fingerprint modal
+// ============================================================================
+
 function showFingerprintModal() {
   if (!activeChatId) return;
   const conv = conversationsById[activeChatId];
@@ -943,8 +963,10 @@ function showFingerprintModal() {
   if (modal) { modal.classList.remove("hidden"); modal.classList.add("flex"); }
 }
 
-// =====================================================================// Unread badge helper
-// =====================================================================
+// ============================================================================
+// Unread badge helper
+// ============================================================================
+
 function triggerUnreadCount(chatId) {
   const badge = document.getElementById("unread-badge-" + chatId);
   if (badge) {
@@ -959,8 +981,10 @@ function triggerUnreadCount(chatId) {
   }
 }
 
-// =====================================================================// Infinite scroll
-// =====================================================================
+// ============================================================================
+// Infinite scroll
+// ============================================================================
+
 function setupInfiniteScroll() {
   const container = document.getElementById("message-history-container");
   if (!container) return;
@@ -978,8 +1002,10 @@ function setupInfiniteScroll() {
   });
 }
 
-// =====================================================================// Message group meta & bubble rendering
-// =====================================================================
+// ============================================================================
+// Message group meta & bubble rendering
+// ============================================================================
+
 function getMessageGroupMetaNew(msgs, index, conv) {
   const msg = msgs[index];
   if (!msg || msg.isSystem) return { isConsecutive: false, isFirstInGroup: true, isLastInGroup: true };
@@ -1404,41 +1430,6 @@ function showSettingsPanel() {
 
 function hideSettingsPanel() {
   navigateSidebar('chat');
-}
-
-// Generic sidebar view navigation (Phase 2)
-var SIDEBAR_VIEWS = ['notifications'];
-function navigateSidebar(viewName) {
-  // Hide all sidebar content views except chat
-  var chatView = document.getElementById('sidebar-chat-view');
-  var settingsView = document.getElementById('sidebar-settings-view');
-  var targetView = document.getElementById('sidebar-view-' + viewName);
-
-  if (chatView) chatView.classList.add('hidden');
-  if (settingsView) settingsView.classList.add('hidden');
-  // Hide all other sidebar views
-  var container = document.getElementById('sidebar-container');
-  if (container) {
-    container.querySelectorAll('.sidebar-view').forEach(function(el) { el.classList.add('hidden'); });
-  }
-  if (targetView) targetView.classList.remove('hidden');
-  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
-}
-
-// Phase 2 sidebar view navigation
-var SIDEBAR_VIEWS = ['privacy-security'];
-function navigateSidebar(viewName) {
-  var chatView = document.getElementById('sidebar-chat-view');
-  var settingsView = document.getElementById('sidebar-settings-view');
-  var targetView = document.getElementById('sidebar-view-' + viewName);
-  if (chatView) chatView.classList.add('hidden');
-  if (settingsView) settingsView.classList.add('hidden');
-  var container = document.getElementById('sidebar-container');
-  if (container) {
-    container.querySelectorAll('.sidebar-view').forEach(function(el) { el.classList.add('hidden'); });
-  }
-  if (targetView) targetView.classList.remove('hidden');
-  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
 }
 
 function setupSidebarResizer() {

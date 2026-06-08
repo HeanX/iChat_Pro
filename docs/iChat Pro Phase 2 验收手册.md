@@ -1,8 +1,9 @@
 # iChat Pro Phase 2 验收手册
 
-> 版本：v1.0
+> 版本：v1.1
 > 日期：2026-06-08
-> 适用范围：P2 T01-T08 前端设置中心 + 最终演示
+> 适用范围：P2 T01-T08 前端设置中心 + P2 T18 手动验收
+> 说明：本文用于当前 `main` 已落地的 Phase 2 前端设置中心验收；后端持久化、真实权限策略和完整多端同步以后续后端 Issue 为准。
 
 ## 1. 验收准备
 
@@ -23,6 +24,14 @@ python manage.py runserver 127.0.0.1:8000
 
 Demo accounts: `alice` / `demo1234` | `bob` / `demo1234`
 
+### 1.3 基础检查
+
+```powershell
+python manage.py check
+```
+
+预期结果：`System check identified no issues`。
+
 ---
 
 ## 2. P2 T01 — 左侧栏多视图导航
@@ -42,7 +51,7 @@ Demo accounts: `alice` / `demo1234` | `bob` / `demo1234`
 | 1 | 设置首页显示用户头像、昵称、在线状态 | 正确显示 | ☐ |
 | 2 | 显示手机号、用户名、邮箱 | 正确显示 | ☐ |
 | 3 | 列出通知/数据/隐私/文件夹/贴纸/设备/语言/快捷键入口 | 每项有图标+标题+状态值 | ☐ |
-| 4 | 点击未实现的二级功能 | 显示 toast 占位提示 | ☐ |
+| 4 | 点击尚未接入真实后端的功能 | 显示 toast 占位、禁用态或前端本地状态 | ☐ |
 | 5 | 点击 Cryptographic Keys | 跳转到密钥管理页 | ☐ |
 | 6 | 点击 Sign Out | 弹出退出确认 | ☐ |
 | 7 | 切换语言后关闭设置再打开 | 语言切换生效 | ☐ |
@@ -79,7 +88,8 @@ Demo accounts: `alice` / `demo1234` | `bob` / `demo1234`
 | 1 | Settings → Data and Storage | 显示用量仪表 | ☐ |
 | 2 | Auto-download 开关（Mobile/WiFi/Roaming） | 可切换 | ☐ |
 | 3 | Clear Local Cache | toast 提示 | ☐ |
-| 4 | Clear All Local Data | 弹窗确认后清除 | ☐ |
+| 4 | Clear All Cache Settings | 弹窗确认后清除缓存设置 | ☐ |
+| 5 | 清理缓存设置后检查 E2EE | 本地加密密钥和必要应用数据不被删除 | ☐ |
 
 ## 7. P2 T06 — 隐私和安全
 
@@ -115,8 +125,8 @@ Demo accounts: `alice` / `demo1234` | `bob` / `demo1234`
 
 | # | 测试项 | 通过 |
 |---|--------|------|
-| 1 | 所有 202 个自动化测试通过 | ☐ |
-| 2 | Django 系统检查无警告 | ☐ |
+| 1 | Django 系统检查无错误 | ☐ |
+| 2 | 当前仓库可用的自动化测试通过 | ☐ |
 | 3 | 私聊 E2EE 加密收发正常 | ☐ |
 | 4 | 群聊逐成员加密正常 | ☐ |
 | 5 | Electron 桌面端启动正常 | ☐ |

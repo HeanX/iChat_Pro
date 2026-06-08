@@ -1407,6 +1407,22 @@ function hideSettingsPanel() {
   }
 }
 
+// Phase 2 sidebar view navigation
+var SIDEBAR_VIEWS = ['privacy-security'];
+function navigateSidebar(viewName) {
+  var chatView = document.getElementById('sidebar-chat-view');
+  var settingsView = document.getElementById('sidebar-settings-view');
+  var targetView = document.getElementById('sidebar-view-' + viewName);
+  if (chatView) chatView.classList.add('hidden');
+  if (settingsView) settingsView.classList.add('hidden');
+  var container = document.getElementById('sidebar-container');
+  if (container) {
+    container.querySelectorAll('.sidebar-view').forEach(function(el) { el.classList.add('hidden'); });
+  }
+  if (targetView) targetView.classList.remove('hidden');
+  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
+}
+
 function setupSidebarResizer() {
   const sidebar = document.getElementById("sidebar-container");
   const handle = document.getElementById("sidebar-resize-handle");

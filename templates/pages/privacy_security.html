@@ -1,0 +1,69 @@
+{# privacy_security.html — P2 T06 Privacy & Security Settings #}
+<div class="divide-y divide-borderColor/60">
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Privacy</h4>
+
+    <div class="flex items-center justify-between py-1">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="clock" class="w-4 h-4 text-textSecondary"></i>
+        <div><div class="text-sm text-textMain">Last Seen & Online</div><div class="text-[10px] text-textSecondary">Everybody</div></div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </div>
+
+    <div class="flex items-center justify-between py-1">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="image" class="w-4 h-4 text-textSecondary"></i>
+        <div><div class="text-sm text-textMain">Profile Photo</div><div class="text-[10px] text-textSecondary">Everybody</div></div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </div>
+
+    <div class="flex items-center justify-between py-1">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="phone" class="w-4 h-4 text-textSecondary"></i>
+        <div><div class="text-sm text-textMain">Phone Number</div><div class="text-[10px] text-textSecondary">My Contacts</div></div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </div>
+  </div>
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Security</h4>
+
+    <button onclick="showToast('Two-step verification coming in Phase 2')" class="w-full py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg"><i data-lucide="shield-check" class="w-4 h-4"></i></div>
+        <span class="text-sm font-medium text-textMain">Two-Step Verification</span>
+      </div>
+      <span class="text-[10px] text-textSecondary">Off</span>
+    </button>
+
+    <button onclick="showToast('Active sessions coming in P2 T08')" class="w-full py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg"><i data-lucide="smartphone" class="w-4 h-4"></i></div>
+        <span class="text-sm font-medium text-textMain">Active Sessions</span>
+      </div>
+      <span class="text-[10px] text-textSecondary">3 devices</span>
+    </button>
+
+    <button onclick="showToast('Blocked users list coming soon')" class="w-full py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-red-500/10 text-red-600 dark:text-red-400 rounded-lg"><i data-lucide="user-x" class="w-4 h-4"></i></div>
+        <span class="text-sm font-medium text-textMain">Blocked Users</span>
+      </div>
+      <span class="text-[10px] text-textSecondary">0</span>
+    </button>
+  </div>
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Data</h4>
+    <button onclick="window.showToast('Contact list cleared')" class="w-full py-3 text-left text-red-500">
+      <span class="text-sm font-medium">Delete Synced Contacts</span>
+    </button>
+    <button onclick="if(confirm('Delete your account? This cannot be undone.')){window.showToast('Account deletion requested')}" class="w-full py-3 text-left text-red-500">
+      <span class="text-sm font-medium">Delete Account</span>
+    </button>
+  </div>
+</div>

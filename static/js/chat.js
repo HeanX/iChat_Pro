@@ -1125,13 +1125,13 @@ function setupEventListeners() {
   const settingsBack = document.getElementById("settings-back-btn");
   if (menuSettings) {
     menuSettings.addEventListener("click", () => {
-      showSettingsPanel();
+      navigateSidebar('settings-home');
       toggleDrawer();
     });
   }
   if (menuProfile) {
     menuProfile.addEventListener("click", () => {
-      showSettingsPanel();
+      navigateSidebar('settings-home');
       toggleDrawer();
     });
   }
@@ -1394,7 +1394,7 @@ let lastSidebarView = 'chat';
 
 function navigateSidebar(viewName) {
   lastSidebarView = viewName;
-  var views = ['chat', 'settings', 'contacts', 'search'];
+  var views = ['chat', 'settings-home', 'settings', 'settings-profile', 'contacts', 'search'];
   views.forEach(function(name) {
     var el = document.getElementById('sidebar-view-' + name);
     if (el) el.classList.toggle('hidden', name !== viewName);

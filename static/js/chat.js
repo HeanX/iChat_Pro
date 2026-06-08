@@ -1125,13 +1125,13 @@ function setupEventListeners() {
   const settingsBack = document.getElementById("settings-back-btn");
   if (menuSettings) {
     menuSettings.addEventListener("click", () => {
-      showSettingsPanel();
+      navigateSidebar('settings-home');
       toggleDrawer();
     });
   }
   if (menuProfile) {
     menuProfile.addEventListener("click", () => {
-      showSettingsPanel();
+      navigateSidebar('settings-home');
       toggleDrawer();
     });
   }
@@ -1389,22 +1389,33 @@ function toggleDrawer() {
   }
 }
 
-function showSettingsPanel() {
-  const sidebarChat = document.getElementById("sidebar-chat-view");
-  const sidebarSettings = document.getElementById("sidebar-settings-view");
-  if (sidebarChat && sidebarSettings) {
-    sidebarChat.classList.add("hidden");
-    sidebarSettings.classList.remove("hidden");
+// Phase 2 sidebar navigation — supports chat/settings/contacts/search views
+let lastSidebarView = 'chat';
+
+function navigateSidebar(viewName) {
+  lastSidebarView = viewName;
+  var views = ['chat', 'settings-home', 'settings', 'settings-profile', 'contacts', 'search'];
+  views.forEach(function(name) {
+    var el = document.getElementById('sidebar-view-' + name);
+    if (el) el.classList.toggle('hidden', name !== viewName);
+  });
+  // On mobile, back to sidebar when navigating settings/contacts
+  if (window.innerWidth < 768 && viewName !== 'chat') {
+    document.getElementById('sidebar-container').classList.remove('hidden');
+    document.getElementById('chat-window-container').classList.add('hidden');
+    window.location.hash = '';
   }
+  // Re-render lucide icons after view switch
+  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
+}
+
+// Backward-compatible wrappers
+function showSettingsPanel() {
+  navigateSidebar('settings');
 }
 
 function hideSettingsPanel() {
-  const sidebarChat = document.getElementById("sidebar-chat-view");
-  const sidebarSettings = document.getElementById("sidebar-settings-view");
-  if (sidebarChat && sidebarSettings) {
-    sidebarChat.classList.remove("hidden");
-    sidebarSettings.classList.add("hidden");
-  }
+  navigateSidebar('chat');
 }
 
 // Generic sidebar view navigation (Phase 2)
@@ -1437,8 +1448,8 @@ function setupSidebarResizer() {
   let animationFrame = null;
 
   const clampWidth = (width) => {
-    const maxByViewport = Math.max(420, window.innerWidth - 420);
-    return Math.min(Math.max(width, 280), Math.min(680, maxByViewport));
+    const maxByViewport = Math.max(440, window.innerWidth - 440);
+    return Math.min(Math.max(width, 280), Math.min(440, maxByViewport));
   };
 
   const applyWidth = (width) => {
@@ -1503,6 +1514,27 @@ function closeFingerprintModal() {
     modal.classList.add("hidden");
   }
 }
+
+// QR Code modal (P2 T03)
+function showQRCodeModal() {
+  const modal = document.getElementById("qr-code-modal");
+  if (modal) { modal.classList.remove("hidden"); modal.classList.add("flex"); }
+}
+function closeQRCodeModal() {
+  const modal = document.getElementById("qr-code-modal");
+  if (modal) { modal.classList.remove("flex"); modal.classList.add("hidden"); }
+}
+function copyQRCode() {
+  const fb = document.getElementById("qr-copy-feedback");
+  navigator.clipboard.writeText(window.location.origin + "/contacts/add/").then(function() {
+    if (fb) { fb.classList.remove("hidden"); setTimeout(function() { fb.classList.add("hidden"); }, 2000); }
+  }).catch(function() {
+    window.showToast("Failed to copy QR code link");
+  });
+}
+window.showQRCodeModal = showQRCodeModal;
+window.closeQRCodeModal = closeQRCodeModal;
+window.copyQRCode = copyQRCode;
 
 function adjustTextareaHeight(textarea) {
   textarea.style.height = "auto";

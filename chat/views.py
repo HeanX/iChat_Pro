@@ -524,6 +524,7 @@ def group_messages_view(request, conversation_id):
             "algorithm": r.algorithm,
             "sender_key_version": r.sender_key_version,
             "receiver_key_version": r.receiver_key_version,
+            "membership_version": r.membership_version,
             "status": r.status,
             "created_at": r.group_message.created_at.isoformat(),
         }
@@ -617,3 +618,35 @@ def conversation_messages_view(request, conversation_id):
         "has_previous": page_obj.has_previous(),
         "messages": messages_data,
     })
+
+
+@login_required(login_url='login')
+def send_private_message_view(request, conversation_id):
+    """Persist a private encrypted message over HTTP and broadcast it.
+
+    The browser still receives messages over WebSocket, but HTTP gives the send
+    path a reliable request/response fallback when the socket is reconnecting.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    data = _json_body(request)
+    data['conversation_id'] = conversation_id
+
+    try:
+        message = async_to_sync(ChatConsumer.create_private_message)(request.user.pk, data)
+    except Exception as error:
+        code = getattr(error, 'code', 'invalid_payload')
+        detail = getattr(error, 'message', str(error))
+        status = 404 if code == 'conversation_not_found' else 400
+        if code == 'conversation_forbidden':
+            status = 403
+        return JsonResponse({'error': code, 'detail': detail}, status=status)
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        ChatConsumer.user_group(message['receiver_id']),
+        {'type': 'message.single.new', 'data': message},
+    )
+
+    return JsonResponse(message, status=201)

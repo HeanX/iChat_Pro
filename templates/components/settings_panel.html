@@ -349,7 +349,7 @@
     btn.textContent = 'Uploading…';
     try {
       const kmgr = _kmgr();
-      await kmgr.initialize(); // idempotent: re-uploads if keys exist locally
+      await kmgr.uploadCurrentRecord();
       _showKeyMsg('Public key re-synced to server.');
       refreshKeyUI();
     } catch (err) {

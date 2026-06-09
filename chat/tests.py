@@ -747,6 +747,32 @@ class ConversationMessagesAPITests(TestCase):
         response = self._get(self.conv.id)
         self.assertEqual(response.status_code, 403)
 
+    def test_http_private_send_persists_message(self):
+        self.client.login(username=self.alice.username, password="test1234")
+        response = self.client.post(
+            f"/api/conversations/{self.conv.id}/messages/send/",
+            {
+                "receiver_id": self.bob.id,
+                "ciphertext": "aGk=",
+                "nonce": "MTIzNDU2Nzg5MDEy",
+                "auth_tag": "MTIzNDU2Nzg5MDEyMzQ1Ng==",
+                "algorithm": "AES-256-GCM",
+                "sender_key_version": 1,
+                "receiver_key_version": 1,
+                "client_message_id": "http-send-1",
+                "message_type": "text",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        message = EncryptedMessage.objects.get(client_message_id="http-send-1")
+        self.assertEqual(message.conversation, self.conv)
+        self.assertEqual(message.sender, self.alice)
+        self.assertEqual(message.receiver, self.bob)
+        self.conv.refresh_from_db()
+        self.assertEqual(self.conv.last_message_id, message.id)
+
 
 class ChatConsumerTests(TransactionTestCase):
     def setUp(self):

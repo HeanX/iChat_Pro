@@ -184,10 +184,10 @@
 
 {% block extra_js %}
 <!-- Main Chat Interaction JavaScript -->
-<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}" data-current-user-id="{{ request.user.pk }}"></script>
-<script src="{% static 'js/private-chat-e2ee.js' %}"></script>
+<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}?v=20260609-explicit-key-reset" data-current-user-id="{{ request.user.pk }}"></script>
+<script src="{% static 'js/private-chat-e2ee.js' %}?v=20260609-peer-trust-reset"></script>
 <script src="{% static 'js/group-chat-e2ee.js' %}"></script>
-<script src="{% static 'js/chat.js' %}"></script>
+<script src="{% static 'js/chat.js' %}?v=20260609-peer-trust-retry"></script>
 <script>
   function exportLocalKeyBackup() {
     try {

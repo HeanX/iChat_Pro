@@ -16,6 +16,8 @@ let isLoadingMessages = false;
 let sessionKeys = {};            // Cache: conversationId → derived CryptoKey
 let myUserId = null;             // Current authenticated user PK
 let wsClient = null;             // v1 /ws/chat/ client
+let e2eeKeyReady = true;
+let e2eeKeyError = null;
 
 function formatClockTime(date = new Date()) {
   return date.toLocaleTimeString([], {
@@ -62,6 +64,151 @@ function logToCryptoConsole(message) {
     const time = formatClockTime();
     consoleLogEl.textContent += `\n[${time}] ${message}`;
     consoleLogEl.scrollTop = consoleLogEl.scrollHeight;
+  }
+}
+
+function setE2EEKeyError(message) {
+  e2eeKeyReady = false;
+  e2eeKeyError = message || 'Local encryption key is unavailable.';
+
+  const textarea = document.getElementById("chat-input-textarea");
+  if (textarea) {
+    textarea.disabled = true;
+    textarea.value = "";
+    textarea.placeholder = currentLanguage === 'zh'
+      ? "请先导入此账号的密钥备份..."
+      : "Import this account's key backup first...";
+  }
+
+  const banner = document.getElementById("chat-input-security-banner");
+  if (banner) {
+    const span = banner.querySelector("span");
+    if (span) {
+      span.textContent = currentLanguage === 'zh'
+        ? "本机缺少匹配的端到端加密私钥，请导入密钥备份。"
+        : "Matching local E2EE private key is missing. Import your key backup.";
+    }
+  }
+
+  logToCryptoConsole(`[E2EE Key Error] ${e2eeKeyError}`);
+}
+
+function clearE2EEKeyError() {
+  e2eeKeyReady = true;
+  e2eeKeyError = null;
+
+  const textarea = document.getElementById("chat-input-textarea");
+  if (textarea) {
+    textarea.disabled = false;
+    textarea.placeholder = currentLanguage === 'zh'
+      ? "编写加密消息..."
+      : "Write an encrypted message...";
+  }
+
+  const banner = document.getElementById("chat-input-security-banner");
+  if (banner) {
+    const span = banner.querySelector("span");
+    if (span) {
+      span.textContent = currentLanguage === 'zh'
+        ? "🔒 消息已通过端到端加密保护。"
+        : "🔒 Messages are secured with end-to-end encryption.";
+    }
+  }
+}
+
+async function recoverE2EEKeyForSending() {
+  if (e2eeKeyReady) return true;
+  if (!window.iChatKeyManager) return false;
+
+  const confirmed = window.confirm(
+    currentLanguage === 'zh'
+      ? "本机没有可用的加密私钥。可以创建新的身份密钥继续发送新消息，但旧消息仍需要原密钥备份才能解密。是否继续？"
+      : "No usable local encryption key is available. Create a new identity key so you can send new messages? Older messages still require the original key backup."
+  );
+  if (!confirmed) return false;
+
+  try {
+    await window.iChatKeyManager.resetIdentityKey();
+    clearE2EEKeyError();
+    window.showToast(currentLanguage === 'zh'
+      ? "已创建新的加密身份，可继续发送新消息。"
+      : "New encryption identity created. You can send new messages now.");
+    await fetchConversations();
+    return true;
+  } catch (err) {
+    setE2EEKeyError(err.message);
+    window.showToast(err.message);
+    return false;
+  }
+}
+
+async function resetIdentityKeyFromPanel() {
+  if (!window.iChatKeyManager || !window.iChatKeyManager.resetIdentityKey) {
+    window.showToast(currentLanguage === 'zh'
+      ? '密钥管理模块不可用'
+      : 'Key manager is not available.');
+    return;
+  }
+
+  const confirmed = window.confirm(
+    currentLanguage === 'zh'
+      ? '重置密钥会创建新的端到端加密身份。之后可以继续发送新消息，但旧消息仍需要原密钥备份才能解密。是否继续？'
+      : 'Resetting creates a new E2EE identity. You can send new messages afterward, but older messages still require the original key backup. Continue?'
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById('right-panel-reset-key-btn');
+  if (btn) btn.disabled = true;
+
+  try {
+    await window.iChatKeyManager.resetIdentityKey();
+    clearE2EEKeyError();
+    await fetchConversations();
+    const conv = conversationsById[activeChatId];
+    if (conv) updateDetailsPanel(conv);
+    window.showToast(currentLanguage === 'zh'
+      ? '已重置密钥，可继续发送新消息。'
+      : 'Key reset. You can send new messages now.');
+  } catch (err) {
+    setE2EEKeyError(err.message);
+    window.showToast(err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function decryptFailureLabel(error) {
+  const code = error && error.code;
+  if (code === 'local_key_missing' || code === 'local_key_changed') {
+    return currentLanguage === 'zh' ? '[需要密钥备份]' : '[Key backup required]';
+  }
+  return '[Decryption failed]';
+}
+
+async function encryptPrivateMessageWithTrustRetry({ text, conv }) {
+  try {
+    return await window.iChatPrivateE2EE.encryptPrivateMessage({
+      plaintext: text,
+      conversationId: conv.id,
+      receiverId: conv.peer_id
+    });
+  } catch (err) {
+    if (err && err.code === 'peer_key_changed' && window.iChatPrivateE2EE.forgetPeerKey) {
+      const confirmed = window.confirm(
+        currentLanguage === 'zh'
+          ? '对方的加密密钥已重置。是否信任新的密钥并重新发送？'
+          : 'This contact reset their encryption key. Trust the new key and retry sending?'
+      );
+      if (confirmed) {
+        window.iChatPrivateE2EE.forgetPeerKey(conv.peer_id);
+        return window.iChatPrivateE2EE.encryptPrivateMessage({
+          plaintext: text,
+          conversationId: conv.id,
+          receiverId: conv.peer_id
+        });
+      }
+    }
+    throw err;
   }
 }
 
@@ -230,7 +377,7 @@ async function fetchMessages(conversationId, page = 1) {
             nonce: msg.nonce,
             auth_tag: msg.auth_tag,
             group_id: conv.id,
-            membership_version: conv.membership_version,
+            membership_version: msg.membership_version,
             sender_id: msg.sender_id,
             receiver_id: msg.receiver_id,
             sender_key_version: msg.sender_key_version,
@@ -242,7 +389,7 @@ async function fetchMessages(conversationId, page = 1) {
             ciphertext: msg.ciphertext,
             nonce: msg.nonce,
             auth_tag: msg.auth_tag,
-            conversation_id: conv.id,
+            conversation_id: data.conversation_id || conv.id,
             sender_id: msg.sender_id,
             receiver_id: msg.receiver_id,
             sender_key_version: msg.sender_key_version,
@@ -263,7 +410,7 @@ async function fetchMessages(conversationId, page = 1) {
         console.warn(`Failed to decrypt message ${msg.id}:`, decryptErr);
         decrypted.push({
           id: msg.id,
-          text: '[Decryption failed]',
+          text: decryptFailureLabel(decryptErr),
           time: formatClockTime(new Date(msg.created_at)),
           isSelf: msg.sender_id === myUserId,
           sender: msg.sender_id,
@@ -362,11 +509,12 @@ function handleIncomingMessage(data) {
 
 async function handlePrivateMessageReceived(data) {
   const payload = data.data || data;
-  const convId = payload.conversation_id;
+  const convId = parseInt(payload.conversation_id);
   const conv = conversationsById[convId];
+  let plaintext;
+  let decryptError = null;
 
   try {
-    let plaintext;
     if (window.iChatPrivateE2EE) {
       plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
         algorithm: payload.algorithm,
@@ -382,46 +530,55 @@ async function handlePrivateMessageReceived(data) {
     } else {
       plaintext = '[Encrypted message — E2EE module not loaded]';
     }
-
-    const newMsg = {
-      id: payload.message_id,
-      text: plaintext,
-      time: formatClockTime(new Date(payload.created_at || Date.now())),
-      isSelf: false,
-      sender: payload.sender_id,
-      status: 'received',
-    };
-
-    if (messages.some(msg => msg.id === payload.message_id)) return;
-
-    if (activeChatId === convId) {
-      messages.push(newMsg);
-      renderMessages();
-      scrollToBottom();
-      // Send delivery receipt
-      if (wsClient) {
-        wsClient.sendPayload({
-          event: 'message.receipt.update',
-          data: {
-            conversation_type: 'single',
-            message_id: payload.message_id,
-            status: 'delivered',
-          },
-        });
-      }
-    } else {
-      // Increment unread badge
-      if (conv) {
-        conv.unread = (conv.unread || 0) + 1;
-        const badge = document.getElementById(`unread-badge-${convId}`);
-        if (badge) {
-          badge.textContent = conv.unread;
-          badge.classList.remove('hidden');
-        }
-      }
-    }
   } catch (err) {
     console.error('Failed to decrypt incoming message:', err);
+    plaintext = decryptFailureLabel(err);
+    decryptError = err;
+  }
+
+  const newMsg = {
+    id: payload.message_id,
+    text: plaintext,
+    time: formatClockTime(new Date(payload.created_at || Date.now())),
+    isSelf: payload.sender_id === myUserId,
+    sender: payload.sender_id,
+    status: 'received',
+    decryptError: !!decryptError,
+  };
+
+  if (messages.some(msg => msg.id === payload.message_id)) return;
+
+  if (conv) {
+    updateSidebarPreview(conv, decryptError ? 'Encrypted message' : plaintext, newMsg.time);
+  } else {
+    fetchConversations();
+  }
+
+  if (activeChatId === convId) {
+    messages.push(newMsg);
+    renderMessages();
+    scrollToBottom();
+    // Send delivery receipt
+    if (wsClient) {
+      wsClient.sendPayload({
+        event: 'message.receipt.update',
+        data: {
+          conversation_type: 'single',
+          message_id: payload.message_id,
+          status: 'delivered',
+        },
+      });
+    }
+  } else {
+    // Increment unread badge
+    if (conv) {
+      conv.unread = (conv.unread || 0) + 1;
+      const badge = document.getElementById(`unread-badge-${convId}`);
+      if (badge) {
+        badge.textContent = conv.unread;
+        badge.classList.remove('hidden');
+      }
+    }
   }
 }
 
@@ -635,6 +792,7 @@ function updateDetailsPanel(conv) {
   const fpWrapper = document.getElementById("right-panel-fingerprint-wrapper");
   const groupSection = document.getElementById("right-panel-group-section");
   const protocol = document.getElementById("right-panel-protocol");
+  const resetKeyBtn = document.getElementById("right-panel-reset-key-btn");
 
   if (avatar) {
     avatar.className = 'w-20 h-20 rounded-full text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3';
@@ -648,6 +806,7 @@ function updateDetailsPanel(conv) {
     if (fpWrapper) fpWrapper.classList.remove("hidden");
     if (fp) fp.textContent = 'ECDH + HKDF + AES-GCM';
     if (protocol) protocol.textContent = "ECDH + HKDF + AES-GCM";
+    if (resetKeyBtn) resetKeyBtn.classList.toggle("hidden", conv.type === "group");
   } else {
     if (fpWrapper) fpWrapper.classList.add("hidden");
   }
@@ -744,6 +903,14 @@ function escapeHtml(value) {
 // ============================================================================
 
 async function sendMessage() {
+  if (!e2eeKeyReady) {
+    const recovered = await recoverE2EEKeyForSending();
+    if (!recovered) {
+      window.showToast(e2eeKeyError || 'Local encryption key is unavailable.');
+      return;
+    }
+  }
+
   const textarea = document.getElementById("chat-input-textarea");
   if (!textarea) return;
   const text = textarea.value.trim();
@@ -802,34 +969,27 @@ async function sendMessage() {
       if (!window.iChatPrivateE2EE || !window.iChatPrivateE2EE.encryptPrivateMessage || !conv.peer_id) {
         throw new Error("Private E2EE module or peer information is missing.");
       }
-        const result = await window.iChatPrivateE2EE.encryptPrivateMessage({
-          plaintext: text,
-          conversationId: conv.id,
-          receiverId: conv.peer_id
+        const result = await encryptPrivateMessageWithTrustRetry({ text, conv });
+        const accepted = await apiFetch(`/api/conversations/${conv.id}/messages/send/`, {
+          method: "POST",
+          body: JSON.stringify({
+            receiver_id: conv.peer_id,
+            ciphertext: result.ciphertext,
+            nonce: result.nonce,
+            auth_tag: result.auth_tag,
+            algorithm: result.algorithm,
+            sender_key_version: result.sender_key_version,
+            receiver_key_version: result.receiver_key_version,
+            client_message_id: clientMsgId,
+            message_type: "text",
+          })
         });
-        if (!wsClient || !wsClient.sendPayload || !wsClient.sendPayload({
-            event: "message.single.send",
-            request_id: clientMsgId,
-            data: {
-              conversation_id: conv.id,
-              sender_id: myUserId,
-              receiver_id: conv.peer_id,
-              ciphertext: result.ciphertext,
-              nonce: result.nonce,
-              auth_tag: result.auth_tag,
-              algorithm: result.algorithm,
-              sender_key_version: result.sender_key_version,
-              receiver_key_version: result.receiver_key_version,
-              client_message_id: clientMsgId,
-              message_type: "text",
-            }
-          })) {
-            throw new Error("WebSocket is not connected.");
-        }
+        handleMessageAccepted({ data: accepted });
     }
   } catch (err) {
     console.error("Send failed:", err);
     logToCryptoConsole("[Send Error] " + err.message);
+    window.showToast(err.message || "Send failed.");
     const idx = messages.findIndex(m => m.id === clientMsgId);
     if (idx >= 0) messages[idx].status = "failed";
     renderMessages();
@@ -1035,7 +1195,7 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
 
   if (msg.isSystem || msg.decryptError) {
     div.className += " message-row-system";
-    var text = msg.decryptError ? "[Decryption failed]" : getSystemMessageTranslation(msg.text);
+    var text = msg.decryptError ? msg.text : getSystemMessageTranslation(msg.text);
     div.innerHTML = '<div class="system-capsule"><span>' + escapeHtml(text) + '</span></div>';
     setTimeout(function() { if (div.querySelector("[data-lucide]")) lucide.createIcons(); }, 0);
     return div;
@@ -1583,7 +1743,7 @@ function insertEmoji(emoji) {
 // Initialize on DOM load
 document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener('ichat:key-missing', () => {
-    window.showToast('Local private key was missing. A new key was created; import your backup to decrypt older messages.');
+    window.showToast('Local private key is missing. Import your key backup to decrypt messages.');
   });
 
   var keyScript = document.getElementById('ichat-key-manager-script');
@@ -1598,6 +1758,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   } catch (err) {
     console.error('Key init failed:', err);
+    setE2EEKeyError(err.message);
   }
 
   await fetchConversations();
@@ -1665,6 +1826,7 @@ const translations = {
     verify_fingerprint_btn: "Verify Fingerprint",
     verify_fp_desc: "E2EE Encrypted. Click to verify fingerprint.",
     verify_fp_title: "Verify Security Fingerprint",
+    reset_key_btn: "Reset Key",
     view_info: "Chat Info",
     write_placeholder: "Write an encrypted message...",
     menu_boost_group: "Boost Group",
@@ -1732,6 +1894,7 @@ const translations = {
     verify_fingerprint_btn: "验证指纹",
     verify_fp_desc: "端到端加密。点击以验证安全指纹。",
     verify_fp_title: "验证安全指纹",
+    reset_key_btn: "重置密钥",
     view_info: "查看信息",
     write_placeholder: "编写加密消息...",
     menu_boost_group: "助力群组",

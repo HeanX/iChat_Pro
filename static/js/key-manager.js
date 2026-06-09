@@ -99,6 +99,15 @@
     return record;
   }
 
+  async function fetchServerKey(userId, keyVersion = null) {
+    const suffix = keyVersion === null ? '' : `${encodeURIComponent(keyVersion)}/`;
+    const response = await fetch(`/api/keys/${encodeURIComponent(userId)}/${suffix}`);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Unable to check server key (${response.status}).`);
+    const payload = await response.json();
+    return payload.key || null;
+  }
+
   async function hasServerKey(userId) {
     const response = await fetch(`/api/keys/${encodeURIComponent(userId)}/`);
     if (response.status === 404) return false;
@@ -115,11 +124,33 @@
       const serverHasKey = await hasServerKey(userId);
       if (serverHasKey) {
         window.dispatchEvent(new CustomEvent('ichat:key-missing'));
+        throw new Error('Local private key is missing. Import your key backup to decrypt existing messages.');
       }
       record = await generateRecord(userId);
       saveRecord(record);
+      return uploadPublicKey(record);
     }
-    return uploadPublicKey(record);
+
+    const activeKey = await fetchServerKey(userId);
+    if (!activeKey) {
+      return uploadPublicKey(record);
+    }
+
+    if (activeKey.identity_public_key === record.identity_public_key) {
+      record.key_version = activeKey.key_version;
+      saveRecord(record);
+      return record;
+    }
+
+    if (record.key_version) {
+      const historicalKey = await fetchServerKey(userId, record.key_version);
+      if (historicalKey && historicalKey.identity_public_key === record.identity_public_key) {
+        return record;
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('ichat:key-missing'));
+    throw new Error('Local private key does not match the server encryption identity. Import the matching key backup or rotate keys explicitly.');
   }
 
   function exportBackup() {
@@ -181,6 +212,18 @@
     initialize,
     exportBackup,
     importBackup,
+    resetIdentityKey: async () => {
+      const userId = currentUserId();
+      if (!userId) throw new Error('Current user ID is unavailable.');
+      const record = await generateRecord(userId);
+      saveRecord(record);
+      return uploadPublicKey(record);
+    },
+    uploadCurrentRecord: () => {
+      const record = loadRecord(currentUserId());
+      if (!record) throw new Error('No local private key is available to upload.');
+      return uploadPublicKey(record);
+    },
     loadCurrentRecord: () => loadRecord(currentUserId())
   };
 })();

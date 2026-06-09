@@ -735,6 +735,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     algorithm=data['algorithm'],
                     sender_key_version=data['sender_key_version'],
                     receiver_key_version=r['receiver_key_version'],
+                    membership_version=data['membership_version'],
                 )
                 for r in data['recipients']
             ]
@@ -784,7 +785,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             group_message=group_message,
         ).select_related('group_message')
         return [
-            cls.serialize_group_recipient(r, conversation.membership_version)
+            cls.serialize_group_recipient(r)
             for r in recipients
         ]
 
@@ -846,11 +847,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         return result
 
     @staticmethod
-    def serialize_group_recipient(recipient, membership_version):
+    def serialize_group_recipient(recipient, membership_version=None):
+        mv = membership_version if membership_version is not None else recipient.membership_version
         return {
             'message_id': recipient.group_message_id,
             'group_id': recipient.group_message.conversation_id,
-            'membership_version': membership_version,
+            'membership_version': mv,
             'sender_id': recipient.group_message.sender_id,
             'receiver_id': recipient.receiver_id,
             'message_type': recipient.group_message.message_type,

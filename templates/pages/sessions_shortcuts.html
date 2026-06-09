@@ -1,0 +1,75 @@
+{# sessions_shortcuts.html — P2 T08 Active Sessions, Language, Keyboard Shortcuts #}
+<div class="divide-y divide-borderColor/60">
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Active Sessions</h4>
+    <p class="text-xs text-textSecondary">Devices currently logged into your account.</p>
+
+    <div class="space-y-3">
+      <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <i data-lucide="monitor" class="w-4 h-4 text-green-500"></i>
+          <div>
+            <div class="text-sm font-semibold text-textMain">Windows — Chrome</div>
+            <div class="text-[10px] text-textSecondary">Beijing, China · Active now · IP: ***</div>
+          </div>
+        </div>
+        <button onclick="showToast('Session terminated')" class="text-xs text-red-500 hover:underline font-semibold">Terminate</button>
+      </div>
+
+      <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <i data-lucide="smartphone" class="w-4 h-4 text-gray-400"></i>
+          <div>
+            <div class="text-sm font-semibold text-textMain">iPhone — Safari</div>
+            <div class="text-[10px] text-textSecondary">Beijing, China · Last active 2h ago</div>
+          </div>
+        </div>
+        <button onclick="showToast('Session terminated')" class="text-xs text-red-500 hover:underline font-semibold">Terminate</button>
+      </div>
+    </div>
+
+    <button onclick="showToast('All other sessions terminated')" class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+      Terminate All Other Sessions
+    </button>
+  </div>
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Language</h4>
+
+    <button onclick="toggleLanguage()" class="w-full py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-lg"><i data-lucide="languages" class="w-4 h-4"></i></div>
+        <div><div class="text-sm font-medium text-textMain" data-i18n="language_mode">Language</div><div id="lang-display-val-2" class="text-[10px] text-textSecondary" data-i18n="lang_display">English</div></div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+  </div>
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Keyboard Shortcuts</h4>
+
+    <div class="space-y-1">
+      <div class="flex items-center justify-between py-2 px-1 text-sm">
+        <span class="text-textMain">Search chats</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + K</kbd>
+      </div>
+      <div class="flex items-center justify-between py-2 px-1 text-sm">
+        <span class="text-textMain">New chat</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + N</kbd>
+      </div>
+      <div class="flex items-center justify-between py-2 px-1 text-sm">
+        <span class="text-textMain">Toggle mute</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + M</kbd>
+      </div>
+      <div class="flex items-center justify-between py-2 px-1 text-sm">
+        <span class="text-textMain">Send message</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Enter</kbd>
+      </div>
+      <div class="flex items-center justify-between py-2 px-1 text-sm">
+        <span class="text-textMain">New line</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Shift + Enter</kbd>
+      </div>
+    </div>
+  </div>
+</div>

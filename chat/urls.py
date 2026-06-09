@@ -91,6 +91,11 @@ urlpatterns = [
         views.update_presence_view,
         name='api_update_presence',
     ),
+    path(
+        'api/conversations/<int:conversation_id>/messages/send/',
+        views.send_private_message_view,
+        name='api_conversation_message_send',
+    ),
     # Group management
     path('api/groups/', views.create_group_view, name='api_create_group'),
     path('api/groups/<int:conversation_id>/', views.update_group_view, name='api_update_group'),

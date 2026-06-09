@@ -246,6 +246,11 @@
     localStorage.setItem(storageKey, JSON.stringify(trusted));
   }
 
+  function forgetPeerKey(userId) {
+    const storageKey = `${TRUST_STORAGE_PREFIX}${requireInteger(userId, 'user_id')}`;
+    localStorage.removeItem(storageKey);
+  }
+
   async function encryptPrivateMessage({ plaintext, conversationId, receiverId }) {
     const local = currentRecord();
     const receiverKey = await fetchPublicKey(requireInteger(receiverId, 'receiver_id'));
@@ -287,10 +292,16 @@
     }
 
     if (localKeyVersion !== requireInteger(local.key_version, 'local_key_version')) {
-      throw new PrivateChatCryptoError(
-        'local_key_changed',
-        'Your current device key cannot decrypt this message. Import the matching key backup.'
-      );
+      const historicalLocalKey = await fetchPublicKey(localUserId, localKeyVersion);
+      if (historicalLocalKey.identity_public_key === local.identity_public_key) {
+        // The same local key material may have been re-registered as a newer
+        // version. Keep using the current private key for historical messages.
+      } else {
+        throw new PrivateChatCryptoError(
+          'local_key_changed',
+          'Your current device key cannot decrypt this message. Import the matching key backup.'
+        );
+      }
     }
 
     const remoteKey = await fetchPublicKey(remoteUserId, remoteKeyVersion);
@@ -312,6 +323,7 @@
     decryptText,
     encryptPrivateMessage,
     decryptPrivateMessage,
-    trustPeerKey
+    trustPeerKey,
+    forgetPeerKey
   };
 })();

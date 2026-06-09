@@ -1,0 +1,222 @@
+{# notifications.html — P2 T04 Notification Settings #}
+<div class="divide-y divide-borderColor/60">
+
+  <!-- Permission Banner -->
+  <div class="px-4 py-3 bg-blue-50/50 dark:bg-blue-950/20 border-b border-blue-200 dark:border-blue-900/30">
+    <div class="flex items-center space-x-3">
+      <i data-lucide="bell" class="w-5 h-5 text-blue-500 flex-shrink-0"></i>
+      <div class="flex-1">
+        <p class="text-sm font-semibold text-textMain">Desktop Notifications</p>
+        <p class="text-[10px] text-textSecondary">Enable browser notifications for new messages</p>
+      </div>
+      <button id="notif-permission-btn" onclick="requestNotifPermission()"
+        class="px-3 py-1.5 text-xs font-semibold bg-blue-500 text-white rounded-custom-md hover:opacity-90 transition-opacity">
+        Enable
+      </button>
+    </div>
+  </div>
+
+  <!-- Master Toggles -->
+  <div class="px-4 py-3 space-y-4">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg">
+          <i data-lucide="bell-off" class="w-4 h-4"></i>
+        </div>
+        <span class="text-sm font-medium text-textMain">Offline Notifications</span>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="notif-offline" onchange="saveNotifSetting()" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg">
+          <i data-lucide="monitor" class="w-4 h-4"></i>
+        </div>
+        <span class="text-sm font-medium text-textMain">Show Notifications from All Accounts</span>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="notif-all-accounts" onchange="saveNotifSetting()">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <!-- Sound Settings -->
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Sound</h4>
+
+    <div class="flex items-center justify-between">
+      <span class="text-sm font-medium text-textMain">Notification Sound</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="notif-sound" onchange="saveNotifSetting()" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-textMain">Volume</span>
+        <span id="notif-volume-val" class="text-xs font-bold text-brand-light dark:text-brand-dark">80%</span>
+      </div>
+      <input type="range" min="0" max="100" value="80" id="notif-volume"
+        class="w-full h-1.5 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-brand-light dark:accent-brand-dark"
+        oninput="updateNotifVolume(this.value)">
+    </div>
+
+    <div class="flex items-center justify-between">
+      <span class="text-sm font-medium text-textMain">Message Sent Sound</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="notif-sent-sound" onchange="saveNotifSetting()" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <!-- Per-Chat-Type Notifications -->
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Chat Notifications</h4>
+
+    <!-- Private Chats -->
+    <div class="p-3 bg-bgSearch rounded-custom-md space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="user" class="w-4 h-4 text-textSecondary"></i>
+          <span class="text-sm font-medium text-textMain">Private Chats</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notif-private" onchange="saveNotifSetting()" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="flex items-center justify-between pl-6">
+        <span class="text-xs text-textSecondary">Message Preview</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notif-private-preview" onchange="saveNotifSetting()" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Groups -->
+    <div class="p-3 bg-bgSearch rounded-custom-md space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="users" class="w-4 h-4 text-textSecondary"></i>
+          <span class="text-sm font-medium text-textMain">Groups</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notif-groups" onchange="saveNotifSetting()" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="flex items-center justify-between pl-6">
+        <span class="text-xs text-textSecondary">Message Preview</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notif-groups-preview" onchange="saveNotifSetting()" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Channels (placeholder) -->
+    <div class="p-3 bg-bgSearch rounded-custom-md space-y-3 opacity-60">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="radio" class="w-4 h-4 text-textSecondary"></i>
+          <span class="text-sm font-medium text-textMain">Channels</span>
+          <span class="text-[9px] bg-zinc-200 dark:bg-zinc-700 text-textSecondary px-1.5 py-0.5 rounded">Phase 3</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" disabled>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Other Notifications -->
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Other</h4>
+
+    <div class="flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg">
+          <i data-lucide="user-plus" class="w-4 h-4"></i>
+        </div>
+        <div class="flex-1 leading-snug">
+          <div class="text-sm font-medium text-textMain">Contact Joined</div>
+          <div class="text-[10px] text-textSecondary">Notify when a contact joins iChat</div>
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="notif-contact-joined" onchange="saveNotifSetting()" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; border-radius: 24px; transition: .3s; }
+  .toggle-switch input:checked + .toggle-slider { background-color: var(--color-primary); }
+  .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
+  .toggle-slider:before { content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
+  .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
+</style>
+
+<script>
+  var NOTIF_DEFAULTS = {
+    offline: true, allAccounts: false, sound: true, volume: 80, sentSound: true,
+    private: true, privatePreview: true, groups: true, groupsPreview: true,
+    contactJoined: true
+  };
+
+  function loadNotifSettings() {
+    try { return JSON.parse(localStorage.getItem('ichat_notif_settings')) || {}; } catch(e) { return {}; }
+  }
+  function saveNotifSetting() {
+    var s = {};
+    ['offline','allAccounts','sound','sentSound','private','privatePreview','groups','groupsPreview','contactJoined'].forEach(function(k) {
+      var el = document.getElementById('notif-' + k.replace(/([A-Z])/g, '-$1').toLowerCase());
+      if (el) s[k] = el.checked;
+    });
+    s.volume = parseInt(document.getElementById('notif-volume').value);
+    localStorage.setItem('ichat_notif_settings', JSON.stringify(s));
+  }
+  function applyNotifSettings() {
+    var s = loadNotifSettings();
+    var d = NOTIF_DEFAULTS;
+    document.getElementById('notif-offline').checked = s.offline !== undefined ? s.offline : d.offline;
+    document.getElementById('notif-all-accounts').checked = s.allAccounts !== undefined ? s.allAccounts : d.allAccounts;
+    document.getElementById('notif-sound').checked = s.sound !== undefined ? s.sound : d.sound;
+    document.getElementById('notif-sent-sound').checked = s.sentSound !== undefined ? s.sentSound : d.sentSound;
+    document.getElementById('notif-private').checked = s.private !== undefined ? s.private : d.private;
+    document.getElementById('notif-private-preview').checked = s.privatePreview !== undefined ? s.privatePreview : d.privatePreview;
+    document.getElementById('notif-groups').checked = s.groups !== undefined ? s.groups : d.groups;
+    document.getElementById('notif-groups-preview').checked = s.groupsPreview !== undefined ? s.groupsPreview : d.groupsPreview;
+    document.getElementById('notif-contact-joined').checked = s.contactJoined !== undefined ? s.contactJoined : d.contactJoined;
+    var vol = s.volume !== undefined ? s.volume : d.volume;
+    document.getElementById('notif-volume').value = vol;
+    document.getElementById('notif-volume-val').textContent = vol + '%';
+  }
+  function updateNotifVolume(val) {
+    document.getElementById('notif-volume-val').textContent = val + '%';
+    saveNotifSetting();
+  }
+  function requestNotifPermission() {
+    if (!('Notification' in window)) { window.showToast('Notifications not supported in this browser'); return; }
+    Notification.requestPermission().then(function(p) {
+      var btn = document.getElementById('notif-permission-btn');
+      if (p === 'granted') { btn.textContent = 'Enabled'; btn.classList.replace('bg-blue-500','bg-green-500'); btn.disabled = true; }
+      else { window.showToast('Notification permission denied'); }
+    });
+  }
+  applyNotifSettings();
+</script>

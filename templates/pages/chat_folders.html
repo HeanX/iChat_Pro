@@ -1,0 +1,61 @@
+{# chat_folders.html — P2 T07 Chat Folders, Stickers & Emoji #}
+<div class="divide-y divide-borderColor/60">
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Chat Folders</h4>
+    <p class="text-xs text-textSecondary">Create folders for different groups of chats to easily access them.</p>
+
+    <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between cursor-pointer hover-bg-search-op-65" onclick="showToast('Create folder coming soon')">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-brand-light/10 text-brand-light dark:text-brand-dark rounded-lg"><i data-lucide="plus" class="w-4 h-4"></i></div>
+        <span class="text-sm font-medium text-textMain">Create New Folder</span>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </div>
+
+    <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between opacity-60">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg"><i data-lucide="users" class="w-4 h-4"></i></div>
+        <div><div class="text-sm font-medium text-textMain">Team Chats</div><div class="text-[10px] text-textSecondary">3 chats</div></div>
+      </div>
+      <span class="text-[9px] bg-zinc-200 dark:bg-zinc-700 text-textSecondary px-1.5 py-0.5 rounded">Demo</span>
+    </div>
+  </div>
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Stickers & Emoji</h4>
+
+    <button onclick="showToast('Sticker sets coming in a future update')" class="w-full py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="sticker" class="w-4 h-4"></i></div>
+        <div><div class="text-sm font-medium text-textMain">Sticker Sets</div><div class="text-[10px] text-textSecondary">0 installed</div></div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+
+    <button onclick="showToast('Emoji suggestions coming soon')" class="w-full py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="smile" class="w-4 h-4"></i></div>
+        <div><div class="text-sm font-medium text-textMain">Suggest Emoji</div><div class="text-[10px] text-textSecondary">Replace text like :) with emoji</div></div>
+      </div>
+      <label class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+    </button>
+
+    <button onclick="showToast('Custom emoji coming soon')" class="w-full py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="image" class="w-4 h-4"></i></div>
+        <span class="text-sm font-medium text-textMain">Custom Emoji</span>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+  </div>
+</div>
+
+<style>
+  .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
+  .toggle-switch input { opacity:0; width:0; height:0 }
+  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
+  .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
+  .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
+  .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
+</style>

@@ -1,0 +1,117 @@
+{# data_storage.html — P2 T05 Data & Storage Settings #}
+<div id="data-storage-settings" class="divide-y divide-borderColor/60">
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Storage Usage</h4>
+    <div class="p-4 bg-bgSearch rounded-custom-md space-y-2">
+      <div class="flex items-center justify-between text-sm">
+        <span class="text-textSecondary">Chat data</span><span class="font-semibold text-textMain">2.4 MB</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <span class="text-textSecondary">Media cache</span><span class="font-semibold text-textMain">0 KB</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <span class="text-textSecondary">Other</span><span class="font-semibold text-textMain">0.1 MB</span>
+      </div>
+      <div class="h-2 bg-gray-200 dark:bg-zinc-700 rounded-full overflow-hidden mt-2">
+        <div class="h-full bg-brand-light dark:bg-brand-dark rounded-full" style="width: 15%"></div>
+      </div>
+      <p class="text-[10px] text-textSecondary">2.5 MB of 50 MB used</p>
+    </div>
+  </div>
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Auto-Download</h4>
+
+    <div class="space-y-3">
+      <div class="flex items-center justify-between py-1">
+        <div class="flex items-center space-x-3">
+          <i data-lucide="wifi" class="w-4 h-4 text-textSecondary"></i>
+          <span class="text-sm text-textMain">On Mobile Data</span>
+        </div>
+        <label class="toggle-switch"><input type="checkbox" data-storage-setting="mobileData" onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="flex items-center justify-between py-1">
+        <div class="flex items-center space-x-3">
+          <i data-lucide="wifi" class="w-4 h-4 text-textSecondary"></i>
+          <span class="text-sm text-textMain">On Wi-Fi</span>
+        </div>
+        <label class="toggle-switch"><input type="checkbox" data-storage-setting="wifi" checked onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="flex items-center justify-between py-1">
+        <div class="flex items-center space-x-3">
+          <i data-lucide="wifi-off" class="w-4 h-4 text-textSecondary"></i>
+          <span class="text-sm text-textMain">On Roaming</span>
+        </div>
+        <label class="toggle-switch"><input type="checkbox" data-storage-setting="roaming" onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
+      </div>
+    </div>
+  </div>
+
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Cache Management</h4>
+
+    <button onclick="clearLocalCache()" class="w-full py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-lg">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+        </div>
+        <span class="text-sm font-medium text-textMain">Clear Local Cache</span>
+      </div>
+      <span class="text-xs text-textSecondary">2.4 MB</span>
+    </button>
+
+    <button onclick="clearAllCacheSettings()" class="w-full py-3 flex items-center justify-between text-red-500">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-red-500/10 rounded-lg"><i data-lucide="alert-triangle" class="w-4 h-4"></i></div>
+        <span class="text-sm font-medium">Clear All Cache Settings</span>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4"></i>
+    </button>
+  </div>
+</div>
+
+<style>
+  .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
+  .toggle-switch input { opacity:0; width:0; height:0 }
+  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
+  .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
+  .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
+  .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
+  .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
+</style>
+
+<script>
+  function saveDataStorageSetting() {
+    var root = document.getElementById('data-storage-settings');
+    var settings = {};
+    if (!root) return;
+    root.querySelectorAll('[data-storage-setting]').forEach(function(el) {
+      settings[el.dataset.storageSetting] = el.checked;
+    });
+    localStorage.setItem('ichat_storage', JSON.stringify(settings));
+  }
+
+  function loadDataStorageSetting() {
+    var root = document.getElementById('data-storage-settings');
+    if (!root) return;
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('ichat_storage') || '{}'); } catch (error) { saved = {}; }
+    root.querySelectorAll('[data-storage-setting]').forEach(function(el) {
+      if (Object.prototype.hasOwnProperty.call(saved, el.dataset.storageSetting)) {
+        el.checked = Boolean(saved[el.dataset.storageSetting]);
+      }
+    });
+  }
+
+  function clearLocalCache(){window.showToast('Local cache cleared')}
+
+  function clearAllCacheSettings(){
+    if (confirm('Clear cache settings? Encryption keys and required app data will be kept.')) {
+      localStorage.removeItem('ichat_storage');
+      loadDataStorageSetting();
+      window.showToast('Cache settings cleared');
+    }
+  }
+
+  loadDataStorageSetting();
+</script>

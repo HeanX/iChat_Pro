@@ -104,4 +104,16 @@ urlpatterns = [
     path('api/groups/<int:conversation_id>/disband/', views.disband_group_view, name='api_disband_group'),
     path('api/groups/<int:conversation_id>/members/', views.group_members_view, name='api_group_members'),
     path('api/groups/<int:conversation_id>/messages/', views.group_messages_view, name='api_group_messages'),
+    # T27: Auto-delete
+    path('api/settings/auto-delete/', views.auto_delete_setting_view, name='api_auto_delete_setting'),
+    path('api/conversations/<int:conversation_id>/auto-delete/', views.conversation_auto_delete_view, name='api_conversation_auto_delete'),
+    # T33/T34: Unified search
+    path('api/search/', views.search_unified_view, name='api_search'),
+    # T37: Advanced group management
+    path('api/groups/<int:conversation_id>/promote/<int:user_id>/', views.group_promote_view, name='api_group_promote'),
+    path('api/groups/<int:conversation_id>/demote/<int:user_id>/', views.group_demote_view, name='api_group_demote'),
+    path('api/groups/<int:conversation_id>/transfer/', views.group_transfer_view, name='api_group_transfer'),
+    path('api/groups/<int:conversation_id>/announcement/', views.group_announcement_view, name='api_group_announcement'),
+    path('api/groups/<int:conversation_id>/mute-group/', views.group_mute_view, name='api_group_mute'),
+    path('api/groups/<int:conversation_id>/members-advanced/', views.group_members_advanced_view, name='api_group_members_advanced'),
 ]

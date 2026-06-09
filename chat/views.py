@@ -18,6 +18,7 @@ from .models import (
     Conversation,
     ConversationMember,
     EncryptedMessage,
+    GroupAnnouncement,
     GroupMessage,
     GroupMessageRecipient,
     UserMessageDeletion,
@@ -754,7 +755,8 @@ def _get_member(conversation_id, user):
 
 @login_required(login_url='login')
 def create_group_view(request):
-    """Create a group conversation. Creator becomes owner automatically."""
+    """Create a group conversation. Creator becomes owner automatically.
+    T32: Accepts optional initial_member_ids list for member pre-selection."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed."}, status=405)
 
@@ -763,23 +765,49 @@ def create_group_view(request):
     if not name:
         return JsonResponse({"error": "Group name is required."}, status=400)
 
-    conversation = Conversation.objects.create(
-        type=Conversation.Type.GROUP,
-        name=name,
-        avatar=data.get("avatar", "").strip(),
-        created_by=request.user,
-    )
-    ConversationMember.objects.create(
-        conversation=conversation,
-        user=request.user,
-        role=ConversationMember.Role.OWNER,
-    )
+    with transaction.atomic():
+        conversation = Conversation.objects.create(
+            type=Conversation.Type.GROUP,
+            name=name,
+            avatar=data.get("avatar", "").strip(),
+            created_by=request.user,
+        )
+        ConversationMember.objects.create(
+            conversation=conversation,
+            user=request.user,
+            role=ConversationMember.Role.OWNER,
+        )
+
+        # T32: Add initial members (contacts only)
+        initial_ids = data.get("initial_member_ids", [])
+        if isinstance(initial_ids, list):
+            # Deduplicate and exclude self
+            unique_ids = list(dict.fromkeys(
+                uid for uid in initial_ids
+                if isinstance(uid, int) and uid != request.user.pk
+            ))
+            valid_users = User.objects.filter(
+                id__in=unique_ids, is_active=True,
+            ).values_list('id', flat=True)
+            members_to_create = [
+                ConversationMember(
+                    conversation=conversation,
+                    user_id=uid,
+                    role=ConversationMember.Role.MEMBER,
+                )
+                for uid in valid_users
+            ]
+            if members_to_create:
+                ConversationMember.objects.bulk_create(members_to_create)
 
     return JsonResponse({
         "id": conversation.id,
         "name": conversation.name,
         "type": conversation.type,
         "created_at": conversation.created_at.isoformat(),
+        "member_count": ConversationMember.objects.filter(
+            conversation=conversation, status=ConversationMember.Status.ACTIVE,
+        ).count(),
     }, status=201)
 
 
@@ -1314,3 +1342,316 @@ def send_private_message_view(request, conversation_id):
     )
 
     return JsonResponse(message, status=201)
+
+
+# ── T27: Auto-delete messages API ───────────────────────────────────
+
+@login_required(login_url='login')
+def auto_delete_setting_view(request):
+    """GET/PUT global auto-delete default. PUT with {'seconds': N} or {'disabled': true}."""
+    if request.method == 'GET':
+        conv_default = Conversation.objects.filter(
+            created_by=request.user, auto_delete_seconds__isnull=False,
+        ).values('auto_delete_seconds').first()
+        return JsonResponse({
+            'global_auto_delete_seconds': (
+                conv_default['auto_delete_seconds'] if conv_default else None
+            ),
+            'enabled': conv_default is not None and conv_default['auto_delete_seconds'] is not None,
+        })
+    if request.method == 'PUT':
+        data = _json_body(request)
+        seconds = None if data.get('disabled') else int(data.get('seconds', 0) or 0)
+        seconds = seconds if seconds and seconds > 0 else None
+        Conversation.objects.filter(
+            type=Conversation.Type.SINGLE,
+            created_by=request.user,
+        ).update(auto_delete_seconds=seconds)
+        return JsonResponse({'global_auto_delete_seconds': seconds, 'status': 'ok'})
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@login_required(login_url='login')
+def conversation_auto_delete_view(request, conversation_id):
+    """GET/PUT per-conversation auto-delete override."""
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+    if request.method == 'GET':
+        return JsonResponse({
+            'conversation_id': conversation_id,
+            'auto_delete_seconds': member.auto_delete_seconds,
+            'global_auto_delete_seconds': member.conversation.auto_delete_seconds,
+        })
+    if request.method == 'PUT':
+        data = _json_body(request)
+        seconds = None if data.get('disabled') else int(data.get('seconds', 0) or 0)
+        seconds = seconds if seconds and seconds > 0 else None
+        member.auto_delete_seconds = seconds
+        member.save(update_fields=['auto_delete_seconds'])
+        return JsonResponse({'status': 'ok', 'auto_delete_seconds': seconds})
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+# ── T33/T34: Unified search API with scope filtering ────────────────
+
+@login_required(login_url='login')
+def search_unified_view(request):
+    """Unified search across conversations, contacts, and groups with scope filter."""
+    query = request.GET.get('q', '').strip()
+    scope = request.GET.get('scope', 'all')
+    results = {'conversations': [], 'contacts': [], 'groups': [], 'channels': []}
+
+    if not query:
+        return JsonResponse({'results': results, 'scope': scope})
+
+    user = request.user
+
+    # Contacts search
+    if scope in ('all', 'contacts', 'private_chats'):
+        name_matches = User.objects.filter(
+            Q(username__icontains=query) | Q(profile__nickname__icontains=query),
+        ).exclude(id=user.id).distinct().select_related('profile')[:10]
+
+        for u in name_matches:
+            try:
+                nickname = u.profile.nickname or ''
+            except Exception:
+                nickname = ''
+            results['contacts'].append({
+                'id': u.id, 'username': u.username,
+                'nickname': nickname,
+                'is_contact': _are_contacts(user, u),
+            })
+
+    # Group search
+    if scope in ('all', 'group_chats'):
+        group_matches = Conversation.objects.filter(
+            type=Conversation.Type.GROUP,
+            name__icontains=query,
+            status=Conversation.Status.ACTIVE,
+        )[:10]
+        for g in group_matches:
+            is_member = ConversationMember.objects.filter(
+                conversation=g, user=user, status=ConversationMember.Status.ACTIVE,
+            ).exists()
+            results['groups'].append({
+                'id': g.id, 'name': g.name,
+                'is_member': is_member,
+                'member_count': ConversationMember.objects.filter(
+                    conversation=g, status=ConversationMember.Status.ACTIVE,
+                ).count(),
+            })
+
+    # Conversation search (private chats)
+    if scope in ('all', 'private_chats'):
+        conv_matches = ConversationMember.objects.filter(
+            user=user, status=ConversationMember.Status.ACTIVE,
+            conversation__type=Conversation.Type.SINGLE,
+        ).select_related('conversation')
+        peer_convs = []
+        for m in conv_matches:
+            peer = ConversationMember.objects.filter(
+                conversation=m.conversation, status=ConversationMember.Status.ACTIVE,
+            ).exclude(user=user).select_related('user__profile').first()
+            if peer:
+                pname = _display_name(peer.user)
+                if query.lower() in pname.lower() or query.lower() in peer.user.username.lower():
+                    peer_convs.append({
+                        'conversation_id': m.conversation_id,
+                        'peer_id': peer.user_id,
+                        'peer_username': peer.user.username,
+                        'peer_display_name': pname,
+                    })
+        results['conversations'] = peer_convs[:10]
+
+    # Channels (placeholder — T33)
+    results['channels'] = []
+
+    return JsonResponse({'results': results, 'scope': scope, 'query': query})
+
+
+# ── T37: Advanced group management ───────────────────────────────────
+
+def _require_admin(conversation_id, user):
+    """Return (member, conversation) if user is admin/owner, else (None, error_response)."""
+    member = _get_member(conversation_id, user)
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return None, JsonResponse({'error': 'Not a member.'}, status=403)
+    if member.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+        return None, JsonResponse({'error': 'Admin permission required.'}, status=403)
+    try:
+        conv = Conversation.objects.get(id=conversation_id, type=Conversation.Type.GROUP)
+    except Conversation.DoesNotExist:
+        return None, JsonResponse({'error': 'Group not found.'}, status=404)
+    return (member, conv), None
+
+
+@login_required(login_url='login')
+def group_promote_view(request, conversation_id, user_id):
+    """Promote a member to admin. Owner or admin only."""
+    result, err = _require_admin(conversation_id, request.user)
+    if err:
+        return err
+    _, conv = result
+    target = _get_member(conversation_id, user_id)
+    if not target or target.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({'error': 'Target not a member.'}, status=404)
+    if target.role in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+        return JsonResponse({'error': 'Already an admin or owner.'}, status=409)
+    target.role = ConversationMember.Role.ADMIN
+    target.save(update_fields=['role'])
+    conv.membership_version = F('membership_version') + 1
+    conv.save(update_fields=['membership_version', 'updated_at'])
+    return JsonResponse({'status': 'ok', 'user_id': user_id, 'role': 'admin'})
+
+
+@login_required(login_url='login')
+def group_demote_view(request, conversation_id, user_id):
+    """Demote an admin to member. Owner only."""
+    member = _get_member(conversation_id, request.user)
+    if not member or member.role != ConversationMember.Role.OWNER:
+        return JsonResponse({'error': 'Only the owner can demote admins.'}, status=403)
+    target = _get_member(conversation_id, user_id)
+    if not target or target.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({'error': 'Target not a member.'}, status=404)
+    if target.role != ConversationMember.Role.ADMIN:
+        return JsonResponse({'error': 'Target is not an admin.'}, status=409)
+    target.role = ConversationMember.Role.MEMBER
+    target.save(update_fields=['role'])
+    conv = Conversation.objects.get(id=conversation_id)
+    conv.membership_version = F('membership_version') + 1
+    conv.save(update_fields=['membership_version', 'updated_at'])
+    return JsonResponse({'status': 'ok', 'user_id': user_id, 'role': 'member'})
+
+
+@login_required(login_url='login')
+def group_transfer_view(request, conversation_id):
+    """Transfer ownership to another member. Owner only."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    member = _get_member(conversation_id, request.user)
+    if not member or member.role != ConversationMember.Role.OWNER:
+        return JsonResponse({'error': 'Only the owner can transfer ownership.'}, status=403)
+    data = _json_body(request)
+    new_owner_id = data.get('user_id')
+    if not new_owner_id:
+        return JsonResponse({'error': 'user_id is required.'}, status=400)
+    target = _get_member(conversation_id, new_owner_id)
+    if not target or target.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({'error': 'Target not a member.'}, status=404)
+    if target.user_id == request.user.pk:
+        return JsonResponse({'error': 'You already own this group.'}, status=400)
+    member.role = ConversationMember.Role.ADMIN
+    member.save(update_fields=['role'])
+    target.role = ConversationMember.Role.OWNER
+    target.save(update_fields=['role'])
+    conv = Conversation.objects.get(id=conversation_id)
+    conv.membership_version = F('membership_version') + 1
+    conv.save(update_fields=['membership_version', 'updated_at'])
+    return JsonResponse({'status': 'ok', 'new_owner_id': new_owner_id})
+
+
+@login_required(login_url='login')
+def group_announcement_view(request, conversation_id):
+    """GET: get active announcement. POST: create/replace. DELETE: remove."""
+    member = _get_member(conversation_id, request.user)
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({'error': 'Not a member.'}, status=403)
+    if member.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+        return JsonResponse({'error': 'Admin permission required.'}, status=403)
+    try:
+        conv = Conversation.objects.get(id=conversation_id, type=Conversation.Type.GROUP)
+    except Conversation.DoesNotExist:
+        return JsonResponse({'error': 'Group not found.'}, status=404)
+
+    if request.method == 'GET':
+        ann = GroupAnnouncement.objects.filter(
+            conversation=conv, is_active=True,
+        ).select_related('author').first()
+        if not ann:
+            return JsonResponse({'announcement': None})
+        return JsonResponse({
+            'announcement': {
+                'id': ann.id, 'content': ann.content,
+                'author_id': ann.author_id, 'author_username': ann.author.username,
+                'created_at': ann.created_at.isoformat(),
+            },
+        })
+    elif request.method == 'POST':
+        data = _json_body(request)
+        content = data.get('content', '').strip()
+        if not content:
+            return JsonResponse({'error': 'Content is required.'}, status=400)
+        # Deactivate old
+        GroupAnnouncement.objects.filter(conversation=conv, is_active=True).update(is_active=False)
+        ann = GroupAnnouncement.objects.create(
+            conversation=conv, author=request.user, content=content,
+        )
+        return JsonResponse({
+            'announcement': {
+                'id': ann.id, 'content': ann.content,
+                'author_id': ann.author_id,
+                'created_at': ann.created_at.isoformat(),
+            },
+        }, status=201)
+    elif request.method == 'DELETE':
+        GroupAnnouncement.objects.filter(conversation=conv, is_active=True).update(is_active=False)
+        return JsonResponse({'status': 'ok'})
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@login_required(login_url='login')
+def group_mute_view(request, conversation_id):
+    """Mute a group (prevent non-admin sends). Owner/admin only."""
+    result, err = _require_admin(conversation_id, request.user)
+    if err:
+        return err
+    _, conv = result
+    if request.method == 'POST':
+        data = _json_body(request)
+        mins = int(data.get('duration_minutes', 60))
+        mins = min(mins, 10080)
+        conv.muted_until = timezone.now() + timezone.timedelta(minutes=mins)
+        conv.save(update_fields=['muted_until'])
+        return JsonResponse({'status': 'ok', 'muted_until': conv.muted_until.isoformat()})
+    elif request.method == 'DELETE':
+        conv.muted_until = None
+        conv.save(update_fields=['muted_until'])
+        return JsonResponse({'status': 'ok'})
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@login_required(login_url='login')
+def group_members_advanced_view(request, conversation_id):
+    """GET active members with roles for the group admin panel."""
+    member = _get_member(conversation_id, request.user)
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({'error': 'Not a member.'}, status=403)
+    try:
+        conv = Conversation.objects.get(id=conversation_id, type=Conversation.Type.GROUP)
+    except Conversation.DoesNotExist:
+        return JsonResponse({'error': 'Group not found.'}, status=404)
+
+    members = ConversationMember.objects.filter(
+        conversation=conv, status=ConversationMember.Status.ACTIVE,
+    ).select_related('user__profile')
+
+    return JsonResponse({
+        'group_id': conv.id,
+        'name': conv.name,
+        'owner_id': conv.created_by_id,
+        'membership_version': conv.membership_version,
+        'members': [
+            {
+                'user_id': m.user_id,
+                'username': m.user.username,
+                'display_name': _display_name(m.user),
+                'role': m.role,
+                'joined_at': m.joined_at.isoformat(),
+                'initials': _initials(_display_name(m.user)),
+                'avatar_color': _avatar_color(_display_name(m.user)),
+            }
+            for m in members
+        ],
+    })

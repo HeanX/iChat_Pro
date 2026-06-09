@@ -29,6 +29,13 @@ class Conversation(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.ACTIVE
     )
+    # T27: Auto-delete messages — global default for the conversation (seconds)
+    auto_delete_seconds = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Auto-delete messages after N seconds. NULL means disabled.",
+    )
+    # T37: Group mute
+    muted_until = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -80,6 +87,11 @@ class ConversationMember(models.Model):
     archived_at = models.DateTimeField(null=True, blank=True)
     hidden_at = models.DateTimeField(null=True, blank=True)
     cleared_at = models.DateTimeField(null=True, blank=True)
+    # T27: Per-conversation auto-delete override (seconds, null = inherit global)
+    auto_delete_seconds = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Per-conversation auto-delete override in seconds.",
+    )
 
     class Meta:
         constraints = [
@@ -381,6 +393,35 @@ class AdminOperationLog(models.Model):
 
     def __str__(self):
         return f"AdminOp #{self.id}: {self.get_action_display()} by {self.admin}"
+
+
+# ── T37: Group announcement ─────────────────────────────────────────
+
+
+class GroupAnnouncement(models.Model):
+    """Pinned group announcement. Only one active per group at a time."""
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="announcements",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="group_announcements",
+    )
+    content = models.TextField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["conversation", "is_active"]),
+        ]
+
+    def __str__(self):
+        return f"Announcement #{self.id} in Conversation #{self.conversation_id}"
 
 
 # ── Soft-delete policy (documented — T31) ─────────────────────────

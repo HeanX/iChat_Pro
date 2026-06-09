@@ -73,4 +73,25 @@ urlpatterns = [
         name='public-key-version',
     ),
     path('api/keys/<int:user_id>/', views.public_key_view, name='public-key'),
+    # T38: Key trust management
+    path(
+        'api/keys/fingerprints/',
+        views.my_fingerprints_view,
+        name='my-fingerprints',
+    ),
+    path(
+        'api/keys/contacts/<int:user_id>/fingerprints/',
+        views.contact_fingerprints_view,
+        name='contact-fingerprints',
+    ),
+    path(
+        'api/keys/contacts/<int:user_id>/trust/',
+        views.key_trust_view,
+        name='key-trust',
+    ),
+    path(
+        'api/keys/trust/',
+        views.key_trust_list_view,
+        name='key-trust-list',
+    ),
 ]

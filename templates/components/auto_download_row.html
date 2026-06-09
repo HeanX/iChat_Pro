@@ -1,0 +1,16 @@
+{# auto_download_row.html — reusable auto-download toggle row for a specific network + content type #}
+{# Expected context vars: network (mobile_data|wifi|roaming), type (photos|videos|files), icon, label #}
+<div class="flex items-center justify-between py-1">
+  <div class="flex items-center space-x-3">
+    <i data-lucide="{{ icon|default:'image' }}" class="w-4 h-4 text-textSecondary"></i>
+    <span class="text-sm text-textMain">{{ label }}</span>
+  </div>
+  <label class="toggle-switch">
+    <input type="checkbox"
+      data-storage-setting
+      data-network="{{ network }}"
+      data-dl-type="{{ type }}"
+      onchange="saveDataStorageSetting()">
+    <span class="toggle-slider"></span>
+  </label>
+</div>

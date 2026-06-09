@@ -25,6 +25,73 @@ class UserProfile(models.Model):
         return self.nickname or self.user.get_short_name() or self.user.username
 
 
+class UserPrivacySettings(models.Model):
+    """
+    Per-user privacy and security preferences (P2 T06).
+    One-to-one with User; auto-created via post_save signal.
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='privacy_settings',
+    )
+
+    # ── Visibility: 'everyone' | 'contacts' | 'nobody' ──
+    last_seen_visibility = models.CharField(max_length=20, default='everyone')
+    profile_photo_visibility = models.CharField(max_length=20, default='everyone')
+    phone_number_visibility = models.CharField(max_length=20, default='contacts')
+    bio_visibility = models.CharField(max_length=20, default='everyone')
+    forward_link_visibility = models.CharField(max_length=20, default='everyone')
+
+    # ── Permissions: 'everyone' | 'contacts' ──
+    who_can_send_messages = models.CharField(max_length=20, default='contacts')
+    who_can_voice_video_call = models.CharField(max_length=20, default='contacts')
+
+    # ── Auto-delete messages: 0=off, 1, 7, 30 days ──
+    auto_delete_messages_days = models.PositiveSmallIntegerField(default=0)
+
+    # ── Toggles ──
+    sensitive_content_filter = models.BooleanField(default=False)
+    passcode_lock_enabled = models.BooleanField(default=False)
+    two_step_verification_enabled = models.BooleanField(default=False)
+
+    # ── Login email for two-step verification ──
+    login_email = models.EmailField(blank=True, default='')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'PrivacySettings for {self.user.username}'
+
+
+class BlockedUser(models.Model):
+    """Tracks which users a user has blocked (P2 T06)."""
+    blocker = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='blocked_users',
+    )
+    blocked = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='blocked_by',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['blocker', 'blocked'],
+                name='unique_block',
+            ),
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.blocker.username} blocked {self.blocked.username}'
+
+
 class FriendRequest(models.Model):
     """A friend request from one user to another."""
 
@@ -143,9 +210,10 @@ class UserPublicKey(models.Model):
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def create_user_profile(sender, instance, created, **kwargs):
-    """Ensure every new user gets a UserProfile immediately."""
+    """Ensure every new user gets a UserProfile and UserPrivacySettings immediately."""
     if created:
         UserProfile.objects.get_or_create(user=instance)
+        UserPrivacySettings.objects.get_or_create(user=instance)
 
 
 # Group and GroupMember have been consolidated into chat.Conversation

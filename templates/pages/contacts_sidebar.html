@@ -92,8 +92,9 @@
     {% if contacts %}
     <div class="space-y-2">
       {% for entry in contacts %}
-      {% with peer=entry.contact %}
       <div class="flex items-center justify-between p-3 bg-bgSearch rounded-custom-md">
+        {% if entry.user == request.user %}
+          {% with peer=entry.contact %}
         <div class="flex items-center space-x-3">
           <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
             {{ peer.username|slice:":1"|upper }}
@@ -103,14 +104,30 @@
             <p class="text-[10px] text-textSecondary">Contact since {{ entry.created_at|date:"M d, Y" }}</p>
           </div>
         </div>
+          {% endwith %}
+        {% else %}
+          {% with peer=entry.user %}
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
+            {{ peer.username|slice:":1"|upper }}
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-textMain">{{ peer.username }}</p>
+            <p class="text-[10px] text-textSecondary">Contact since {{ entry.created_at|date:"M d, Y" }}</p>
+          </div>
+        </div>
+          {% endwith %}
+        {% endif %}
         <div class="flex space-x-2">
+          <a href="{% url 'contact_chat' entry.id %}" class="px-3 py-1 text-xs font-semibold bg-brand-light dark:bg-brand-dark text-white rounded-custom-sm hover:opacity-90">
+            Message
+          </a>
           <form method="POST" action="{% url 'contact_delete' entry.id %}">
             {% csrf_token %}
             <button class="px-3 py-1 text-xs font-semibold border border-borderColor text-red-500 rounded-custom-sm hover:bg-red-50">Remove</button>
           </form>
         </div>
       </div>
-      {% endwith %}
       {% endfor %}
     </div>
     {% else %}

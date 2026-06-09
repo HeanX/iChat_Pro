@@ -874,17 +874,24 @@ class ProfileEditTests(TestCase):
             UserProfile.objects.filter(user=self.alice).exists(),
         )
         self.client.post(self.PROFILE_EDIT_URL, {
+            'username': 'alice',
             'nickname': 'Ally',
             'bio': 'Hello world',
+            'first_name': 'Alice',
+            'last_name': 'Smith',
         })
         profile = UserProfile.objects.get(user=self.alice)
         self.assertEqual(profile.nickname, 'Ally')
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.first_name, 'Alice')
+        self.assertEqual(self.alice.last_name, 'Smith')
 
     def test_profile_edit_updates_nickname(self):
         # T27: profile is auto-created on user creation; update it.
         self.alice.profile.nickname = 'Old'
         self.alice.profile.save()
         self.client.post(self.PROFILE_EDIT_URL, {
+            'username': 'alice',
             'nickname': 'NewName',
             'bio': '',
         })
@@ -893,10 +900,53 @@ class ProfileEditTests(TestCase):
 
     def test_profile_edit_success_redirect(self):
         response = self.client.post(self.PROFILE_EDIT_URL, {
+            'username': 'alice',
             'nickname': 'Ally',
             'bio': 'Hi',
         })
         self.assertRedirects(response, self.INDEX_URL)
+
+    def test_profile_edit_updates_username(self):
+        new_username = 'alice_new'
+        self.assertNotEqual(self.alice.username, new_username)
+        self.client.post(self.PROFILE_EDIT_URL, {
+            'username': new_username,
+            'nickname': 'Ally',
+            'bio': 'Hi',
+        })
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.username, new_username)
+
+    def test_profile_edit_username_duplicate(self):
+        User.objects.create_user(username='bob', password='bobpass')
+        response = self.client.post(self.PROFILE_EDIT_URL, {
+            'username': 'bob',
+            'nickname': 'Ally',
+            'bio': 'Hi',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.alice.refresh_from_db()
+        self.assertNotEqual(self.alice.username, 'bob')
+
+    def test_profile_edit_username_too_short(self):
+        response = self.client.post(self.PROFILE_EDIT_URL, {
+            'username': 'ab',
+            'nickname': 'Ally',
+            'bio': 'Hi',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.alice.refresh_from_db()
+        self.assertNotEqual(self.alice.username, 'ab')
+
+    def test_profile_edit_sidebar_mode_renders_sidebar_template(self):
+        response = self.client.post(self.PROFILE_EDIT_URL, {
+            '_sidebar': '1',
+            'username': '---invalid---',
+            'nickname': 'x',
+            'bio': '',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'pages/profile_edit_sidebar.html')
 
 
 # ─── Groups ───────────────────────────────────────────────────────────

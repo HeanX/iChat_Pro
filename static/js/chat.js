@@ -2,7 +2,7 @@
 // Vanilla JavaScript utilizing Web Crypto API for ECDH + HKDF + AES-GCM
 // Connects to real backend API, WebSocket, and E2EE modules
 
-// Global State — populated from API instead of mock data
+// Global State — populated from backend APIs
 let conversations = [];          // Array of conversation objects from GET /api/conversations/
 let conversationsById = {};      // ID → conversation lookup map
 let activeChatId = null;
@@ -18,6 +18,9 @@ let myUserId = null;             // Current authenticated user PK
 let wsClient = null;             // v1 /ws/chat/ client
 let e2eeKeyReady = true;
 let e2eeKeyError = null;
+let groupMembersByConversation = {};
+let fingerprintCacheByUserId = {};
+let detailsPanelRequestId = 0;
 
 function formatClockTime(date = new Date()) {
   return date.toLocaleTimeString([], {
@@ -454,7 +457,9 @@ async function fetchMessages(conversationId, page = 1) {
           time: formatClockTime(new Date(msg.created_at)),
           isSelf: msg.sender_id === myUserId,
           sender: msg.sender_id,
-          sender_name: conv.type === 'group' ? `User #${msg.sender_id}` : undefined,
+          sender_name: conv.type === 'group' ? msg.sender_name : conv.name,
+          sender_initials: msg.sender_initials,
+          sender_avatar_color: msg.sender_avatar_color,
           status: msg.status,
           isSystem: msg.message_type === 'system',
         });
@@ -466,6 +471,9 @@ async function fetchMessages(conversationId, page = 1) {
           time: formatClockTime(new Date(msg.created_at)),
           isSelf: msg.sender_id === myUserId,
           sender: msg.sender_id,
+          sender_name: conv.type === 'group' ? msg.sender_name : conv.name,
+          sender_initials: msg.sender_initials,
+          sender_avatar_color: msg.sender_avatar_color,
           status: msg.status,
           decryptError: true,
         });
@@ -487,7 +495,72 @@ async function fetchMessages(conversationId, page = 1) {
 
 async function fetchGroupMemberIds(conversationId) {
   const data = await apiFetch(`/api/groups/${conversationId}/members/`);
+  groupMembersByConversation[conversationId] = {};
+  (data.members || []).forEach(member => {
+    groupMembersByConversation[conversationId][member.user_id] = member;
+  });
   return (data.members || []).map(member => member.user_id);
+}
+
+async function fetchPeerFingerprint(userId) {
+  if (!userId) return null;
+  if (fingerprintCacheByUserId[userId] !== undefined) {
+    return fingerprintCacheByUserId[userId];
+  }
+  try {
+    const data = await apiFetch(`/api/keys/fingerprint/${userId}/`);
+    fingerprintCacheByUserId[userId] = data;
+    return data;
+  } catch (err) {
+    fingerprintCacheByUserId[userId] = null;
+    return null;
+  }
+}
+
+function formatFingerprint(value) {
+  if (!value) {
+    return currentLanguage === 'zh' ? '联系人尚未上传公钥' : 'Contact has not uploaded a public key';
+  }
+  const compact = String(value).replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+  if (!compact) return value;
+  return compact.match(/.{1,4}/g).join(' ');
+}
+
+function getGroupMemberInfo(conversationId, userId) {
+  const members = groupMembersByConversation[conversationId] || {};
+  return members[userId] || null;
+}
+
+function getMessageSenderName(msg, conv) {
+  if (msg.sender_name) return msg.sender_name;
+  if (conv && conv.type === "single") return conv.name || conv.peer_username || "Unknown";
+  const member = conv ? getGroupMemberInfo(conv.id, msg.sender) : null;
+  return member ? (member.display_name || member.username) : "Unknown";
+}
+
+function renderRightPanelMembers(conv) {
+  const list = document.getElementById("right-panel-members-list");
+  if (!list || !conv) return;
+  const members = Object.values(groupMembersByConversation[conv.id] || {});
+  list.innerHTML = "";
+  members.forEach(member => {
+    const row = document.createElement("div");
+    row.className = "flex items-center justify-between pt-3 first:pt-0";
+    const safeColor = /^#[0-9a-fA-F]{6}$/.test(member.avatar_color || '') ? member.avatar_color : '#5c6bc0';
+    row.innerHTML = `
+      <div class="flex items-center min-w-0 space-x-2.5">
+        <div class="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs flex-shrink-0" style="background-color: ${safeColor}">
+          ${escapeHtml(member.initials || "??")}
+        </div>
+        <div class="min-w-0">
+          <div class="text-xs font-semibold text-textMain truncate">${escapeHtml(member.display_name || member.username || "Unknown")}</div>
+          <div class="text-[10px] text-textSecondary truncate">@${escapeHtml(member.username || String(member.user_id))}</div>
+        </div>
+      </div>
+      <span class="text-[10px] text-textSecondary flex-shrink-0">${escapeHtml(getRoleTranslation(member.role))}</span>
+    `;
+    list.appendChild(row);
+  });
 }
 
 // ============================================================================
@@ -594,6 +667,7 @@ async function handlePrivateMessageReceived(data) {
     time: formatClockTime(new Date(payload.created_at || Date.now())),
     isSelf: payload.sender_id === myUserId,
     sender: payload.sender_id,
+    sender_name: conv ? conv.name : undefined,
     status: 'received',
     decryptError: !!decryptError,
   };
@@ -664,6 +738,7 @@ async function handleGroupMessageReceived(data) {
       time: formatClockTime(new Date(payload.created_at || Date.now())),
       isSelf: payload.sender_id === myUserId,
       sender: payload.sender_id,
+      sender_name: payload.sender_name || (getGroupMemberInfo(convId, payload.sender_id) || {}).display_name,
       status: 'received',
     };
 
@@ -836,7 +911,8 @@ async function selectChat(chatId) {
   updateDetailsPanel(conv);
 }
 
-function updateDetailsPanel(conv) {
+async function updateDetailsPanel(conv) {
+  const requestId = ++detailsPanelRequestId;
   const avatar = document.getElementById("details-avatar");
   const name = document.getElementById("details-name");
   const status = document.getElementById("details-status");
@@ -845,6 +921,7 @@ function updateDetailsPanel(conv) {
   const groupSection = document.getElementById("right-panel-group-section");
   const protocol = document.getElementById("right-panel-protocol");
   const resetKeyBtn = document.getElementById("right-panel-reset-key-btn");
+  const verificationStatus = document.getElementById("right-panel-verification-status");
 
   if (avatar) {
     avatar.className = 'w-20 h-20 rounded-full text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3';
@@ -856,9 +933,37 @@ function updateDetailsPanel(conv) {
 
   if (conv.is_secure) {
     if (fpWrapper) fpWrapper.classList.remove("hidden");
-    if (fp) fp.textContent = 'ECDH + HKDF + AES-GCM';
     if (protocol) protocol.textContent = "ECDH + HKDF + AES-GCM";
     if (resetKeyBtn) resetKeyBtn.classList.toggle("hidden", conv.type === "group");
+    if (verificationStatus) {
+      verificationStatus.className = "font-semibold text-amber-500 flex items-center space-x-1";
+      verificationStatus.innerHTML = '<i data-lucide="shield-question" class="w-3.5 h-3.5 mr-0.5 inline-block text-amber-500"></i><span>' + (currentLanguage === 'zh' ? '待验证' : 'Unverified') + '</span>';
+    }
+    if (fp) {
+      fp.textContent = currentLanguage === 'zh' ? '正在加载真实指纹...' : 'Loading real fingerprint...';
+    }
+
+    if (conv.type === "single" && conv.peer_id) {
+      const fingerprint = await fetchPeerFingerprint(conv.peer_id);
+      if (requestId !== detailsPanelRequestId) return;
+      if (fp) {
+        fp.textContent = fingerprint
+          ? `v${fingerprint.key_version}: ${formatFingerprint(fingerprint.key_fingerprint)}`
+          : formatFingerprint(null);
+      }
+      if (verificationStatus) {
+        const verified = Boolean(fingerprint);
+        verificationStatus.className = `font-semibold ${verified ? 'text-emerald-500' : 'text-amber-500'} flex items-center space-x-1`;
+        verificationStatus.innerHTML = verified
+          ? '<i data-lucide="shield-check" class="w-3.5 h-3.5 mr-0.5 inline-block text-emerald-500"></i><span>' + (currentLanguage === 'zh' ? '已加载真实指纹' : 'Real fingerprint loaded') + '</span>'
+          : '<i data-lucide="shield-alert" class="w-3.5 h-3.5 mr-0.5 inline-block text-amber-500"></i><span>' + (currentLanguage === 'zh' ? '缺少公钥' : 'No public key') + '</span>';
+      }
+    } else if (fp) {
+      fp.textContent = currentLanguage === 'zh'
+        ? '群聊使用每位成员的当前公钥加密。'
+        : 'Group messages are encrypted to each member public key.';
+    }
+    if (window.lucide) window.lucide.createIcons();
   } else {
     if (fpWrapper) fpWrapper.classList.add("hidden");
   }
@@ -867,6 +972,13 @@ function updateDetailsPanel(conv) {
     if (groupSection) groupSection.classList.remove("hidden");
     const mc = document.getElementById("right-panel-members-count");
     if (mc) mc.textContent = currentLanguage === 'zh' ? `群组成员 (${conv.member_count || 0})` : `Group Members (${conv.member_count || 0})`;
+    try {
+      await fetchGroupMemberIds(conv.id);
+      if (requestId !== detailsPanelRequestId) return;
+      renderRightPanelMembers(conv);
+    } catch (err) {
+      logToCryptoConsole(`[API] Failed to load group members: ${err.message}`);
+    }
   } else {
     if (groupSection) groupSection.classList.add("hidden");
   }
@@ -900,18 +1012,18 @@ function handleMobileNavigation() {
 }
 
 // Helper to derive initials and background color for user avatars based on name
-function getSenderAvatarInfo(senderName) {
-  let initials = "";
-  if (senderName) {
+function getSenderAvatarInfo(senderName, msg, conv) {
+  const member = conv ? getGroupMemberInfo(conv.id, msg && msg.sender) : null;
+  let initials = (msg && msg.sender_initials) || (member && member.initials) || "";
+  if (!initials && senderName) {
     const parts = senderName.split(" ");
     if (parts.length > 1) {
       initials = (parts[0][0] + parts[1][0]).toUpperCase();
     } else {
       initials = senderName.substring(0, 2).toUpperCase();
     }
-  } else {
-    initials = "AV";
   }
+  initials = initials || "??";
   
   // Hash sender initials to select a background color class
   const colors = ["bg-red-500", "bg-orange-500", "bg-yellow-500", "bg-green-500", "bg-teal-500", "bg-blue-500", "bg-indigo-500", "bg-purple-500", "bg-pink-500"];
@@ -921,7 +1033,11 @@ function getSenderAvatarInfo(senderName) {
   }
   const colorClass = colors[Math.abs(hash) % colors.length];
   
-  return { initials, colorClass };
+  const avatarColor = (msg && msg.sender_avatar_color) || (member && member.avatar_color) || "";
+  const safeStyle = /^#[0-9a-fA-F]{6}$/.test(avatarColor)
+    ? ` style="background-color: ${avatarColor}"`
+    : "";
+  return { initials, colorClass, safeStyle };
 }
 
 // Helper to look up member role in a group chat
@@ -1167,14 +1283,28 @@ function populateGroupMembersList() {
 // Fingerprint modal
 // ============================================================================
 
-function showFingerprintModal() {
+async function showFingerprintModal() {
   if (!activeChatId) return;
   const conv = conversationsById[activeChatId];
   if (!conv || !conv.is_secure) return;
   document.getElementById("fp-modal-name").textContent = conv.name || "Unknown";
-  document.getElementById("fp-modal-key").textContent = "ECDH + HKDF + AES-GCM";
+  const keyEl = document.getElementById("fp-modal-key");
+  if (keyEl) {
+    keyEl.textContent = currentLanguage === 'zh' ? '正在加载真实指纹...' : 'Loading real fingerprint...';
+  }
   const modal = document.getElementById("fingerprint-modal");
   if (modal) { modal.classList.remove("hidden"); modal.classList.add("flex"); }
+  if (conv.type === "single" && conv.peer_id) {
+    const fingerprint = await fetchPeerFingerprint(conv.peer_id);
+    if (activeChatId !== conv.id || !keyEl) return;
+    keyEl.textContent = fingerprint
+      ? `v${fingerprint.key_version}: ${formatFingerprint(fingerprint.key_fingerprint)}`
+      : formatFingerprint(null);
+  } else if (keyEl) {
+    keyEl.textContent = currentLanguage === 'zh'
+      ? '群聊没有单一联系人指纹，请分别验证成员公钥。'
+      : 'Group chats do not have one peer fingerprint; verify member keys individually.';
+  }
 }
 
 // ============================================================================
@@ -1262,7 +1392,7 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
   var checkboxHtml = '<div class="message-select-checkbox select-none ' + (isSelectingMessages ? "" : "hidden") + '" id="msg-select-check-' + msg.id + '"><i data-lucide="' + (selectedMessageIds.includes(msg.id) ? "check-circle-2" : "circle") + '" class="w-5 h-5 text-textSecondary"></i></div>';
 
   var isGroup = conv && conv.type === "group";
-  var senderName = msg.isSelf ? "You" : (msg.sender_name || ("User #" + msg.sender));
+  var senderName = msg.isSelf ? "You" : getMessageSenderName(msg, conv);
   var messageText = escapeHtml(msg.text);
   var messageTime = escapeHtml(msg.time || "");
 
@@ -1285,8 +1415,8 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     if (isSelectingMessages) div.className += " message-row-selecting";
     var avatarHtml = "";
     if (isLastInGroup) {
-      var avatarInfo = getSenderAvatarInfo(senderName);
-      avatarHtml = '<div class="message-avatar ' + avatarInfo.colorClass + '" title="' + escapeHtml(senderName) + '">' + avatarInfo.initials + '</div>';
+      var avatarInfo = getSenderAvatarInfo(senderName, msg, conv);
+      avatarHtml = '<div class="message-avatar ' + avatarInfo.colorClass + '" title="' + escapeHtml(senderName) + '"' + avatarInfo.safeStyle + '>' + escapeHtml(avatarInfo.initials) + '</div>';
     } else {
       avatarHtml = '<div class="message-avatar-spacer" aria-hidden="true"></div>';
     }
@@ -1431,6 +1561,11 @@ function setupEventListeners() {
       closeReportModal();
       closeDeleteConfirmModal();
       closeLogoutConfirmModal();
+      if (typeof closeClearAllModal === 'function') closeClearAllModal();
+      closeVisibilityPicker();
+      closeAutoDeletePicker();
+      closeBlockedUsersList();
+      closePrivacyConfirmModal();
     }
   });
 
@@ -1633,6 +1768,14 @@ function navigateSidebar(viewName) {
     document.getElementById('chat-window-container').classList.add('hidden');
     window.location.hash = '';
   }
+  // Refresh data-storage stats when navigating to that view
+  if (viewName === 'data-storage' && typeof renderStorageUsage === 'function') {
+    setTimeout(function() { renderStorageUsage(); }, 150);
+  }
+  // Refresh privacy settings when navigating to that view
+  if (viewName === 'privacy-security' && typeof loadPrivacySettings === 'function') {
+    setTimeout(function() { loadPrivacySettings(); }, 150);
+  }
   // Re-render lucide icons after view switch
   if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
 }
@@ -1735,7 +1878,10 @@ function closeQRCodeModal() {
 }
 function copyQRCode() {
   const fb = document.getElementById("qr-copy-feedback");
-  navigator.clipboard.writeText(window.location.origin + "/contacts/add/").then(function() {
+  const btn = document.querySelector("[data-qr-username]");
+  const username = btn ? btn.getAttribute("data-qr-username") : "";
+  const inviteUrl = window.location.origin + "/contacts/add/" + (username ? "?ref=" + encodeURIComponent(username) : "");
+  navigator.clipboard.writeText(inviteUrl).then(function() {
     if (fb) { fb.classList.remove("hidden"); setTimeout(function() { fb.classList.add("hidden"); }, 2000); }
   }).catch(function() {
     window.showToast("Failed to copy QR code link");
@@ -1751,7 +1897,7 @@ function adjustTextareaHeight(textarea) {
 }
 
 function toggleEmojiDropdown() {
-  const picker = document.getElementById("emoji-picker-mock");
+  const picker = document.getElementById("emoji-picker");
   if (picker) {
     picker.classList.toggle("hidden");
   }
@@ -1839,7 +1985,7 @@ const translations = {
     e2ee_banner: "🔒 Messages are secured with end-to-end encryption.",
     email_address: "Email Address",
     empty_desc: "Choose a contact from the sidebar list or search for someone new to initiate an end-to-end encrypted session.",
-    empty_item1: "Messages are ciphered locally using X25519 protocols.",
+    empty_item1: "Messages are encrypted locally with ECDH P-256 key agreement.",
     empty_item2: "No plain text is ever stored on the server directory.",
     empty_item3: "Verify encryption status by checking active fingerprints.",
     empty_title: "No Chat Selected",
@@ -1907,7 +2053,7 @@ const translations = {
     e2ee_banner: "🔒 消息已通过端到端加密保护。",
     email_address: "电子邮箱地址",
     empty_desc: "从侧边栏列表中选择一个联系人，或搜索新联系人以启动端到端加密会话。",
-    empty_item1: "消息使用 X25519 协议在本地进行加密。",
+    empty_item1: "消息使用 ECDH P-256 密钥协商在本地进行加密。",
     empty_item2: "服务器目录中绝不存储任何明文消息。",
     empty_item3: "通过检查当前的安全指纹来验证加密状态。",
     empty_title: "未选择聊天",
@@ -1962,6 +2108,147 @@ const translations = {
   }
 };
 
+const literalTextTranslations = {
+  zh: {
+    "Notifications and Sounds": "通知与声音",
+    "Data and Storage": "数据和存储",
+    "Privacy and Security": "隐私和安全",
+    "Chat Folders": "聊天文件夹",
+    "Customize folder appearance": "自定义文件夹显示",
+    "5 chats": "5 个聊天",
+    "Stickers and Emoji": "贴纸与表情",
+    "Speakers and Camera": "扬声器和摄像头",
+    "Devices": "设备",
+    "3 active": "3 个活跃",
+    "Language / 语言": "语言",
+    "Keyboard Shortcuts": "快捷键",
+    "Manage Cryptographic Keys": "管理加密密钥",
+    "Checking...": "检查中...",
+    "Key Fingerprint (SHA-256)": "密钥指纹 (SHA-256)",
+    "Generate Keys": "生成密钥",
+    "Upload to Server": "上传到服务器",
+    "Export Backup": "导出备份",
+    "Import Backup": "导入备份",
+    "Security Status": "安全状态",
+    "E2EE key setup and contact verification": "端到端加密密钥和联系人验证状态",
+    "Local Keys": "本地密钥",
+    "Server Synced": "服务器同步",
+    "Refresh Status": "刷新状态",
+    "Storage Usage": "存储用量",
+    "Images": "图片",
+    "Video files": "视频文件",
+    "Stickers and emojis": "贴纸和表情",
+    "Other": "其他",
+    "Cached video stream chunks": "缓存的视频流片段",
+    "Calculating…": "计算中…",
+    "Auto-Download": "自动下载",
+    "Reset Auto-Download Settings": "重置自动下载设置",
+    "On Mobile Data": "使用移动数据时",
+    "On Wi-Fi": "使用 Wi-Fi 时",
+    "On Roaming": "漫游时",
+    "Photos": "照片",
+    "Files": "文件",
+    "Files / Documents": "文件 / 文档",
+    "All on": "全部开启",
+    "All off": "全部关闭",
+    "Maximum File Size for Auto-Download": "自动下载文件大小限制",
+    "Cache Management": "缓存管理",
+    "Cache retention period": "缓存保留时间",
+    "1 week": "1 周",
+    "1 month": "1 个月",
+    "3 months": "3 个月",
+    "Forever": "永久",
+    "Maximum cache size": "最大缓存大小",
+    "Clear Images": "清除图片",
+    "Clear Video files": "清除视频文件",
+    "Clear Stickers & Emojis": "清除贴纸和表情",
+    "Clear Other Cached Data": "清除其他缓存数据",
+    "Clear Cached Video Stream Chunks": "清除缓存的视频流片段",
+    "Clear All Cache": "清除所有缓存",
+    "Clear Local Cache": "清理本地缓存",
+    "Clear All Cache Settings": "清除所有缓存设置",
+    "Privacy": "隐私",
+    "Last Seen & Online": "最后在线与在线状态",
+    "Everybody": "所有人",
+    "Profile Photo": "头像",
+    "Phone Number": "电话号码",
+    "My Contacts": "我的联系人",
+    "Security": "安全",
+    "Two-Step Verification": "两步验证",
+    "Off": "关闭",
+    "Active Sessions": "活跃会话",
+    "3 devices": "3 台设备",
+    "Blocked Users": "已屏蔽用户",
+    "Data": "数据",
+    "Delete Synced Contacts": "删除已同步联系人",
+    "Delete Account": "删除账号",
+    "Create folders for different groups of chats to easily access them.": "为不同类型的聊天创建文件夹，方便快速访问。",
+    "Create New Folder": "创建新文件夹",
+    "Team Chats": "团队聊天",
+    "Demo": "演示",
+    "Stickers & Emoji": "贴纸与表情",
+    "Sticker Sets": "贴纸包",
+    "0 installed": "已安装 0 个",
+    "Suggest Emoji": "表情建议",
+    "Replace text like :) with emoji": "将 :) 等文本替换为表情",
+    "Custom Emoji": "自定义表情",
+    "Devices currently logged into your account.": "当前登录此账号的设备。",
+    "Windows / Chrome": "Windows / Chrome",
+    "This browser / Active now / IP: not exposed": "此浏览器 / 当前活跃 / IP：前端不展示",
+    "Session management API not connected": "会话管理接口未接入",
+    "Only the current browser can be shown right now": "当前只能显示本浏览器",
+    "Terminate": "终止",
+    "Terminate All Other Sessions": "终止其它所有会话",
+    "Language": "语言",
+    "Search chats": "搜索聊天",
+    "New chat": "新建聊天",
+    "Toggle mute": "切换静音",
+    "Send message": "发送消息",
+    "New line": "换行",
+    "Settings": "设置",
+    "Edit Profile": "编辑资料",
+    "Search": "搜索",
+    "Data and Storage": "数据和存储",
+    "Privacy and Security": "隐私和安全",
+    "Devices and Shortcuts": "设备与快捷键"
+  }
+};
+
+const literalTextTranslationsReverse = {
+  en: Object.fromEntries(
+    Object.entries(literalTextTranslations.zh).map(([en, zh]) => [zh, en])
+  )
+};
+
+function applyLiteralTextTranslations() {
+  const map = currentLanguage === 'zh'
+    ? literalTextTranslations.zh
+    : literalTextTranslationsReverse.en;
+  const root = document.getElementById('sidebar-container');
+  if (!root || !map) return;
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest('script, style, textarea, input')) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      const text = node.nodeValue.trim();
+      return text && map[text] ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    const original = node.nodeValue;
+    const leading = original.match(/^\s*/)[0];
+    const trailing = original.match(/\s*$/)[0];
+    const translated = map[original.trim()];
+    node.nodeValue = `${leading}${translated}${trailing}`;
+  });
+}
+
 function applyLanguage() {
   const langDisplay = document.getElementById("lang-display-val");
   if (langDisplay) {
@@ -2000,11 +2287,13 @@ function applyLanguage() {
     }
   });
 
+  applyLiteralTextTranslations();
+
   // Re-render sidebar previews and selected chat UI
   if (activeChatId && conversationsById[activeChatId]) {
     const conv = conversationsById[activeChatId];
     selectChat(activeChatId.toString());
-    updateDetailsPanel(chat);
+    updateDetailsPanel(conv);
   }
 
   // Also update self-destruct slider labels if they exist
@@ -2189,9 +2478,7 @@ window.triggerMuteAction = async function(e) {
   const chat = conversationsById[activeChatId];
   if (!chat) return;
   
-  chat.isMuted = !chat.isMuted;
-    
-  // Sync mute state via simulated API or actual POST
+  const nextMuted = !chat.isMuted;
   try {
     const response = await fetch(`/api/conversations/${activeChatId}/mute/`, {
       method: 'POST',
@@ -2199,13 +2486,17 @@ window.triggerMuteAction = async function(e) {
         'Content-Type': 'application/json',
         'X-CSRFToken': getCookie('csrftoken') || ''
       },
-      body: JSON.stringify({ mute: chat.isMuted })
+      body: JSON.stringify({ mute: nextMuted })
     });
-    if (response.ok) {
-      console.log('Mute status synced to backend');
+    if (!response.ok) {
+      throw new Error('mute_endpoint_unavailable');
     }
+    chat.isMuted = nextMuted;
   } catch (err) {
-    console.log('Mute status synced locally:', err);
+    window.showToast(currentLanguage === 'zh'
+      ? '静音接口尚未接入，未保存更改'
+      : 'Mute API is not available yet. No change was saved.');
+    return;
   }
   
   // Update UI mute text and icons
@@ -2360,11 +2651,14 @@ window.submitReport = async function() {
         reason: reason
       })
     });
-    if (response.ok) {
-      console.log('Report submitted to backend');
+    if (!response.ok) {
+      throw new Error('report_endpoint_unavailable');
     }
   } catch (err) {
-    console.log('Report submitted locally:', err);
+    window.showToast(currentLanguage === 'zh'
+      ? '举报接口尚未接入，未提交'
+      : 'Report API is not available yet. Nothing was submitted.');
+    return;
   }
   
   window.closeReportModal();
@@ -2399,7 +2693,6 @@ window.confirmDeleteChat = async function() {
   
   const chatIdToDelete = activeChatId;
   
-  // API Call
   try {
     const response = await fetch(`/api/conversations/${chatIdToDelete}/hide/`, {
       method: 'POST',
@@ -2408,11 +2701,15 @@ window.confirmDeleteChat = async function() {
         'X-CSRFToken': getCookie('csrftoken') || ''
       }
     });
-    if (response.ok) {
-      console.log('Conversation hidden in backend');
+    if (!response.ok) {
+      throw new Error('hide_endpoint_unavailable');
     }
   } catch (err) {
-    console.log('Conversation hidden locally:', err);
+    window.closeDeleteConfirmModal();
+    window.showToast(currentLanguage === 'zh'
+      ? '删除/隐藏会话接口尚未接入，未移除会话'
+      : 'Delete/hide conversation API is not available yet. No chat was removed.');
+    return;
   }
   
   // Local deletion
@@ -2509,6 +2806,390 @@ window.checkForUpdates = function(e) {
   const msg = currentLanguage === 'zh' ? "当前已是最新版本" : "Already the latest version";
   window.showToast(msg);
 };
+
+// ============================================================================
+// P2 T06: Privacy & Security Settings
+// ============================================================================
+
+var _privacySettingsCache = null;
+
+var _visibilityLabelMap = {
+  'everyone': 'Everyone',
+  'contacts': 'My Contacts',
+  'nobody': 'Nobody'
+};
+
+var _visibilityLabelMapZh = {
+  'everyone': '所有人',
+  'contacts': '我的联系人',
+  'nobody': '无人'
+};
+
+var _autoDeleteLabelMap = {
+  0: 'Off',
+  1: '1 Day',
+  7: '7 Days',
+  30: '30 Days'
+};
+
+var _autoDeleteLabelMapZh = {
+  0: '关闭',
+  1: '1 天',
+  7: '7 天',
+  30: '30 天'
+};
+
+function _privacyVisLabel(value) {
+  var map = currentLanguage === 'zh' ? _visibilityLabelMapZh : _visibilityLabelMap;
+  return map[value] || value;
+}
+
+function _privacyBoolLabel(value) {
+  if (currentLanguage === 'zh') {
+    return value ? '开启' : '关闭';
+  }
+  return value ? 'On' : 'Off';
+}
+
+async function loadPrivacySettings() {
+  try {
+    var data = await apiFetch('/api/privacy/settings/');
+    _privacySettingsCache = data.settings;
+
+    // Update visibility labels
+    ['last_seen_visibility', 'profile_photo_visibility', 'phone_number_visibility',
+     'bio_visibility', 'forward_link_visibility', 'who_can_send_messages',
+     'who_can_voice_video_call'].forEach(function(key) {
+      var el = document.getElementById('privacy-label-' + key);
+      if (el && _privacySettingsCache[key] !== undefined) {
+        el.textContent = _privacyVisLabel(_privacySettingsCache[key]);
+      }
+    });
+
+    // Update boolean toggles
+    ['two_step_verification_enabled', 'passcode_lock_enabled',
+     'sensitive_content_filter'].forEach(function(key) {
+      var el = document.getElementById('privacy-label-' + key);
+      if (el && _privacySettingsCache[key] !== undefined) {
+        el.textContent = _privacyBoolLabel(_privacySettingsCache[key]);
+      }
+    });
+
+    // Update login email input
+    var emailInput = document.getElementById('privacy-input-login_email');
+    if (emailInput && _privacySettingsCache.login_email !== undefined) {
+      emailInput.value = _privacySettingsCache.login_email || '';
+    }
+
+    // Update auto-delete
+    var autoDeleteEl = document.getElementById('privacy-label-auto_delete_messages_days');
+    if (autoDeleteEl && _privacySettingsCache.auto_delete_messages_days !== undefined) {
+      var days = _privacySettingsCache.auto_delete_messages_days;
+      var labelMap = currentLanguage === 'zh' ? _autoDeleteLabelMapZh : _autoDeleteLabelMap;
+      autoDeleteEl.textContent = labelMap[days] || (days + ' days');
+    }
+
+    // Load blocked users count
+    loadBlockedUsersCount();
+  } catch (err) {
+    console.error('Failed to load privacy settings:', err);
+    window.showToast(currentLanguage === 'zh'
+      ? '加载隐私设置失败'
+      : 'Failed to load privacy settings');
+  }
+}
+
+async function savePrivacySetting(key, value) {
+  var payload = {};
+  payload[key] = value;
+  return savePrivacySettings(payload);
+}
+
+async function savePrivacySettings(settings) {
+  try {
+    var data = await apiFetch('/api/privacy/settings/', {
+      method: 'POST',
+      body: JSON.stringify(settings)
+    });
+    _privacySettingsCache = data.settings;
+    // Reload UI to reflect changes
+    loadPrivacySettings();
+    var lang = currentLanguage;
+    window.showToast(lang === 'zh' ? '隐私设置已保存' : 'Privacy settings saved');
+  } catch (err) {
+    console.error('Failed to save privacy settings:', err);
+    window.showToast(currentLanguage === 'zh'
+      ? '保存隐私设置失败'
+      : 'Failed to save privacy settings');
+  }
+}
+
+// ── Visibility Picker (bottom sheet) ──
+
+var _visibilityPickerKey = null;
+var _visibilityPickerIsPermission = false;
+
+function showVisibilityPicker(rowEl, key, isPermission) {
+  _visibilityPickerKey = key;
+  _visibilityPickerIsPermission = !!isPermission;
+
+  var picker = document.getElementById('privacy-visibility-picker');
+  if (!picker) return;
+  picker.classList.remove('hidden');
+
+  var title = document.getElementById('privacy-picker-title');
+  var optionsEl = document.getElementById('privacy-picker-options');
+  if (!title || !optionsEl) return;
+
+  // Set title based on the row's text
+  var rowTitle = rowEl.querySelector('.text-sm') || rowEl.querySelector('.font-medium');
+  if (title && rowTitle) {
+    title.textContent = rowTitle.textContent.trim();
+  }
+
+  // Determine which options to show
+  var options;
+  if (_visibilityPickerIsPermission) {
+    options = [
+      { value: 'everyone', label: _visibilityLabelMap['everyone'], labelZh: _visibilityLabelMapZh['everyone'] },
+      { value: 'contacts', label: _visibilityLabelMap['contacts'], labelZh: _visibilityLabelMapZh['contacts'] },
+    ];
+  } else {
+    options = [
+      { value: 'everyone', label: _visibilityLabelMap['everyone'], labelZh: _visibilityLabelMapZh['everyone'] },
+      { value: 'contacts', label: _visibilityLabelMap['contacts'], labelZh: _visibilityLabelMapZh['contacts'] },
+      { value: 'nobody', label: _visibilityLabelMap['nobody'], labelZh: _visibilityLabelMapZh['nobody'] },
+    ];
+  }
+
+  var currentValue = _privacySettingsCache ? _privacySettingsCache[key] : null;
+
+  var html = '';
+  options.forEach(function(opt) {
+    var isSelected = currentValue === opt.value;
+    var label = currentLanguage === 'zh' ? opt.labelZh : opt.label;
+    html += '<button onclick="selectVisibilityOption(\'' + opt.value + '\')" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">';
+    html += '<span>' + label + '</span>';
+    html += '<i data-lucide="check" class="w-4 h-4 text-brand-light' + (isSelected ? '' : ' hidden') + '"></i>';
+    html += '</button>';
+  });
+
+  optionsEl.innerHTML = html;
+  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
+}
+
+function selectVisibilityOption(value) {
+  if (_visibilityPickerKey) {
+    savePrivacySetting(_visibilityPickerKey, value);
+  }
+  closeVisibilityPicker();
+}
+
+function closeVisibilityPicker() {
+  var picker = document.getElementById('privacy-visibility-picker');
+  if (picker) picker.classList.add('hidden');
+  _visibilityPickerKey = null;
+}
+
+// ── Auto-Delete Picker ──
+
+function showAutoDeletePicker(rowEl) {
+  var picker = document.getElementById('privacy-autodelete-picker');
+  if (!picker) return;
+  picker.classList.remove('hidden');
+
+  // Highlight current value
+  var currentDays = _privacySettingsCache ? _privacySettingsCache.auto_delete_messages_days : 0;
+  [0, 1, 7, 30].forEach(function(d) {
+    var check = document.getElementById('autodelete-check-' + d);
+    if (check) {
+      if (d === currentDays) {
+        check.classList.remove('hidden');
+      } else {
+        check.classList.add('hidden');
+      }
+    }
+  });
+  if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
+}
+
+function closeAutoDeletePicker() {
+  var picker = document.getElementById('privacy-autodelete-picker');
+  if (picker) picker.classList.add('hidden');
+}
+
+// ── Boolean toggle ──
+
+async function togglePrivacySwitch(key) {
+  if (!_privacySettingsCache) return;
+  var currentValue = _privacySettingsCache[key];
+  var newValue = !currentValue;
+  await savePrivacySetting(key, newValue);
+}
+
+// ── Blocked Users ──
+
+async function loadBlockedUsersCount() {
+  try {
+    var data = await apiFetch('/api/privacy/blocked/');
+    var count = data.blocked_users ? data.blocked_users.length : 0;
+    var el = document.getElementById('privacy-blocked-count');
+    if (el) el.textContent = String(count);
+    _blockedUsersCache = data.blocked_users || [];
+  } catch (err) {
+    console.error('Failed to load blocked users:', err);
+  }
+}
+
+var _blockedUsersCache = [];
+
+async function openBlockedUsersList() {
+  var modal = document.getElementById('privacy-blocked-modal');
+  if (!modal) return;
+
+  try {
+    var data = await apiFetch('/api/privacy/blocked/');
+    _blockedUsersCache = data.blocked_users || [];
+
+    var listEl = document.getElementById('privacy-blocked-list');
+    if (!listEl) return;
+
+    if (_blockedUsersCache.length === 0) {
+      var emptyMsg = currentLanguage === 'zh' ? '没有被屏蔽的用户' : 'No blocked users';
+      listEl.innerHTML = '<p class="text-sm text-textSecondary text-center py-8">' + emptyMsg + '</p>';
+    } else {
+      var html = '<div class="space-y-2">';
+      _blockedUsersCache.forEach(function(user) {
+        var displayName = user.nickname || user.username;
+        html += '<div class="flex items-center justify-between py-2 px-2 hover:bg-bgSearch/50 rounded-custom-md">';
+        html += '<div class="flex items-center space-x-3">';
+        html += '<div class="w-9 h-9 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">' + (displayName[0] || '?').toUpperCase() + '</div>';
+        html += '<div>';
+        html += '<div class="text-sm font-medium text-textMain">' + escapeHtml(displayName) + '</div>';
+        html += '<div class="text-[10px] text-textSecondary">@' + escapeHtml(user.username) + '</div>';
+        html += '</div></div>';
+        html += '<button onclick="unblockUser(' + user.id + ')" class="px-3 py-1.5 text-xs font-semibold text-red-500 hover:bg-red-500/10 rounded-custom-md transition-colors">';
+        html += (currentLanguage === 'zh' ? '解除屏蔽' : 'Unblock');
+        html += '</button></div>';
+      });
+      html += '</div>';
+      listEl.innerHTML = html;
+    }
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
+
+    // Update count
+    var countEl = document.getElementById('privacy-blocked-count');
+    if (countEl) countEl.textContent = String(_blockedUsersCache.length);
+  } catch (err) {
+    console.error('Failed to load blocked users:', err);
+    window.showToast(currentLanguage === 'zh'
+      ? '加载已屏蔽用户失败'
+      : 'Failed to load blocked users');
+  }
+}
+
+function closeBlockedUsersList() {
+  var modal = document.getElementById('privacy-blocked-modal');
+  if (modal) {
+    modal.classList.remove('flex');
+    modal.classList.add('hidden');
+  }
+}
+
+async function unblockUser(userId) {
+  try {
+    await apiFetch('/api/privacy/unblock/', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId })
+    });
+    window.showToast(currentLanguage === 'zh'
+      ? '已解除屏蔽'
+      : 'User unblocked');
+    // Refresh the list
+    openBlockedUsersList();
+    loadBlockedUsersCount();
+  } catch (err) {
+    console.error('Failed to unblock user:', err);
+    window.showToast(currentLanguage === 'zh'
+      ? '解除屏蔽失败'
+      : 'Failed to unblock user');
+  }
+}
+
+// ── Delete Synced Contacts ──
+
+function deleteSyncedContacts() {
+  var title = currentLanguage === 'zh' ? '删除同步联系人' : 'Delete Synced Contacts';
+  var desc = currentLanguage === 'zh'
+    ? '确定要删除所有同步的联系人吗？此操作不可撤销。'
+    : 'Are you sure you want to delete all synced contacts? This cannot be undone.';
+  showPrivacyConfirmModal(title, desc, async function() {
+    try {
+      var data = await apiFetch('/api/privacy/delete-contacts/', { method: 'POST' });
+      window.showToast(currentLanguage === 'zh'
+        ? '已删除 ' + data.deleted_count + ' 个联系人'
+        : 'Deleted ' + data.deleted_count + ' contacts');
+      closePrivacyConfirmModal();
+    } catch (err) {
+      console.error('Failed to delete contacts:', err);
+      window.showToast(currentLanguage === 'zh'
+        ? '删除联系人失败'
+        : 'Failed to delete contacts');
+    }
+  });
+}
+
+// ── Delete Account ──
+
+function deleteAccount() {
+  var title = currentLanguage === 'zh' ? '删除账号' : 'Delete Account';
+  var desc = currentLanguage === 'zh'
+    ? '确定要永久删除您的账号吗？所有数据将被清除，此操作不可撤销。'
+    : 'Are you sure you want to permanently delete your account? All data will be lost. This cannot be undone.';
+  showPrivacyConfirmModal(title, desc, async function() {
+    try {
+      await apiFetch('/api/privacy/delete-account/', { method: 'POST' });
+      window.location.href = '/accounts/login/';
+    } catch (err) {
+      console.error('Failed to delete account:', err);
+      window.showToast(currentLanguage === 'zh'
+        ? '删除账号失败'
+        : 'Failed to delete account');
+    }
+  });
+}
+
+// ── Generic Confirm Modal ──
+
+var _privacyConfirmCallback = null;
+
+function showPrivacyConfirmModal(title, desc, callback) {
+  var modal = document.getElementById('privacy-confirm-modal');
+  if (!modal) return;
+  document.getElementById('privacy-confirm-title').textContent = title;
+  document.getElementById('privacy-confirm-desc').textContent = desc;
+  _privacyConfirmCallback = callback;
+  var btn = document.getElementById('privacy-confirm-btn');
+  if (btn) {
+    btn.onclick = function() {
+      if (_privacyConfirmCallback) _privacyConfirmCallback();
+    };
+  }
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closePrivacyConfirmModal() {
+  var modal = document.getElementById('privacy-confirm-modal');
+  if (modal) {
+    modal.classList.remove('flex');
+    modal.classList.add('hidden');
+  }
+  _privacyConfirmCallback = null;
+}
 
 // Helper function to extract cookies (e.g. csrftoken for Django)
 

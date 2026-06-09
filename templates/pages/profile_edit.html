@@ -37,6 +37,35 @@
       </div>
 
       <div class="space-y-1.5">
+        <label for="{{ form.first_name.id_for_label }}" class="block text-sm font-semibold text-textMain">First Name</label>
+        <input type="text" name="first_name" id="{{ form.first_name.id_for_label }}"
+          value="{{ form.first_name.value|default:'' }}"
+          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
+          placeholder="Your first name">
+        {% if form.first_name.errors %}<p class="text-xs text-red-500">{{ form.first_name.errors.0 }}</p>{% endif %}
+      </div>
+
+      <div class="space-y-1.5">
+        <label for="{{ form.last_name.id_for_label }}" class="block text-sm font-semibold text-textMain">Last Name</label>
+        <input type="text" name="last_name" id="{{ form.last_name.id_for_label }}"
+          value="{{ form.last_name.value|default:'' }}"
+          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
+          placeholder="Your last name">
+        {% if form.last_name.errors %}<p class="text-xs text-red-500">{{ form.last_name.errors.0 }}</p>{% endif %}
+      </div>
+
+      <div class="space-y-1.5">
+        <label for="{{ form.username.id_for_label }}" class="block text-sm font-semibold text-textMain">Username</label>
+        <input type="text" name="username" id="{{ form.username.id_for_label }}"
+          value="{{ form.username.value|default:'' }}"
+          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
+          placeholder="a-z, 0-9, underscores (min. 5 chars)"
+          pattern="^[a-z0-9_]{5,}$">
+        <p class="text-xs text-textSecondary">You can use a–z, 0–9 and underscores. Minimum length is 5 characters.</p>
+        {% if form.username.errors %}<p class="text-xs text-red-500">{{ form.username.errors.0 }}</p>{% endif %}
+      </div>
+
+      <div class="space-y-1.5">
         <label for="{{ form.nickname.id_for_label }}" class="block text-sm font-semibold text-textMain">Nickname</label>
         <input type="text" name="nickname" id="{{ form.nickname.id_for_label }}"
           value="{{ form.nickname.value|default:'' }}"

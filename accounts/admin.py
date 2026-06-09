@@ -1,8 +1,10 @@
 from django.contrib import admin
 
 from .models import (
+    BlockedUser,
     Contact,
     FriendRequest,
+    UserPrivacySettings,
     UserProfile,
     UserPublicKey,
 )
@@ -41,3 +43,23 @@ class UserPublicKeyAdmin(admin.ModelAdmin):
 class ContactAdmin(admin.ModelAdmin):
     list_display = ('user', 'contact', 'created_at')
     search_fields = ('user__username', 'contact__username')
+
+
+@admin.register(UserPrivacySettings)
+class UserPrivacySettingsAdmin(admin.ModelAdmin):
+    list_display = (
+        'user', 'last_seen_visibility', 'profile_photo_visibility',
+        'phone_number_visibility', 'two_step_verification_enabled',
+        'updated_at',
+    )
+    list_filter = (
+        'last_seen_visibility', 'two_step_verification_enabled',
+        'passcode_lock_enabled',
+    )
+    search_fields = ('user__username',)
+
+
+@admin.register(BlockedUser)
+class BlockedUserAdmin(admin.ModelAdmin):
+    list_display = ('blocker', 'blocked', 'created_at')
+    search_fields = ('blocker__username', 'blocked__username')

@@ -130,9 +130,9 @@
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="settings">Settings</h2>
       <div class="flex items-center space-x-1">
-        <a href="{% url 'profile_edit' %}" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
+        <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
           <i data-lucide="edit-3" class="w-5 h-5"></i>
-        </a>
+        </button>
       </div>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">
@@ -147,9 +147,9 @@
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="settings">Settings</h2>
-      <a href="{% url 'profile_edit' %}" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
+      <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
         <i data-lucide="edit-3" class="w-5 h-5"></i>
-      </a>
+      </button>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-borderColor/60">
       {% include 'components/settings_panel_body.html' %}
@@ -198,7 +198,7 @@
   <!-- P2 T04: Notification Settings -->
   <div id="sidebar-view-notifications" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all">
+      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1">Notifications and Sounds</h2>

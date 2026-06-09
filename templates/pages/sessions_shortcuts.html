@@ -1,4 +1,4 @@
-{# sessions_shortcuts.html — P2 T08 Active Sessions, Language, Keyboard Shortcuts #}
+{# sessions_shortcuts.html - P2 T08 Active Sessions, Language, Keyboard Shortcuts #}
 <div class="divide-y divide-borderColor/60">
 
   <div class="px-4 py-4 space-y-4">
@@ -10,26 +10,25 @@
         <div class="flex items-center space-x-3">
           <i data-lucide="monitor" class="w-4 h-4 text-green-500"></i>
           <div>
-            <div class="text-sm font-semibold text-textMain">Windows — Chrome</div>
-            <div class="text-[10px] text-textSecondary">Beijing, China · Active now · IP: ***</div>
+            <div class="text-sm font-semibold text-textMain">Windows / Chrome</div>
+            <div class="text-[10px] text-textSecondary">This browser / Active now / IP: not exposed</div>
           </div>
         </div>
-        <button onclick="showToast('Session terminated')" class="text-xs text-red-500 hover:underline font-semibold">Terminate</button>
+        <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入' : 'Session management API is not connected yet')" class="text-xs text-red-500 hover:underline font-semibold">Terminate</button>
       </div>
 
-      <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between">
+      <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between opacity-70">
         <div class="flex items-center space-x-3">
           <i data-lucide="smartphone" class="w-4 h-4 text-gray-400"></i>
           <div>
-            <div class="text-sm font-semibold text-textMain">iPhone — Safari</div>
-            <div class="text-[10px] text-textSecondary">Beijing, China · Last active 2h ago</div>
+            <div class="text-sm font-semibold text-textMain">Session management API not connected</div>
+            <div class="text-[10px] text-textSecondary">Only the current browser can be shown right now</div>
           </div>
         </div>
-        <button onclick="showToast('Session terminated')" class="text-xs text-red-500 hover:underline font-semibold">Terminate</button>
       </div>
     </div>
 
-    <button onclick="showToast('All other sessions terminated')" class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+    <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入' : 'Session management API is not connected yet')" class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
       Terminate All Other Sessions
     </button>
   </div>

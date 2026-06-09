@@ -83,8 +83,40 @@ class RegistrationForm(UserCreationForm):
 
 
 class ProfileForm(forms.ModelForm):
-    """Edit nickname, bio, and avatar."""
+    """Edit nickname, bio, avatar, and username/name fields."""
+
+    first_name = forms.CharField(max_length=150, required=False)
+    last_name = forms.CharField(max_length=150, required=False)
+    username = forms.CharField(max_length=150, required=True)
 
     class Meta:
         model = UserProfile
         fields = ('nickname', 'bio', 'avatar')
+
+    def __init__(self, *args, **kwargs):
+        self._user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+
+    def clean_username(self):
+        username = self.cleaned_data.get('username', '').strip().lower()
+
+        if len(username) < 5:
+            raise forms.ValidationError(
+                'Username must be at least 5 characters long.',
+            )
+
+        if not re.match(r'^[a-z0-9_]+$', username):
+            raise forms.ValidationError(
+                'Username may only contain lowercase letters, digits, and underscores.',
+            )
+
+        # Check uniqueness excluding the current user
+        qs = User.objects.filter(username__iexact=username)
+        if self._user:
+            qs = qs.exclude(pk=self._user.pk)
+        if qs.exists():
+            raise forms.ValidationError(
+                'A user with that username already exists.',
+            )
+
+        return username

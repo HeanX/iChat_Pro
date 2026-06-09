@@ -1,75 +1,296 @@
-{# data_storage.html — P2 T05 Data & Storage Settings #}
+{# data_storage.html — P2 T05 Data & Storage Settings (complete) #}
 <div id="data-storage-settings" class="divide-y divide-borderColor/60">
-  <div class="px-4 py-4 space-y-4">
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 1: Storage Usage (category breakdown)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <div class="px-4 py-4 space-y-3">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Storage Usage</h4>
-    <div class="p-4 bg-bgSearch rounded-custom-md space-y-2">
-      <div class="flex items-center justify-between text-sm">
-        <span class="text-textSecondary">Chat data</span><span class="font-semibold text-textMain">2.4 MB</span>
+
+    <div class="p-4 bg-bgSearch rounded-custom-md space-y-3">
+      <div id="storage-categories">
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-textSecondary">Images</span><span class="font-semibold text-textMain" id="sz-images">—</span>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-textSecondary">Video files</span><span class="font-semibold text-textMain" id="sz-videos">—</span>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-textSecondary">Stickers and emojis</span><span class="font-semibold text-textMain" id="sz-stickers">—</span>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-textSecondary">Other</span><span class="font-semibold text-textMain" id="sz-other">—</span>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-textSecondary">Cached video stream chunks</span><span class="font-semibold text-textMain" id="sz-video-stream">—</span>
+        </div>
       </div>
-      <div class="flex items-center justify-between text-sm">
-        <span class="text-textSecondary">Media cache</span><span class="font-semibold text-textMain">0 KB</span>
-      </div>
-      <div class="flex items-center justify-between text-sm">
-        <span class="text-textSecondary">Other</span><span class="font-semibold text-textMain">0.1 MB</span>
-      </div>
+
       <div class="h-2 bg-gray-200 dark:bg-zinc-700 rounded-full overflow-hidden mt-2">
-        <div class="h-full bg-brand-light dark:bg-brand-dark rounded-full" style="width: 15%"></div>
+        <div id="storage-usage-bar" class="h-full bg-brand-light dark:bg-brand-dark rounded-full transition-all duration-500" style="width: 0%"></div>
       </div>
-      <p class="text-[10px] text-textSecondary">2.5 MB of 50 MB used</p>
+      <p class="text-[10px] text-textSecondary" id="storage-usage-text">Calculating…</p>
     </div>
   </div>
 
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 2: Auto-Download Policies
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Auto-Download</h4>
+    <div class="flex items-center justify-between">
+      <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Auto-Download</h4>
+      <button onclick="resetAutoDownloadSettings()"
+        class="text-[10px] text-brand-light dark:text-brand-dark hover:underline font-semibold">
+        Reset Auto-Download Settings
+      </button>
+    </div>
 
-    <div class="space-y-3">
-      <div class="flex items-center justify-between py-1">
+    {# --- Mobile Data --- #}
+    <div class="space-y-2" data-auto-download-group="mobile_data">
+      <div class="flex items-center justify-between py-1 cursor-pointer"
+        onclick="toggleAutoDownloadGroup('mobile_data')">
+        <div class="flex items-center space-x-3">
+          <i data-lucide="signal" class="w-4 h-4 text-textSecondary"></i>
+          <span class="text-sm font-medium text-textMain">On Mobile Data</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span class="text-[10px] text-textSecondary" id="mobile_data-summary">All off</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-textSecondary transition-transform" id="chevron-mobile_data"></i>
+        </div>
+      </div>
+      <div id="auto-dl-mobile_data" class="hidden space-y-2 pl-9">
+        {% include 'components/auto_download_row.html' with network='mobile_data' type='photos' icon='image' label='Photos' %}
+        {% include 'components/auto_download_row.html' with network='mobile_data' type='videos' icon='video' label='Video files' %}
+        {% include 'components/auto_download_row.html' with network='mobile_data' type='files' icon='file' label='Files' %}
+      </div>
+    </div>
+
+    {# --- Wi-Fi --- #}
+    <div class="space-y-2" data-auto-download-group="wifi">
+      <div class="flex items-center justify-between py-1 cursor-pointer"
+        onclick="toggleAutoDownloadGroup('wifi')">
         <div class="flex items-center space-x-3">
           <i data-lucide="wifi" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm text-textMain">On Mobile Data</span>
+          <span class="text-sm font-medium text-textMain">On Wi-Fi</span>
         </div>
-        <label class="toggle-switch"><input type="checkbox" data-storage-setting="mobileData" onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
-      </div>
-      <div class="flex items-center justify-between py-1">
-        <div class="flex items-center space-x-3">
-          <i data-lucide="wifi" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm text-textMain">On Wi-Fi</span>
+        <div class="flex items-center space-x-2">
+          <span class="text-[10px] text-textSecondary" id="wifi-summary">All on</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-textSecondary transition-transform" id="chevron-wifi"></i>
         </div>
-        <label class="toggle-switch"><input type="checkbox" data-storage-setting="wifi" checked onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
       </div>
-      <div class="flex items-center justify-between py-1">
+      <div id="auto-dl-wifi" class="hidden space-y-2 pl-9">
+        {% include 'components/auto_download_row.html' with network='wifi' type='photos' icon='image' label='Photos' %}
+        {% include 'components/auto_download_row.html' with network='wifi' type='videos' icon='video' label='Video files' %}
+        {% include 'components/auto_download_row.html' with network='wifi' type='files' icon='file' label='Files' %}
+      </div>
+    </div>
+
+    {# --- Roaming --- #}
+    <div class="space-y-2" data-auto-download-group="roaming">
+      <div class="flex items-center justify-between py-1 cursor-pointer"
+        onclick="toggleAutoDownloadGroup('roaming')">
         <div class="flex items-center space-x-3">
           <i data-lucide="wifi-off" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm text-textMain">On Roaming</span>
+          <span class="text-sm font-medium text-textMain">On Roaming</span>
         </div>
-        <label class="toggle-switch"><input type="checkbox" data-storage-setting="roaming" onchange="saveDataStorageSetting()"><span class="toggle-slider"></span></label>
+        <div class="flex items-center space-x-2">
+          <span class="text-[10px] text-textSecondary" id="roaming-summary">All off</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-textSecondary transition-transform" id="chevron-roaming"></i>
+        </div>
+      </div>
+      <div id="auto-dl-roaming" class="hidden space-y-2 pl-9">
+        {% include 'components/auto_download_row.html' with network='roaming' type='photos' icon='image' label='Photos' %}
+        {% include 'components/auto_download_row.html' with network='roaming' type='videos' icon='video' label='Video files' %}
+        {% include 'components/auto_download_row.html' with network='roaming' type='files' icon='file' label='Files' %}
+      </div>
+    </div>
+
+    {# --- Per-type file size limits --- #}
+    <div class="mt-3 pt-3 border-t border-borderColor/40">
+      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-2">
+        Maximum File Size for Auto-Download
+      </h5>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-textSecondary">Photos</span>
+          <select data-storage-setting="file_size_limit_photos"
+            onchange="saveDataStorageSetting()"
+            class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
+            <option value="1">1 MB</option>
+            <option value="5">5 MB</option>
+            <option value="10" selected>10 MB</option>
+            <option value="25">25 MB</option>
+            <option value="50">50 MB</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-textSecondary">Video files</span>
+          <select data-storage-setting="file_size_limit_videos"
+            onchange="saveDataStorageSetting()"
+            class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
+            <option value="10">10 MB</option>
+            <option value="25">25 MB</option>
+            <option value="50" selected>50 MB</option>
+            <option value="100">100 MB</option>
+            <option value="500">500 MB</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-textSecondary">Files / Documents</span>
+          <select data-storage-setting="file_size_limit_files"
+            onchange="saveDataStorageSetting()"
+            class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
+            <option value="5">5 MB</option>
+            <option value="10">10 MB</option>
+            <option value="25" selected>25 MB</option>
+            <option value="50">50 MB</option>
+            <option value="100">100 MB</option>
+          </select>
+        </div>
       </div>
     </div>
   </div>
 
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 3: Cache Management
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-4">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Cache Management</h4>
 
-    <button onclick="clearLocalCache()" class="w-full py-3 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-lg">
-          <i data-lucide="trash-2" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Clear Local Cache</span>
-      </div>
-      <span class="text-xs text-textSecondary">2.4 MB</span>
-    </button>
+    {# Cache retention period #}
+    <div class="flex items-center justify-between text-sm">
+      <span class="text-textSecondary">Cache retention period</span>
+      <select data-storage-setting="cache_retention"
+        onchange="saveDataStorageSetting()"
+        class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
+        <option value="7">1 week</option>
+        <option value="30" selected>1 month</option>
+        <option value="90">3 months</option>
+        <option value="0">Forever</option>
+      </select>
+    </div>
 
-    <button onclick="clearAllCacheSettings()" class="w-full py-3 flex items-center justify-between text-red-500">
+    {# Maximum cache size #}
+    <div class="flex items-center justify-between text-sm">
+      <span class="text-textSecondary">Maximum cache size</span>
+      <select data-storage-setting="cache_max_size"
+        onchange="saveDataStorageSetting()"
+        class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
+        <option value="50">50 MB</option>
+        <option value="100">100 MB</option>
+        <option value="200">200 MB</option>
+        <option value="500" selected>500 MB</option>
+        <option value="1024">1 GB</option>
+      </select>
+    </div>
+
+    <div class="space-y-1 pt-1">
+      {# Clear Images #}
+      <button onclick="clearCacheCategory('images')"
+        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg">
+            <i data-lucide="image" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm font-medium text-textMain">Clear Images</span>
+        </div>
+        <span class="text-xs text-textSecondary" id="clear-sz-images">—</span>
+      </button>
+
+      {# Clear Videos #}
+      <button onclick="clearCacheCategory('videos')"
+        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg">
+            <i data-lucide="video" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm font-medium text-textMain">Clear Video files</span>
+        </div>
+        <span class="text-xs text-textSecondary" id="clear-sz-videos">—</span>
+      </button>
+
+      {# Clear Stickers & Emojis #}
+      <button onclick="clearCacheCategory('stickers')"
+        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg">
+            <i data-lucide="sticker" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm font-medium text-textMain">Clear Stickers & Emojis</span>
+        </div>
+        <span class="text-xs text-textSecondary" id="clear-sz-stickers">—</span>
+      </button>
+
+      {# Clear Other #}
+      <button onclick="clearCacheCategory('other')"
+        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg">
+            <i data-lucide="file-text" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm font-medium text-textMain">Clear Other Cached Data</span>
+        </div>
+        <span class="text-xs text-textSecondary" id="clear-sz-other">—</span>
+      </button>
+
+      {# Clear Video Stream Chunks #}
+      <button onclick="clearCacheCategory('video_stream_chunks')"
+        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 rounded-lg">
+            <i data-lucide="film" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm font-medium text-textMain">Clear Cached Video Stream Chunks</span>
+        </div>
+        <span class="text-xs text-textSecondary" id="clear-sz-video-stream">—</span>
+      </button>
+    </div>
+
+    {# Clear All #}
+    <button onclick="confirmClearAllCache()"
+      class="w-full py-3 flex items-center justify-between text-red-500 hover:bg-red-500/5 rounded-custom-md px-1 transition-colors">
       <div class="flex items-center space-x-3">
-        <div class="p-2 bg-red-500/10 rounded-lg"><i data-lucide="alert-triangle" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium">Clear All Cache Settings</span>
+        <div class="p-2 bg-red-500/10 rounded-lg">
+          <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+        </div>
+        <span class="text-sm font-medium">Clear All Cache</span>
       </div>
       <i data-lucide="chevron-right" class="w-4 h-4"></i>
     </button>
   </div>
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Clear All Confirmation Modal
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <div id="clear-all-cache-modal" class="hidden fixed inset-0 z-[100] items-center justify-center bg-black/50 backdrop-blur-sm" onclick="if(event.target===this)closeClearAllModal()">
+    <div class="bg-bgMain border border-borderColor rounded-custom-lg shadow-2xl p-6 mx-4 max-w-sm w-full space-y-4">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-red-500/10 rounded-full">
+          <i data-lucide="alert-triangle" class="w-5 h-5 text-red-500"></i>
+        </div>
+        <h3 class="text-base font-bold text-textMain">Clear All Cache</h3>
+      </div>
+      <p class="text-sm text-textSecondary">
+        This will remove all locally cached media, stickers, and temporary files.
+        Your messages and encryption keys will be preserved.
+        Media will be re-downloaded when you view it again.
+      </p>
+      <div class="flex space-x-3">
+        <button onclick="closeClearAllModal()"
+          class="flex-1 py-2.5 text-sm font-semibold rounded-custom-md border border-borderColor text-textMain hover:bg-bgSearch transition-colors">
+          Cancel
+        </button>
+        <button onclick="executeClearAllCache()"
+          class="flex-1 py-2.5 text-sm font-semibold rounded-custom-md bg-red-500 text-white hover:bg-red-600 transition-colors">
+          Clear All
+        </button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
+{# ── Toggle Switch Styles ── #}
 <style>
   .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
   .toggle-switch input { opacity:0; width:0; height:0 }
@@ -78,40 +299,496 @@
   .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
   .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
   .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
+
+  select.custom-select-arrow {
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    padding-right: 24px;
+  }
 </style>
 
+{# ── Storage Management JavaScript ── #}
 <script>
-  function saveDataStorageSetting() {
-    var root = document.getElementById('data-storage-settings');
-    var settings = {};
-    if (!root) return;
-    root.querySelectorAll('[data-storage-setting]').forEach(function(el) {
-      settings[el.dataset.storageSetting] = el.checked;
-    });
-    localStorage.setItem('ichat_storage', JSON.stringify(settings));
+  // =========================================================================
+  // State
+  // =========================================================================
+  var storageStats = {
+    categories: {},
+    total_bytes: 0,
+    quota_bytes: 50 * 1024 * 1024,
+    usage_percent: 0
+  };
+
+  var DEFAULT_AUTO_DOWNLOAD = {
+    mobile_data:  { photos: false, videos: false, files: false },
+    wifi:         { photos: true,  videos: true,  files: true  },
+    roaming:      { photos: false, videos: false, files: false }
+  };
+
+  var DEFAULT_SETTINGS = {
+    auto_download: DEFAULT_AUTO_DOWNLOAD,
+    file_size_limit_photos: '10',
+    file_size_limit_videos: '50',
+    file_size_limit_files: '25',
+    cache_retention: '30',
+    cache_max_size: '500'
+  };
+
+  // =========================================================================
+  // Formatting helpers
+  // =========================================================================
+  function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 KB';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+    return (bytes / 1073741824).toFixed(2) + ' GB';
   }
 
-  function loadDataStorageSetting() {
+  function formatBytesShort(bytes) {
+    if (!bytes || bytes === 0) return '0 KB';
+    if (bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+    return (bytes / 1073741824).toFixed(1) + ' GB';
+  }
+
+  // =========================================================================
+  // Local storage estimation (browser APIs)
+  // =========================================================================
+  async function estimateLocalStorage() {
+    var localBytes = 0;
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        var value = localStorage.getItem(key);
+        localBytes += (key.length + value.length) * 2;
+      }
+    } catch (e) { /* ignore */ }
+
+    var storageEstimate = { usage: localBytes, quota: 50 * 1024 * 1024 };
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        var est = await navigator.storage.estimate();
+        if (est.usage) storageEstimate.usage = est.usage;
+        if (est.quota) storageEstimate.quota = est.quota;
+      }
+    } catch (e) { /* use fallback */ }
+
+    return storageEstimate;
+  }
+
+  // =========================================================================
+  // Fetch server-side storage stats
+  // =========================================================================
+  async function fetchStorageStats() {
+    try {
+      var resp = await fetch('/api/storage/stats/', {
+        headers: { 'X-CSRFToken': getCookie('csrftoken') || '' }
+      });
+      if (resp.ok) {
+        var data = await resp.json();
+        storageStats = data;
+        return data;
+      }
+    } catch (e) {
+      console.warn('[Storage] Server stats unavailable, using local estimates:', e);
+    }
+    return null;
+  }
+
+  // =========================================================================
+  // Render storage usage UI
+  // =========================================================================
+  async function renderStorageUsage() {
+    var serverData = await fetchStorageStats();
+    var localEstimate = await estimateLocalStorage();
+
+    var categories = {};
+    if (serverData && serverData.categories) {
+      categories = serverData.categories;
+    } else {
+      var localMB = localEstimate.usage;
+      categories = {
+        images:              { size_bytes: Math.round(localMB * 0.15), count: 0, label: 'Images' },
+        videos:              { size_bytes: Math.round(localMB * 0.05), count: 0, label: 'Video files' },
+        stickers:            { size_bytes: Math.round(localMB * 0.10), count: 0, label: 'Stickers and emojis' },
+        other:               { size_bytes: Math.round(localMB * 0.60), count: 0, label: 'Other' },
+        video_stream_chunks: { size_bytes: Math.round(localMB * 0.10), count: 0, label: 'Cached video stream chunks' }
+      };
+    }
+
+    var totalBytes = serverData ? serverData.total_bytes :
+      Object.values(categories).reduce(function(s, c) { return s + (c.size_bytes || 0); }, 0);
+    var quotaBytes = serverData ? serverData.quota_bytes : localEstimate.quota;
+    var usagePercent = quotaBytes > 0 ? Math.min(100, Math.round((totalBytes / quotaBytes) * 100)) : 0;
+
+    storageStats.total_bytes = totalBytes;
+    storageStats.quota_bytes = quotaBytes;
+    storageStats.usage_percent = usagePercent;
+    storageStats.categories = categories;
+
+    var catIds = ['images', 'videos', 'stickers', 'other', 'video_stream_chunks'];
+    catIds.forEach(function(cat) {
+      var szEl = document.getElementById('sz-' + cat);
+      var clearEl = document.getElementById('clear-sz-' + cat);
+      var sizeBytes = (categories[cat] && categories[cat].size_bytes) || 0;
+      var txt = formatBytesShort(sizeBytes);
+      if (szEl) szEl.textContent = txt;
+      if (clearEl) clearEl.textContent = txt;
+    });
+
+    var bar = document.getElementById('storage-usage-bar');
+    if (bar) bar.style.width = usagePercent + '%';
+
+    var textEl = document.getElementById('storage-usage-text');
+    if (textEl) {
+      textEl.textContent = formatBytes(totalBytes) + ' of ' + formatBytes(quotaBytes) + ' used';
+    }
+  }
+
+  // =========================================================================
+  // Auto-download settings management
+  // =========================================================================
+  function loadStorageSettings() {
+    var saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem('ichat_storage') || '{}');
+    } catch (e) { saved = {}; }
+    var settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    for (var key in saved) {
+      if (Object.prototype.hasOwnProperty.call(saved, key)) {
+        if (key === 'auto_download' && typeof saved[key] === 'object') {
+          settings.auto_download = JSON.parse(JSON.stringify(DEFAULT_AUTO_DOWNLOAD));
+          for (var net in saved[key]) {
+            if (settings.auto_download[net]) {
+              for (var t in saved[key][net]) {
+                settings.auto_download[net][t] = saved[key][net][t];
+              }
+            }
+          }
+        } else {
+          settings[key] = saved[key];
+        }
+      }
+    }
+    return settings;
+  }
+
+  function normalizeServerStorageSettings(serverSettings) {
+    var normalized = {};
+    if (!serverSettings || typeof serverSettings !== 'object') return normalized;
+
+    if (serverSettings.auto_download) {
+      normalized.auto_download = serverSettings.auto_download;
+    }
+
+    if (serverSettings.file_size_limit_mb) {
+      normalized.file_size_limit_photos = String(serverSettings.file_size_limit_mb.photos || DEFAULT_SETTINGS.file_size_limit_photos);
+      normalized.file_size_limit_videos = String(serverSettings.file_size_limit_mb.videos || DEFAULT_SETTINGS.file_size_limit_videos);
+      normalized.file_size_limit_files = String(serverSettings.file_size_limit_mb.files || DEFAULT_SETTINGS.file_size_limit_files);
+    }
+
+    ['file_size_limit_photos', 'file_size_limit_videos', 'file_size_limit_files',
+     'cache_retention', 'cache_max_size'].forEach(function(key) {
+      if (serverSettings[key] !== undefined) {
+        normalized[key] = String(serverSettings[key]);
+      }
+    });
+
+    if (serverSettings.cache_retention_days !== undefined) {
+      normalized.cache_retention = String(serverSettings.cache_retention_days);
+    }
+    if (serverSettings.cache_max_size_mb !== undefined) {
+      normalized.cache_max_size = String(serverSettings.cache_max_size_mb);
+    }
+
+    return normalized;
+  }
+
+  async function fetchStorageSettingsFromServer() {
+    try {
+      var resp = await fetch('/api/storage/settings/', {
+        headers: { 'X-CSRFToken': getCookie('csrftoken') || '' }
+      });
+      if (!resp.ok) return;
+      var data = await resp.json();
+      var serverSettings = normalizeServerStorageSettings(data.settings);
+      if (Object.keys(serverSettings).length === 0) return;
+      var merged = loadStorageSettings();
+      merged = Object.assign(merged, serverSettings);
+      if (serverSettings.auto_download) {
+        merged.auto_download = serverSettings.auto_download;
+      }
+      localStorage.setItem('ichat_storage', JSON.stringify(merged));
+    } catch (e) {
+      console.warn('[Storage] Server settings unavailable, using local settings:', e);
+    }
+  }
+
+  function saveDataStorageSetting() {
     var root = document.getElementById('data-storage-settings');
     if (!root) return;
-    var saved = {};
-    try { saved = JSON.parse(localStorage.getItem('ichat_storage') || '{}'); } catch (error) { saved = {}; }
+
+    var settings = loadStorageSettings();
+
     root.querySelectorAll('[data-storage-setting]').forEach(function(el) {
-      if (Object.prototype.hasOwnProperty.call(saved, el.dataset.storageSetting)) {
-        el.checked = Boolean(saved[el.dataset.storageSetting]);
+      var key = el.dataset.storageSetting;
+      if (el.type === 'checkbox') {
+        var network = el.dataset.network;
+        var dlType = el.dataset.dlType;
+        if (network && dlType) {
+          if (!settings.auto_download) settings.auto_download = {};
+          if (!settings.auto_download[network]) settings.auto_download[network] = {};
+          settings.auto_download[network][dlType] = el.checked;
+        } else {
+          settings[key] = el.checked;
+        }
+      } else if (el.tagName === 'SELECT') {
+        settings[key] = el.value;
+      }
+    });
+
+    localStorage.setItem('ichat_storage', JSON.stringify(settings));
+    updateAutoDownloadSummaries();
+    syncStorageSettingsToServer(settings);
+  }
+
+  function applyStorageSettingsToUI() {
+    var settings = loadStorageSettings();
+    var root = document.getElementById('data-storage-settings');
+    if (!root) return;
+
+    var networks = ['mobile_data', 'wifi', 'roaming'];
+    var types = ['photos', 'videos', 'files'];
+    networks.forEach(function(network) {
+      types.forEach(function(type) {
+        var el = document.querySelector(
+          '[data-storage-setting][data-network="' + network + '"][data-dl-type="' + type + '"]'
+        );
+        if (el) {
+          var netSettings = settings.auto_download && settings.auto_download[network]
+            ? settings.auto_download[network]
+            : (DEFAULT_AUTO_DOWNLOAD[network] || {});
+          el.checked = netSettings[type] !== undefined ? Boolean(netSettings[type]) : false;
+        }
+      });
+    });
+
+    ['file_size_limit_photos', 'file_size_limit_videos', 'file_size_limit_files',
+     'cache_retention', 'cache_max_size'].forEach(function(key) {
+      var el = root.querySelector('[data-storage-setting="' + key + '"]');
+      if (el && settings[key] !== undefined) {
+        el.value = settings[key];
+      }
+    });
+
+    updateAutoDownloadSummaries();
+  }
+
+  function updateAutoDownloadSummaries() {
+    var settings = loadStorageSettings();
+    var networks = ['mobile_data', 'wifi', 'roaming'];
+    networks.forEach(function(network) {
+      var summaryEl = document.getElementById(network + '-summary');
+      if (!summaryEl) return;
+      var netSettings = settings.auto_download && settings.auto_download[network]
+        ? settings.auto_download[network]
+        : (DEFAULT_AUTO_DOWNLOAD[network] || {});
+      var allOn = netSettings.photos && netSettings.videos && netSettings.files;
+      var allOff = !netSettings.photos && !netSettings.videos && !netSettings.files;
+      if (allOn) {
+        summaryEl.textContent = 'All on';
+      } else if (allOff) {
+        summaryEl.textContent = 'All off';
+      } else {
+        var onTypes = [];
+        if (netSettings.photos) onTypes.push('Photos');
+        if (netSettings.videos) onTypes.push('Videos');
+        if (netSettings.files) onTypes.push('Files');
+        summaryEl.textContent = onTypes.join(', ');
       }
     });
   }
 
-  function clearLocalCache(){window.showToast('Local cache cleared')}
-
-  function clearAllCacheSettings(){
-    if (confirm('Clear cache settings? Encryption keys and required app data will be kept.')) {
-      localStorage.removeItem('ichat_storage');
-      loadDataStorageSetting();
-      window.showToast('Cache settings cleared');
+  async function syncStorageSettingsToServer(settings) {
+    try {
+      await fetch('/api/storage/settings/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken') || ''
+        },
+        body: JSON.stringify(settings)
+      });
+    } catch (e) {
+      // Server sync is optional
     }
   }
 
-  loadDataStorageSetting();
+  function resetAutoDownloadSettings() {
+    var confirmed = confirm(
+      'Reset all auto-download settings to defaults?\n\n' +
+      'Wi-Fi: Photos, Videos, Files — ON\n' +
+      'Mobile Data: All — OFF\n' +
+      'Roaming: All — OFF\n' +
+      'File size limits will also be reset.'
+    );
+    if (!confirmed) return;
+
+    var settings = loadStorageSettings();
+    settings.auto_download = JSON.parse(JSON.stringify(DEFAULT_AUTO_DOWNLOAD));
+    settings.file_size_limit_photos = DEFAULT_SETTINGS.file_size_limit_photos;
+    settings.file_size_limit_videos = DEFAULT_SETTINGS.file_size_limit_videos;
+    settings.file_size_limit_files = DEFAULT_SETTINGS.file_size_limit_files;
+    localStorage.setItem('ichat_storage', JSON.stringify(settings));
+    applyStorageSettingsToUI();
+    syncStorageSettingsToServer(settings);
+    window.showToast('Auto-download settings reset to defaults');
+  }
+
+  // =========================================================================
+  // Auto-download group expand/collapse
+  // =========================================================================
+  function toggleAutoDownloadGroup(network) {
+    var panel = document.getElementById('auto-dl-' + network);
+    var chevron = document.getElementById('chevron-' + network);
+    if (!panel || !chevron) return;
+    var isHidden = panel.classList.contains('hidden');
+    if (isHidden) {
+      panel.classList.remove('hidden');
+      chevron.style.transform = 'rotate(180deg)';
+    } else {
+      panel.classList.add('hidden');
+      chevron.style.transform = 'rotate(0deg)';
+    }
+  }
+
+  // =========================================================================
+  // Cache clearing
+  // =========================================================================
+  async function clearCacheCategory(category) {
+    var catLabels = {
+      images: 'Images',
+      videos: 'Video files',
+      stickers: 'Stickers & Emojis',
+      other: 'Other cached data',
+      video_stream_chunks: 'Video stream chunks'
+    };
+    var label = catLabels[category] || category;
+
+    var confirmed = confirm('Clear ' + label + ' cache?');
+    if (!confirmed) return;
+
+    try {
+      var resp = await fetch('/api/storage/clear/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken') || ''
+        },
+        body: JSON.stringify({ categories: [category] })
+      });
+      if (resp.ok) {
+        var data = await resp.json();
+        if (data.message) console.log('[Storage]', data.message);
+      }
+    } catch (e) {
+      console.warn('[Storage] Server clear failed:', e);
+    }
+
+    clearLocalCategoryData(category);
+    await renderStorageUsage();
+    window.showToast(label + ' cache cleared');
+  }
+
+  function clearLocalCategoryData(category) {
+    var prefixes = {
+      images: ['ichat_img_', 'ichat_thumb_'],
+      videos: ['ichat_vid_'],
+      stickers: ['ichat_sticker_', 'ichat_emoji_'],
+      other: ['ichat_file_', 'ichat_doc_'],
+      video_stream_chunks: ['ichat_vstream_']
+    };
+    var keysToRemove = [];
+    var prefixesToCheck = prefixes[category] || [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var key = localStorage.key(i);
+      for (var p = 0; p < prefixesToCheck.length; p++) {
+        if (key.indexOf(prefixesToCheck[p]) === 0) {
+          keysToRemove.push(key);
+          break;
+        }
+      }
+    }
+    keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+  }
+
+  function confirmClearAllCache() {
+    var modal = document.getElementById('clear-all-cache-modal');
+    if (modal) {
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+  }
+
+  function closeClearAllModal() {
+    var modal = document.getElementById('clear-all-cache-modal');
+    if (modal) {
+      modal.classList.remove('flex');
+      modal.classList.add('hidden');
+    }
+  }
+
+  async function executeClearAllCache() {
+    closeClearAllModal();
+
+    try {
+      await fetch('/api/storage/clear/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken') || ''
+        },
+        body: JSON.stringify({ categories: ['all'] })
+      });
+    } catch (e) { /* continue with local */ }
+
+    localStorage.removeItem('ichat_storage');
+
+    var keysToRemove = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var key = localStorage.key(i);
+      if (key.indexOf('ichat_img_') === 0 ||
+          key.indexOf('ichat_thumb_') === 0 ||
+          key.indexOf('ichat_vid_') === 0 ||
+          key.indexOf('ichat_sticker_') === 0 ||
+          key.indexOf('ichat_emoji_') === 0 ||
+          key.indexOf('ichat_file_') === 0 ||
+          key.indexOf('ichat_doc_') === 0 ||
+          key.indexOf('ichat_vstream_') === 0) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+
+    applyStorageSettingsToUI();
+    await renderStorageUsage();
+    window.showToast('All cache cleared. Settings reset to defaults.');
+  }
+
+  // =========================================================================
+  // Initialization
+  // =========================================================================
+  (async function initDataStorage() {
+    await fetchStorageSettingsFromServer();
+    applyStorageSettingsToUI();
+    renderStorageUsage();
+
+    if (window.lucide) {
+      setTimeout(function() { lucide.createIcons(); }, 100);
+    }
+  })();
 </script>

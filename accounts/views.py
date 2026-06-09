@@ -21,6 +21,7 @@ from .forms import ProfileForm, RegistrationForm
 from .models import (
     Contact,
     FriendRequest,
+    KeyTrust,
     UserProfile,
     UserPublicKey,
 )
@@ -701,3 +702,150 @@ def public_key_fingerprint_view(request, user_id):
         'key_fingerprint': public_key.key_fingerprint,
         'key_version': public_key.key_version,
     })
+
+
+# ── P2 T38: Key trust and fingerprint management ──────────────────
+
+
+@login_required
+@require_GET
+def my_fingerprints_view(request):
+    """Return all public keys (active + historical) for the current user."""
+    keys = UserPublicKey.objects.filter(user=request.user).order_by('-key_version')
+    trust_counts = (
+        KeyTrust.objects
+        .filter(contact=request.user, trust_status=KeyTrust.TrustStatus.TRUSTED)
+        .count()
+    )
+    return JsonResponse({
+        'user_id': request.user.pk,
+        'keys': [_serialize_key(k) for k in keys],
+        'active_key_count': keys.filter(is_active=True).count(),
+        'trusted_by_count': trust_counts,
+    })
+
+
+@login_required
+@require_GET
+def contact_fingerprints_view(request, user_id):
+    """Return public key fingerprints for a given contact (T38)."""
+    try:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        target = User.objects.get(id=user_id, is_active=True)
+    except Exception:
+        return JsonResponse({'error': 'User not found.'}, status=404)
+
+    keys = UserPublicKey.objects.filter(user=target).order_by('-key_version')
+    active_key = keys.filter(is_active=True).first()
+
+    # Check if current user has verified any of the contact's keys
+    trust_records = KeyTrust.objects.filter(
+        user=request.user,
+        contact=target,
+    )
+    trust_map = {t.key_fingerprint: t.trust_status for t in trust_records}
+
+    key_data = []
+    for k in keys:
+        info = _serialize_key(k)
+        info['trust_status'] = trust_map.get(k.key_fingerprint, 'untrusted')
+        key_data.append(info)
+
+    is_contact = Contact.objects.filter(
+        (models.Q(user=request.user) & models.Q(contact=target))
+        | (models.Q(user=target) & models.Q(contact=request.user)),
+    ).exists()
+
+    return JsonResponse({
+        'user_id': target.pk,
+        'username': target.username,
+        'is_contact': is_contact,
+        'active_key': _serialize_key(active_key) if active_key else None,
+        'keys': key_data,
+    })
+
+
+@login_required
+@require_http_methods(['POST', 'DELETE'])
+def key_trust_view(request, user_id):
+    """Trust or untrust a contact's active key (T38)."""
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    try:
+        target = User.objects.get(id=user_id, is_active=True)
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'User not found.'}, status=404)
+
+    if target == request.user:
+        return JsonResponse({'error': 'Cannot trust your own key.'}, status=400)
+
+    active_key = _active_key(user_id)
+    if active_key is None:
+        return JsonResponse({'error': 'Contact has no public key.'}, status=404)
+
+    if request.method == 'POST':
+        trust_status = _json_body(request).get('trust_status', 'trusted')
+        if trust_status not in KeyTrust.TrustStatus.values:
+            return JsonResponse({'error': 'Invalid trust status.'}, status=400)
+
+        key_trust, created = KeyTrust.objects.update_or_create(
+            user=request.user,
+            contact=target,
+            key_fingerprint=active_key.key_fingerprint,
+            defaults={
+                'key_version': active_key.key_version,
+                'trust_status': trust_status,
+                'verified_at': timezone.now(),
+            },
+        )
+        return JsonResponse({
+            'status': 'ok',
+            'created': created,
+            'trust_status': key_trust.trust_status,
+            'key_fingerprint': key_trust.key_fingerprint,
+        })
+
+    elif request.method == 'DELETE':
+        deleted, _ = KeyTrust.objects.filter(
+            user=request.user,
+            contact=target,
+            key_fingerprint=active_key.key_fingerprint,
+        ).delete()
+        return JsonResponse({
+            'status': 'ok',
+            'deleted': deleted > 0,
+        })
+
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@login_required
+@require_GET
+def key_trust_list_view(request):
+    """List key trust status for all contacts (T38)."""
+    trust_records = KeyTrust.objects.filter(
+        user=request.user,
+    ).select_related('contact').order_by('-updated_at')
+
+    results = []
+    for t in trust_records:
+        # Check if the contact has rotated their key
+        active_key = _active_key(t.contact_id)
+        key_changed = (
+            active_key is not None
+            and active_key.key_fingerprint != t.key_fingerprint
+        )
+        results.append({
+            'contact_id': t.contact_id,
+            'contact_username': t.contact.username,
+            'key_fingerprint': t.key_fingerprint,
+            'key_version': t.key_version,
+            'trust_status': t.trust_status,
+            'verified_at': t.verified_at.isoformat() if t.verified_at else None,
+            'key_changed': key_changed,
+            'active_key_fingerprint': active_key.key_fingerprint if active_key else None,
+        })
+
+    return JsonResponse({'trusts': results})

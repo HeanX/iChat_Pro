@@ -12,11 +12,84 @@ urlpatterns = [
         views.get_or_create_single_conversation_view,
         name='api_conversation_create',
     ),
-    # Private chat history
+    # T19: Conversation management
+    path(
+        'api/conversations/<int:conversation_id>/pin/',
+        views.pin_conversation_view,
+        name='api_pin_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/mute/',
+        views.mute_conversation_view,
+        name='api_mute_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/archive/',
+        views.archive_conversation_view,
+        name='api_archive_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/unarchive/',
+        views.unarchive_conversation_view,
+        name='api_unarchive_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/clear/',
+        views.clear_conversation_view,
+        name='api_clear_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/read/',
+        views.read_conversation_view,
+        name='api_read_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/unread/',
+        views.unread_conversation_view,
+        name='api_unread_conversation',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/',
+        views.hide_conversation_view,
+        name='api_hide_conversation',
+    ),
+    # T20: Message operations
+    path(
+        'api/conversations/<int:conversation_id>/messages/forward/',
+        views.forward_message_view,
+        name='api_forward_message',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/messages/<int:message_id>/',
+        views.delete_message_view,
+        name='api_delete_message',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/messages/<int:message_id>/recall/',
+        views.recall_message_view,
+        name='api_recall_message',
+    ),
+    path(
+        'api/conversations/<int:conversation_id>/messages/<int:message_id>/status/',
+        views.message_status_view,
+        name='api_message_status',
+    ),
+    # Private chat history (keep after T20 routes to avoid conflicts)
     path(
         'api/conversations/<int:conversation_id>/messages/',
         views.conversation_messages_view,
         name='api_conversation_messages',
+    ),
+    # T22: Presence
+    path(
+        'api/users/<int:user_id>/presence/',
+        views.user_presence_view,
+        name='api_user_presence',
+    ),
+    path(
+        'api/users/presence/',
+        views.update_presence_view,
+        name='api_update_presence',
     ),
     path(
         'api/conversations/<int:conversation_id>/messages/send/',
@@ -31,4 +104,16 @@ urlpatterns = [
     path('api/groups/<int:conversation_id>/disband/', views.disband_group_view, name='api_disband_group'),
     path('api/groups/<int:conversation_id>/members/', views.group_members_view, name='api_group_members'),
     path('api/groups/<int:conversation_id>/messages/', views.group_messages_view, name='api_group_messages'),
+    # T27: Auto-delete
+    path('api/settings/auto-delete/', views.auto_delete_setting_view, name='api_auto_delete_setting'),
+    path('api/conversations/<int:conversation_id>/auto-delete/', views.conversation_auto_delete_view, name='api_conversation_auto_delete'),
+    # T33/T34: Unified search
+    path('api/search/', views.search_unified_view, name='api_search'),
+    # T37: Advanced group management
+    path('api/groups/<int:conversation_id>/promote/<int:user_id>/', views.group_promote_view, name='api_group_promote'),
+    path('api/groups/<int:conversation_id>/demote/<int:user_id>/', views.group_demote_view, name='api_group_demote'),
+    path('api/groups/<int:conversation_id>/transfer/', views.group_transfer_view, name='api_group_transfer'),
+    path('api/groups/<int:conversation_id>/announcement/', views.group_announcement_view, name='api_group_announcement'),
+    path('api/groups/<int:conversation_id>/mute-group/', views.group_mute_view, name='api_group_mute'),
+    path('api/groups/<int:conversation_id>/members-advanced/', views.group_members_advanced_view, name='api_group_members_advanced'),
 ]

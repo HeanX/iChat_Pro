@@ -179,10 +179,62 @@ async function resetIdentityKeyFromPanel() {
 
 function decryptFailureLabel(error) {
   const code = error && error.code;
-  if (code === 'local_key_missing' || code === 'local_key_changed') {
-    return currentLanguage === 'zh' ? '[需要密钥备份]' : '[Key backup required]';
+  const labels = {
+    local_key_missing: {
+      zh: '[无法解密：本机缺少私钥，请导入此账号的密钥备份]',
+      en: '[Cannot decrypt: local private key is missing. Import this account key backup]'
+    },
+    local_key_changed: {
+      zh: '[无法解密：这条消息使用旧密钥，请导入对应密钥备份]',
+      en: '[Cannot decrypt: this message uses an older key. Import the matching key backup]'
+    },
+    peer_key_changed: {
+      zh: '[无法解密：联系人已更换密钥，请重新验证指纹]',
+      en: '[Cannot decrypt: contact key changed. Verify the new fingerprint]'
+    },
+    wrong_receiver: {
+      zh: '[无法解密：这条密文不属于当前账号]',
+      en: '[Cannot decrypt: this message belongs to another account]'
+    },
+    damaged_ciphertext: {
+      zh: '[无法解密：密文或认证标签已损坏]',
+      en: '[Cannot decrypt: ciphertext or authentication tag is damaged]'
+    },
+    invalid_ciphertext: {
+      zh: '[无法解密：密文格式无效]',
+      en: '[Cannot decrypt: encrypted payload is malformed]'
+    },
+    unsupported_algorithm: {
+      zh: '[无法解密：不支持的加密算法]',
+      en: '[Cannot decrypt: unsupported encryption algorithm]'
+    },
+    peer_key_missing: {
+      zh: '[无法解密：联系人缺少公开密钥]',
+      en: '[Cannot decrypt: contact public key is missing]'
+    },
+    peer_key_unavailable: {
+      zh: '[无法解密：暂时无法加载联系人密钥]',
+      en: '[Cannot decrypt: contact key is currently unavailable]'
+    },
+    invalid_peer_key: {
+      zh: '[无法解密：联系人密钥记录无效]',
+      en: '[Cannot decrypt: contact key record is invalid]'
+    },
+    peer_trust_invalid: {
+      zh: '[无法解密：本地联系人信任记录损坏]',
+      en: '[Cannot decrypt: saved contact trust record is damaged]'
+    },
+    invalid_metadata: {
+      zh: '[无法解密：消息加密元数据无效]',
+      en: '[Cannot decrypt: message encryption metadata is invalid]'
+    }
+  };
+  if (labels[code]) {
+    return currentLanguage === 'zh' ? labels[code].zh : labels[code].en;
   }
-  return '[Decryption failed]';
+  return currentLanguage === 'zh'
+    ? '[无法解密：未知错误，请检查密钥状态]'
+    : '[Cannot decrypt: unknown error. Check key status]';
 }
 
 async function encryptPrivateMessageWithTrustRetry({ text, conv }) {

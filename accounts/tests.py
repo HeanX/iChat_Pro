@@ -1334,3 +1334,21 @@ class BlockedUserApiTests(TestCase):
         self._login()
         resp = self._post('/api/settings/privacy/block/', {'user_id': self.user.id})
         self.assertEqual(resp.status_code, 400)
+
+# ── P2 T30: QR card API ─────────────────────────────────────────
+
+class QrCardApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='qrtest', password='p')
+
+    def test_qr_card_returns_profile(self):
+        self.client.login(username='qrtest', password='p')
+        resp = self.client.get('/api/qr-card/')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['username'], 'qrtest')
+        self.assertIn('nickname', data)
+
+    def test_qr_card_requires_login(self):
+        resp = self.client.get('/api/qr-card/')
+        self.assertIn(resp.status_code, (301, 302))

@@ -131,4 +131,6 @@ urlpatterns = [
     path('api/settings/privacy/blocked/', views.blocked_users_list_view, name='blocked-list'),
     path('api/settings/privacy/block/', views.block_user_view, name='block-user'),
     path('api/settings/privacy/unblock/', views.unblock_user_view, name='unblock-user'),
+    # QR code card (P2 T30)
+    path('api/qr-card/', views.qr_card_view, name='qr-card'),
 ]

@@ -1073,3 +1073,22 @@ def unblock_user_view(request):
     deleted, _ = BlockedUser.objects.filter(
         blocker=request.user, blocked_id=payload['user_id']).delete()
     return JsonResponse({'unblocked': deleted > 0})
+
+
+# ── QR Code card API (P2 T30) ─────────────────────────────────────
+
+
+@login_required
+@require_GET
+def qr_card_view(request):
+    """Return the current user's public card data for QR code sharing."""
+    from .models import UserProfile
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    return JsonResponse({
+        'user_id': request.user.id,
+        'username': request.user.username,
+        'nickname': profile.nickname or request.user.username,
+        'avatar': request.build_absolute_uri(profile.avatar.url) if profile.avatar else '',
+        'bio': profile.bio,
+        'phone_number': profile.phone_number,
+    })

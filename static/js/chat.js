@@ -29,6 +29,41 @@ let replyToMessage = null;          // { id, sender_name, text_preview } for rep
 let typingUsers = {};              // Map: conversationId → { userId, timeoutId }
 let connectionStatus = 'connecting'; // 'connected' | 'connecting' | 'disconnected'
 
+// Expose state to window for cross-module access (T12/T13/T14 modules)
+// — readable via getters that always return the current value
+// — writable where new modules need to update state (clear/delete/reset)
+Object.defineProperty(window, 'conversations', {
+  get() { return conversations; },
+  set(v) { conversations = v; },
+  enumerable: true, configurable: true
+});
+Object.defineProperty(window, 'conversationsById', {
+  get() { return conversationsById; },
+  set(v) { conversationsById = v; },
+  enumerable: true, configurable: true
+});
+Object.defineProperty(window, 'activeChatId', {
+  get() { return activeChatId; },
+  set(v) { activeChatId = v; },
+  enumerable: true, configurable: true
+});
+Object.defineProperty(window, 'messages', {
+  get() { return messages; },
+  set(v) { messages = v; },
+  enumerable: true, configurable: true
+});
+Object.defineProperty(window, 'myUserId', { get() { return myUserId; }, enumerable: true, configurable: true });
+Object.defineProperty(window, 'currentLanguage', { get() { return currentLanguage; }, enumerable: true, configurable: true });
+Object.defineProperty(window, 'isSelectingMessages', { get() { return isSelectingMessages; }, enumerable: true, configurable: true });
+Object.defineProperty(window, 'selectedMessageIds', { get() { return selectedMessageIds; }, enumerable: true, configurable: true });
+Object.defineProperty(window, 'wsClient', { get() { return wsClient; }, enumerable: true, configurable: true });
+Object.defineProperty(window, 'replyToMessage', {
+  get() { return replyToMessage; },
+  set(v) { replyToMessage = v; },
+  enumerable: true, configurable: true
+});
+Object.defineProperty(window, 'typingUsers', { get() { return typingUsers; }, enumerable: true, configurable: true });
+
 function formatClockTime(date = new Date()) {
   return date.toLocaleTimeString([], {
     hour: "2-digit",
@@ -1525,7 +1560,7 @@ async function sendMessage() {
               algorithm: result.algorithm,
               client_message_id: clientMsgId,
               recipients: result.recipients,
-              reply_to: tempMsg.reply_to || undefined
+              reply_to_message_id: tempMsg.reply_to || undefined
             }
           })) {
             throw new Error("WebSocket is not connected.");
@@ -1547,7 +1582,7 @@ async function sendMessage() {
             receiver_key_version: result.receiver_key_version,
             client_message_id: clientMsgId,
             message_type: "text",
-            reply_to: tempMsg.reply_to || undefined,
+            reply_to_message_id: tempMsg.reply_to || undefined,
           })
         });
         handleMessageAccepted({ data: accepted });
@@ -1989,6 +2024,29 @@ function setupEventListeners() {
         e.preventDefault();
         sendMessage();
       }
+    });
+    // T14: Send typing.start / typing.stop via WebSocket
+    let typingTimer = null;
+    let typingSent = false;
+    chatInput.addEventListener("input", () => {
+      if (!activeChatId || !wsClient || !wsClient.sendPayload) return;
+      if (!typingSent) {
+        wsClient.sendPayload({
+          event: "typing.start",
+          data: { conversation_id: activeChatId }
+        });
+        typingSent = true;
+      }
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => {
+        if (wsClient && wsClient.sendPayload) {
+          wsClient.sendPayload({
+            event: "typing.stop",
+            data: { conversation_id: activeChatId }
+          });
+        }
+        typingSent = false;
+      }, 2500);
     });
   }
 
@@ -3990,8 +4048,8 @@ window.confirmDeleteChat = async function() {
   const chatIdToDelete = activeChatId;
   
   try {
-    const response = await fetch(`/api/conversations/${chatIdToDelete}/hide/`, {
-      method: 'POST',
+    const response = await fetch(`/api/conversations/${chatIdToDelete}/`, {
+      method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRFToken': getCookie('csrftoken') || ''

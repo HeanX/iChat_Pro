@@ -44,7 +44,7 @@
     </h3>
     <div class="space-y-2">
       {% for req in incoming_requests %}
-      <div class="flex items-center justify-between p-3 bg-bgSearch rounded-custom-md">
+      <div class="flex items-center justify-between p-3 bg-bgSearch rounded-custom-md" data-contact-search="{{ req.sender.username }}">
         <div>
           <p class="text-sm font-semibold text-textMain">{{ req.sender.username }}</p>
           <p class="text-[10px] text-textSecondary">{{ req.created_at|date:"M d" }}</p>
@@ -73,7 +73,7 @@
     </h3>
     <div class="space-y-2">
       {% for req in outgoing_requests %}
-      <div class="flex items-center justify-between p-3 bg-bgSearch rounded-custom-md">
+      <div class="flex items-center justify-between p-3 bg-bgSearch rounded-custom-md" data-contact-search="{{ req.receiver.username }}">
         <div>
           <p class="text-sm font-semibold text-textMain">{{ req.receiver.username }}</p>
           <p class="text-[10px] text-textSecondary">Pending</p>
@@ -92,14 +92,14 @@
     {% if contacts %}
     <div class="space-y-2">
       {% for entry in contacts %}
-      <div class="flex items-center justify-between p-3 bg-bgSearch rounded-custom-md">
+      <div class="flex items-center justify-between p-3 bg-bgSearch rounded-custom-md" data-contact-search="{% if entry.user == request.user %}{{ entry.contact.username }}{% else %}{{ entry.user.username }}{% endif %}">
         {% if entry.user == request.user %}
           {% with peer=entry.contact %}
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
+        <div class="flex items-center space-x-3 flex-1 min-w-0">
+          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
             {{ peer.username|slice:":1"|upper }}
           </div>
-          <div>
+          <div class="min-w-0">
             <p class="text-sm font-semibold text-textMain">{{ peer.username }}</p>
             <p class="text-[10px] text-textSecondary">Contact since {{ entry.created_at|date:"M d, Y" }}</p>
           </div>
@@ -107,11 +107,11 @@
           {% endwith %}
         {% else %}
           {% with peer=entry.user %}
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
+        <div class="flex items-center space-x-3 flex-1 min-w-0">
+          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
             {{ peer.username|slice:":1"|upper }}
           </div>
-          <div>
+          <div class="min-w-0">
             <p class="text-sm font-semibold text-textMain">{{ peer.username }}</p>
             <p class="text-[10px] text-textSecondary">Contact since {{ entry.created_at|date:"M d, Y" }}</p>
           </div>

@@ -110,9 +110,11 @@
           <i data-lucide="search" class="w-4 h-4"></i>
         </span>
         <input type="text" id="sidebar-search" 
-          class="w-full pl-10 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all"
+          class="w-full pl-10 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all cursor-pointer"
           placeholder="Search chats or messages..."
-          data-i18n-placeholder="search_placeholder">
+          data-i18n-placeholder="search_placeholder"
+          onfocus="navigateSidebar('search'); setTimeout(function(){ var si=document.getElementById('search-sidebar-input'); if(si) si.focus(); }, 100);"
+          readonly>
       </div>
     </div>
     
@@ -156,16 +158,50 @@
     </div>
   </div>
 
-  <!-- View 3: Contacts View -->
-  <div id="sidebar-view-contacts" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+  <!-- View 3: Contacts View (P2 T09) -->
+  <div id="sidebar-view-contacts" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar relative">
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
       <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
-      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="menu_contacts">Contacts</h2>
+      <div class="relative flex-1">
+        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-textSecondary pointer-events-none">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </span>
+        <input type="text" id="contacts-header-search"
+          class="w-full pl-9 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all"
+          placeholder="Search contacts..."
+          oninput="filterContactsInSidebar(this.value)">
+      </div>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar" id="sidebar-contacts-content">
       {% include 'pages/contacts_sidebar.html' %}
+    </div>
+
+    <!-- FAB: Quick Create Menu (P2 T09) -->
+    <div class="absolute bottom-5 right-5 z-20" id="contacts-fab-container">
+      <button id="contacts-fab-btn" onclick="toggleContactsFab(event)"
+        class="w-12 h-12 rounded-full bg-brand-light dark:bg-brand-dark text-white shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 focus:outline-none"
+        title="Quick create">
+        <i data-lucide="plus" class="w-6 h-6 transition-transform duration-200" id="contacts-fab-icon"></i>
+      </button>
+      <!-- FAB Menu Dropdown -->
+      <div id="contacts-fab-menu" class="hidden absolute bottom-14 right-0 w-52 bg-bgSidebar/95 dark:bg-bgSidebar/98 backdrop-blur-lg border border-borderColor/60 rounded-[18px] shadow-xl z-30 py-1.5 animate-fadeIn">
+        <button onclick="fabNewPrivateChat(event)" class="fab-menu-item">
+          <i data-lucide="message-circle" class="w-4 h-4 text-brand-light dark:text-brand-dark"></i>
+          <span>New Private Chat</span>
+        </button>
+        <button onclick="fabNewGroup(event)" class="fab-menu-item">
+          <i data-lucide="users" class="w-4 h-4 text-green-500"></i>
+          <span>New Group</span>
+        </button>
+        <div class="h-px bg-borderColor/40 my-1"></div>
+        <button onclick="fabNewChannel(event)" class="fab-menu-item opacity-50 cursor-not-allowed">
+          <i data-lucide="hash" class="w-4 h-4"></i>
+          <span>New Channel</span>
+          <span class="text-[10px] text-textSecondary ml-auto">Soon</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -182,16 +218,59 @@
     </div>
   </div>
 
-  <!-- View 6: Search Results View -->
+  <!-- View 6: Search Results View (P2 T10) -->
   <div id="sidebar-view-search" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
+    <!-- Header: back + search input + clear -->
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
-      <h2 class="text-lg font-bold text-textMain flex-1">Search</h2>
+      <div class="relative flex-1">
+        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-textSecondary pointer-events-none">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </span>
+        <input type="text" id="search-sidebar-input"
+          class="w-full pl-9 pr-9 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark text-sm"
+          placeholder="Search..."
+          autocomplete="off">
+        <button id="search-sidebar-clear" class="hidden absolute inset-y-0 right-0 pr-2.5 flex items-center text-textSecondary hover:text-textMain"
+          onclick="clearSearchSidebar()">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
     </div>
-    <div class="flex-1 overflow-y-auto custom-scrollbar" id="sidebar-search-results">
-      <p class="text-textSecondary text-sm text-center py-8">Type in the search bar above to find chats and messages.</p>
+
+    <!-- Type tabs: Chats | Channels | Apps | Posts -->
+    <div class="px-4 py-2 border-b border-borderColor/60 flex-shrink-0 overflow-x-auto search-type-tabs">
+      <div class="flex space-x-1 min-w-max">
+        <button class="search-type-tab active" data-tab="chats" onclick="switchSearchTab('chats')">Chats</button>
+        <button class="search-type-tab" data-tab="channels" onclick="switchSearchTab('channels')">Channels</button>
+        <button class="search-type-tab" data-tab="apps" onclick="switchSearchTab('apps')">Apps</button>
+        <button class="search-type-tab" data-tab="posts" onclick="switchSearchTab('posts')">Posts</button>
+      </div>
+    </div>
+
+    <!-- Scope filter (shown for chats tab, hidden for others) -->
+    <div id="search-scope-bar" class="px-4 py-2 border-b border-borderColor/60 flex-shrink-0">
+      <select id="search-scope-select" onchange="onSearchScopeChange()"
+        class="w-full text-xs bg-bgSearch border border-borderColor rounded-full px-3 py-1.5 text-textMain focus:outline-none focus:ring-1 focus:ring-brand-light dark:focus:ring-brand-dark">
+        <option value="all">All Chats</option>
+        <option value="private_chats">Private Chats</option>
+        <option value="group_chats">Group Chats</option>
+        <option value="channels">Channels</option>
+      </select>
+    </div>
+
+    <!-- Results area -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar" id="search-results-container">
+      <div id="search-empty-state" class="flex flex-col items-center justify-center h-full text-textSecondary">
+        <i data-lucide="search" class="w-10 h-10 mb-3 opacity-30"></i>
+        <p class="text-sm">Search for chats, contacts, and messages</p>
+      </div>
+      <div id="search-results-content" class="hidden divide-y divide-borderColor/30"></div>
+      <div id="search-loading" class="hidden flex items-center justify-center py-8">
+        <div class="animate-spin w-5 h-5 border-2 border-brand-light border-t-transparent rounded-full"></div>
+      </div>
     </div>
   </div>
 

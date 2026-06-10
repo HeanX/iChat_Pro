@@ -562,6 +562,7 @@ def forward_message_view(request, conversation_id):
                     algorithm=r.get('algorithm', 'AES-256-GCM'),
                     sender_key_version=r.get('sender_key_version'),
                     receiver_key_version=r.get('receiver_key_version'),
+                    membership_version=data.get('membership_version'),
                 )
                 for r in recipients
             ]

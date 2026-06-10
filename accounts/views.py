@@ -926,3 +926,42 @@ def notification_settings_update_view(request):
         'user_id': request.user.id,
         **{f: getattr(settings_obj, f) for f in _NOTIFICATION_FIELDS},
     })
+
+
+# ── Storage settings API (P2 T24) ─────────────────────────────────
+
+
+@login_required
+@require_GET
+def storage_settings_view(request):
+    """Return the current user's storage & auto-download settings."""
+    from .models import UserStorageSettings
+    settings_obj, _ = UserStorageSettings.objects.get_or_create(
+        user=request.user,
+    )
+    return JsonResponse({
+        'user_id': request.user.id,
+        'settings_json': settings_obj.settings_json,
+    })
+
+
+@login_required
+@require_http_methods(['PUT'])
+def storage_settings_update_view(request):
+    """Update the current user's storage settings (JSON blob)."""
+    from .models import UserStorageSettings
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    settings_obj, _ = UserStorageSettings.objects.get_or_create(
+        user=request.user,
+    )
+    if 'settings_json' in payload:
+        settings_obj.settings_json = payload['settings_json']
+        settings_obj.save(update_fields=['settings_json', 'updated_at'])
+
+    return JsonResponse({
+        'user_id': request.user.id,
+        'settings_json': settings_obj.settings_json,
+    })

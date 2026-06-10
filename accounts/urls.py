@@ -105,4 +105,15 @@ urlpatterns = [
         views.notification_settings_update_view,
         name='notification-settings-update',
     ),
+    # Storage settings (P2 T24)
+    path(
+        'api/settings/storage/',
+        views.storage_settings_view,
+        name='storage-settings',
+    ),
+    path(
+        'api/settings/storage/update/',
+        views.storage_settings_update_view,
+        name='storage-settings-update',
+    ),
 ]

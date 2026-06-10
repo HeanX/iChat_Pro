@@ -1223,3 +1223,36 @@ class NotificationSettingsApiTests(TestCase):
         first = self._get()
         second = self._get()
         self.assertEqual(first.json(), second.json())
+
+# ── P2 T24: Storage settings API ────────────────────────────────
+
+class StorageSettingsApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='stest', password='p')
+
+    def _get(self):
+        self.client.login(username='stest', password='p')
+        return self.client.get('/api/settings/storage/')
+
+    def _put(self, data):
+        self.client.login(username='stest', password='p')
+        return self.client.put(
+            '/api/settings/storage/update/',
+            data=json.dumps(data),
+            content_type='application/json',
+        )
+
+    def test_get_returns_defaults(self):
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['settings_json'], {})
+
+    def test_update_persists_settings(self):
+        blob = {'auto_download': True, 'max_cache_mb': 500}
+        resp = self._put({'settings_json': blob})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['settings_json'], blob)
+
+    def test_requires_login(self):
+        resp = self.client.get('/api/settings/storage/')
+        self.assertIn(resp.status_code, (301, 302))

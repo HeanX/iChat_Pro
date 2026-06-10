@@ -18,7 +18,7 @@ def create_default_privacy_settings(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts', '0002_remove_group_and_groupmember'),
+        ('accounts', '0003_keytrust'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

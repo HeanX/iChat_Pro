@@ -204,6 +204,59 @@ class UserPublicKey(models.Model):
         return f'{self.user.username} key v{self.key_version}'
 
 
+# ── P2 T38: Key trust verification ─────────────────────────────────
+
+
+class KeyTrust(models.Model):
+    """Tracks whether a user has verified a contact's public key (T38).
+
+    Trust is per-user, per-contact, per-key-fingerprint — when a contact
+    rotates their key, the old trust record is preserved for audit and the
+    new key starts as untrusted until verified again.
+    """
+
+    class TrustStatus(models.TextChoices):
+        UNTRUSTED = "untrusted", "Untrusted"
+        TRUSTED = "trusted", "Trusted"
+        VERIFIED = "verified", "Verified"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="key_trusts",
+    )
+    contact = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="key_trusted_by",
+    )
+    key_fingerprint = models.CharField(max_length=64)
+    key_version = models.PositiveIntegerField()
+    trust_status = models.CharField(
+        max_length=20,
+        choices=TrustStatus.choices,
+        default=TrustStatus.UNTRUSTED,
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "contact", "key_fingerprint"],
+                name="unique_key_trust",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "contact"]),
+            models.Index(fields=["contact", "key_fingerprint"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"User #{self.user_id} trusts {self.contact.username} key {self.key_fingerprint[:12]}"
+
 
 # ── Signal: auto-create UserProfile on user creation (T27) ─────────
 

@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('chat', '0006_add_admin_operation_log'),
+        ('chat', '0007_usermessagedeletion_userpresence_and_more'),
     ]
 
     operations = [

@@ -145,6 +145,57 @@ body.sidebar-resizing .sidebar-resize-handle::after {
   box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
+.security-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 3px 9px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: normal;
+  text-align: center;
+}
+
+.security-status-loading {
+  background: var(--color-search-bg);
+  color: var(--color-text-secondary);
+}
+
+.security-status-verified {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.security-status-unverified {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
+.security-status-danger,
+.security-status-missing {
+  border-color: rgba(239, 68, 68, 0.32);
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+.security-trust-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(127, 127, 127, 0.16);
+  border-radius: var(--radius-md);
+  background: var(--color-search-bg);
+}
+
 [data-theme="dark"] .chat-empty-badge {
   background-color: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -1964,4 +2015,441 @@ input:checked + .slider:before {
 
 [data-theme="dark"] .chat-item-btn.active .unread-badge {
   color: #6d5dfc !important;
+}
+
+/* ==========================================================================
+   P2 T09: Contacts FAB (Floating Action Button)
+   ========================================================================== */
+
+#contacts-fab-btn.expanded {
+  transform: rotate(45deg) !important;
+}
+
+.fab-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.625rem 1rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-main);
+  transition: background-color 0.12s;
+  text-align: left;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.fab-menu-item:hover:not(.cursor-not-allowed) {
+  background-color: var(--color-search-bg);
+}
+
+/* ==========================================================================
+   P2 T10: Search Sidebar
+   ========================================================================== */
+
+/* Search type tabs */
+.search-type-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.search-type-tab {
+  padding: 0.375rem 0.875rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  transition: all 0.15s;
+  white-space: nowrap;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.search-type-tab.active {
+  background-color: var(--color-primary);
+  color: white;
+}
+
+.search-type-tab:not(.active):hover {
+  background-color: var(--color-search-bg);
+  color: var(--color-text-main);
+}
+
+/* Search result items */
+.search-result-group-label {
+  padding: 0.5rem 1rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  color: var(--color-text-secondary);
+  background: var(--color-sidebar-bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.search-result-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.12s;
+  width: 100%;
+  border: none;
+  background: none;
+  text-align: left;
+}
+
+.search-result-item:hover {
+  background-color: var(--color-search-bg);
+}
+
+/* ==========================================================================
+   Context Menu (right-click / long-press)
+   ========================================================================== */
+
+.context-menu-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 249;
+  /* Transparent layer that captures outside clicks */
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 250;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 6px;
+  background: var(--color-sidebar-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: 0 10px 38px -10px rgba(0, 0, 0, 0.18),
+              0 4px 16px -6px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  opacity: 0;
+  transform: scale(0.92);
+  transform-origin: top left;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+.context-menu-visible {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0 10px;
+  height: 38px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-main);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.1s;
+  text-align: left;
+  font-family: inherit;
+  gap: 10px;
+}
+
+.context-menu-item:hover,
+.context-menu-item.focused {
+  background-color: var(--color-search-bg);
+}
+
+.context-menu-item.danger {
+  color: #ef4444;
+}
+
+.context-menu-item.danger:hover,
+.context-menu-item.danger.focused {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.context-menu-item-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.context-menu-item-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--color-border);
+  opacity: 0.5;
+  margin: 4px 6px;
+}
+
+/* Dark theme adjustments */
+[data-theme="dark"] .context-menu {
+  box-shadow: 0 10px 38px -10px rgba(0, 0, 0, 0.48),
+              0 4px 16px -6px rgba(0, 0, 0, 0.32);
+}
+
+[data-theme="dark"] .context-menu-item.danger {
+  color: #f87171;
+}
+
+/* ==========================================================================
+   Reply Quote Banner
+   ========================================================================== */
+
+.reply-quote-banner {
+  display: flex;
+  align-items: center;
+  max-width: 820px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 6px 12px;
+  background: var(--color-sidebar-bg);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 10px 10px 0 0;
+  gap: 10px;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.reply-quote-banner:hover {
+  background: var(--color-search-bg);
+}
+
+.reply-quote-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.reply-quote-sender {
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.reply-quote-close {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.reply-quote-close:hover {
+  background: var(--color-bg);
+  color: var(--color-text-main);
+}
+
+/* ==========================================================================
+   Typing Indicator
+   ========================================================================== */
+
+.typing-indicator-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: middle;
+}
+
+.typing-dot {
+  width: 5px;
+  height: 5px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  animation: typingBounce 1.3s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+/* ==========================================================================
+   WebSocket Connection Status Badge
+   ========================================================================== */
+
+.connection-badge {
+  position: fixed;
+  top: 68px;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.3s, transform 0.3s;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.connection-badge.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.connection-badge.connected {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.connection-badge.reconnecting {
+  background: rgba(234, 179, 8, 0.15);
+  color: #ca8a04;
+  border: 1px solid rgba(234, 179, 8, 0.25);
+}
+
+.connection-badge.disconnected {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* ==========================================================================
+   Enhanced Message Status Icons
+   ========================================================================== */
+
+.msg-status-icon {
+  flex-shrink: 0;
+}
+
+.msg-status-sending {
+  opacity: 0.5;
+}
+
+.msg-status-failed {
+  color: #ef4444 !important;
+}
+
+.msg-status-read {
+  color: var(--color-primary);
+}
+
+/* ==========================================================================
+   Conversation Item Status Icons (sidebar)
+   ========================================================================== */
+
+.conv-status-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.conv-icon-pin {
+  color: var(--color-primary);
+  width: 12px;
+  height: 12px;
+}
+
+.conv-icon-muted {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+  width: 12px;
+  height: 12px;
+}
+
+/* ==========================================================================
+   System Notice / Recall styling
+   ========================================================================== */
+
+.system-notice-recalled {
+  font-style: italic;
+  opacity: 0.65;
+}
+
+.search-result-item .result-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: white;
+  flex-shrink: 0;
+}
+
+.search-result-item .result-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.search-result-item .result-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-item .result-subtitle {
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Placeholder tab empty state */
+.search-placeholder-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--color-text-secondary);
 }

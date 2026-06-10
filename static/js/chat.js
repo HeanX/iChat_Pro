@@ -20,7 +20,14 @@ let e2eeKeyReady = true;
 let e2eeKeyError = null;
 let groupMembersByConversation = {};
 let fingerprintCacheByUserId = {};
+let contactKeyStatusCacheByUserId = {};
+let keyTrustListCache = null;
 let detailsPanelRequestId = 0;
+let currentSearchTab = 'chats';     // Active search type tab
+let searchDebounceTimer = null;    // Debounce timer for search input
+let replyToMessage = null;          // { id, sender_name, text_preview } for reply quoting
+let typingUsers = {};              // Map: conversationId → { userId, timeoutId }
+let connectionStatus = 'connecting'; // 'connected' | 'connecting' | 'disconnected'
 
 function formatClockTime(date = new Date()) {
   return date.toLocaleTimeString([], {
@@ -368,6 +375,33 @@ function appendChatItemToSidebar(conv) {
 
   chatListContainer.appendChild(wrapper);
   lucide.createIcons();
+
+  // Wire right-click context menu on this conversation item
+  const btn = wrapper.querySelector('.chat-item-btn');
+  if (btn) {
+    btn.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof ConversationActions !== 'undefined' && ConversationActions.showMenu) {
+        ConversationActions.showMenu(e, conv);
+      }
+    });
+  }
+
+  // Add avatar class for online indicator
+  const avatarDiv = wrapper.querySelector('.w-12.h-12.rounded-full');
+  if (avatarDiv) {
+    avatarDiv.classList.add('avatar');
+    // Check if peer is online (for private chats)
+    if (conv.type === 'single' && conv.is_online) {
+      avatarDiv.classList.add('online');
+    }
+  }
+
+  // Add status icons (pin, mute) after insertion
+  if (typeof ConversationActions !== 'undefined' && ConversationActions.updateStatusIcons) {
+    ConversationActions.updateStatusIcons(conv);
+  }
 }
 
 function updateSidebarPreview(conv, text, time) {
@@ -517,6 +551,107 @@ async function fetchPeerFingerprint(userId) {
   }
 }
 
+async function fetchContactKeyStatus(userId, { force = false } = {}) {
+  if (!userId) return null;
+  if (!force && contactKeyStatusCacheByUserId[userId] !== undefined) {
+    return contactKeyStatusCacheByUserId[userId];
+  }
+  try {
+    const data = await apiFetch(`/api/keys/contacts/${userId}/fingerprints/`);
+    contactKeyStatusCacheByUserId[userId] = data;
+    return data;
+  } catch (err) {
+    contactKeyStatusCacheByUserId[userId] = null;
+    return null;
+  }
+}
+
+function getActiveKeyStatus(contactStatus) {
+  if (!contactStatus || !contactStatus.active_key) return null;
+  const active = contactStatus.active_key;
+  const keys = Array.isArray(contactStatus.keys) ? contactStatus.keys : [];
+  const matched = keys.find(key => key.key_fingerprint === active.key_fingerprint);
+  return {
+    ...active,
+    trust_status: matched ? matched.trust_status : 'untrusted'
+  };
+}
+
+function contactKeyHasChanged(contactStatus) {
+  if (!contactStatus || !contactStatus.active_key || !Array.isArray(contactStatus.keys)) return false;
+  return contactStatus.keys.some(key =>
+    key.trust_status &&
+    key.trust_status !== 'untrusted' &&
+    key.key_fingerprint !== contactStatus.active_key.key_fingerprint
+  );
+}
+
+function trustStatusMeta(status, keyChanged = false) {
+  if (keyChanged) {
+    return {
+      className: 'font-semibold text-red-500 flex items-center space-x-1',
+      icon: 'shield-alert',
+      iconClass: 'text-red-500',
+      label: currentLanguage === 'zh' ? '密钥已变更' : 'Key changed'
+    };
+  }
+  if (status === 'missing') {
+    return {
+      className: 'font-semibold text-red-500 flex items-center space-x-1',
+      icon: 'shield-alert',
+      iconClass: 'text-red-500',
+      label: currentLanguage === 'zh' ? '缺少公钥' : 'No public key'
+    };
+  }
+  if (status === 'trusted' || status === 'verified') {
+    return {
+      className: 'font-semibold text-emerald-500 flex items-center space-x-1',
+      icon: 'shield-check',
+      iconClass: 'text-emerald-500',
+      label: currentLanguage === 'zh' ? '已验证' : 'Verified'
+    };
+  }
+  return {
+    className: 'font-semibold text-amber-500 flex items-center space-x-1',
+    icon: 'shield-question',
+    iconClass: 'text-amber-500',
+    label: currentLanguage === 'zh' ? '未验证' : 'Unverified'
+  };
+}
+
+function setVerificationStatus(el, status, keyChanged = false) {
+  if (!el) return;
+  const meta = trustStatusMeta(status, keyChanged);
+  el.className = meta.className;
+  el.innerHTML = `<i data-lucide="${meta.icon}" class="w-3.5 h-3.5 mr-0.5 inline-block ${meta.iconClass}"></i><span>${escapeHtml(meta.label)}</span>`;
+}
+
+async function setContactKeyTrust(userId, trustStatus = 'verified') {
+  const data = await apiFetch(`/api/keys/contacts/${userId}/trust/`, {
+    method: 'POST',
+    body: JSON.stringify({ trust_status: trustStatus })
+  });
+  delete contactKeyStatusCacheByUserId[userId];
+  keyTrustListCache = null;
+  fingerprintCacheByUserId[userId] = null;
+  const refreshed = await fetchContactKeyStatus(userId, { force: true });
+  const active = getActiveKeyStatus(refreshed);
+  if (active && window.iChatPrivateE2EE && window.iChatPrivateE2EE.trustPeerKey) {
+    window.iChatPrivateE2EE.trustPeerKey(active);
+  }
+  return { data, refreshed };
+}
+
+async function clearContactKeyTrust(userId) {
+  const data = await apiFetch(`/api/keys/contacts/${userId}/trust/`, { method: 'DELETE' });
+  delete contactKeyStatusCacheByUserId[userId];
+  keyTrustListCache = null;
+  if (window.iChatPrivateE2EE && window.iChatPrivateE2EE.forgetPeerKey) {
+    window.iChatPrivateE2EE.forgetPeerKey(userId);
+  }
+  return data;
+}
+
 function formatFingerprint(value) {
   if (!value) {
     return currentLanguage === 'zh' ? '联系人尚未上传公钥' : 'Contact has not uploaded a public key';
@@ -586,6 +721,7 @@ function connectWebSocket() {
       socket = new WebSocket(url);
       socket.addEventListener('open', () => {
         logToCryptoConsole('[WebSocket] Connected');
+        updateConnectionBadge('connected');
       });
       socket.addEventListener('message', (event) => {
         try {
@@ -595,6 +731,7 @@ function connectWebSocket() {
         }
       });
       socket.addEventListener('close', (event) => {
+        updateConnectionBadge('disconnected');
         logToCryptoConsole(`[WebSocket] Disconnected: ${event.reason || event.code}`);
         window.clearTimeout(reconnectTimer);
         reconnectTimer = window.setTimeout(() => wsClient.connect(), 1500);
@@ -613,6 +750,7 @@ function handleIncomingMessage(data) {
 
   if (event === 'connection.ready') {
     logToCryptoConsole(`[WebSocket] Ready for user ${data.data?.user_id || myUserId}`);
+    updateConnectionBadge('connected');
   } else if (event === 'message.single.new') {
     handlePrivateMessageReceived(data);
   } else if (event === 'message.single.accepted') {
@@ -625,6 +763,14 @@ function handleIncomingMessage(data) {
     handleMessageAccepted(data);
   } else if (event === 'group.members.changed') {
     fetchConversations();
+  } else if (event === 'typing' || event === 'typing.indicator') {
+    handleTypingEvent(data);
+  } else if (event === 'presence.updated') {
+    handlePresenceEvent(data);
+  } else if (event === 'message.recalled') {
+    handleMessageRecalled(data);
+  } else if (event === 'message.deleted') {
+    handleMessageDeleted(data);
   } else if (event === 'error') {
     logToCryptoConsole(`[WebSocket Error] ${data.data?.message || 'Unknown error'}`);
   } else {
@@ -772,6 +918,31 @@ function handleMessageStatusUpdate(data) {
   }
 }
 
+function handleMessageRecalled(data) {
+  const payload = data.data || data;
+  const msg = messages.find(m => m.id === payload.message_id);
+  if (msg) {
+    msg.isRecalled = true;
+    msg.isSystem = true;
+    msg.text = payload.sender_id === myUserId
+      ? (currentLanguage === 'zh' ? '你撤回了一条消息' : 'You recalled a message')
+      : (currentLanguage === 'zh' ? '消息已被撤回' : 'message recalled');
+    renderMessages();
+  }
+}
+
+function handleMessageDeleted(data) {
+  const payload = data.data || data;
+  // Per-user deletion notification — remove from local view if active
+  const msg = messages.find(m => m.id === payload.message_id);
+  if (msg) {
+    msg.isDeleted = true;
+    msg.isSystem = true;
+    msg.text = currentLanguage === 'zh' ? '消息已删除' : 'message deleted';
+    renderMessages();
+  }
+}
+
 function handleMessageAccepted(data) {
   const payload = data.data || data;
   const tempId = payload.client_message_id;
@@ -827,6 +998,206 @@ async function deriveActiveSessionKey(convId) {
     console.error('ECDH session key derivation failed:', err);
     logToCryptoConsole(`[ECDH Error] Derivation failed: ${err.message}`);
     sessionKeys[convId] = null;
+  }
+}
+
+// ============================================================================
+// T14 Helper: send read receipts for undelivered messages in active chat
+// ============================================================================
+function sendReadReceipts(conv) {
+  if (!wsClient || !wsClient.sendPayload) return;
+  messages.forEach(function(msg) {
+    if (msg.isSelf) return; // don't send receipts for own messages
+    if (msg.status === 'delivered' || msg.status === 'sent' || msg.status === 'received') {
+      wsClient.sendPayload({
+        event: 'message.receipt.update',
+        data: {
+          conversation_type: conv.type === 'group' ? 'group' : 'single',
+          message_id: msg.id,
+          status: 'read'
+        }
+      });
+    }
+  });
+}
+
+// ============================================================================
+// T14 Helper: update chat header with online/last-seen presence
+// ============================================================================
+function updateHeaderPresence(conv) {
+  var statusEl = document.getElementById('chat-header-status');
+  if (!statusEl) return;
+
+  // Check typing indicator first
+  if (typingUsers[conv.id]) {
+    var typingUserIds = typingUsers[conv.id];
+    if (Object.keys(typingUserIds).length > 0) {
+      var typingHtml = '<span class="text-brand-light dark:text-brand-dark font-medium">' +
+        (currentLanguage === 'zh' ? '正在输入' : 'Typing') +
+        '</span><span class="typing-indicator-dots">' +
+        '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span>';
+      statusEl.innerHTML = typingHtml;
+      return;
+    }
+  }
+
+  if (conv.type === 'group') {
+    statusEl.textContent = currentLanguage === 'zh'
+      ? (conv.member_count || 0) + ' 位成员'
+      : (conv.member_count || 0) + ' members';
+    return;
+  }
+
+  // Private chat: check presence
+  if (conv.is_online) {
+    statusEl.innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle"></span>' +
+      (currentLanguage === 'zh' ? '在线' : 'Online');
+  } else if (conv.last_seen) {
+    var lastSeen = new Date(conv.last_seen);
+    var now = new Date();
+    var diffMs = now - lastSeen;
+    var diffMin = Math.floor(diffMs / 60000);
+    var diffHours = Math.floor(diffMs / 3600000);
+    var diffDays = Math.floor(diffMs / 86400000);
+
+    var timeStr = lastSeen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    var text;
+    if (diffMin < 1) {
+      text = currentLanguage === 'zh' ? '刚刚在线' : 'Last seen just now';
+    } else if (diffMin < 60) {
+      text = (currentLanguage === 'zh' ? '最后上线 ' : 'Last seen ') + diffMin + (currentLanguage === 'zh' ? ' 分钟前' : ' min ago');
+    } else if (diffHours < 6) {
+      text = (currentLanguage === 'zh' ? '最后上线 ' : 'Last seen ') + diffHours + (currentLanguage === 'zh' ? ' 小时前' : ' hours ago');
+    } else if (diffDays === 0) {
+      text = (currentLanguage === 'zh' ? '最后上线今天 ' : 'Last seen today at ') + timeStr;
+    } else if (diffDays === 1) {
+      text = (currentLanguage === 'zh' ? '最后上线昨天 ' : 'Last seen yesterday at ') + timeStr;
+    } else {
+      var dateStr = lastSeen.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      text = (currentLanguage === 'zh' ? '最后上线 ' : 'Last seen ') + dateStr;
+    }
+    statusEl.textContent = text;
+  } else {
+    statusEl.textContent = currentLanguage === 'zh' ? '联系人' : 'Contact';
+  }
+}
+
+// ============================================================================
+// T14 Helper: update WebSocket connection status badge
+// ============================================================================
+function updateConnectionBadge(status) {
+  connectionStatus = status;
+  var badge = document.getElementById('connection-status-badge');
+
+  if (!badge) {
+    // Create the badge dynamically
+    badge = document.createElement('div');
+    badge.id = 'connection-status-badge';
+    badge.className = 'connection-badge';
+    document.body.appendChild(badge);
+  }
+
+  var icon, text, className;
+  if (status === 'connected') {
+    icon = 'wifi';
+    text = currentLanguage === 'zh' ? '已连接' : 'Connected';
+    className = 'connection-badge connected visible';
+    // Auto-hide connected badge after 3s
+    setTimeout(function() {
+      if (connectionStatus === 'connected') {
+        badge.classList.remove('visible');
+      }
+    }, 3000);
+  } else if (status === 'connecting') {
+    icon = 'wifi';
+    text = currentLanguage === 'zh' ? '重连中...' : 'Reconnecting...';
+    className = 'connection-badge reconnecting visible';
+  } else {
+    icon = 'wifi-off';
+    text = currentLanguage === 'zh' ? '已断开' : 'Disconnected';
+    className = 'connection-badge disconnected visible';
+  }
+
+  badge.className = className;
+  badge.innerHTML = '<i data-lucide="' + icon + '" class="w-3.5 h-3.5"></i><span>' + text + '</span>';
+  if (window.lucide) window.lucide.createIcons({ nodes: badge.querySelectorAll('[data-lucide]') });
+}
+
+// ============================================================================
+// T14 Helper: handle typing indicator from WebSocket events
+// ============================================================================
+function handleTypingEvent(data) {
+  var payload = data.data || data;
+  var convId = payload.conversation_id;
+  var userId = payload.user_id;
+  var action = payload.action; // 'typing' or 'stop'
+
+  if (!typingUsers[convId]) typingUsers[convId] = {};
+
+  if (action === 'typing') {
+    // Set typing
+    typingUsers[convId][userId] = true;
+    // Auto-clear after 4 seconds
+    if (typingUsers[convId]['_timeout_' + userId]) {
+      clearTimeout(typingUsers[convId]['_timeout_' + userId]);
+    }
+    typingUsers[convId]['_timeout_' + userId] = setTimeout(function() {
+      delete typingUsers[convId][userId];
+      delete typingUsers[convId]['_timeout_' + userId];
+      if (Object.keys(typingUsers[convId]).filter(function(k) { return k.indexOf('_timeout_') !== 0; }).length === 0) {
+        // Update header to show normal status
+        if (activeChatId === convId) {
+          var conv = conversationsById[convId];
+          if (conv) updateHeaderPresence(conv);
+        }
+      }
+    }, 4000);
+  } else if (action === 'stop') {
+    delete typingUsers[convId][userId];
+    if (typingUsers[convId]['_timeout_' + userId]) {
+      clearTimeout(typingUsers[convId]['_timeout_' + userId]);
+      delete typingUsers[convId]['_timeout_' + userId];
+    }
+  }
+
+  // Update header if this is the active conversation
+  if (activeChatId === convId) {
+    var conv = conversationsById[convId];
+    if (conv) updateHeaderPresence(conv);
+  }
+}
+
+// ============================================================================
+// T14 Helper: handle presence update from WebSocket
+// ============================================================================
+function handlePresenceEvent(data) {
+  var payload = data.data || data;
+  var userId = payload.user_id;
+
+  // Update all conversations involving this user
+  for (var convId in conversationsById) {
+    var conv = conversationsById[convId];
+    if (conv.type === 'single' && conv.peer_id === userId) {
+      conv.is_online = payload.is_online;
+      conv.last_seen = payload.last_seen;
+      conv.status_text = payload.status;
+
+      // Update online dot in sidebar
+      var item = document.getElementById('chat-item-' + conv.id);
+      var avatar = item ? item.querySelector('.avatar') : null;
+      if (avatar) {
+        if (payload.is_online) {
+          avatar.classList.add('online');
+        } else {
+          avatar.classList.remove('online');
+        }
+      }
+
+      // Update header if this is the active chat
+      if (activeChatId === conv.id) {
+        updateHeaderPresence(conv);
+      }
+    }
   }
 }
 
@@ -909,6 +1280,21 @@ async function selectChat(chatId) {
   renderMessages();
   scrollToBottom();
   updateDetailsPanel(conv);
+
+  // Send read receipts for any undelivered messages
+  sendReadReceipts(conv);
+
+  // Mark conversation as read via REST API
+  fetch('/api/conversations/' + activeChatId + '/read/', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': getCookie('csrftoken') || ''
+    }
+  }).catch(function() {});
+
+  // Update header with presence data
+  updateHeaderPresence(conv);
 }
 
 async function updateDetailsPanel(conv) {
@@ -944,20 +1330,16 @@ async function updateDetailsPanel(conv) {
     }
 
     if (conv.type === "single" && conv.peer_id) {
-      const fingerprint = await fetchPeerFingerprint(conv.peer_id);
+      const contactStatus = await fetchContactKeyStatus(conv.peer_id);
       if (requestId !== detailsPanelRequestId) return;
+      const activeKey = getActiveKeyStatus(contactStatus);
+      const keyChanged = contactKeyHasChanged(contactStatus);
       if (fp) {
-        fp.textContent = fingerprint
-          ? `v${fingerprint.key_version}: ${formatFingerprint(fingerprint.key_fingerprint)}`
+        fp.textContent = activeKey
+          ? `v${activeKey.key_version}: ${formatFingerprint(activeKey.key_fingerprint)}`
           : formatFingerprint(null);
       }
-      if (verificationStatus) {
-        const verified = Boolean(fingerprint);
-        verificationStatus.className = `font-semibold ${verified ? 'text-emerald-500' : 'text-amber-500'} flex items-center space-x-1`;
-        verificationStatus.innerHTML = verified
-          ? '<i data-lucide="shield-check" class="w-3.5 h-3.5 mr-0.5 inline-block text-emerald-500"></i><span>' + (currentLanguage === 'zh' ? '已加载真实指纹' : 'Real fingerprint loaded') + '</span>'
-          : '<i data-lucide="shield-alert" class="w-3.5 h-3.5 mr-0.5 inline-block text-amber-500"></i><span>' + (currentLanguage === 'zh' ? '缺少公钥' : 'No public key') + '</span>';
-      }
+      setVerificationStatus(verificationStatus, activeKey ? activeKey.trust_status : 'missing', keyChanged);
     } else if (fp) {
       fp.textContent = currentLanguage === 'zh'
         ? '群聊使用每位成员的当前公钥加密。'
@@ -1090,6 +1472,19 @@ async function sendMessage() {
   const time = formatClockTime();
   const clientMsgId = `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+  // Capture reply info before clearing
+  const replyInfo = replyToMessage;
+  if (replyToMessage) {
+    // Clear reply state
+    replyToMessage = null;
+    if (typeof MessageActions !== 'undefined' && MessageActions.cancelReply) {
+      MessageActions.cancelReply();
+    } else {
+      var banner = document.getElementById('reply-quote-banner');
+      if (banner) banner.style.display = 'none';
+    }
+  }
+
   // Optimistic render
   const tempMsg = {
     id: clientMsgId,
@@ -1097,6 +1492,7 @@ async function sendMessage() {
     time: time,
     isSelf: true,
     status: "sending",
+    reply_to: replyInfo ? replyInfo.id : null,
   };
   messages.push(tempMsg);
   renderMessages();
@@ -1128,7 +1524,8 @@ async function sendMessage() {
               message_type: "text",
               algorithm: result.algorithm,
               client_message_id: clientMsgId,
-              recipients: result.recipients
+              recipients: result.recipients,
+              reply_to: tempMsg.reply_to || undefined
             }
           })) {
             throw new Error("WebSocket is not connected.");
@@ -1150,6 +1547,7 @@ async function sendMessage() {
             receiver_key_version: result.receiver_key_version,
             client_message_id: clientMsgId,
             message_type: "text",
+            reply_to: tempMsg.reply_to || undefined,
           })
         });
         handleMessageAccepted({ data: accepted });
@@ -1287,23 +1685,135 @@ async function showFingerprintModal() {
   if (!activeChatId) return;
   const conv = conversationsById[activeChatId];
   if (!conv || !conv.is_secure) return;
-  document.getElementById("fp-modal-name").textContent = conv.name || "Unknown";
   const keyEl = document.getElementById("fp-modal-key");
+  const statusEl = document.getElementById("fp-modal-status");
+  const actionBtn = document.getElementById("fp-modal-trust-btn");
+  const untrustBtn = document.getElementById("fp-modal-untrust-btn");
+  const warningEl = document.getElementById("fp-modal-warning");
   if (keyEl) {
     keyEl.textContent = currentLanguage === 'zh' ? '正在加载真实指纹...' : 'Loading real fingerprint...';
+  }
+  if (statusEl) {
+    statusEl.className = 'security-status-chip security-status-loading';
+    statusEl.textContent = currentLanguage === 'zh' ? '正在加载信任状态' : 'Loading trust status';
+  }
+  if (warningEl) warningEl.classList.add("hidden");
+  if (actionBtn) {
+    actionBtn.classList.add("hidden");
+    actionBtn.disabled = true;
+  }
+  if (untrustBtn) {
+    untrustBtn.classList.add("hidden");
+    untrustBtn.disabled = true;
   }
   const modal = document.getElementById("fingerprint-modal");
   if (modal) { modal.classList.remove("hidden"); modal.classList.add("flex"); }
   if (conv.type === "single" && conv.peer_id) {
-    const fingerprint = await fetchPeerFingerprint(conv.peer_id);
-    if (activeChatId !== conv.id || !keyEl) return;
-    keyEl.textContent = fingerprint
-      ? `v${fingerprint.key_version}: ${formatFingerprint(fingerprint.key_fingerprint)}`
+    const contactStatus = await fetchContactKeyStatus(conv.peer_id);
+    if (String(activeChatId) !== String(conv.id) || !keyEl) return;
+    const activeKey = getActiveKeyStatus(contactStatus);
+    const keyChanged = contactKeyHasChanged(contactStatus);
+    keyEl.textContent = activeKey
+      ? `v${activeKey.key_version}: ${formatFingerprint(activeKey.key_fingerprint)}`
       : formatFingerprint(null);
+    renderFingerprintModalState(conv, activeKey, keyChanged);
   } else if (keyEl) {
     keyEl.textContent = currentLanguage === 'zh'
       ? '群聊没有单一联系人指纹，请分别验证成员公钥。'
       : 'Group chats do not have one peer fingerprint; verify member keys individually.';
+    if (statusEl) {
+      statusEl.className = 'security-status-chip security-status-unverified';
+      statusEl.textContent = currentLanguage === 'zh' ? '请在成员列表逐个验证' : 'Verify members individually';
+    }
+  }
+}
+
+function renderFingerprintModalState(conv, activeKey, keyChanged) {
+  const statusEl = document.getElementById("fp-modal-status");
+  const actionBtn = document.getElementById("fp-modal-trust-btn");
+  const untrustBtn = document.getElementById("fp-modal-untrust-btn");
+  const warningEl = document.getElementById("fp-modal-warning");
+  const explainEl = document.getElementById("fp-modal-explain-container");
+
+  if (warningEl) {
+    warningEl.classList.toggle("hidden", !keyChanged);
+    warningEl.textContent = currentLanguage === 'zh'
+      ? '高风险警告：这个联系人当前公钥与此前已验证的指纹不同。请通过其他渠道确认后再重新验证。'
+      : 'High risk: this contact active key differs from a previously verified fingerprint. Confirm out-of-band before re-verifying.';
+  }
+
+  if (explainEl) {
+    explainEl.innerHTML = currentLanguage === 'zh'
+      ? '请与 <strong id="fp-modal-name">' + escapeHtml(conv.name || 'this contact') + '</strong> 通过其他渠道核对下方真实指纹：'
+      : 'Verify with <strong id="fp-modal-name">' + escapeHtml(conv.name || 'this contact') + '</strong> that the real fingerprint below matches:';
+  }
+
+  if (!activeKey) {
+    if (statusEl) {
+      statusEl.className = 'security-status-chip security-status-missing';
+      statusEl.textContent = currentLanguage === 'zh' ? '缺少公钥' : 'No public key';
+    }
+    if (actionBtn) actionBtn.classList.add("hidden");
+    if (untrustBtn) untrustBtn.classList.add("hidden");
+    return;
+  }
+
+  const trusted = activeKey.trust_status === 'trusted' || activeKey.trust_status === 'verified';
+  if (statusEl) {
+    statusEl.className = 'security-status-chip ' + (keyChanged ? 'security-status-danger' : trusted ? 'security-status-verified' : 'security-status-unverified');
+    statusEl.textContent = keyChanged
+      ? (currentLanguage === 'zh' ? '密钥已变更' : 'Key changed')
+      : trusted
+        ? (currentLanguage === 'zh' ? '已验证' : 'Verified')
+        : (currentLanguage === 'zh' ? '未验证' : 'Unverified');
+  }
+
+  if (actionBtn) {
+    actionBtn.classList.remove("hidden");
+    actionBtn.disabled = false;
+    actionBtn.textContent = trusted && !keyChanged
+      ? (currentLanguage === 'zh' ? '重新验证当前指纹' : 'Re-verify Current Fingerprint')
+      : (currentLanguage === 'zh' ? '标记为已验证' : 'Mark as Verified');
+  }
+  if (untrustBtn) {
+    untrustBtn.classList.toggle("hidden", !trusted);
+    untrustBtn.disabled = !trusted;
+  }
+}
+
+async function trustActiveFingerprintFromModal() {
+  const conv = conversationsById[activeChatId];
+  if (!conv || conv.type !== "single" || !conv.peer_id) return;
+  const actionBtn = document.getElementById("fp-modal-trust-btn");
+  if (actionBtn) actionBtn.disabled = true;
+  try {
+    const result = await setContactKeyTrust(conv.peer_id, 'verified');
+    const activeKey = getActiveKeyStatus(result.refreshed);
+    renderFingerprintModalState(conv, activeKey, false);
+    updateDetailsPanel(conv);
+    window.showToast(currentLanguage === 'zh' ? '联系人密钥已标记为已验证' : 'Contact key marked as verified.');
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === 'zh' ? '验证失败' : 'Verification failed'));
+  } finally {
+    if (actionBtn) actionBtn.disabled = false;
+  }
+}
+
+async function untrustActiveFingerprintFromModal() {
+  const conv = conversationsById[activeChatId];
+  if (!conv || conv.type !== "single" || !conv.peer_id) return;
+  const untrustBtn = document.getElementById("fp-modal-untrust-btn");
+  if (untrustBtn) untrustBtn.disabled = true;
+  try {
+    await clearContactKeyTrust(conv.peer_id);
+    const refreshed = await fetchContactKeyStatus(conv.peer_id, { force: true });
+    renderFingerprintModalState(conv, getActiveKeyStatus(refreshed), contactKeyHasChanged(refreshed));
+    updateDetailsPanel(conv);
+    window.showToast(currentLanguage === 'zh' ? '已撤销当前密钥信任' : 'Trust removed for the current key.');
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === 'zh' ? '撤销失败' : 'Could not remove trust'));
+  } finally {
+    if (untrustBtn) untrustBtn.disabled = false;
   }
 }
 
@@ -1387,6 +1897,13 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     div.onclick = function(e) {
       if (isSelectingMessages) { e.stopPropagation(); toggleMessageSelection(msg.id); }
     };
+    div.oncontextmenu = function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof MessageActions !== 'undefined' && MessageActions.showMenu) {
+        MessageActions.showMenu(e, msg, conv || conversationsById[activeChatId]);
+      }
+    };
   }
 
   var checkboxHtml = '<div class="message-select-checkbox select-none ' + (isSelectingMessages ? "" : "hidden") + '" id="msg-select-check-' + msg.id + '"><i data-lucide="' + (selectedMessageIds.includes(msg.id) ? "check-circle-2" : "circle") + '" class="w-5 h-5 text-textSecondary"></i></div>';
@@ -1400,15 +1917,34 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     div.className += " message-row-self";
     if (isSelectingMessages) div.className += " message-row-selecting";
     var statusIcon = "check";
-    if (msg.status === "delivered" || msg.status === "sent") statusIcon = "check-check";
-    if (msg.status === "read") statusIcon = "check-check";
+    var statusIconClass = "msg-status-icon";
+    var statusTooltip = "";
+    if (msg.status === "sending") {
+      statusIcon = "clock";
+      statusIconClass += " msg-status-sending";
+      statusTooltip = currentLanguage === 'zh' ? '发送中...' : 'Sending...';
+    } else if (msg.status === "sent") {
+      statusIcon = "check";
+      statusTooltip = currentLanguage === 'zh' ? '已发送' : 'Sent';
+    } else if (msg.status === "delivered") {
+      statusIcon = "check-check";
+      statusTooltip = currentLanguage === 'zh' ? '已送达' : 'Delivered';
+    } else if (msg.status === "read") {
+      statusIcon = "check-check";
+      statusIconClass += " msg-status-read";
+      statusTooltip = currentLanguage === 'zh' ? '已读' : 'Read';
+    } else if (msg.status === "failed" || msg.client_status === "failed") {
+      statusIcon = "alert-circle";
+      statusIconClass += " msg-status-failed";
+      statusTooltip = currentLanguage === 'zh' ? '发送失败' : 'Failed to send';
+    }
     var statusClass = msg.status === "read" ? "text-brand-light dark:text-brand-dark" : "";
     div.innerHTML = checkboxHtml
       + '<div class="message-bubble-custom bubble-self" data-message-id="' + msg.id + '">'
       + '<p class="message-text-content">' + messageText + '</p>'
       + '<div class="message-meta-line">'
       + '<span>' + messageTime + '</span>'
-      + '<i data-lucide="' + statusIcon + '" class="w-3.5 h-3.5 ' + statusClass + '"></i>'
+      + '<i data-lucide="' + statusIcon + '" class="w-3.5 h-3.5 ' + statusIconClass + ' ' + statusClass + '" title="' + statusTooltip + '"></i>'
       + '</div></div>';
   } else {
     div.className += " message-row-peer";
@@ -1541,6 +2077,14 @@ function setupEventListeners() {
         mainBtn.classList.remove("bg-bgSearch", "text-textMain");
       }
     }
+    // 3. Contacts FAB menu (P2 T09)
+    const fabMenu = document.getElementById("contacts-fab-menu");
+    const fabBtn = document.getElementById("contacts-fab-btn");
+    if (fabMenu && !fabMenu.classList.contains("hidden")) {
+      if (fabBtn && !fabBtn.contains(e.target) && !fabMenu.contains(e.target)) {
+        closeContactsFab();
+      }
+    }
   });
 
   // Handle ESC key press to close dropdowns and modals
@@ -1566,6 +2110,7 @@ function setupEventListeners() {
       closeAutoDeletePicker();
       closeBlockedUsersList();
       closePrivacyConfirmModal();
+      closeContactsFab();
     }
   });
 
@@ -1697,6 +2242,22 @@ function setupEventListeners() {
   });
 
   window.addEventListener("hashchange", handleMobileNavigation);
+
+  // P2 T10: Search sidebar input with debounce
+  var searchSidebarInput = document.getElementById('search-sidebar-input');
+  if (searchSidebarInput) {
+    searchSidebarInput.addEventListener('input', function() {
+      clearTimeout(searchDebounceTimer);
+      var clearBtn = document.getElementById('search-sidebar-clear');
+      if (clearBtn) clearBtn.classList.toggle('hidden', !this.value.trim());
+      searchDebounceTimer = setTimeout(performSearch, 300);
+    });
+    searchSidebarInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        clearSearchSidebar();
+      }
+    });
+  }
 }
 
 // 14. Additional Interface Utilities
@@ -1788,6 +2349,606 @@ function showSettingsPanel() {
 
 function hideSettingsPanel() {
   navigateSidebar('chat');
+}
+
+// ============================================================================
+// P2 T09: Contacts FAB (Floating Action Button) & header search
+// ============================================================================
+
+function toggleContactsFab(event) {
+  event.stopPropagation();
+  const btn = document.getElementById('contacts-fab-btn');
+  const menu = document.getElementById('contacts-fab-menu');
+  if (!btn || !menu) return;
+  const isOpen = !menu.classList.contains('hidden');
+  if (isOpen) {
+    menu.classList.add('hidden');
+    btn.classList.remove('expanded');
+  } else {
+    menu.classList.remove('hidden');
+    btn.classList.add('expanded');
+    if (window.lucide) lucide.createIcons();
+  }
+}
+
+function fabNewPrivateChat(event) {
+  event.stopPropagation();
+  closeContactsFab();
+  // Open the existing contacts modal for adding a contact to start a private chat
+  const contactsModal = document.getElementById('contacts-modal');
+  if (contactsModal) {
+    contactsModal.classList.remove('hidden');
+    contactsModal.classList.add('flex');
+  }
+}
+
+function fabNewGroup(event) {
+  event.stopPropagation();
+  closeContactsFab();
+  // Open the existing group creation modal
+  const groupModal = document.getElementById('group-modal');
+  if (groupModal) {
+    populateGroupMembersList();
+    groupModal.classList.remove('hidden');
+    groupModal.classList.add('flex');
+  }
+}
+
+function fabNewChannel(event) {
+  event.stopPropagation();
+  closeContactsFab();
+  window.showToast(currentLanguage === 'zh' ? '频道功能暂未开放' : 'Channels are not yet available');
+}
+
+function closeContactsFab() {
+  const btn = document.getElementById('contacts-fab-btn');
+  const menu = document.getElementById('contacts-fab-menu');
+  if (menu) menu.classList.add('hidden');
+  if (btn) btn.classList.remove('expanded');
+}
+
+function filterContactsInSidebar(query) {
+  const trimmed = (query || '').toLowerCase().trim();
+  const sections = document.querySelectorAll('#sidebar-contacts-content > .divide-y > div');
+  const contactItems = document.querySelectorAll('#sidebar-contacts-content [data-contact-search]');
+
+  if (!trimmed) {
+    // Show all sections, all items
+    if (sections.length) sections.forEach(function(s) { s.style.display = ''; });
+    contactItems.forEach(function(el) { el.style.display = ''; });
+    return;
+  }
+
+  contactItems.forEach(function(el) {
+    const searchText = (el.getAttribute('data-contact-search') || '').toLowerCase();
+    el.style.display = searchText.includes(trimmed) ? '' : 'none';
+  });
+
+  // Hide section headers when searching (simplifies view)
+  if (sections.length) {
+    sections.forEach(function(s) {
+      // Keep visible if it contains visible contact items
+      const visibleItems = s.querySelectorAll('[data-contact-search]');
+      let hasVisible = false;
+      visibleItems.forEach(function(item) {
+        if (item.style.display !== 'none') hasVisible = true;
+      });
+      s.style.display = hasVisible ? '' : 'none';
+    });
+  }
+}
+
+// ============================================================================
+// P2 T10: Search Sidebar
+// ============================================================================
+
+function switchSearchTab(tab) {
+  currentSearchTab = tab;
+  // Update active tab styling
+  document.querySelectorAll('.search-type-tab').forEach(function(btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-tab') === tab);
+  });
+  // Show/hide scope bar (only for chats)
+  const scopeBar = document.getElementById('search-scope-bar');
+  if (scopeBar) {
+    scopeBar.style.display = (tab === 'chats') ? '' : 'none';
+  }
+  // Show placeholder for non-chats tabs
+  if (tab !== 'chats') {
+    showSearchPlaceholder(tab);
+  } else {
+    // Re-run search if input has text
+    const input = document.getElementById('search-sidebar-input');
+    if (input && input.value.trim()) {
+      performSearch();
+    } else {
+      showSearchEmpty();
+    }
+  }
+}
+
+function onSearchScopeChange() {
+  const input = document.getElementById('search-sidebar-input');
+  if (input && input.value.trim()) {
+    performSearch();
+  }
+}
+
+function clearSearchSidebar() {
+  const input = document.getElementById('search-sidebar-input');
+  const clearBtn = document.getElementById('search-sidebar-clear');
+  if (input) input.value = '';
+  if (clearBtn) clearBtn.classList.add('hidden');
+  showSearchEmpty();
+}
+
+function performSearch() {
+  var input = document.getElementById('search-sidebar-input');
+  var clearBtn = document.getElementById('search-sidebar-clear');
+  var query = input ? input.value.trim() : '';
+
+  // Toggle clear button
+  if (clearBtn) {
+    clearBtn.classList.toggle('hidden', !query);
+  }
+
+  if (!query) {
+    showSearchEmpty();
+    return;
+  }
+
+  if (currentSearchTab !== 'chats') {
+    showSearchPlaceholder(currentSearchTab);
+    return;
+  }
+
+  // Show loading
+  var emptyState = document.getElementById('search-empty-state');
+  var resultsContent = document.getElementById('search-results-content');
+  var loading = document.getElementById('search-loading');
+  if (emptyState) emptyState.classList.add('hidden');
+  if (resultsContent) resultsContent.classList.add('hidden');
+  if (loading) loading.classList.remove('hidden');
+
+  var scope = document.getElementById('search-scope-select');
+  var scopeValue = scope ? scope.value : 'all';
+
+  var url = '/api/search/?q=' + encodeURIComponent(query) + '&scope=' + encodeURIComponent(scopeValue);
+
+  // Race-condition guard: only render if the input hasn't changed since request
+  var sentQuery = query;
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (loading) loading.classList.add('hidden');
+      var currentInput = document.getElementById('search-sidebar-input');
+      var currentQuery = currentInput ? currentInput.value.trim() : '';
+      if (currentQuery !== sentQuery) return; // stale response, discard
+      renderSearchResults(data, currentQuery);
+    })
+    .catch(function(err) {
+      if (loading) loading.classList.add('hidden');
+      console.error('Search failed:', err);
+      showSearchEmpty();
+      window.showToast(currentLanguage === 'zh' ? '搜索失败，请重试' : 'Search failed. Please retry.');
+    });
+}
+
+function renderSearchResults(data, query) {
+  var emptyState = document.getElementById('search-empty-state');
+  var resultsContent = document.getElementById('search-results-content');
+  if (!resultsContent) return;
+
+  resultsContent.innerHTML = '';
+  var hasContent = false;
+
+  // Group: Contacts
+  var contacts = (data.results && data.results.contacts) ? data.results.contacts : [];
+  if (contacts.length > 0) {
+    hasContent = true;
+    resultsContent.appendChild(createResultGroupLabel('Contacts'));
+    contacts.forEach(function(c) {
+      resultsContent.appendChild(createSearchResultItem({
+        initials: (c.username || '?')[0].toUpperCase(),
+        name: c.nickname || c.username || 'Unknown',
+        subtitle: c.is_contact ? (currentLanguage === 'zh' ? '已是联系人' : 'Already a contact') : ('@' + (c.username || '')),
+        color: '#5c6bc0',
+        onclick: function() {
+          if (c.is_contact) {
+            // Navigate to chat with this contact
+            apiFetch('/api/conversations/create/', {
+              method: 'POST',
+              body: JSON.stringify({ peer_id: c.id })
+            }).then(function(resp) {
+              navigateSidebar('chat');
+              fetchConversations().then(function() {
+                if (resp.conversation_id) selectChat(resp.conversation_id.toString());
+              });
+            }).catch(function(err) {
+              window.showToast(err.message);
+            });
+          } else {
+            // Open add-contact flow — fill the Add Contact form in contacts view
+            clearSearchSidebar();
+            navigateSidebar('contacts');
+            setTimeout(function() {
+              var addInput = document.getElementById('contact-search-input');
+              if (addInput) { addInput.value = c.username; addInput.focus(); }
+            }, 150);
+          }
+        }
+      }));
+    });
+  }
+
+  // Group: Groups
+  var groups = (data.results && data.results.groups) ? data.results.groups : [];
+  if (groups.length > 0) {
+    hasContent = true;
+    resultsContent.appendChild(createResultGroupLabel('Groups'));
+    groups.forEach(function(g) {
+      resultsContent.appendChild(createSearchResultItem({
+        initials: (g.name || 'G')[0].toUpperCase(),
+        name: g.name || 'Unnamed Group',
+        subtitle: (g.is_member ? '' : (currentLanguage === 'zh' ? '未加入 · ' : 'Not joined · ')) + (g.member_count || 0) + ' members',
+        color: '#6f42c1',
+        onclick: function() {
+          if (g.is_member) {
+            navigateSidebar('chat');
+            // Match group by Conversation ID (g.id === Conversation.id)
+            fetchConversations().then(function() {
+              var conv = conversationsById[g.id];
+              if (!conv) {
+                // Fallback: id-based scan
+                conv = conversations.find(function(c) { return c.type === 'group' && c.id === g.id; });
+              }
+              if (conv) selectChat(conv.id.toString());
+            });
+          } else {
+            window.showToast(currentLanguage === 'zh' ? '你尚未加入该群组' : 'You are not a member of this group');
+          }
+        }
+      }));
+    });
+  }
+
+  // Group: Conversations
+  var conversations_ = (data.results && data.results.conversations) ? data.results.conversations : [];
+  if (conversations_.length > 0) {
+    hasContent = true;
+    resultsContent.appendChild(createResultGroupLabel('Conversations'));
+    conversations_.forEach(function(conv) {
+      resultsContent.appendChild(createSearchResultItem({
+        initials: (conv.peer_display_name || conv.peer_username || '?')[0].toUpperCase(),
+        name: conv.peer_display_name || conv.peer_username || 'Unknown',
+        subtitle: '@' + (conv.peer_username || ''),
+        color: '#3390ec',
+        onclick: function() {
+          navigateSidebar('chat');
+          if (conv.conversation_id) {
+            selectChat(conv.conversation_id.toString());
+          }
+        }
+      }));
+    });
+  }
+
+  if (!hasContent) {
+    if (emptyState) emptyState.classList.remove('hidden');
+    resultsContent.classList.add('hidden');
+    var emptyP = emptyState ? emptyState.querySelector('p') : null;
+    if (emptyP) emptyP.textContent = currentLanguage === 'zh'
+      ? '未找到与 "' + query + '" 相关的结果'
+      : 'No results found for "' + query + '"';
+  } else {
+    if (emptyState) emptyState.classList.add('hidden');
+    resultsContent.classList.remove('hidden');
+  }
+}
+
+function createResultGroupLabel(text) {
+  var div = document.createElement('div');
+  div.className = 'search-result-group-label';
+  div.textContent = text;
+  return div;
+}
+
+function createSearchResultItem(opts) {
+  var btn = document.createElement('button');
+  btn.className = 'search-result-item';
+  btn.onclick = opts.onclick;
+  var safeColor = /^#[0-9a-fA-F]{6}$/.test(opts.color || '') ? opts.color : '#5c6bc0';
+  btn.innerHTML = '<div class="result-avatar" style="background-color:' + safeColor + '">'
+    + escapeHtml(opts.initials || '?')
+    + '</div>'
+    + '<div class="result-info">'
+    + '<div class="result-name">' + escapeHtml(opts.name || '') + '</div>'
+    + '<div class="result-subtitle">' + escapeHtml(opts.subtitle || '') + '</div>'
+    + '</div>';
+  return btn;
+}
+
+function showSearchEmpty() {
+  var emptyState = document.getElementById('search-empty-state');
+  var resultsContent = document.getElementById('search-results-content');
+  var loading = document.getElementById('search-loading');
+  if (emptyState) {
+    emptyState.classList.remove('hidden');
+    var p = emptyState.querySelector('p');
+    if (p) p.textContent = currentLanguage === 'zh'
+      ? '搜索聊天、联系人和消息'
+      : 'Search for chats, contacts, and messages';
+  }
+  if (resultsContent) resultsContent.classList.add('hidden');
+  if (loading) loading.classList.add('hidden');
+}
+
+function showSearchPlaceholder(tab) {
+  var emptyState = document.getElementById('search-empty-state');
+  var resultsContent = document.getElementById('search-results-content');
+  var loading = document.getElementById('search-loading');
+  if (resultsContent) resultsContent.classList.add('hidden');
+  if (loading) loading.classList.add('hidden');
+  if (emptyState) {
+    emptyState.classList.remove('hidden');
+    var labels = {
+      channels: currentLanguage === 'zh' ? '频道搜索暂未开放' : 'Channel search is not yet available',
+      apps: currentLanguage === 'zh' ? 'Apps 搜索暂未开放' : 'Apps search is not yet available',
+      posts: currentLanguage === 'zh' ? 'Posts 搜索暂未开放' : 'Posts search is not yet available'
+    };
+    var p = emptyState.querySelector('p');
+    if (p) p.textContent = labels[tab] || labels.channels;
+  }
+}
+
+function _kmgr() {
+  return window.iChatKeyManager;
+}
+
+function setTextById(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function setStatusGlyph(el, ok, missingLabel = '-') {
+  if (!el) return;
+  el.textContent = ok ? 'OK' : missingLabel;
+  el.classList.remove('text-green-500', 'text-red-400', 'text-gray-400', 'text-amber-500');
+  el.classList.add(ok ? 'text-green-500' : missingLabel === '!' ? 'text-amber-500' : 'text-red-400');
+}
+
+function toggleKeyManagement() {
+  const panel = document.getElementById('key-mgmt-panel');
+  const chevron = document.getElementById('key-mgmt-chevron');
+  if (!panel) return;
+  const isHidden = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !isHidden);
+  if (chevron) chevron.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+  if (isHidden) refreshKeyUI();
+}
+
+async function refreshKeyUI() {
+  const kmgr = _kmgr();
+  const record = kmgr ? kmgr.loadCurrentRecord() : null;
+  const fpEl = document.getElementById('key-fingerprint-display');
+  const statusDot = document.querySelector('#key-status-badge span.w-2');
+  const statusText = document.getElementById('key-status-text');
+  const subtitle = document.getElementById('key-mgmt-subtitle');
+  const genBtn = document.getElementById('btn-key-generate');
+  const uploadBtn = document.getElementById('btn-key-upload');
+
+  if (fpEl) fpEl.textContent = record && record.key_fingerprint ? formatFingerprint(record.key_fingerprint) : '-';
+  if (record && record.key_fingerprint) {
+    if (subtitle) subtitle.textContent = 'ECDH P-256 keys stored locally';
+    if (statusDot) {
+      statusDot.classList.remove('bg-gray-400', 'bg-red-400');
+      statusDot.classList.add('bg-green-500');
+    }
+    if (statusText) statusText.textContent = record.key_version ? `Keys synced (v${record.key_version})` : 'Keys ready';
+    if (genBtn) {
+      genBtn.disabled = false;
+      genBtn.textContent = 'Re-initialize Keys';
+    }
+    if (uploadBtn) uploadBtn.disabled = false;
+  } else {
+    if (subtitle) subtitle.textContent = 'No key pair found. Initialize one to enable E2EE.';
+    if (statusDot) {
+      statusDot.classList.remove('bg-green-500', 'bg-red-400');
+      statusDot.classList.add('bg-gray-400');
+    }
+    if (statusText) statusText.textContent = 'No local keys';
+    if (genBtn) {
+      genBtn.disabled = false;
+      genBtn.textContent = 'Initialize Keys';
+    }
+    if (uploadBtn) uploadBtn.disabled = true;
+  }
+
+  try {
+    const data = await apiFetch('/api/keys/fingerprints/');
+    const activeKey = (data.keys || []).find(key => key.is_active) || (data.keys || [])[0];
+    if (activeKey) {
+      setTextById('key-version-display', `v${activeKey.key_version}`);
+      if (fpEl) fpEl.textContent = formatFingerprint(activeKey.key_fingerprint);
+    } else {
+      setTextById('key-version-display', '-');
+    }
+    setTextById('key-trusted-by-display', String(data.trusted_by_count || 0));
+  } catch (err) {
+    setTextById('key-version-display', '-');
+    setTextById('key-trusted-by-display', '-');
+  }
+}
+
+function _showKeyMsg(text, isError = false) {
+  const el = document.getElementById('key-mgmt-message');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'text-xs p-2.5 rounded-custom-md border';
+  el.classList.add(
+    isError ? 'bg-red-50' : 'bg-green-50',
+    isError ? 'border-red-200' : 'border-green-200',
+    isError ? 'text-red-700' : 'text-green-700',
+    isError ? 'dark:bg-red-950/20' : 'dark:bg-green-950/20',
+    isError ? 'dark:border-red-900/50' : 'dark:border-green-900/50',
+    isError ? 'dark:text-red-400' : 'dark:text-green-400'
+  );
+  setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+async function keyMgrGenerate() {
+  const btn = document.getElementById('btn-key-generate');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Initializing...';
+  }
+  try {
+    const kmgr = _kmgr();
+    if (!kmgr) throw new Error('Key manager is not available.');
+    const record = await kmgr.initialize();
+    _showKeyMsg(`ECDH P-256 keys initialized and synced. Version: ${record.key_version}`);
+    await refreshKeyUI();
+    await refreshSecurityStatus();
+  } catch (err) {
+    _showKeyMsg(`Initialization failed: ${err.message}`, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Initialize Keys';
+    }
+  }
+}
+
+async function keyMgrUpload() {
+  const btn = document.getElementById('btn-key-upload');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Uploading...';
+  }
+  try {
+    const kmgr = _kmgr();
+    if (!kmgr) throw new Error('Key manager is not available.');
+    await kmgr.uploadCurrentRecord();
+    _showKeyMsg('Public key re-synced to server.');
+    await refreshKeyUI();
+  } catch (err) {
+    _showKeyMsg(`Upload failed: ${err.message}`, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Upload to Server';
+    }
+  }
+}
+
+function keyMgrExport() {
+  try {
+    const kmgr = _kmgr();
+    if (!kmgr || !kmgr.loadCurrentRecord()) {
+      _showKeyMsg('No keys to export. Initialize them first.', true);
+      return;
+    }
+    kmgr.exportBackup();
+    _showKeyMsg('Backup downloaded. Keep it safe.');
+  } catch (err) {
+    _showKeyMsg(`Export failed: ${err.message}`, true);
+  }
+}
+
+async function keyMgrImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const kmgr = _kmgr();
+    if (!kmgr) throw new Error('Key manager is not available.');
+    const record = await kmgr.importBackup(file);
+    _showKeyMsg(`Keys restored. Fingerprint: ${record.key_fingerprint.slice(0, 16)}...`);
+    await refreshKeyUI();
+    await refreshSecurityStatus();
+  } catch (err) {
+    _showKeyMsg(`Import failed: ${err.message}`, true);
+  } finally {
+    event.target.value = '';
+  }
+}
+
+function toggleSecurityStatus() {
+  const panel = document.getElementById('security-status-panel');
+  const chevron = document.getElementById('security-status-chevron');
+  if (!panel) return;
+  const isHidden = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !isHidden);
+  if (chevron) chevron.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+  if (isHidden) refreshSecurityStatus();
+}
+
+async function fetchKeyTrustList({ force = false } = {}) {
+  if (!force && keyTrustListCache) return keyTrustListCache;
+  const data = await apiFetch('/api/keys/trust/');
+  keyTrustListCache = data.trusts || [];
+  return keyTrustListCache;
+}
+
+function renderTrustList(trusts) {
+  const list = document.getElementById('security-trust-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!trusts.length) {
+    list.innerHTML = '<div class="text-[10px] text-textSecondary text-center py-2">No verified contact keys yet.</div>';
+    return;
+  }
+  trusts.forEach(trust => {
+    const row = document.createElement('div');
+    const changed = Boolean(trust.key_changed);
+    row.className = 'security-trust-row';
+    row.innerHTML =
+      '<div class="min-w-0">' +
+        '<div class="text-xs font-semibold text-textMain truncate">' + escapeHtml(trust.contact_username || 'Unknown') + '</div>' +
+        '<div class="text-[10px] text-textSecondary font-mono truncate">v' + escapeHtml(trust.key_version) + ' ' + escapeHtml(formatFingerprint(trust.key_fingerprint)) + '</div>' +
+      '</div>' +
+      '<span class="' + (changed ? 'security-status-chip security-status-danger' : 'security-status-chip security-status-verified') + '">' +
+        (changed ? (currentLanguage === 'zh' ? '已变更' : 'Changed') : escapeHtml(trust.trust_status || 'trusted')) +
+      '</span>';
+    list.appendChild(row);
+  });
+}
+
+async function refreshSecurityStatus() {
+  const keysEl = document.getElementById('sec-keys-status');
+  const serverEl = document.getElementById('sec-server-status');
+  const trustEl = document.getElementById('sec-trust-status');
+  const kmgr = _kmgr();
+  const record = kmgr ? kmgr.loadCurrentRecord() : null;
+  setStatusGlyph(keysEl, Boolean(record && record.key_fingerprint));
+
+  try {
+    const data = await apiFetch('/api/keys/fingerprints/');
+    const activeKey = (data.keys || []).find(key => key.is_active);
+    setStatusGlyph(serverEl, Boolean(activeKey));
+    if (activeKey) {
+      setTextById('key-version-display', `v${activeKey.key_version}`);
+      setTextById('key-trusted-by-display', String(data.trusted_by_count || 0));
+    }
+  } catch (err) {
+    setStatusGlyph(serverEl, false);
+  }
+
+  try {
+    const trusts = await fetchKeyTrustList({ force: true });
+    const changedCount = trusts.filter(trust => trust.key_changed).length;
+    if (trustEl) {
+      trustEl.textContent = changedCount > 0 ? '!' : String(trusts.length);
+      trustEl.classList.remove('text-green-500', 'text-red-400', 'text-gray-400', 'text-amber-500');
+      trustEl.classList.add(changedCount > 0 ? 'text-amber-500' : trusts.length > 0 ? 'text-green-500' : 'text-gray-400');
+    }
+    renderTrustList(trusts);
+  } catch (err) {
+    if (trustEl) {
+      trustEl.textContent = '-';
+      trustEl.classList.remove('text-green-500', 'text-red-400', 'text-amber-500');
+      trustEl.classList.add('text-gray-400');
+    }
+  }
 }
 
 function setupSidebarResizer() {
@@ -2037,7 +3198,74 @@ const translations = {
     menu_add_account: "Add Account",
     menu_more: "More",
     menu_about: "About iChat Pro",
-    menu_updates: "Check Updates"
+    menu_updates: "Check Updates",
+    // T12: Conversation actions
+    convPin: "Pin",
+    convUnpin: "Unpin",
+    convPinned: "Pinned",
+    convUnpinned: "Unpinned",
+    convMute: "Mute",
+    convUnmute: "Unmute",
+    convMuted: "Muted",
+    convUnmuted: "Unmuted",
+    convMute1h: "Mute for 1 hour",
+    convMute8h: "Mute for 8 hours",
+    convMute24h: "Mute for 24 hours",
+    convMuteForever: "Mute forever",
+    convArchive: "Archive",
+    convUnarchive: "Unarchive",
+    convArchived: "Archived",
+    convUnarchived: "Unarchived",
+    convClear: "Clear History",
+    convDelete: "Delete Chat",
+    convMarkRead: "Mark as Read",
+    convMarkUnread: "Mark as Unread",
+    convMarkedRead: "Marked as read",
+    convMarkedUnread: "Marked as unread",
+    convCleared: "History cleared",
+    convDeleted: "Conversation deleted",
+    convClearConfirm: "Clear all messages in this chat?",
+    convDeleteConfirm: "Delete this conversation?",
+    convActionFailed: "Action failed",
+    // T13: Message actions
+    msgCopy: "Copy",
+    msgCopied: "Copied",
+    msgCopyFailed: "Copy failed",
+    msgNothingToCopy: "Nothing to copy",
+    msgReply: "Reply",
+    msgForward: "Forward",
+    msgForwardTitle: "Forward to...",
+    msgForwarded: "Forwarded",
+    msgForwardFailed: "Forward failed",
+    msgNoForwardTargets: "No conversations to forward to",
+    msgSelect: "Select",
+    msgDelete: "Delete",
+    msgDeleted: "message deleted",
+    msgDeletedToast: "Message deleted",
+    msgRecall: "Recall",
+    msgRecalled: "message recalled",
+    msgYouRecalled: "You recalled a message",
+    msgRecalledToast: "Message recalled",
+    msgRecallFailed: "Recall failed",
+    msgResend: "Resend",
+    msgCancelReply: "Cancel reply",
+    msgActionFailed: "Action failed",
+    // T14: Status & presence
+    statusSending: "Sending...",
+    statusSent: "Sent",
+    statusDelivered: "Delivered",
+    statusRead: "Read",
+    statusFailed: "Failed to send",
+    connectionConnected: "Connected",
+    connectionReconnecting: "Reconnecting...",
+    connectionDisconnected: "Disconnected",
+    lastSeenJustNow: "Last seen just now",
+    lastSeenMinAgo: "Last seen %d min ago",
+    lastSeenHoursAgo: "Last seen %d hours ago",
+    lastSeenToday: "Last seen today at",
+    lastSeenYesterday: "Last seen yesterday at",
+    lastSeenDate: "Last seen",
+    typingIndicator: "Typing"
   },
   zh: {
     account_details: "账号详情",
@@ -2105,7 +3333,74 @@ const translations = {
     menu_add_account: "添加账号",
     menu_more: "更多",
     menu_about: "关于 iChat Pro",
-    menu_updates: "检查更新"
+    menu_updates: "检查更新",
+    // T12: Conversation actions
+    convPin: "置顶",
+    convUnpin: "取消置顶",
+    convPinned: "已置顶",
+    convUnpinned: "已取消置顶",
+    convMute: "静音",
+    convUnmute: "取消静音",
+    convMuted: "已静音",
+    convUnmuted: "已取消静音",
+    convMute1h: "静音1小时",
+    convMute8h: "静音8小时",
+    convMute24h: "静音24小时",
+    convMuteForever: "永久静音",
+    convArchive: "归档",
+    convUnarchive: "取消归档",
+    convArchived: "已归档",
+    convUnarchived: "已取消归档",
+    convClear: "清空聊天记录",
+    convDelete: "删除会话",
+    convMarkRead: "标为已读",
+    convMarkUnread: "标为未读",
+    convMarkedRead: "已标为已读",
+    convMarkedUnread: "已标为未读",
+    convCleared: "聊天记录已清空",
+    convDeleted: "会话已删除",
+    convClearConfirm: "确定清空该会话的所有消息？",
+    convDeleteConfirm: "确定删除该会话？",
+    convActionFailed: "操作失败",
+    // T13: Message actions
+    msgCopy: "复制",
+    msgCopied: "已复制",
+    msgCopyFailed: "复制失败",
+    msgNothingToCopy: "无可复制内容",
+    msgReply: "回复",
+    msgForward: "转发",
+    msgForwardTitle: "转发到...",
+    msgForwarded: "已转发",
+    msgForwardFailed: "转发失败",
+    msgNoForwardTargets: "没有可转发的会话",
+    msgSelect: "选择",
+    msgDelete: "删除",
+    msgDeleted: "消息已删除",
+    msgDeletedToast: "消息已删除",
+    msgRecall: "撤回",
+    msgRecalled: "消息已撤回",
+    msgYouRecalled: "你撤回了一条消息",
+    msgRecalledToast: "消息已撤回",
+    msgRecallFailed: "撤回失败",
+    msgResend: "重发",
+    msgCancelReply: "取消回复",
+    msgActionFailed: "操作失败",
+    // T14: Status & presence
+    statusSending: "发送中...",
+    statusSent: "已发送",
+    statusDelivered: "已送达",
+    statusRead: "已读",
+    statusFailed: "发送失败",
+    connectionConnected: "已连接",
+    connectionReconnecting: "重连中...",
+    connectionDisconnected: "已断开",
+    lastSeenJustNow: "刚刚在线",
+    lastSeenMinAgo: "最后上线 %d 分钟前",
+    lastSeenHoursAgo: "最后上线 %d 小时前",
+    lastSeenToday: "最后上线今天",
+    lastSeenYesterday: "最后上线昨天",
+    lastSeenDate: "最后上线",
+    typingIndicator: "正在输入"
   }
 };
 

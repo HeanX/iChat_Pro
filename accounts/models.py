@@ -18,6 +18,11 @@ class UserProfile(models.Model):
     avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
     bio = models.TextField(max_length=500, blank=True)
 
+    # P2 T29: extended profile fields
+    phone_number = models.CharField(max_length=20, blank=True)
+    location = models.CharField(max_length=100, blank=True)
+    birthday = models.DateField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -127,4 +127,8 @@ urlpatterns = [
         views.privacy_settings_update_view,
         name='privacy-settings-update',
     ),
+    # Blocked users (P2 T26)
+    path('api/settings/privacy/blocked/', views.blocked_users_list_view, name='blocked-list'),
+    path('api/settings/privacy/block/', views.block_user_view, name='block-user'),
+    path('api/settings/privacy/unblock/', views.unblock_user_view, name='unblock-user'),
 ]

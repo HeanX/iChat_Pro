@@ -1291,3 +1291,46 @@ class PrivacySettingsApiTests(TestCase):
         data = resp.json()
         self.assertEqual(data['last_seen_visibility'], 'contacts')
         self.assertEqual(data['auto_delete_messages_days'], 7)
+
+# ── P2 T26: Blocked users API ───────────────────────────────────
+
+class BlockedUserApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='blocker', password='p')
+        self.target = User.objects.create_user(username='victim', password='p')
+
+    def _login(self):
+        self.client.login(username='blocker', password='p')
+
+    def _post(self, url, data):
+        return self.client.post(url, data=json.dumps(data), content_type='application/json')
+
+    def test_list_empty(self):
+        self._login()
+        resp = self.client.get('/api/settings/privacy/blocked/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['blocked_users'], [])
+
+    def test_block_user(self):
+        self._login()
+        resp = self._post('/api/settings/privacy/block/', {'user_id': self.target.id})
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(resp.json()['blocked'])
+
+    def test_block_twice_is_idempotent(self):
+        self._login()
+        self._post('/api/settings/privacy/block/', {'user_id': self.target.id})
+        resp = self._post('/api/settings/privacy/block/', {'user_id': self.target.id})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()['created'])
+
+    def test_unblock_user(self):
+        self._login()
+        self._post('/api/settings/privacy/block/', {'user_id': self.target.id})
+        resp = self._post('/api/settings/privacy/unblock/', {'user_id': self.target.id})
+        self.assertTrue(resp.json()['unblocked'])
+
+    def test_cannot_block_self(self):
+        self._login()
+        resp = self._post('/api/settings/privacy/block/', {'user_id': self.user.id})
+        self.assertEqual(resp.status_code, 400)

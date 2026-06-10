@@ -1021,3 +1021,53 @@ def privacy_settings_update_view(request):
         'user_id': request.user.id,
         **{f: getattr(settings_obj, f) for f in _PRIVACY_FIELDS},
     })
+
+
+# ── Blocked users API (P2 T26) ────────────────────────────────────
+
+
+@login_required
+@require_GET
+def blocked_users_list_view(request):
+    """List users blocked by the current user."""
+    from .models import BlockedUser
+    blocked_qs = BlockedUser.objects.filter(
+        blocker=request.user,
+    ).select_related('blocked').order_by('-created_at')
+    results = [
+        {'user_id': b.blocked.id, 'username': b.blocked.username,
+         'blocked_at': b.created_at.isoformat()}
+        for b in blocked_qs
+    ]
+    return JsonResponse({'blocked_users': results})
+
+
+@login_required
+@require_http_methods(['POST'])
+def block_user_view(request):
+    """Block a user."""
+    from .models import BlockedUser
+    payload = _json_body(request)
+    if not payload or not payload.get('user_id'):
+        return JsonResponse({'error': 'user_id is required.'}, status=400)
+    target = get_object_or_404(User, id=payload['user_id'])
+    if target == request.user:
+        return JsonResponse({'error': 'Cannot block yourself.'}, status=400)
+    _, created = BlockedUser.objects.get_or_create(
+        blocker=request.user, blocked=target)
+    return JsonResponse({
+        'blocked': True, 'user_id': target.id, 'created': created,
+    }, status=201 if created else 200)
+
+
+@login_required
+@require_http_methods(['POST'])
+def unblock_user_view(request):
+    """Unblock a user."""
+    from .models import BlockedUser
+    payload = _json_body(request)
+    if not payload or not payload.get('user_id'):
+        return JsonResponse({'error': 'user_id is required.'}, status=400)
+    deleted, _ = BlockedUser.objects.filter(
+        blocker=request.user, blocked_id=payload['user_id']).delete()
+    return JsonResponse({'unblocked': deleted > 0})

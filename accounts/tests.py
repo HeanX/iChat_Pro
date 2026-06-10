@@ -1256,3 +1256,38 @@ class StorageSettingsApiTests(TestCase):
     def test_requires_login(self):
         resp = self.client.get('/api/settings/storage/')
         self.assertIn(resp.status_code, (301, 302))
+
+# ── P2 T25: Privacy settings API ────────────────────────────────
+
+class PrivacySettingsApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='ptest', password='p')
+
+    def _get(self):
+        self.client.login(username='ptest', password='p')
+        return self.client.get('/api/settings/privacy/')
+
+    def _put(self, data):
+        self.client.login(username='ptest', password='p')
+        return self.client.put(
+            '/api/settings/privacy/update/',
+            data=json.dumps(data),
+            content_type='application/json',
+        )
+
+    def test_get_returns_defaults(self):
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['last_seen_visibility'], 'everyone')
+        self.assertFalse(data['passcode_lock_enabled'])
+
+    def test_update_changes_fields(self):
+        resp = self._put({
+            'last_seen_visibility': 'contacts',
+            'auto_delete_messages_days': 7,
+        })
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['last_seen_visibility'], 'contacts')
+        self.assertEqual(data['auto_delete_messages_days'], 7)

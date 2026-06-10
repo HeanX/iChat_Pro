@@ -965,3 +965,59 @@ def storage_settings_update_view(request):
         'user_id': request.user.id,
         'settings_json': settings_obj.settings_json,
     })
+
+
+# ── Privacy settings API (P2 T25) ─────────────────────────────────
+
+_PRIVACY_FIELDS = [
+    'last_seen_visibility',
+    'profile_photo_visibility',
+    'phone_number_visibility',
+    'bio_visibility',
+    'forward_link_visibility',
+    'who_can_send_messages',
+    'who_can_voice_video_call',
+    'auto_delete_messages_days',
+    'sensitive_content_filter',
+    'passcode_lock_enabled',
+    'two_step_verification_enabled',
+    'login_email',
+]
+
+
+@login_required
+@require_GET
+def privacy_settings_view(request):
+    from .models import UserPrivacySettings
+    settings_obj, _ = UserPrivacySettings.objects.get_or_create(
+        user=request.user,
+    )
+    return JsonResponse({
+        'user_id': request.user.id,
+        **{f: getattr(settings_obj, f) for f in _PRIVACY_FIELDS},
+    })
+
+
+@login_required
+@require_http_methods(['PUT'])
+def privacy_settings_update_view(request):
+    from .models import UserPrivacySettings
+    settings_obj, _ = UserPrivacySettings.objects.get_or_create(
+        user=request.user,
+    )
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    updated = False
+    for field in _PRIVACY_FIELDS:
+        if field in payload:
+            setattr(settings_obj, field, payload[field])
+            updated = True
+    if updated:
+        settings_obj.save(update_fields=[f for f in _PRIVACY_FIELDS if f in payload] + ['updated_at'])
+
+    return JsonResponse({
+        'user_id': request.user.id,
+        **{f: getattr(settings_obj, f) for f in _PRIVACY_FIELDS},
+    })

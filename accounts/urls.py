@@ -116,4 +116,15 @@ urlpatterns = [
         views.storage_settings_update_view,
         name='storage-settings-update',
     ),
+    # Privacy settings (P2 T25)
+    path(
+        'api/settings/privacy/',
+        views.privacy_settings_view,
+        name='privacy-settings',
+    ),
+    path(
+        'api/settings/privacy/update/',
+        views.privacy_settings_update_view,
+        name='privacy-settings-update',
+    ),
 ]

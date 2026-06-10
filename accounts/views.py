@@ -866,3 +866,310 @@ def key_trust_list_view(request):
         })
 
     return JsonResponse({'trusts': results})
+
+
+# ── Notification settings API (P2 T23) ────────────────────────────
+
+
+_NOTIFICATION_FIELDS = [
+    'offline_notifications',
+    'all_accounts_notifications',
+    'notification_sound',
+    'volume',
+    'message_sent_sound',
+    'private_chat_notifications',
+    'group_chat_notifications',
+    'channel_notifications',
+    'message_preview_private',
+    'message_preview_group',
+    'message_preview_channel',
+    'contact_join_notifications',
+]
+
+
+@login_required
+@require_GET
+def notification_settings_view(request):
+    """Return the current user's notification settings."""
+    from .models import UserNotificationSettings  # avoid top-level circular
+    settings_obj, _ = UserNotificationSettings.objects.get_or_create(
+        user=request.user,
+    )
+    data = {
+        'user_id': request.user.id,
+        **{f: getattr(settings_obj, f) for f in _NOTIFICATION_FIELDS},
+    }
+    return JsonResponse(data)
+
+
+@login_required
+@require_http_methods(['PUT'])
+def notification_settings_update_view(request):
+    """Update the current user's notification settings."""
+    from .models import UserNotificationSettings
+    settings_obj, _ = UserNotificationSettings.objects.get_or_create(
+        user=request.user,
+    )
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    updated = False
+    for field in _NOTIFICATION_FIELDS:
+        if field in payload:
+            setattr(settings_obj, field, payload[field])
+            updated = True
+    if updated:
+        settings_obj.save(update_fields=[f for f in _NOTIFICATION_FIELDS if f in payload] + ['updated_at'])
+
+    return JsonResponse({
+        'user_id': request.user.id,
+        **{f: getattr(settings_obj, f) for f in _NOTIFICATION_FIELDS},
+    })
+
+
+# ── Storage settings API (P2 T24) ─────────────────────────────────
+
+
+@login_required
+@require_GET
+def storage_settings_view(request):
+    """Return the current user's storage & auto-download settings."""
+    from .models import UserStorageSettings
+    settings_obj, _ = UserStorageSettings.objects.get_or_create(
+        user=request.user,
+    )
+    return JsonResponse({
+        'user_id': request.user.id,
+        'settings_json': settings_obj.settings_json,
+    })
+
+
+@login_required
+@require_http_methods(['PUT'])
+def storage_settings_update_view(request):
+    """Update the current user's storage settings (JSON blob)."""
+    from .models import UserStorageSettings
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    settings_obj, _ = UserStorageSettings.objects.get_or_create(
+        user=request.user,
+    )
+    if 'settings_json' in payload:
+        settings_obj.settings_json = payload['settings_json']
+        settings_obj.save(update_fields=['settings_json', 'updated_at'])
+
+    return JsonResponse({
+        'user_id': request.user.id,
+        'settings_json': settings_obj.settings_json,
+    })
+
+
+# ── Privacy settings API (P2 T25) ─────────────────────────────────
+
+_PRIVACY_FIELDS = [
+    'last_seen_visibility',
+    'profile_photo_visibility',
+    'phone_number_visibility',
+    'bio_visibility',
+    'forward_link_visibility',
+    'who_can_send_messages',
+    'who_can_voice_video_call',
+    'auto_delete_messages_days',
+    'sensitive_content_filter',
+    'passcode_lock_enabled',
+    'two_step_verification_enabled',
+    'passkey_enabled',       # P2 T28
+    'passcode',              # P2 T28
+    'login_email',
+]
+
+
+@login_required
+@require_GET
+def privacy_settings_view(request):
+    from .models import UserPrivacySettings
+    settings_obj, _ = UserPrivacySettings.objects.get_or_create(
+        user=request.user,
+    )
+    return JsonResponse({
+        'user_id': request.user.id,
+        **{f: getattr(settings_obj, f) for f in _PRIVACY_FIELDS},
+    })
+
+
+@login_required
+@require_http_methods(['PUT'])
+def privacy_settings_update_view(request):
+    from .models import UserPrivacySettings
+    settings_obj, _ = UserPrivacySettings.objects.get_or_create(
+        user=request.user,
+    )
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    updated = False
+    for field in _PRIVACY_FIELDS:
+        if field in payload:
+            setattr(settings_obj, field, payload[field])
+            updated = True
+    if updated:
+        settings_obj.save(update_fields=[f for f in _PRIVACY_FIELDS if f in payload] + ['updated_at'])
+
+    return JsonResponse({
+        'user_id': request.user.id,
+        **{f: getattr(settings_obj, f) for f in _PRIVACY_FIELDS},
+    })
+
+
+# ── Blocked users API (P2 T26) ────────────────────────────────────
+
+
+@login_required
+@require_GET
+def blocked_users_list_view(request):
+    """List users blocked by the current user."""
+    from .models import BlockedUser
+    blocked_qs = BlockedUser.objects.filter(
+        blocker=request.user,
+    ).select_related('blocked').order_by('-created_at')
+    results = [
+        {'user_id': b.blocked.id, 'username': b.blocked.username,
+         'blocked_at': b.created_at.isoformat()}
+        for b in blocked_qs
+    ]
+    return JsonResponse({'blocked_users': results})
+
+
+@login_required
+@require_http_methods(['POST'])
+def block_user_view(request):
+    """Block a user."""
+    from .models import BlockedUser
+    payload = _json_body(request)
+    if not payload or not payload.get('user_id'):
+        return JsonResponse({'error': 'user_id is required.'}, status=400)
+    target = get_object_or_404(User, id=payload['user_id'])
+    if target == request.user:
+        return JsonResponse({'error': 'Cannot block yourself.'}, status=400)
+    _, created = BlockedUser.objects.get_or_create(
+        blocker=request.user, blocked=target)
+    return JsonResponse({
+        'blocked': True, 'user_id': target.id, 'created': created,
+    }, status=201 if created else 200)
+
+
+@login_required
+@require_http_methods(['POST'])
+def unblock_user_view(request):
+    """Unblock a user."""
+    from .models import BlockedUser
+    payload = _json_body(request)
+    if not payload or not payload.get('user_id'):
+        return JsonResponse({'error': 'user_id is required.'}, status=400)
+    deleted, _ = BlockedUser.objects.filter(
+        blocker=request.user, blocked_id=payload['user_id']).delete()
+    return JsonResponse({'unblocked': deleted > 0})
+
+
+# ── QR Code card API (P2 T30) ─────────────────────────────────────
+
+
+@login_required
+@require_GET
+def qr_card_view(request):
+    """Return the current user's public card data for QR code sharing."""
+    from .models import UserProfile
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    return JsonResponse({
+        'user_id': request.user.id,
+        'username': request.user.username,
+        'nickname': profile.nickname or request.user.username,
+        'avatar': request.build_absolute_uri(profile.avatar.url) if profile.avatar else '',
+        'bio': profile.bio,
+        'phone_number': profile.phone_number,
+    })
+
+
+# ── Multi-account context API (P2 T35) ────────────────────────────
+
+
+@login_required
+@require_GET
+def multi_account_view(request):
+    from .models import MultiAccountContext
+    ctx, _ = MultiAccountContext.objects.get_or_create(user=request.user)
+    return JsonResponse({'user_id': request.user.id, 'context_json': ctx.context_json})
+
+
+@login_required
+@require_http_methods(['PUT'])
+def multi_account_update_view(request):
+    from .models import MultiAccountContext
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+    ctx, _ = MultiAccountContext.objects.get_or_create(user=request.user)
+    if 'context_json' in payload:
+        ctx.context_json = payload['context_json']
+        ctx.save(update_fields=['context_json', 'updated_at'])
+    return JsonResponse({'user_id': request.user.id, 'context_json': ctx.context_json})
+
+
+# ── Session management API (P2 T36) ───────────────────────────────
+
+
+@login_required
+@require_GET
+def session_list_view(request):
+    """List active sessions for the current user."""
+    from django.contrib.sessions.models import Session
+    sessions = Session.objects.filter(expire_date__gte=timezone.now())
+    results = []
+    for s in sessions:
+        data = s.get_decoded()
+        if data.get('_auth_user_id') == str(request.user.id):
+            results.append({
+                'session_key': s.session_key[:20] + '...',
+                'created': s.expire_date.strftime('%Y-%m-%d %H:%M'),
+                'is_current': s.session_key == request.session.session_key,
+            })
+    return JsonResponse({'sessions': results})
+
+
+@login_required
+@require_http_methods(['POST'])
+def session_terminate_view(request):
+    """Terminate a specific session."""
+    from django.contrib.sessions.models import Session
+    session_key = (_json_body(request) or {}).get('session_key', '')
+    if not session_key:
+        return JsonResponse({'error': 'session_key required'}, status=400)
+    # Don't allow terminating current session via this endpoint
+    full_key = request.session.session_key or ''
+    if session_key == full_key[:20] + '...':
+        return JsonResponse({'error': 'Use logout to end current session'}, status=400)
+    Session.objects.filter(
+        session_key__startswith=session_key.replace('...', ''),
+    ).delete()
+    return JsonResponse({'terminated': True})
+
+
+# ── Profile sync events API (P2 T39) ──────────────────────────────
+
+
+@login_required
+@require_GET
+def profile_updates_view(request):
+    """Return recent profile update events for contacts."""
+    from .models import UserProfileUpdateLog
+    since = request.GET.get('since')
+    qs = UserProfileUpdateLog.objects.select_related('user').order_by('-created_at')[:50]
+    if since:
+        qs = qs.filter(created_at__gt=since)
+    results = [{'id': e.id, 'user_id': e.user_id, 'username': e.user.username,
+                'created_at': e.created_at.isoformat()} for e in qs]
+    return JsonResponse({'updates': results})

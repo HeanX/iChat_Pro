@@ -91,7 +91,7 @@ class ProfileForm(forms.ModelForm):
 
     class Meta:
         model = UserProfile
-        fields = ('nickname', 'bio', 'avatar')
+        fields = ('nickname', 'bio', 'avatar', 'phone_number', 'location', 'birthday')
 
     def __init__(self, *args, **kwargs):
         self._user = kwargs.pop('user', None)

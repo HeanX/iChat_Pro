@@ -94,4 +94,51 @@ urlpatterns = [
         views.key_trust_list_view,
         name='key-trust-list',
     ),
+    # Notification settings (P2 T23)
+    path(
+        'api/settings/notifications/',
+        views.notification_settings_view,
+        name='notification-settings',
+    ),
+    path(
+        'api/settings/notifications/update/',
+        views.notification_settings_update_view,
+        name='notification-settings-update',
+    ),
+    # Storage settings (P2 T24)
+    path(
+        'api/settings/storage/',
+        views.storage_settings_view,
+        name='storage-settings',
+    ),
+    path(
+        'api/settings/storage/update/',
+        views.storage_settings_update_view,
+        name='storage-settings-update',
+    ),
+    # Privacy settings (P2 T25)
+    path(
+        'api/settings/privacy/',
+        views.privacy_settings_view,
+        name='privacy-settings',
+    ),
+    path(
+        'api/settings/privacy/update/',
+        views.privacy_settings_update_view,
+        name='privacy-settings-update',
+    ),
+    # Blocked users (P2 T26)
+    path('api/settings/privacy/blocked/', views.blocked_users_list_view, name='blocked-list'),
+    path('api/settings/privacy/block/', views.block_user_view, name='block-user'),
+    path('api/settings/privacy/unblock/', views.unblock_user_view, name='unblock-user'),
+    # QR code card (P2 T30)
+    path('api/qr-card/', views.qr_card_view, name='qr-card'),
+    # Multi-account context (P2 T35)
+    path('api/account/context/', views.multi_account_view, name='multi-account'),
+    path('api/account/context/update/', views.multi_account_update_view, name='multi-account-update'),
+    # Session management (P2 T36)
+    path('api/sessions/', views.session_list_view, name='session-list'),
+    path('api/sessions/terminate/', views.session_terminate_view, name='session-terminate'),
+    # Profile sync events (P2 T39)
+    path('api/profile/updates/', views.profile_updates_view, name='profile-updates'),
 ]

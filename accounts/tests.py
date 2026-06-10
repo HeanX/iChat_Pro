@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import json
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
@@ -1171,3 +1172,221 @@ class GroupViewTests(TestCase):
             {'username': 'bob'},
         )
         self.assertTrue(response.status_code in (301, 302))
+
+# ── P2 T23: Notification settings API ───────────────────────────
+
+class NotificationSettingsApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='ntest', password='p')
+
+    def _get(self):
+        self.client.login(username='ntest', password='p')
+        return self.client.get('/api/settings/notifications/')
+
+    def _put(self, data):
+        self.client.login(username='ntest', password='p')
+        return self.client.put(
+            '/api/settings/notifications/update/',
+            data=json.dumps(data),
+            content_type='application/json',
+        )
+
+    def test_get_returns_defaults(self):
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data['offline_notifications'])
+        self.assertEqual(data['notification_sound'], 'default')
+        self.assertEqual(data['volume'], 80)
+
+    def test_update_changes_settings(self):
+        resp = self._put({'volume': 50, 'notification_sound': 'chime'})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['volume'], 50)
+        self.assertEqual(data['notification_sound'], 'chime')
+
+    def test_get_reflects_update(self):
+        self._put({'private_chat_notifications': False})
+        resp = self._get()
+        self.assertFalse(resp.json()['private_chat_notifications'])
+
+    def test_update_requires_login(self):
+        resp = self.client.put(
+            '/api/settings/notifications/update/',
+            data=json.dumps({'volume': 10}),
+            content_type='application/json',
+        )
+        self.assertIn(resp.status_code, (301, 302))
+
+    def test_get_is_idempotent(self):
+        first = self._get()
+        second = self._get()
+        self.assertEqual(first.json(), second.json())
+
+# ── P2 T24: Storage settings API ────────────────────────────────
+
+class StorageSettingsApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='stest', password='p')
+
+    def _get(self):
+        self.client.login(username='stest', password='p')
+        return self.client.get('/api/settings/storage/')
+
+    def _put(self, data):
+        self.client.login(username='stest', password='p')
+        return self.client.put(
+            '/api/settings/storage/update/',
+            data=json.dumps(data),
+            content_type='application/json',
+        )
+
+    def test_get_returns_defaults(self):
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['settings_json'], {})
+
+    def test_update_persists_settings(self):
+        blob = {'auto_download': True, 'max_cache_mb': 500}
+        resp = self._put({'settings_json': blob})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['settings_json'], blob)
+
+    def test_requires_login(self):
+        resp = self.client.get('/api/settings/storage/')
+        self.assertIn(resp.status_code, (301, 302))
+
+# ── P2 T25: Privacy settings API ────────────────────────────────
+
+class PrivacySettingsApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='ptest', password='p')
+
+    def _get(self):
+        self.client.login(username='ptest', password='p')
+        return self.client.get('/api/settings/privacy/')
+
+    def _put(self, data):
+        self.client.login(username='ptest', password='p')
+        return self.client.put(
+            '/api/settings/privacy/update/',
+            data=json.dumps(data),
+            content_type='application/json',
+        )
+
+    def test_get_returns_defaults(self):
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['last_seen_visibility'], 'everyone')
+        self.assertFalse(data['passcode_lock_enabled'])
+
+    def test_update_changes_fields(self):
+        resp = self._put({
+            'last_seen_visibility': 'contacts',
+            'auto_delete_messages_days': 7,
+        })
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['last_seen_visibility'], 'contacts')
+        self.assertEqual(data['auto_delete_messages_days'], 7)
+
+# ── P2 T26: Blocked users API ───────────────────────────────────
+
+class BlockedUserApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='blocker', password='p')
+        self.target = User.objects.create_user(username='victim', password='p')
+
+    def _login(self):
+        self.client.login(username='blocker', password='p')
+
+    def _post(self, url, data):
+        return self.client.post(url, data=json.dumps(data), content_type='application/json')
+
+    def test_list_empty(self):
+        self._login()
+        resp = self.client.get('/api/settings/privacy/blocked/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['blocked_users'], [])
+
+    def test_block_user(self):
+        self._login()
+        resp = self._post('/api/settings/privacy/block/', {'user_id': self.target.id})
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(resp.json()['blocked'])
+
+    def test_block_twice_is_idempotent(self):
+        self._login()
+        self._post('/api/settings/privacy/block/', {'user_id': self.target.id})
+        resp = self._post('/api/settings/privacy/block/', {'user_id': self.target.id})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()['created'])
+
+    def test_unblock_user(self):
+        self._login()
+        self._post('/api/settings/privacy/block/', {'user_id': self.target.id})
+        resp = self._post('/api/settings/privacy/unblock/', {'user_id': self.target.id})
+        self.assertTrue(resp.json()['unblocked'])
+
+    def test_cannot_block_self(self):
+        self._login()
+        resp = self._post('/api/settings/privacy/block/', {'user_id': self.user.id})
+        self.assertEqual(resp.status_code, 400)
+
+# ── P2 T30: QR card API ─────────────────────────────────────────
+
+class QrCardApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='qrtest', password='p')
+
+    def test_qr_card_returns_profile(self):
+        self.client.login(username='qrtest', password='p')
+        resp = self.client.get('/api/qr-card/')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['username'], 'qrtest')
+        self.assertIn('nickname', data)
+
+    def test_qr_card_requires_login(self):
+        resp = self.client.get('/api/qr-card/')
+        self.assertIn(resp.status_code, (301, 302))
+
+# ── P2 T35: Multi-account context ────────────────────────────────
+
+class MultiAccountApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='mactest', password='p')
+
+    def test_get_returns_default(self):
+        self.client.login(username='mactest', password='p')
+        resp = self.client.get('/api/account/context/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['context_json'], {})
+
+    def test_update_persists(self):
+        self.client.login(username='mactest', password='p')
+        blob = {'accounts': [{'id': 1, 'label': 'Work'}]}
+        resp = self.client.put(
+            '/api/account/context/update/',
+            data=json.dumps({'context_json': blob}),
+            content_type='application/json',
+        )
+        self.assertEqual(resp.json()['context_json'], blob)
+
+# ── P2 T36: Session management API ───────────────────────────────
+
+class SessionApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='sestest', password='p')
+
+    def test_session_list_requires_login(self):
+        resp = self.client.get('/api/sessions/')
+        self.assertIn(resp.status_code, (301, 302))
+
+    def test_logged_in_user_has_sessions(self):
+        self.client.login(username='sestest', password='p')
+        resp = self.client.get('/api/sessions/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreater(len(resp.json()['sessions']), 0)

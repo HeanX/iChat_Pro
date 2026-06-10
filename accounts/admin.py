@@ -4,6 +4,7 @@ from .models import (
     BlockedUser,
     Contact,
     FriendRequest,
+    UserNotificationSettings,
     UserPrivacySettings,
     UserProfile,
     UserPublicKey,
@@ -63,3 +64,9 @@ class UserPrivacySettingsAdmin(admin.ModelAdmin):
 class BlockedUserAdmin(admin.ModelAdmin):
     list_display = ('blocker', 'blocked', 'created_at')
     search_fields = ('blocker__username', 'blocked__username')
+
+
+@admin.register(UserNotificationSettings)
+class UserNotificationSettingsAdmin(admin.ModelAdmin):
+    list_display = ('user', 'notification_sound', 'volume', 'created_at')
+    search_fields = ('user__username',)

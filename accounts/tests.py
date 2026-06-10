@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import json
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
@@ -1171,3 +1172,54 @@ class GroupViewTests(TestCase):
             {'username': 'bob'},
         )
         self.assertTrue(response.status_code in (301, 302))
+
+# ── P2 T23: Notification settings API ───────────────────────────
+
+class NotificationSettingsApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='ntest', password='p')
+
+    def _get(self):
+        self.client.login(username='ntest', password='p')
+        return self.client.get('/api/settings/notifications/')
+
+    def _put(self, data):
+        self.client.login(username='ntest', password='p')
+        return self.client.put(
+            '/api/settings/notifications/update/',
+            data=json.dumps(data),
+            content_type='application/json',
+        )
+
+    def test_get_returns_defaults(self):
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data['offline_notifications'])
+        self.assertEqual(data['notification_sound'], 'default')
+        self.assertEqual(data['volume'], 80)
+
+    def test_update_changes_settings(self):
+        resp = self._put({'volume': 50, 'notification_sound': 'chime'})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['volume'], 50)
+        self.assertEqual(data['notification_sound'], 'chime')
+
+    def test_get_reflects_update(self):
+        self._put({'private_chat_notifications': False})
+        resp = self._get()
+        self.assertFalse(resp.json()['private_chat_notifications'])
+
+    def test_update_requires_login(self):
+        resp = self.client.put(
+            '/api/settings/notifications/update/',
+            data=json.dumps({'volume': 10}),
+            content_type='application/json',
+        )
+        self.assertIn(resp.status_code, (301, 302))
+
+    def test_get_is_idempotent(self):
+        first = self._get()
+        second = self._get()
+        self.assertEqual(first.json(), second.json())

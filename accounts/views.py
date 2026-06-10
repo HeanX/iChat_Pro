@@ -866,3 +866,63 @@ def key_trust_list_view(request):
         })
 
     return JsonResponse({'trusts': results})
+
+
+# ── Notification settings API (P2 T23) ────────────────────────────
+
+
+_NOTIFICATION_FIELDS = [
+    'offline_notifications',
+    'all_accounts_notifications',
+    'notification_sound',
+    'volume',
+    'message_sent_sound',
+    'private_chat_notifications',
+    'group_chat_notifications',
+    'channel_notifications',
+    'message_preview_private',
+    'message_preview_group',
+    'message_preview_channel',
+    'contact_join_notifications',
+]
+
+
+@login_required
+@require_GET
+def notification_settings_view(request):
+    """Return the current user's notification settings."""
+    from .models import UserNotificationSettings  # avoid top-level circular
+    settings_obj, _ = UserNotificationSettings.objects.get_or_create(
+        user=request.user,
+    )
+    data = {
+        'user_id': request.user.id,
+        **{f: getattr(settings_obj, f) for f in _NOTIFICATION_FIELDS},
+    }
+    return JsonResponse(data)
+
+
+@login_required
+@require_http_methods(['PUT'])
+def notification_settings_update_view(request):
+    """Update the current user's notification settings."""
+    from .models import UserNotificationSettings
+    settings_obj, _ = UserNotificationSettings.objects.get_or_create(
+        user=request.user,
+    )
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    updated = False
+    for field in _NOTIFICATION_FIELDS:
+        if field in payload:
+            setattr(settings_obj, field, payload[field])
+            updated = True
+    if updated:
+        settings_obj.save(update_fields=[f for f in _NOTIFICATION_FIELDS if f in payload] + ['updated_at'])
+
+    return JsonResponse({
+        'user_id': request.user.id,
+        **{f: getattr(settings_obj, f) for f in _NOTIFICATION_FIELDS},
+    })

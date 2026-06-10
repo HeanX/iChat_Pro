@@ -114,6 +114,33 @@ class UserStorageSettings(models.Model):
         return f'StorageSettings for {self.user.username}'
 
 
+class UserNotificationSettings(models.Model):
+    """Per-user notification preferences (P2 T23)."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notification_settings',
+    )
+    offline_notifications = models.BooleanField(default=True)
+    all_accounts_notifications = models.BooleanField(default=True)
+    notification_sound = models.CharField(max_length=100, default='default')
+    volume = models.PositiveSmallIntegerField(default=80)
+    message_sent_sound = models.CharField(max_length=100, default='default')
+    private_chat_notifications = models.BooleanField(default=True)
+    group_chat_notifications = models.BooleanField(default=True)
+    channel_notifications = models.BooleanField(default=False)
+    message_preview_private = models.BooleanField(default=True)
+    message_preview_group = models.BooleanField(default=True)
+    message_preview_channel = models.BooleanField(default=True)
+    contact_join_notifications = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'NotificationSettings for {self.user.username}'
+
+
 class FriendRequest(models.Model):
     """A friend request from one user to another."""
 

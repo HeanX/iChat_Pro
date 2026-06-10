@@ -94,4 +94,15 @@ urlpatterns = [
         views.key_trust_list_view,
         name='key-trust-list',
     ),
+    # Notification settings (P2 T23)
+    path(
+        'api/settings/notifications/',
+        views.notification_settings_view,
+        name='notification-settings',
+    ),
+    path(
+        'api/settings/notifications/update/',
+        views.notification_settings_update_view,
+        name='notification-settings-update',
+    ),
 ]

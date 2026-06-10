@@ -139,4 +139,6 @@ urlpatterns = [
     # Session management (P2 T36)
     path('api/sessions/', views.session_list_view, name='session-list'),
     path('api/sessions/terminate/', views.session_terminate_view, name='session-terminate'),
+    # Profile sync events (P2 T39)
+    path('api/profile/updates/', views.profile_updates_view, name='profile-updates'),
 ]

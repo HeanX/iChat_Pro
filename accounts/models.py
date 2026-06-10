@@ -350,3 +350,37 @@ def create_user_profile(sender, instance, created, **kwargs):
 
 # Group and GroupMember have been consolidated into chat.Conversation
 # and chat.ConversationMember.  See T22 for rationale.
+
+
+# ── Profile sync event (P2 T39) ──────────────────────────────────
+
+class UserProfileUpdateLog(models.Model):
+    """Timestamped record of profile updates for sync notifications."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='profile_updates',
+    )
+    updated_fields = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'ProfileUpdate #{self.id} for {self.user.username}'
+
+
+# ── Profile update signal (P2 T39) ────────────────────────────────
+
+
+@receiver(post_save, sender=UserProfile)
+def log_profile_update(sender, instance, created, **kwargs):
+    """Log profile updates for sync notifications (skip initial creation)."""
+    if created:
+        return
+    UserProfileUpdateLog.objects.create(user=instance.user, updated_fields=[])

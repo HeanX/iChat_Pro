@@ -1156,3 +1156,20 @@ def session_terminate_view(request):
         session_key__startswith=session_key.replace('...', ''),
     ).delete()
     return JsonResponse({'terminated': True})
+
+
+# ── Profile sync events API (P2 T39) ──────────────────────────────
+
+
+@login_required
+@require_GET
+def profile_updates_view(request):
+    """Return recent profile update events for contacts."""
+    from .models import UserProfileUpdateLog
+    since = request.GET.get('since')
+    qs = UserProfileUpdateLog.objects.select_related('user').order_by('-created_at')[:50]
+    if since:
+        qs = qs.filter(created_at__gt=since)
+    results = [{'id': e.id, 'user_id': e.user_id, 'username': e.user.username,
+                'created_at': e.created_at.isoformat()} for e in qs]
+    return JsonResponse({'updates': results})

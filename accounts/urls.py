@@ -133,4 +133,7 @@ urlpatterns = [
     path('api/settings/privacy/unblock/', views.unblock_user_view, name='unblock-user'),
     # QR code card (P2 T30)
     path('api/qr-card/', views.qr_card_view, name='qr-card'),
+    # Multi-account context (P2 T35)
+    path('api/account/context/', views.multi_account_view, name='multi-account'),
+    path('api/account/context/update/', views.multi_account_update_view, name='multi-account-update'),
 ]

@@ -1352,3 +1352,25 @@ class QrCardApiTests(TestCase):
     def test_qr_card_requires_login(self):
         resp = self.client.get('/api/qr-card/')
         self.assertIn(resp.status_code, (301, 302))
+
+# ── P2 T35: Multi-account context ────────────────────────────────
+
+class MultiAccountApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='mactest', password='p')
+
+    def test_get_returns_default(self):
+        self.client.login(username='mactest', password='p')
+        resp = self.client.get('/api/account/context/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['context_json'], {})
+
+    def test_update_persists(self):
+        self.client.login(username='mactest', password='p')
+        blob = {'accounts': [{'id': 1, 'label': 'Work'}]}
+        resp = self.client.put(
+            '/api/account/context/update/',
+            data=json.dumps({'context_json': blob}),
+            content_type='application/json',
+        )
+        self.assertEqual(resp.json()['context_json'], blob)

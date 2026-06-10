@@ -1092,3 +1092,28 @@ def qr_card_view(request):
         'bio': profile.bio,
         'phone_number': profile.phone_number,
     })
+
+
+# ── Multi-account context API (P2 T35) ────────────────────────────
+
+
+@login_required
+@require_GET
+def multi_account_view(request):
+    from .models import MultiAccountContext
+    ctx, _ = MultiAccountContext.objects.get_or_create(user=request.user)
+    return JsonResponse({'user_id': request.user.id, 'context_json': ctx.context_json})
+
+
+@login_required
+@require_http_methods(['PUT'])
+def multi_account_update_view(request):
+    from .models import MultiAccountContext
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+    ctx, _ = MultiAccountContext.objects.get_or_create(user=request.user)
+    if 'context_json' in payload:
+        ctx.context_json = payload['context_json']
+        ctx.save(update_fields=['context_json', 'updated_at'])
+    return JsonResponse({'user_id': request.user.id, 'context_json': ctx.context_json})

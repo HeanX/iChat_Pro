@@ -150,6 +150,26 @@ class UserNotificationSettings(models.Model):
         return f'NotificationSettings for {self.user.username}'
 
 
+class MultiAccountContext(models.Model):
+    """Per-user multi-account context storage (P2 T35).
+
+    Stores the user's local account-switching state so the frontend
+    can remember which accounts the user has added on this device.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='multi_account_context',
+    )
+    context_json = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'MultiAccountContext for {self.user.username}'
+
+
 class FriendRequest(models.Model):
     """A friend request from one user to another."""
 

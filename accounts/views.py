@@ -981,6 +981,8 @@ _PRIVACY_FIELDS = [
     'sensitive_content_filter',
     'passcode_lock_enabled',
     'two_step_verification_enabled',
+    'passkey_enabled',       # P2 T28
+    'passcode',              # P2 T28
     'login_email',
 ]
 

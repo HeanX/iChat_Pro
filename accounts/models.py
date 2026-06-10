@@ -54,9 +54,13 @@ class UserPrivacySettings(models.Model):
     sensitive_content_filter = models.BooleanField(default=False)
     passcode_lock_enabled = models.BooleanField(default=False)
     two_step_verification_enabled = models.BooleanField(default=False)
+    passkey_enabled = models.BooleanField(default=False)  # P2 T28 placeholder
 
     # ── Login email for two-step verification ──
     login_email = models.EmailField(blank=True, default='')
+
+    # ── Passcode placeholder (P2 T28) ──
+    passcode = models.CharField(max_length=128, blank=True, default='')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

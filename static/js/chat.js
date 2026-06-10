@@ -2374,7 +2374,8 @@ function navigateSidebar(viewName) {
     'privacy-security',
     'general-settings',
     'chat-folders',
-    'sessions-shortcuts'
+    'sessions-shortcuts',
+    'accounts-switcher'
   ];
   views.forEach(function(name) {
     var el = name === 'chat'
@@ -2396,6 +2397,10 @@ function navigateSidebar(viewName) {
   if (viewName === 'privacy-security' && typeof loadPrivacySettings === 'function') {
     setTimeout(function() { loadPrivacySettings(); }, 150);
   }
+  // Refresh account switcher list when navigating to it (P2 T11)
+  if (viewName === 'accounts-switcher') {
+    setTimeout(function() { renderAccountsSwitcher(); }, 50);
+  }
   // Re-render lucide icons after view switch
   if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
 }
@@ -2407,6 +2412,142 @@ function showSettingsPanel() {
 
 function hideSettingsPanel() {
   navigateSidebar('chat');
+}
+
+// ============================================================================
+// P2 T11: Multi-Account Add & Switch
+// ============================================================================
+
+function getSavedAccounts() {
+  try {
+    return JSON.parse(localStorage.getItem('ichat_accounts') || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveAccountToLocalList(user) {
+  if (!user || !user.username) return;
+  var accounts = getSavedAccounts();
+  // Remove existing entry for this username (dedup)
+  accounts = accounts.filter(function(a) { return a.username !== user.username; });
+  // Add to front
+  accounts.unshift({
+    username: user.username,
+    initials: user.initials || user.username[0].toUpperCase(),
+    email: user.email || '',
+    addedAt: Date.now()
+  });
+  // Keep max 10 accounts
+  if (accounts.length > 10) accounts = accounts.slice(0, 10);
+  try {
+    localStorage.setItem('ichat_accounts', JSON.stringify(accounts));
+  } catch (e) {
+    // localStorage full or unavailable
+  }
+}
+
+function removeSavedAccount(username) {
+  var accounts = getSavedAccounts().filter(function(a) { return a.username !== username; });
+  try {
+    localStorage.setItem('ichat_accounts', JSON.stringify(accounts));
+  } catch (e) {}
+}
+
+function autoSaveCurrentAccount() {
+  var keyScript = document.getElementById('ichat-key-manager-script');
+  if (!keyScript) return;
+  var username = keyScript.dataset.username;
+  if (!username) return;
+  var initials = username[0].toUpperCase();
+  var email = keyScript.dataset.email || '';
+  saveAccountToLocalList({ username: username, initials: initials, email: email });
+
+  // If coming from 'add account' flow, clear the URL param
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('add_account') === '1') {
+    params.delete('add_account');
+    var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, '', newUrl);
+    }
+  }
+}
+
+function renderAccountsSwitcher() {
+  var list = document.getElementById('accounts-switcher-list');
+  if (!list) return;
+  var accounts = getSavedAccounts();
+  var keyScript = document.getElementById('ichat-key-manager-script');
+  var currentUsername = keyScript ? keyScript.dataset.username : '';
+
+  list.innerHTML = '';
+
+  if (!accounts.length) {
+    list.innerHTML = '<div class="text-xs text-textSecondary text-center py-8">' +
+      (currentLanguage === 'zh' ? '暂无已保存的账号。点击下方按钮添加新账号。' : 'No saved accounts. Tap below to add one.') +
+      '</div>';
+    return;
+  }
+
+  accounts.forEach(function(acc) {
+    var isCurrent = acc.username === currentUsername;
+    var card = document.createElement('div');
+    card.className = 'account-card' + (isCurrent ? ' account-card-current' : '');
+    card.innerHTML =
+      '<div class="account-card-avatar">' + escapeHtml(acc.initials) + '</div>' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="text-sm font-semibold text-textMain truncate">' + escapeHtml(acc.username) +
+          (isCurrent ? ' <span class="text-[10px] text-brand-light dark:text-brand-dark font-medium ml-1">' + (currentLanguage === 'zh' ? '当前' : 'Current') + '</span>' : '') +
+        '</div>' +
+        '<div class="text-[11px] text-textSecondary truncate">' + (acc.email ? escapeHtml(acc.email) : '') + '</div>' +
+      '</div>';
+
+    if (!isCurrent) {
+      var btn = document.createElement('button');
+      btn.className = 'text-xs font-semibold text-brand-light dark:text-brand-dark hover:underline flex-shrink-0 ml-2';
+      btn.textContent = currentLanguage === 'zh' ? '切换' : 'Switch';
+      btn.onclick = function(e) {
+        e.stopPropagation();
+        switchToAccount(acc.username);
+      };
+      card.appendChild(btn);
+    }
+
+    // Long-press or right-click to remove
+    card.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+      if (isCurrent) {
+        window.showToast(currentLanguage === 'zh' ? '不能移除当前账号' : 'Cannot remove current account');
+        return;
+      }
+      var confirmMsg = currentLanguage === 'zh'
+        ? '确定从列表中移除账号 "' + acc.username + '" ？'
+        : 'Remove "' + acc.username + '" from the account list?';
+      if (window.confirm(confirmMsg)) {
+        removeSavedAccount(acc.username);
+        renderAccountsSwitcher();
+      }
+    });
+
+    list.appendChild(card);
+  });
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function switchToAccount(username) {
+  var msg = currentLanguage === 'zh'
+    ? '切换到账号 "' + username + '" ？当前会话将退出。'
+    : 'Switch to "' + username + '"? You will be logged out of the current account.';
+  if (!window.confirm(msg)) return;
+  // T11: logout then redirect to login to switch accounts
+  window.location.href = '/logout/?next=' + encodeURIComponent('/login/?next=/chat/');
+}
+
+function addNewAccount() {
+  // T11: logout first so login_view won't redirect authenticated users away
+  window.location.href = '/logout/?next=' + encodeURIComponent('/login/?next=/chat/?add_account=1');
 }
 
 // ============================================================================
@@ -3166,6 +3307,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   var keyScript = document.getElementById('ichat-key-manager-script');
   myUserId = keyScript ? parseInt(keyScript.dataset.currentUserId) : null;
+
+  // T11: Auto-save current account to multi-account list
+  autoSaveCurrentAccount();
 
   setupEventListeners();
   setupSidebarResizer();
@@ -4519,7 +4663,7 @@ function deleteAccount() {
   showPrivacyConfirmModal(title, desc, async function() {
     try {
       await apiFetch('/api/privacy/delete-account/', { method: 'POST' });
-      window.location.href = '/accounts/login/';
+      window.location.href = '/login/';
     } catch (err) {
       console.error('Failed to delete account:', err);
       window.showToast(currentLanguage === 'zh'

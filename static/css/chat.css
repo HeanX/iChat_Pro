@@ -1957,6 +1957,51 @@ input:checked + .slider:before {
   background-color: rgba(255, 255, 255, 0.03);
 }
 
+/* ==========================================================================
+   P2 T11: Multi-Account Card Styles
+   ========================================================================== */
+
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg, 14px);
+  border: 1px solid var(--color-border);
+  background: var(--color-sidebar-bg);
+  transition: background-color 0.15s, border-color 0.15s;
+  cursor: default;
+}
+
+.account-card:hover {
+  background: var(--color-search-bg);
+}
+
+.account-card-current {
+  border-color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.account-card-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-primary), #7c3aed);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.account-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Top-Right and Top-Left Buttons Active and Hover Highlighting */
 #chat-header-more-btn:hover,
 #chat-header-more-btn.active,

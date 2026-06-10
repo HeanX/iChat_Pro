@@ -27,9 +27,11 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Set DJANGO_DEBUG=False in production environments.
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = []
+_ALLOWED_HOSTS_RAW = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1')
+ALLOWED_HOSTS = [h.strip() for h in _ALLOWED_HOSTS_RAW.split(',') if h.strip()]
 
 
 # Application definition
@@ -72,6 +74,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'ichat_pro.context_processors.tailwind',
+                'ichat_pro.context_processors.settings_sidebar',
             ],
         },
     },
@@ -80,22 +83,67 @@ TEMPLATES = [
 WSGI_APPLICATION = 'ichat_pro.wsgi.application'
 ASGI_APPLICATION = 'ichat_pro.asgi.application'
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
-
-
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# In production, set DATABASE_URL=postgres://USER:PASSWORD@HOST:PORT/NAME
+_DATABASE_URL = os.environ.get('DATABASE_URL', '')
+if _DATABASE_URL:
+    import re as _re
+    _m = _re.match(
+        r'^(?P<engine>postgres|postgresql|mysql)://'
+        r'(?P<user>[^:]+):(?P<password>[^@]+)@'
+        r'(?P<host>[^:/]+):?(?P<port>\d+)?/(?P<name>.+)$',
+        _DATABASE_URL,
+    )
+    if _m:
+        _engine_map = {
+            'postgres': 'django.db.backends.postgresql',
+            'postgresql': 'django.db.backends.postgresql',
+            'mysql': 'django.db.backends.mysql',
+        }
+        DATABASES = {
+            'default': {
+                'ENGINE': _engine_map[_m.group('engine')],
+                'NAME': _m.group('name'),
+                'USER': _m.group('user'),
+                'PASSWORD': _m.group('password'),
+                'HOST': _m.group('host'),
+                'PORT': _m.group('port') or '',
+            }
+        }
+    else:
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': BASE_DIR / 'db.sqlite3',
+            }
+        }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+
+# Channel layer
+# In production, set REDIS_URL=redis://[:password@]host:port/db
+_REDIS_URL = os.environ.get('REDIS_URL', '')
+if _REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [_REDIS_URL],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 
 # Password validation

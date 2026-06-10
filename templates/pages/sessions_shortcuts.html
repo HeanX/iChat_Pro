@@ -1,83 +1,52 @@
 {# sessions_shortcuts.html - P2 T08 Active Sessions, Language, Keyboard Shortcuts #}
 <div class="divide-y divide-borderColor/60" id="sessions-shortcuts-root">
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 1: Active Sessions
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-4">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Active Sessions</h4>
     <p class="text-xs text-textSecondary">Devices currently logged into your account.</p>
 
     <div class="space-y-3">
-      {# Current device #}
-      <div class="p-3 bg-bgSearch rounded-custom-md border border-green-500/20">
+      {% for session in settings_active_sessions %}
+      <div class="p-3 bg-bgSearch rounded-custom-md {% if session.is_current %}border border-green-500/20{% else %}opacity-80{% endif %}">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-3 min-w-0">
-            <div class="w-10 h-10 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center flex-shrink-0">
-              <i data-lucide="monitor" class="w-5 h-5"></i>
+            <div class="w-10 h-10 rounded-full {% if session.is_current %}bg-green-500/10 text-green-500{% else %}bg-zinc-500/10 text-zinc-400{% endif %} flex items-center justify-center flex-shrink-0">
+              <i data-lucide="{% if session.is_current %}monitor{% else %}smartphone{% endif %}" class="w-5 h-5"></i>
             </div>
             <div class="min-w-0">
               <div class="text-sm font-semibold text-textMain flex items-center space-x-1.5">
-                <span>Windows / Chrome</span>
+                <span>Session {{ session.short_key }}</span>
+                {% if session.is_current %}
                 <span class="text-[9px] bg-green-500/15 text-green-600 dark:text-green-400 px-1.5 py-0.5 rounded-full font-medium">Current</span>
+                {% endif %}
               </div>
-              <div class="text-[10px] text-textSecondary">This browser · IP not exposed · Active now</div>
+              <div class="text-[10px] text-textSecondary">Expires {{ session.expires_at|date:"Y-m-d H:i" }}</div>
             </div>
           </div>
+          {% if session.is_current %}
           <button onclick="showToast(currentLanguage === 'zh' ? '无法终止当前会话' : 'Cannot terminate current session')"
             class="text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0 ml-2 font-semibold">
             Terminate
           </button>
-        </div>
-      </div>
-
-      {# Other device (placeholder) #}
-      <div class="p-3 bg-bgSearch rounded-custom-md opacity-70">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-3 min-w-0">
-            <div class="w-10 h-10 rounded-full bg-zinc-500/10 text-zinc-400 flex items-center justify-center flex-shrink-0">
-              <i data-lucide="smartphone" class="w-5 h-5"></i>
-            </div>
-            <div class="min-w-0">
-              <div class="text-sm font-semibold text-textMain">iPhone / Safari</div>
-              <div class="text-[10px] text-textSecondary">Shanghai, China · Last active: 2 days ago</div>
-            </div>
-          </div>
-          <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入 (P2 T36)' : 'Session management API is not connected yet (P2 T36)')"
+          {% else %}
+          <button data-session-id="{{ session.session_index }}" onclick="terminateSession(this.dataset.sessionId)"
             class="text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0 ml-2 font-semibold">
             Terminate
           </button>
+          {% endif %}
         </div>
       </div>
-
-      <div class="p-3 bg-bgSearch rounded-custom-md opacity-70">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-3 min-w-0">
-            <div class="w-10 h-10 rounded-full bg-zinc-500/10 text-zinc-400 flex items-center justify-center flex-shrink-0">
-              <i data-lucide="laptop" class="w-5 h-5"></i>
-            </div>
-            <div class="min-w-0">
-              <div class="text-sm font-semibold text-textMain">MacBook / Firefox</div>
-              <div class="text-[10px] text-textSecondary">Beijing, China · Last active: 5 days ago</div>
-            </div>
-          </div>
-          <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入 (P2 T36)' : 'Session management API is not connected yet (P2 T36)')"
-            class="text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0 ml-2 font-semibold">
-            Terminate
-          </button>
-        </div>
+      {% empty %}
+      <div class="p-3 bg-bgSearch rounded-custom-md text-sm text-textSecondary">
+        No active sessions found.
       </div>
+      {% endfor %}
     </div>
 
-    <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入 (P2 T36)' : 'Session management API is not connected yet (P2 T36)')"
+    <button onclick="terminateOtherSessions()"
       class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
       Terminate All Other Sessions
     </button>
   </div>
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 2: Language
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-3">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Language</h4>
 
@@ -126,10 +95,6 @@
       </label>
     </div>
   </div>
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 3: Keyboard Shortcuts (by category)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-4">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Keyboard Shortcuts</h4>
 
@@ -322,6 +287,50 @@
     // Translate toggle
     var translateToggle = document.querySelector('#sessions-shortcuts-root input[type=checkbox]');
     if (translateToggle) translateToggle.checked = !!s.show_translate;
+  }
+
+  function terminateSessionRequest(sessionId) {
+    return fetch('/api/sessions/terminate/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify({ session_id: String(sessionId) })
+    })
+      .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
+      .then(function(result) {
+        if (!result.ok) throw new Error(result.data && result.data.error ? result.data.error : 'Failed to terminate session');
+        return result.data;
+      });
+  }
+
+  function terminateSession(sessionId) {
+    terminateSessionRequest(sessionId)
+      .then(function() {
+        window.showToast(currentLanguage === 'zh' ? '会话已终止' : 'Session terminated');
+        window.location.reload();
+      })
+      .catch(function(err) {
+        window.showToast(err.message || (currentLanguage === 'zh' ? '终止会话失败' : 'Failed to terminate session'));
+      });
+  }
+
+  function terminateOtherSessions() {
+    var buttons = Array.prototype.slice.call(document.querySelectorAll('#sessions-shortcuts-root button[data-session-id]'));
+    var ids = buttons.map(function(button) { return button.dataset.sessionId; }).filter(Boolean);
+    if (!ids.length) {
+      window.showToast(currentLanguage === 'zh' ? '没有其他会话' : 'No other sessions');
+      return;
+    }
+    Promise.all(ids.map(terminateSessionRequest))
+      .then(function() {
+        window.showToast(currentLanguage === 'zh' ? '其他会话已终止' : 'Other sessions terminated');
+        window.location.reload();
+      })
+      .catch(function(err) {
+        window.showToast(err.message || (currentLanguage === 'zh' ? '终止会话失败' : 'Failed to terminate sessions'));
+      });
   }
 
   (function() { applySessionSettingsUI(loadSessionSettings()); })();

@@ -112,6 +112,23 @@ def _json_body(request):
         return {}
 
 
+def _parse_int(value, default=0, min_value=None, max_value=None):
+    """Safely parse an integer from user input.
+
+    Returns *default* on ValueError/TypeError instead of raising 500.
+    Optionally clamps to [min_value, max_value].
+    """
+    try:
+        result = int(value)
+    except (ValueError, TypeError):
+        return default
+    if min_value is not None:
+        result = max(min_value, result)
+    if max_value is not None:
+        result = min(max_value, result)
+    return result
+
+
 def _get_active_member(conversation_id, user):
     """Return active ConversationMember or None."""
     try:
@@ -373,8 +390,7 @@ def mute_conversation_view(request, conversation_id):
 
     if request.method == 'POST':
         data = _json_body(request)
-        duration_minutes = int(data.get('duration_minutes', 60))
-        duration_minutes = min(duration_minutes, 10080)  # max 7 days
+        duration_minutes = _parse_int(data.get('duration_minutes'), 60, min_value=1, max_value=10080)
         member.muted_until = timezone.now() + timezone.timedelta(minutes=duration_minutes)
         member.save(update_fields=['muted_until'])
         return JsonResponse({
@@ -473,8 +489,8 @@ def unread_conversation_view(request, conversation_id):
         return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
 
     data = _json_body(request)
-    count = int(data.get('unread_count', 1))
-    member.unread_count = max(1, min(count, 99))
+    count = _parse_int(data.get('unread_count'), 1, min_value=1, max_value=99)
+    member.unread_count = count
     member.save(update_fields=['unread_count'])
     return JsonResponse({'status': 'ok', 'unread_count': member.unread_count})
 
@@ -492,22 +508,66 @@ def forward_message_view(request, conversation_id):
     The server only stores ciphertext (E2EE preserved).
     Accepts the same payload as a normal send but includes metadata about
     the original message for the UI.
+
+    Validation mirrors the WebSocket send paths (ChatConsumer) to ensure
+    the same security checks apply regardless of transport.
     """
     data = _json_body(request)
     original_message_id = data.get('original_message_id')
     original_conversation_id = data.get('original_conversation_id')
 
-    # Validate sender is member of target conversation
+    # Validate sender is an active member of the target conversation
     member = _get_active_member(conversation_id, request.user)
     if not member:
         return JsonResponse({'error': 'Target conversation not found or not a member.'}, status=404)
 
-    # For private chat targets
     conversation = member.conversation
+
+    # Ensure the conversation itself is active
+    if conversation.status != Conversation.Status.ACTIVE:
+        return JsonResponse({'error': 'Target conversation is not active.'}, status=400)
+
+    # ── Private chat forwarding ──
     if conversation.type == Conversation.Type.SINGLE:
         peer_id = data.get('peer_id')
         if not peer_id:
             return JsonResponse({'error': 'peer_id is required for private chat.'}, status=400)
+
+        # Validate peer is an active member of this conversation
+        active_members = ConversationMember.objects.filter(
+            conversation=conversation,
+            status=ConversationMember.Status.ACTIVE,
+        )
+        if (
+            active_members.count() != 2
+            or not active_members.filter(user_id=request.user.id).exists()
+            or not active_members.filter(user_id=peer_id).exists()
+        ):
+            return JsonResponse({'error': 'Peer is not a member of this conversation.'}, status=403)
+
+        # Block/contact enforcement (mirrors WebSocket consumers.py:383-419)
+        from accounts.models import BlockedUser, Contact
+        blocked = (
+            BlockedUser.objects.filter(blocker=peer_id, blocked=request.user.id).exists()
+            or BlockedUser.objects.filter(blocker=request.user.id, blocked=peer_id).exists()
+        )
+        if blocked:
+            return JsonResponse({'error': 'Cannot send messages due to block relationship.'}, status=403)
+        is_contact = (
+            Contact.objects.filter(user=request.user.id, contact=peer_id).exists()
+            or Contact.objects.filter(user=peer_id, contact=request.user.id).exists()
+        )
+        if not is_contact:
+            return JsonResponse({'error': 'Cannot send messages to non-contacts.'}, status=403)
+
+        # Validate required ciphertext fields
+        ciphertext = data.get('ciphertext', '')
+        nonce = data.get('nonce', '')
+        algorithm = data.get('algorithm', 'AES-256-GCM')
+        if not ciphertext or not nonce:
+            return JsonResponse({'error': 'ciphertext and nonce are required.'}, status=400)
+        if algorithm not in ('AES-256-GCM', 'AES-128-GCM', 'ChaCha20-Poly1305'):
+            return JsonResponse({'error': f'Unsupported algorithm: {algorithm}.'}, status=400)
 
         try:
             EncryptedMessage.objects.create(
@@ -515,10 +575,10 @@ def forward_message_view(request, conversation_id):
                 sender=request.user,
                 receiver_id=peer_id,
                 message_type=data.get('message_type', EncryptedMessage.MessageType.TEXT),
-                ciphertext=data.get('ciphertext', ''),
-                nonce=data.get('nonce', ''),
+                ciphertext=ciphertext,
+                nonce=nonce,
                 auth_tag=data.get('auth_tag', ''),
-                algorithm=data.get('algorithm', 'AES-256-GCM'),
+                algorithm=algorithm,
                 sender_key_version=data.get('sender_key_version'),
                 receiver_key_version=data.get('receiver_key_version'),
                 client_message_id=data.get('client_message_id', ''),
@@ -541,8 +601,33 @@ def forward_message_view(request, conversation_id):
         except (ValueError, KeyError) as e:
             return JsonResponse({'error': f'Invalid payload: {e}'}, status=400)
 
-    # For group chat targets
+    # ── Group chat forwarding ──
     elif conversation.type == Conversation.Type.GROUP:
+        # Mute enforcement (mirrors WebSocket consumers.py:722-726)
+        if conversation.muted_until and conversation.muted_until > timezone.now():
+            if member.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+                return JsonResponse({'error': 'This group is muted.'}, status=403)
+
+        # Validate recipients match active members (mirrors consumers.py:728-732)
+        recipients = data.get('recipients', [])
+        if not recipients:
+            return JsonResponse({'error': 'recipients are required for group chat.'}, status=400)
+
+        active_member_ids = set(
+            ConversationMember.objects.filter(
+                conversation=conversation,
+                status=ConversationMember.Status.ACTIVE,
+            ).values_list('user_id', flat=True)
+        )
+        recipient_user_ids = {r.get('receiver_id') for r in recipients if r.get('receiver_id')}
+        if recipient_user_ids != active_member_ids:
+            return JsonResponse({'error': 'Recipients must match current active members.'}, status=400)
+
+        # Validate membership_version
+        client_membership_version = data.get('membership_version')
+        if client_membership_version is not None and client_membership_version != conversation.membership_version:
+            return JsonResponse({'error': 'Membership version mismatch. Please refresh.'}, status=409)
+
         group_message = GroupMessage.objects.create(
             conversation=conversation,
             sender=request.user,
@@ -550,31 +635,29 @@ def forward_message_view(request, conversation_id):
             client_message_id=data.get('client_message_id', ''),
             reply_to_message_id=original_message_id,
         )
-        recipients = data.get('recipients', [])
-        if recipients:
-            recipient_objs = [
-                GroupMessageRecipient(
-                    group_message=group_message,
-                    receiver_id=r['receiver_id'],
-                    ciphertext=r.get('ciphertext', ''),
-                    nonce=r.get('nonce', ''),
-                    auth_tag=r.get('auth_tag', ''),
-                    algorithm=r.get('algorithm', 'AES-256-GCM'),
-                    sender_key_version=r.get('sender_key_version'),
-                    receiver_key_version=r.get('receiver_key_version'),
-                    membership_version=data.get('membership_version'),
-                )
-                for r in recipients
-            ]
-            GroupMessageRecipient.objects.bulk_create(recipient_objs)
+        recipient_objs = [
+            GroupMessageRecipient(
+                group_message=group_message,
+                receiver_id=r['receiver_id'],
+                ciphertext=r.get('ciphertext', ''),
+                nonce=r.get('nonce', ''),
+                auth_tag=r.get('auth_tag', ''),
+                algorithm=r.get('algorithm', 'AES-256-GCM'),
+                sender_key_version=r.get('sender_key_version'),
+                receiver_key_version=r.get('receiver_key_version'),
+                membership_version=client_membership_version,
+            )
+            for r in recipients
+        ]
+        GroupMessageRecipient.objects.bulk_create(recipient_objs)
 
-            active_members = ConversationMember.objects.filter(
-                conversation=conversation,
-                status=ConversationMember.Status.ACTIVE,
-            )
-            active_members.exclude(user=request.user).update(
-                unread_count=F('unread_count') + 1,
-            )
+        active_members = ConversationMember.objects.filter(
+            conversation=conversation,
+            status=ConversationMember.Status.ACTIVE,
+        )
+        active_members.exclude(user=request.user).update(
+            unread_count=F('unread_count') + 1,
+        )
 
         conversation.last_message_id = group_message.pk
         conversation.last_message_at = group_message.created_at
@@ -879,15 +962,17 @@ def update_group_view(request, conversation_id):
         return JsonResponse({"error": "Method not allowed."}, status=405)
 
     member = _get_member(conversation_id, request.user)
-    if not member or member.role != ConversationMember.Role.OWNER:
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({"error": "Not an active member of this group."}, status=403)
+    if member.role != ConversationMember.Role.OWNER:
         return JsonResponse({"error": "Only the group owner can update the group."}, status=403)
 
     try:
         conversation = Conversation.objects.get(
-            id=conversation_id, type=Conversation.Type.GROUP
+            id=conversation_id, type=Conversation.Type.GROUP, status=Conversation.Status.ACTIVE,
         )
     except Conversation.DoesNotExist:
-        return JsonResponse({"error": "Group not found."}, status=404)
+        return JsonResponse({"error": "Group not found or not active."}, status=404)
 
     data = _json_body(request)
     if "name" in data:
@@ -910,15 +995,17 @@ def invite_member_view(request, conversation_id):
         return JsonResponse({"error": "Method not allowed."}, status=405)
 
     actor = _get_member(conversation_id, request.user)
-    if not actor or actor.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+    if not actor or actor.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({"error": "Not an active member of this group."}, status=403)
+    if actor.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
         return JsonResponse({"error": "Permission denied."}, status=403)
 
     try:
         conversation = Conversation.objects.get(
-            id=conversation_id, type=Conversation.Type.GROUP
+            id=conversation_id, type=Conversation.Type.GROUP, status=Conversation.Status.ACTIVE,
         )
     except Conversation.DoesNotExist:
-        return JsonResponse({"error": "Group not found."}, status=404)
+        return JsonResponse({"error": "Group not found or not active."}, status=404)
 
     data = _json_body(request)
     user_id = data.get("user_id")
@@ -956,12 +1043,15 @@ def invite_member_view(request, conversation_id):
 
 @login_required(login_url='login')
 def remove_member_view(request, conversation_id):
-    """Remove a member from a group. Owner / admin only. Cannot remove owner."""
+    """Remove a member from a group. Owner / admin only.
+    Only the owner can remove admins; admins can only remove regular members."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed."}, status=405)
 
     actor = _get_member(conversation_id, request.user)
-    if not actor or actor.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+    if not actor or actor.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({"error": "You are not an active member of this group."}, status=403)
+    if actor.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
         return JsonResponse({"error": "Permission denied."}, status=403)
 
     data = _json_body(request)
@@ -975,6 +1065,10 @@ def remove_member_view(request, conversation_id):
 
     if target_member.role == ConversationMember.Role.OWNER:
         return JsonResponse({"error": "Cannot remove the group owner."}, status=403)
+
+    # Admins can only remove regular members; only the owner can remove admins
+    if target_member.role == ConversationMember.Role.ADMIN and actor.role != ConversationMember.Role.OWNER:
+        return JsonResponse({"error": "Only the group owner can remove admins."}, status=403)
 
     target_member.status = ConversationMember.Status.REMOVED
     target_member.left_at = timezone.now()
@@ -1007,15 +1101,17 @@ def disband_group_view(request, conversation_id):
         return JsonResponse({"error": "Method not allowed."}, status=405)
 
     member = _get_member(conversation_id, request.user)
-    if not member or member.role != ConversationMember.Role.OWNER:
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({"error": "Not an active member of this group."}, status=403)
+    if member.role != ConversationMember.Role.OWNER:
         return JsonResponse({"error": "Only the group owner can disband the group."}, status=403)
 
     try:
         conversation = Conversation.objects.get(
-            id=conversation_id, type=Conversation.Type.GROUP
+            id=conversation_id, type=Conversation.Type.GROUP, status=Conversation.Status.ACTIVE,
         )
     except Conversation.DoesNotExist:
-        return JsonResponse({"error": "Group not found."}, status=404)
+        return JsonResponse({"error": "Group not found or not active."}, status=404)
 
     conversation.status = Conversation.Status.DELETED
     conversation.membership_version = F('membership_version') + 1
@@ -1026,6 +1122,66 @@ def disband_group_view(request, conversation_id):
         change='group_dissolved',
         actor_id=request.user.pk,
         affected_user_id=None,
+        membership_version=conversation.membership_version,
+    )
+
+    return JsonResponse({"status": "ok"})
+
+
+@login_required(login_url='login')
+def leave_group_view(request, conversation_id):
+    """Leave a group. Any active member can leave."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed."}, status=405)
+
+    member = _get_member(conversation_id, request.user)
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({"error": "You are not a member of this group."}, status=403)
+
+    try:
+        conversation = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({"error": "Group not found."}, status=404)
+
+    # If owner and has other members, require transfer first
+    if member.role == ConversationMember.Role.OWNER:
+        other_active = ConversationMember.objects.filter(
+            conversation=conversation,
+            status=ConversationMember.Status.ACTIVE,
+        ).exclude(user=request.user).exists()
+        if other_active:
+            return JsonResponse(
+                {"error": "You are the owner. Transfer ownership before leaving."},
+                status=403,
+            )
+        # Owner is the only member — disband instead
+        conversation.status = Conversation.Status.DELETED
+        conversation.membership_version = F('membership_version') + 1
+        conversation.save(update_fields=["status", "membership_version", "updated_at"])
+        conversation.refresh_from_db(fields=['membership_version'])
+        _broadcast_member_change(
+            group_id=conversation.pk,
+            change='group_dissolved',
+            actor_id=request.user.pk,
+            affected_user_id=None,
+            membership_version=conversation.membership_version,
+        )
+        return JsonResponse({"status": "ok", "group_dissolved": True})
+
+    member.status = ConversationMember.Status.LEFT
+    member.left_at = timezone.now()
+    member.save(update_fields=["status", "left_at"])
+
+    conversation.membership_version = F('membership_version') + 1
+    conversation.save(update_fields=['membership_version', 'updated_at'])
+    conversation.refresh_from_db(fields=['membership_version'])
+    _broadcast_member_change(
+        group_id=conversation.pk,
+        change='member_left',
+        actor_id=request.user.pk,
+        affected_user_id=request.user.pk,
         membership_version=conversation.membership_version,
     )
 
@@ -1099,7 +1255,7 @@ def group_messages_view(request, conversation_id):
         )
 
     page_number = request.GET.get("page", 1)
-    per_page = min(int(request.GET.get("per_page", 30)), 100)
+    per_page = _parse_int(request.GET.get("per_page"), 30, min_value=1, max_value=100)
 
     # Filter out deleted messages for this user
     deleted_ids = set(
@@ -1211,7 +1367,7 @@ def conversation_messages_view(request, conversation_id):
             )
 
     page_number = request.GET.get("page", 1)
-    per_page = min(int(request.GET.get("per_page", 30)), 100)
+    per_page = _parse_int(request.GET.get("per_page"), 30, min_value=1, max_value=100)
 
     # Filter out deleted messages for this user
     deleted_ids = set(
@@ -1767,7 +1923,7 @@ def auto_delete_setting_view(request):
         })
     if request.method == 'PUT':
         data = _json_body(request)
-        seconds = None if data.get('disabled') else int(data.get('seconds', 0) or 0)
+        seconds = None if data.get('disabled') else _parse_int(data.get('seconds', 0) or 0, 0, min_value=0)
         seconds = seconds if seconds and seconds > 0 else None
         Conversation.objects.filter(
             type=Conversation.Type.SINGLE,
@@ -1948,7 +2104,7 @@ def conversation_auto_delete_view(request, conversation_id):
         })
     if request.method == 'PUT':
         data = _json_body(request)
-        seconds = None if data.get('disabled') else int(data.get('seconds', 0) or 0)
+        seconds = None if data.get('disabled') else _parse_int(data.get('seconds', 0) or 0, 0, min_value=0)
         seconds = seconds if seconds and seconds > 0 else None
         member.auto_delete_seconds = seconds
         member.save(update_fields=['auto_delete_seconds'])
@@ -2053,11 +2209,18 @@ def _require_admin(conversation_id, user):
 @login_required(login_url='login')
 @require_POST
 def group_promote_view(request, conversation_id, user_id):
-    """Promote a member to admin. Owner or admin only."""
-    result, err = _require_admin(conversation_id, request.user)
-    if err:
-        return err
-    _, conv = result
+    """Promote a member to admin. Owner only."""
+    member = _get_member(conversation_id, request.user)
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({'error': 'Not an active member of this group.'}, status=403)
+    if member.role != ConversationMember.Role.OWNER:
+        return JsonResponse({'error': 'Only the group owner can set admins.'}, status=403)
+    try:
+        conv = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP, status=Conversation.Status.ACTIVE,
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({'error': 'Group not found or not active.'}, status=404)
     target = _get_member(conversation_id, user_id)
     if not target or target.status != ConversationMember.Status.ACTIVE:
         return JsonResponse({'error': 'Target not a member.'}, status=404)
@@ -2075,8 +2238,16 @@ def group_promote_view(request, conversation_id, user_id):
 def group_demote_view(request, conversation_id, user_id):
     """Demote an admin to member. Owner only."""
     member = _get_member(conversation_id, request.user)
-    if not member or member.role != ConversationMember.Role.OWNER:
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({'error': 'Not an active member of this group.'}, status=403)
+    if member.role != ConversationMember.Role.OWNER:
         return JsonResponse({'error': 'Only the owner can demote admins.'}, status=403)
+    try:
+        conv = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP, status=Conversation.Status.ACTIVE,
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({'error': 'Group not found or not active.'}, status=404)
     target = _get_member(conversation_id, user_id)
     if not target or target.status != ConversationMember.Status.ACTIVE:
         return JsonResponse({'error': 'Target not a member.'}, status=404)
@@ -2084,7 +2255,6 @@ def group_demote_view(request, conversation_id, user_id):
         return JsonResponse({'error': 'Target is not an admin.'}, status=409)
     target.role = ConversationMember.Role.MEMBER
     target.save(update_fields=['role'])
-    conv = Conversation.objects.get(id=conversation_id)
     conv.membership_version = F('membership_version') + 1
     conv.save(update_fields=['membership_version', 'updated_at'])
     return JsonResponse({'status': 'ok', 'user_id': user_id, 'role': 'member'})
@@ -2096,8 +2266,16 @@ def group_transfer_view(request, conversation_id):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed.'}, status=405)
     member = _get_member(conversation_id, request.user)
-    if not member or member.role != ConversationMember.Role.OWNER:
+    if not member or member.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({'error': 'Not an active member of this group.'}, status=403)
+    if member.role != ConversationMember.Role.OWNER:
         return JsonResponse({'error': 'Only the owner can transfer ownership.'}, status=403)
+    try:
+        conv = Conversation.objects.get(
+            id=conversation_id, type=Conversation.Type.GROUP, status=Conversation.Status.ACTIVE,
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({'error': 'Group not found or not active.'}, status=404)
     data = _json_body(request)
     new_owner_id = data.get('user_id')
     if not new_owner_id:
@@ -2111,7 +2289,6 @@ def group_transfer_view(request, conversation_id):
     member.save(update_fields=['role'])
     target.role = ConversationMember.Role.OWNER
     target.save(update_fields=['role'])
-    conv = Conversation.objects.get(id=conversation_id)
     conv.membership_version = F('membership_version') + 1
     conv.save(update_fields=['membership_version', 'updated_at'])
     return JsonResponse({'status': 'ok', 'new_owner_id': new_owner_id})
@@ -2119,16 +2296,21 @@ def group_transfer_view(request, conversation_id):
 
 @login_required(login_url='login')
 def group_announcement_view(request, conversation_id):
-    """GET: get active announcement. POST: create/replace. DELETE: remove."""
+    """GET: get active announcement (all members).
+    POST: create/replace (admin+). DELETE: remove (admin+)."""
     member = _get_member(conversation_id, request.user)
     if not member or member.status != ConversationMember.Status.ACTIVE:
         return JsonResponse({'error': 'Not a member.'}, status=403)
-    if member.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
-        return JsonResponse({'error': 'Admin permission required.'}, status=403)
+
     try:
         conv = Conversation.objects.get(id=conversation_id, type=Conversation.Type.GROUP)
     except Conversation.DoesNotExist:
         return JsonResponse({'error': 'Group not found.'}, status=404)
+
+    # GET allowed for any active member; mutation methods require admin+
+    if request.method in ('POST', 'DELETE'):
+        if member.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+            return JsonResponse({'error': 'Admin permission required.'}, status=403)
 
     if request.method == 'GET':
         ann = GroupAnnouncement.objects.filter(
@@ -2175,8 +2357,7 @@ def group_mute_view(request, conversation_id):
     _, conv = result
     if request.method == 'POST':
         data = _json_body(request)
-        mins = int(data.get('duration_minutes', 60))
-        mins = min(mins, 10080)
+        mins = _parse_int(data.get('duration_minutes'), 60, min_value=1, max_value=10080)
         conv.muted_until = timezone.now() + timezone.timedelta(minutes=mins)
         conv.save(update_fields=['muted_until'])
         return JsonResponse({'status': 'ok', 'muted_until': conv.muted_until.isoformat()})

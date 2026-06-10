@@ -166,44 +166,32 @@ def login_view(request):
                 return redirect(next_url)
 
             # credentials were valid format but authenticate returned None
-            if target is not None:
-                if not target.is_active:
+            if target is not None and not target.is_active:
+                messages.error(
+                    request,
+                    'This account has been disabled. '
+                    'Please contact an administrator.',
+                )
+            else:
+                # Use a generic message to prevent account enumeration
+                messages.error(
+                    request,
+                    'Invalid username or password. Please try again.',
+                )
+        else:
+            # Distinguish between missing fields and bad credentials
+            if username and password:
+                if target is not None and not target.is_active:
                     messages.error(
                         request,
                         'This account has been disabled. '
                         'Please contact an administrator.',
                     )
                 else:
+                    # Use a generic message to prevent account enumeration
                     messages.error(
                         request,
-                        'Invalid password. Please try again.',
-                    )
-            else:
-                messages.error(
-                    request,
-                    'No account found with that username. '
-                    'Please check and try again.',
-                )
-        else:
-            # Distinguish between missing fields and bad credentials
-            if username and password:
-                if target is not None:
-                    if not target.is_active:
-                        messages.error(
-                            request,
-                            'This account has been disabled. '
-                            'Please contact an administrator.',
-                        )
-                    else:
-                        messages.error(
-                            request,
-                            'Invalid password. Please try again.',
-                        )
-                else:
-                    messages.error(
-                        request,
-                        'No account found with that username. '
-                        'Please check and try again.',
+                        'Invalid username or password. Please try again.',
                     )
             else:
                 for field, errors in form.errors.items():
@@ -419,6 +407,62 @@ def friend_request_reject(request, request_id):
         f'Friend request from {friend_request.sender.username} rejected.',
     )
     return redirect('contacts')
+
+
+@login_required(login_url='login')
+@require_http_methods(['POST'])
+def friend_request_cancel(request, user_id):
+    """Cancel an outgoing friend request to the given user. JSON API for T17."""
+    friend_request = get_object_or_404(
+        FriendRequest,
+        sender=request.user,
+        receiver_id=user_id,
+        status=FriendRequest.Status.PENDING,
+    )
+    friend_request.status = FriendRequest.Status.REJECTED
+    friend_request.save()
+    return JsonResponse({'status': 'ok'})
+
+
+@login_required(login_url='login')
+@require_http_methods(['POST'])
+def friend_request_accept_by_user(request, user_id):
+    """Accept an incoming friend request from the given user. JSON API for T17."""
+    friend_request = get_object_or_404(
+        FriendRequest,
+        sender_id=user_id,
+        receiver=request.user,
+        status=FriendRequest.Status.PENDING,
+    )
+
+    with transaction.atomic():
+        friend_request.status = FriendRequest.Status.ACCEPTED
+        friend_request.save()
+        Contact.objects.get_or_create(
+            user=friend_request.sender,
+            contact=friend_request.receiver,
+        )
+        _ensure_single_conversation(
+            friend_request.sender,
+            friend_request.receiver,
+        )
+
+    return JsonResponse({'status': 'ok', 'username': friend_request.sender.username})
+
+
+@login_required(login_url='login')
+@require_http_methods(['POST'])
+def friend_request_reject_by_user(request, user_id):
+    """Reject an incoming friend request from the given user. JSON API for T17."""
+    friend_request = get_object_or_404(
+        FriendRequest,
+        sender_id=user_id,
+        receiver=request.user,
+        status=FriendRequest.Status.PENDING,
+    )
+    friend_request.status = FriendRequest.Status.REJECTED
+    friend_request.save()
+    return JsonResponse({'status': 'ok'})
 
 
 @login_required(login_url='login')
@@ -994,36 +1038,80 @@ def multi_account_update_view(request):
 @login_required
 @require_GET
 def session_list_view(request):
-    """List active sessions for the current user."""
+    """List active sessions for the current user.
+
+    Returns opaque session IDs (index-based) rather than real session keys.
+    """
     from django.contrib.sessions.models import Session
     sessions = Session.objects.filter(expire_date__gte=timezone.now())
     results = []
-    for s in sessions:
-        data = s.get_decoded()
-        if data.get('_auth_user_id') == str(request.user.id):
-            results.append({
-                'session_key': s.session_key[:20] + '...',
-                'created': s.expire_date.strftime('%Y-%m-%d %H:%M'),
-                'is_current': s.session_key == request.session.session_key,
-            })
+    # Build a temporary index → session_key mapping, stored server-side in
+    # the request session so terminate_view can resolve the real key later.
+    index_map = {}
+    idx = 0
+    for s in sessions.order_by('-expire_date'):
+        try:
+            data = s.get_decoded()
+        except Exception:
+            continue
+        if data.get('_auth_user_id') != str(request.user.id):
+            continue
+        idx += 1
+        opaque_id = f'sid_{idx}'
+        index_map[opaque_id] = s.session_key
+        results.append({
+            'session_id': opaque_id,
+            'created': s.expire_date.strftime('%Y-%m-%d %H:%M'),
+            'is_current': s.session_key == request.session.session_key,
+        })
+    # Stash the mapping in the current session so terminate_view can resolve
+    request.session['_session_index_map'] = index_map
     return JsonResponse({'sessions': results})
 
 
 @login_required
 @require_http_methods(['POST'])
 def session_terminate_view(request):
-    """Terminate a specific session."""
+    """Terminate a specific session. Verifies session ownership before deleting."""
     from django.contrib.sessions.models import Session
-    session_key = (_json_body(request) or {}).get('session_key', '')
-    if not session_key:
-        return JsonResponse({'error': 'session_key required'}, status=400)
+    payload = _json_body(request) or {}
+    session_id = payload.get('session_id', '')
+
+    if not session_id:
+        return JsonResponse({'error': 'session_id required'}, status=400)
+
+    # Resolve opaque session_id → real session_key via server-side index map
+    index_map = request.session.get('_session_index_map', {})
+    real_key = index_map.get(session_id)
+
+    if not real_key:
+        return JsonResponse({'error': 'Session not found or not yours.'}, status=404)
+
     # Don't allow terminating current session via this endpoint
-    full_key = request.session.session_key or ''
-    if session_key == full_key[:20] + '...':
+    current_key = request.session.session_key or ''
+    if real_key == current_key:
         return JsonResponse({'error': 'Use logout to end current session'}, status=400)
-    Session.objects.filter(
-        session_key__startswith=session_key.replace('...', ''),
-    ).delete()
+
+    # Verify ownership: decode the session and check _auth_user_id
+    try:
+        target_session = Session.objects.get(session_key=real_key)
+    except Session.DoesNotExist:
+        return JsonResponse({'error': 'Session not found.'}, status=404)
+
+    try:
+        data = target_session.get_decoded()
+    except Exception:
+        # Corrupt session data — delete it anyway
+        target_session.delete()
+        return JsonResponse({'terminated': True})
+
+    if data.get('_auth_user_id') != str(request.user.id):
+        return JsonResponse({'error': 'Session not found or not yours.'}, status=404)
+
+    target_session.delete()
+    # Clean up the index map from current session
+    index_map.pop(session_id, None)
+    request.session['_session_index_map'] = index_map
     return JsonResponse({'terminated': True})
 
 

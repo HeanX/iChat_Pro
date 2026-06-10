@@ -409,7 +409,7 @@ class LoginViewTests(TestCase):
             'password': 'wrongpassword1',
         })
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Invalid password')
+        self.assertContains(response, 'Invalid username or password')
 
     def test_login_nonexistent_user(self):
         response = self.client.post(self.LOGIN_URL, {
@@ -417,7 +417,7 @@ class LoginViewTests(TestCase):
             'password': 'whatever1',
         })
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'No account found')
+        self.assertContains(response, 'Invalid username or password')
 
     def test_login_disabled_account(self):
         response = self.client.post(self.LOGIN_URL, {

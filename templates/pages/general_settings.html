@@ -1,0 +1,316 @@
+{# general_settings.html — P2 T07 General/Appearance Settings #}
+<div class="divide-y divide-borderColor/60" id="general-settings-root">
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 1: Theme & Appearance
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Appearance</h4>
+
+    {# Theme Mode #}
+    <div class="space-y-2">
+      <span class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider">Theme Mode</span>
+      <div class="grid grid-cols-3 gap-2">
+        <button onclick="setThemeMode('light')" data-theme-btn="light"
+          class="p-3 rounded-custom-md border text-center transition-all hover:border-brand-light bg-white text-zinc-800"
+          id="theme-btn-light">
+          <i data-lucide="sun" class="w-5 h-5 mx-auto mb-1"></i>
+          <span class="text-[10px] font-semibold">Light</span>
+        </button>
+        <button onclick="setThemeMode('dark')" data-theme-btn="dark"
+          class="p-3 rounded-custom-md border text-center transition-all hover:border-brand-light bg-zinc-800 text-white"
+          id="theme-btn-dark">
+          <i data-lucide="moon" class="w-5 h-5 mx-auto mb-1"></i>
+          <span class="text-[10px] font-semibold">Dark</span>
+        </button>
+        <button onclick="setThemeMode('system')" data-theme-btn="system"
+          class="p-3 rounded-custom-md border text-center transition-all hover:border-brand-light bg-gradient-to-b from-white to-zinc-700 text-zinc-600"
+          id="theme-btn-system">
+          <i data-lucide="monitor" class="w-5 h-5 mx-auto mb-1"></i>
+          <span class="text-[10px] font-semibold">System</span>
+        </button>
+      </div>
+    </div>
+
+    {# Accent Color #}
+    <div class="space-y-2">
+      <span class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider">Accent Color</span>
+      <div class="flex items-center space-x-3">
+        {% with 'blue green purple red orange' as colors %}
+        {% for color in colors.split %}
+        <button onclick="setAccentColor('{{ color }}')" data-accent-btn="{{ color }}"
+          class="w-8 h-8 rounded-full bg-{{ color }}-500 hover:scale-110 transition-transform flex items-center justify-center"
+          id="accent-btn-{{ color }}">
+          <i data-lucide="check" class="w-4 h-4 text-white hidden" id="accent-check-{{ color }}"></i>
+        </button>
+        {% endfor %}
+        {% endwith %}
+      </div>
+    </div>
+
+    {# Chat Wallpaper #}
+    <div class="space-y-2">
+      <span class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider">Chat Wallpaper</span>
+      <div class="flex items-center space-x-2">
+        <button onclick="setWallpaper('#ffffff')" data-wallpaper-btn="#ffffff" id="wallpaper-btn-#ffffff"
+          class="w-10 h-10 rounded-lg border-2 bg-white hover:scale-105 transition-transform"></button>
+        <button onclick="setWallpaper('#f0f4f8')" data-wallpaper-btn="#f0f4f8" id="wallpaper-btn-#f0f4f8"
+          class="w-10 h-10 rounded-lg border-2 bg-[#f0f4f8] hover:scale-105 transition-transform"></button>
+        <button onclick="setWallpaper('#e8f5e9')" data-wallpaper-btn="#e8f5e9" id="wallpaper-btn-#e8f5e9"
+          class="w-10 h-10 rounded-lg border-2 bg-[#e8f5e9] hover:scale-105 transition-transform"></button>
+        <button onclick="setWallpaper('#fff3e0')" data-wallpaper-btn="#fff3e0" id="wallpaper-btn-#fff3e0"
+          class="w-10 h-10 rounded-lg border-2 bg-[#fff3e0] hover:scale-105 transition-transform"></button>
+        <button onclick="setWallpaper('#fce4ec')" data-wallpaper-btn="#fce4ec" id="wallpaper-btn-#fce4ec"
+          class="w-10 h-10 rounded-lg border-2 bg-[#fce4ec] hover:scale-105 transition-transform"></button>
+        <button onclick="setWallpaper('default')" data-wallpaper-btn="default" id="wallpaper-btn-default"
+          class="w-10 h-10 rounded-lg border-2 bg-bgMain flex items-center justify-center hover:scale-105 transition-transform">
+          <i data-lucide="rotate-ccw" class="w-4 h-4 text-textSecondary"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 2: Text & Display
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <div class="px-4 py-4 space-y-4">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Text & Display</h4>
+
+    {# Message Text Size #}
+    <div class="space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-textMain">Message Text Size</span>
+        <span class="text-xs font-bold text-brand-light dark:text-brand-dark" id="font-size-val">16px</span>
+      </div>
+      <input type="range" min="12" max="24" value="16" step="1" id="font-size-slider"
+        class="w-full h-1.5 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-brand-light dark:accent-brand-dark"
+        oninput="updateMessageFontSize(this.value)">
+      <div class="flex justify-between text-[9px] text-textSecondary">
+        <span>12px</span><span>16px</span><span>20px</span><span>24px</span>
+      </div>
+      {# Preview #}
+      <div class="p-3 bg-bgSearch rounded-custom-md mt-2" id="font-size-preview">
+        <p class="text-textMain" style="font-size: 16px">The quick brown fox jumps over the lazy dog.</p>
+      </div>
+    </div>
+
+    {# Time Format #}
+    <div class="flex items-center justify-between py-2">
+      <span class="text-sm font-medium text-textMain">Time Format</span>
+      <div class="flex bg-bgSearch rounded-full p-0.5">
+        <button onclick="setTimeFormat('12h')" data-time-btn="12h" id="time-btn-12h"
+          class="px-3 py-1 rounded-full text-xs font-semibold transition-colors">12h</button>
+        <button onclick="setTimeFormat('24h')" data-time-btn="24h" id="time-btn-24h"
+          class="px-3 py-1 rounded-full text-xs font-semibold transition-colors">24h</button>
+      </div>
+    </div>
+  </div>
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 3: Power & Performance
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <div class="px-4 py-4 space-y-3">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Power & Performance</h4>
+
+    {# Power Saving Mode #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Power Saving Mode</span>
+        <p class="text-[10px] text-textSecondary">Reduce animations and background activity</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="power-saving-toggle" onchange="togglePowerSaving(this.checked)" data-power-saving>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    {# Animations #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Reduce Motion</span>
+        <p class="text-[10px] text-textSecondary">Minimize transition and animation effects</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="reduce-motion-toggle" onchange="toggleReduceMotion(this.checked)" data-reduce-motion>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 4: Reset
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <div class="px-4 py-4">
+    <button onclick="resetGeneralSettings()"
+      class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+      Reset All Appearance Settings
+    </button>
+  </div>
+
+</div>
+
+{# ── Toggle Switch Styles ── #}
+<style>
+  .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
+  .toggle-switch input { opacity:0; width:0; height:0 }
+  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
+  .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
+  .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
+  .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
+  .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
+</style>
+
+{# ── General Settings JavaScript ── #}
+<script>
+  var GENERAL_DEFAULTS = {
+    theme: 'system',
+    accent_color: 'blue',
+    wallpaper: 'default',
+    message_font_size: '16',
+    time_format: '24h',
+    power_saving: false,
+    reduce_motion: false
+  };
+
+  function loadGeneralSettings() {
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('ichat_general') || '{}'); } catch(e) {}
+    var s = Object.assign({}, GENERAL_DEFAULTS, saved);
+    return s;
+  }
+
+  function saveGeneralSettings(settings) {
+    var current = loadGeneralSettings();
+    var merged = Object.assign({}, current, settings);
+    localStorage.setItem('ichat_general', JSON.stringify(merged));
+    applyGeneralSettingsUI(merged);
+  }
+
+  function applyGeneralSettingsUI(s) {
+    // Theme buttons
+    ['light','dark','system'].forEach(function(t) {
+      var btn = document.getElementById('theme-btn-' + t);
+      if (btn) btn.style.outline = s.theme === t ? '2px solid var(--color-primary)' : '2px solid transparent';
+    });
+
+    // Accent color
+    ['blue','green','purple','red','orange'].forEach(function(c) {
+      var check = document.getElementById('accent-check-' + c);
+      if (check) {
+        if (s.accent_color === c) check.classList.remove('hidden');
+        else check.classList.add('hidden');
+      }
+    });
+
+    // Wallpaper — HTML id uses "#" (e.g. wallpaper-btn-#ffffff), match exactly
+    ['#ffffff','#f0f4f8','#e8f5e9','#fff3e0','#fce4ec','default'].forEach(function(w) {
+      var btn = document.getElementById('wallpaper-btn-' + w);
+      if (btn) btn.style.outline = s.wallpaper === w ? '2px solid var(--color-primary)' : '2px solid transparent';
+    });
+
+    // Font size
+    var slider = document.getElementById('font-size-slider');
+    var valEl = document.getElementById('font-size-val');
+    if (slider) slider.value = s.message_font_size;
+    if (valEl) valEl.textContent = s.message_font_size + 'px';
+    var preview = document.getElementById('font-size-preview');
+    if (preview) {
+      var p = preview.querySelector('p');
+      if (p) p.style.fontSize = s.message_font_size + 'px';
+    }
+
+    // Time format
+    ['12h','24h'].forEach(function(f) {
+      var btn = document.getElementById('time-btn-' + f);
+      if (!btn) return;
+      if (s.time_format === f) {
+        btn.classList.add('bg-brand-light','dark:bg-brand-dark','text-white');
+      } else {
+        btn.classList.remove('bg-brand-light','dark:bg-brand-dark','text-white');
+      }
+    });
+
+    // Toggles
+    var powerToggle = document.getElementById('power-saving-toggle');
+    if (powerToggle) powerToggle.checked = !!s.power_saving;
+    var motionToggle = document.getElementById('reduce-motion-toggle');
+    if (motionToggle) motionToggle.checked = !!s.reduce_motion;
+
+    // Apply accent color to CSS variable
+    var hex = ACCENT_COLORS[s.accent_color] || '#3b82f6';
+    document.documentElement.style.setProperty('--color-primary', hex);
+
+    // Apply wallpaper to chat background (default clears inline style)
+    var chatBg = document.getElementById('chat-window-container');
+    if (chatBg) chatBg.style.backgroundColor = s.wallpaper === 'default' ? '' : (s.wallpaper || '');
+  }
+
+  function setThemeMode(mode) {
+    saveGeneralSettings({ theme: mode });
+    applyThemeGlobally(mode);
+  }
+
+  var ACCENT_COLORS = {
+    blue:   '#3b82f6',
+    green:  '#22c55e',
+    purple: '#8b5cf6',
+    red:    '#ef4444',
+    orange: '#f97316'
+  };
+
+  function setAccentColor(color) {
+    saveGeneralSettings({ accent_color: color });
+    var hex = ACCENT_COLORS[color] || '#3b82f6';
+    document.documentElement.style.setProperty('--color-primary', hex);
+    window.showToast('Accent color updated');
+  }
+
+  function setWallpaper(color) {
+    saveGeneralSettings({ wallpaper: color });
+    var bg = color === 'default' ? '' : color;
+    var chatBg = document.getElementById('chat-window-container');
+    if (chatBg) chatBg.style.backgroundColor = bg;
+    window.showToast('Wallpaper updated');
+  }
+
+  function updateMessageFontSize(size) {
+    saveGeneralSettings({ message_font_size: String(size) });
+  }
+
+  function setTimeFormat(format) {
+    saveGeneralSettings({ time_format: format });
+    window.showToast(format === '12h' ? '12-hour format' : '24-hour format');
+  }
+
+  function togglePowerSaving(on) {
+    saveGeneralSettings({ power_saving: !!on });
+    window.showToast(on ? 'Power saving enabled' : 'Power saving disabled');
+  }
+
+  function toggleReduceMotion(on) {
+    saveGeneralSettings({ reduce_motion: !!on });
+    window.showToast(on ? 'Reduce motion enabled' : 'Reduce motion disabled');
+  }
+
+  function applyThemeGlobally(mode) {
+    var root = document.documentElement;
+    if (mode === 'light') {
+      root.classList.remove('dark');
+    } else if (mode === 'dark') {
+      root.classList.add('dark');
+    }
+    // 'system' uses OS preference (no forced class change)
+  }
+
+  function resetGeneralSettings() {
+    if (!confirm('Reset all appearance settings to defaults?')) return;
+    localStorage.removeItem('ichat_general');
+    applyGeneralSettingsUI(GENERAL_DEFAULTS);
+    window.showToast('Appearance settings reset to defaults');
+  }
+
+  // Initialize on load
+  (function() {
+    applyGeneralSettingsUI(loadGeneralSettings());
+  })();
+</script>

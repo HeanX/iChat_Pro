@@ -224,6 +224,15 @@
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/privacy_security.html' %}</div>
   </div>
 
+  <!-- P2 T07: General Settings (Appearance) -->
+  <div id="sidebar-view-general-settings" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <h2 class="text-lg font-bold text-textMain flex-1">General Settings</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/general_settings.html' %}</div>
+  </div>
+
   <!-- P2 T07: Chat Folders, Stickers & Emoji -->
   <div id="sidebar-view-chat-folders" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">

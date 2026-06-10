@@ -1753,6 +1753,7 @@ function navigateSidebar(viewName) {
     'notifications',
     'data-storage',
     'privacy-security',
+    'general-settings',
     'chat-folders',
     'sessions-shortcuts'
   ];

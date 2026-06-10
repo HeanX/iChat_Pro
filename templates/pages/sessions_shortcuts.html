@@ -1,74 +1,328 @@
 {# sessions_shortcuts.html - P2 T08 Active Sessions, Language, Keyboard Shortcuts #}
-<div class="divide-y divide-borderColor/60">
+<div class="divide-y divide-borderColor/60" id="sessions-shortcuts-root">
 
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 1: Active Sessions
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-4">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Active Sessions</h4>
     <p class="text-xs text-textSecondary">Devices currently logged into your account.</p>
 
     <div class="space-y-3">
-      <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between">
-        <div class="flex items-center space-x-3">
-          <i data-lucide="monitor" class="w-4 h-4 text-green-500"></i>
-          <div>
-            <div class="text-sm font-semibold text-textMain">Windows / Chrome</div>
-            <div class="text-[10px] text-textSecondary">This browser / Active now / IP: not exposed</div>
+      {# Current device #}
+      <div class="p-3 bg-bgSearch rounded-custom-md border border-green-500/20">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="monitor" class="w-5 h-5"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-textMain flex items-center space-x-1.5">
+                <span>Windows / Chrome</span>
+                <span class="text-[9px] bg-green-500/15 text-green-600 dark:text-green-400 px-1.5 py-0.5 rounded-full font-medium">Current</span>
+              </div>
+              <div class="text-[10px] text-textSecondary">This browser · IP not exposed · Active now</div>
+            </div>
           </div>
+          <button onclick="showToast(currentLanguage === 'zh' ? '无法终止当前会话' : 'Cannot terminate current session')"
+            class="text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0 ml-2 font-semibold">
+            Terminate
+          </button>
         </div>
-        <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入' : 'Session management API is not connected yet')" class="text-xs text-red-500 hover:underline font-semibold">Terminate</button>
       </div>
 
-      <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between opacity-70">
-        <div class="flex items-center space-x-3">
-          <i data-lucide="smartphone" class="w-4 h-4 text-gray-400"></i>
-          <div>
-            <div class="text-sm font-semibold text-textMain">Session management API not connected</div>
-            <div class="text-[10px] text-textSecondary">Only the current browser can be shown right now</div>
+      {# Other device (placeholder) #}
+      <div class="p-3 bg-bgSearch rounded-custom-md opacity-70">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-full bg-zinc-500/10 text-zinc-400 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="smartphone" class="w-5 h-5"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-textMain">iPhone / Safari</div>
+              <div class="text-[10px] text-textSecondary">Shanghai, China · Last active: 2 days ago</div>
+            </div>
           </div>
+          <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入 (P2 T36)' : 'Session management API is not connected yet (P2 T36)')"
+            class="text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0 ml-2 font-semibold">
+            Terminate
+          </button>
+        </div>
+      </div>
+
+      <div class="p-3 bg-bgSearch rounded-custom-md opacity-70">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-full bg-zinc-500/10 text-zinc-400 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="laptop" class="w-5 h-5"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-textMain">MacBook / Firefox</div>
+              <div class="text-[10px] text-textSecondary">Beijing, China · Last active: 5 days ago</div>
+            </div>
+          </div>
+          <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入 (P2 T36)' : 'Session management API is not connected yet (P2 T36)')"
+            class="text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0 ml-2 font-semibold">
+            Terminate
+          </button>
         </div>
       </div>
     </div>
 
-    <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入' : 'Session management API is not connected yet')" class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+    <button onclick="showToast(currentLanguage === 'zh' ? '会话管理接口尚未接入 (P2 T36)' : 'Session management API is not connected yet (P2 T36)')"
+      class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
       Terminate All Other Sessions
     </button>
   </div>
 
-  <div class="px-4 py-4 space-y-4">
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 2: Language
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <div class="px-4 py-4 space-y-3">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Language</h4>
 
-    <button onclick="toggleLanguage()" class="w-full py-3 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-lg"><i data-lucide="languages" class="w-4 h-4"></i></div>
-        <div><div class="text-sm font-medium text-textMain" data-i18n="language_mode">Language</div><div id="lang-display-val-2" class="text-[10px] text-textSecondary" data-i18n="lang_display">English</div></div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
+    {# Language selector — scrollable list #}
+    <div class="bg-bgSearch rounded-custom-md divide-y divide-borderColor/30 overflow-hidden border border-borderColor/40 max-h-[320px] overflow-y-auto custom-scrollbar" id="language-list">
+      <button onclick="selectLanguage('en')" data-lang="en" data-lang-btn="en"
+        class="w-full px-4 py-3 flex items-center justify-between hover:bg-bgMain/50 transition-colors text-left">
+        <div>
+          <div class="text-sm font-semibold text-textMain">English</div>
+          <div class="text-[10px] text-textSecondary">English (United States)</div>
+        </div>
+        <i data-lucide="check" class="w-4 h-4 text-brand-light dark:text-brand-dark hidden" id="lang-check-en"></i>
+      </button>
+      <button onclick="selectLanguage('zh')" data-lang="zh" data-lang-btn="zh"
+        class="w-full px-4 py-3 flex items-center justify-between hover:bg-bgMain/50 transition-colors text-left">
+        <div>
+          <div class="text-sm font-semibold text-textMain">中文</div>
+          <div class="text-[10px] text-textSecondary">简体中文 (Simplified Chinese)</div>
+        </div>
+        <i data-lucide="check" class="w-4 h-4 text-brand-light dark:text-brand-dark hidden" id="lang-check-zh"></i>
+      </button>
+      <button onclick="selectLanguage('ja')" data-lang="ja" data-lang-btn="ja"
+        class="w-full px-4 py-3 flex items-center justify-between hover:bg-bgMain/50 transition-colors text-left opacity-50">
+        <div>
+          <div class="text-sm font-semibold text-textMain">日本語</div>
+          <div class="text-[10px] text-textSecondary">Japanese — Coming soon</div>
+        </div>
+        <span class="text-[9px] text-textSecondary">Soon</span>
+      </button>
+      <button onclick="selectLanguage('ko')" data-lang="ko" data-lang-btn="ko"
+        class="w-full px-4 py-3 flex items-center justify-between hover:bg-bgMain/50 transition-colors text-left opacity-50">
+        <div>
+          <div class="text-sm font-semibold text-textMain">한국어</div>
+          <div class="text-[10px] text-textSecondary">Korean — Coming soon</div>
+        </div>
+        <span class="text-[9px] text-textSecondary">Soon</span>
+      </button>
+    </div>
+
+    {# Show translate button #}
+    <div class="flex items-center justify-between py-1">
+      <span class="text-sm font-medium text-textMain">Show Translate Button</span>
+      <label class="toggle-switch">
+        <input type="checkbox" checked onchange="saveSessionSetting('show_translate', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
   </div>
 
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 3: Keyboard Shortcuts (by category)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-4">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Keyboard Shortcuts</h4>
 
+    {# Text Formatting #}
     <div class="space-y-1">
-      <div class="flex items-center justify-between py-2 px-1 text-sm">
+      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Text Formatting</h5>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Bold</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + B</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Italic</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + I</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Underline</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + U</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Strikethrough</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + X</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Monospace / Code</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + M</kbd>
+      </div>
+    </div>
+
+    {# Messages #}
+    <div class="space-y-1">
+      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Messages</h5>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Edit last message</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">↑</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Reply to message</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + ↑</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Forward message</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + F</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Delete message</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Delete</kbd>
+      </div>
+    </div>
+
+    {# Chat Navigation #}
+    <div class="space-y-1">
+      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Chat Navigation</h5>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
         <span class="text-textMain">Search chats</span>
         <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + K</kbd>
       </div>
-      <div class="flex items-center justify-between py-2 px-1 text-sm">
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
         <span class="text-textMain">New chat</span>
         <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + N</kbd>
       </div>
-      <div class="flex items-center justify-between py-2 px-1 text-sm">
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
         <span class="text-textMain">Toggle mute</span>
         <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + M</kbd>
       </div>
-      <div class="flex items-center justify-between py-2 px-1 text-sm">
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Archive chat</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + E</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Next chat</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Tab</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Previous chat</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + Tab</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Go to top of chat</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Home</kbd>
+      </div>
+    </div>
+
+    {# Sending #}
+    <div class="space-y-1">
+      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Sending</h5>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
         <span class="text-textMain">Send message</span>
         <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Enter</kbd>
       </div>
-      <div class="flex items-center justify-between py-2 px-1 text-sm">
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
         <span class="text-textMain">New line</span>
         <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Shift + Enter</kbd>
       </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Send without sound</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + Enter</kbd>
+      </div>
     </div>
+
+    {# Media #}
+    <div class="space-y-1">
+      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Media & Others</h5>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Toggle emoji panel</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + E</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Open settings</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + ,</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Toggle dark mode</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + D</kbd>
+      </div>
+      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
+        <span class="text-textMain">Close current panel</span>
+        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Escape</kbd>
+      </div>
+    </div>
+
+    <p class="text-[10px] text-textSecondary italic pt-1">
+      Shortcuts marked with * require the chat input to be focused. Some shortcuts may not be fully implemented yet.
+    </p>
   </div>
+
 </div>
+
+{# ── Toggle Switch Styles ── #}
+<style>
+  .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
+  .toggle-switch input { opacity:0; width:0; height:0 }
+  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
+  .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
+  .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
+  .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
+  .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
+</style>
+
+{# ── Sessions & Shortcuts JavaScript ── #}
+<script>
+  var SESSION_DEFAULTS = {
+    language: currentLanguage || 'en',
+    show_translate: true
+  };
+
+  function loadSessionSettings() {
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('ichat_sessions') || '{}'); } catch(e) {}
+    return Object.assign({}, SESSION_DEFAULTS, saved);
+  }
+
+  function saveSessionSetting(key, value) {
+    var settings = loadSessionSettings();
+    settings[key] = value;
+    localStorage.setItem('ichat_sessions', JSON.stringify(settings));
+    applySessionSettingsUI(settings);
+  }
+
+  function selectLanguage(lang) {
+    if (lang === 'ja' || lang === 'ko') {
+      window.showToast(currentLanguage === 'zh' ? '该语言尚未支持' : 'This language is not yet supported');
+      return;
+    }
+    saveSessionSetting('language', lang);
+    // Update all lang check icons
+    ['en','zh','ja','ko'].forEach(function(l) {
+      var check = document.getElementById('lang-check-' + l);
+      if (check) {
+        if (l === lang && (l === 'en' || l === 'zh')) check.classList.remove('hidden');
+        else check.classList.add('hidden');
+      }
+    });
+    // Delegate to global language toggle
+    if (lang !== currentLanguage && typeof toggleLanguage === 'function') {
+      toggleLanguage();
+    }
+    window.showToast(lang === 'zh' ? '语言已切换为中文' : 'Language set to English');
+  }
+
+  function applySessionSettingsUI(s) {
+    // Language check icons
+    var lang = s.language || 'en';
+    ['en','zh'].forEach(function(l) {
+      var check = document.getElementById('lang-check-' + l);
+      if (check) {
+        if (l === lang) check.classList.remove('hidden');
+        else check.classList.add('hidden');
+      }
+    });
+    // Translate toggle
+    var translateToggle = document.querySelector('#sessions-shortcuts-root input[type=checkbox]');
+    if (translateToggle) translateToggle.checked = !!s.show_translate;
+  }
+
+  (function() { applySessionSettingsUI(loadSessionSettings()); })();
+</script>

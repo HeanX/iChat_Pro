@@ -1374,3 +1374,19 @@ class MultiAccountApiTests(TestCase):
             content_type='application/json',
         )
         self.assertEqual(resp.json()['context_json'], blob)
+
+# ── P2 T36: Session management API ───────────────────────────────
+
+class SessionApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='sestest', password='p')
+
+    def test_session_list_requires_login(self):
+        resp = self.client.get('/api/sessions/')
+        self.assertIn(resp.status_code, (301, 302))
+
+    def test_logged_in_user_has_sessions(self):
+        self.client.login(username='sestest', password='p')
+        resp = self.client.get('/api/sessions/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreater(len(resp.json()['sessions']), 0)

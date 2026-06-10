@@ -1117,3 +1117,42 @@ def multi_account_update_view(request):
         ctx.context_json = payload['context_json']
         ctx.save(update_fields=['context_json', 'updated_at'])
     return JsonResponse({'user_id': request.user.id, 'context_json': ctx.context_json})
+
+
+# ── Session management API (P2 T36) ───────────────────────────────
+
+
+@login_required
+@require_GET
+def session_list_view(request):
+    """List active sessions for the current user."""
+    from django.contrib.sessions.models import Session
+    sessions = Session.objects.filter(expire_date__gte=timezone.now())
+    results = []
+    for s in sessions:
+        data = s.get_decoded()
+        if data.get('_auth_user_id') == str(request.user.id):
+            results.append({
+                'session_key': s.session_key[:20] + '...',
+                'created': s.expire_date.strftime('%Y-%m-%d %H:%M'),
+                'is_current': s.session_key == request.session.session_key,
+            })
+    return JsonResponse({'sessions': results})
+
+
+@login_required
+@require_http_methods(['POST'])
+def session_terminate_view(request):
+    """Terminate a specific session."""
+    from django.contrib.sessions.models import Session
+    session_key = (_json_body(request) or {}).get('session_key', '')
+    if not session_key:
+        return JsonResponse({'error': 'session_key required'}, status=400)
+    # Don't allow terminating current session via this endpoint
+    full_key = request.session.session_key or ''
+    if session_key == full_key[:20] + '...':
+        return JsonResponse({'error': 'Use logout to end current session'}, status=400)
+    Session.objects.filter(
+        session_key__startswith=session_key.replace('...', ''),
+    ).delete()
+    return JsonResponse({'terminated': True})

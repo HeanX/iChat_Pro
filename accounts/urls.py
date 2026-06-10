@@ -136,4 +136,7 @@ urlpatterns = [
     # Multi-account context (P2 T35)
     path('api/account/context/', views.multi_account_view, name='multi-account'),
     path('api/account/context/update/', views.multi_account_update_view, name='multi-account-update'),
+    # Session management (P2 T36)
+    path('api/sessions/', views.session_list_view, name='session-list'),
+    path('api/sessions/terminate/', views.session_terminate_view, name='session-terminate'),
 ]

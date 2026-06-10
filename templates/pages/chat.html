@@ -184,7 +184,7 @@
 
 {% block extra_js %}
 <!-- Main Chat Interaction JavaScript -->
-<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}?v=20260609-explicit-key-reset" data-current-user-id="{{ request.user.pk }}"></script>
+<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}?v=20260609-explicit-key-reset" data-current-user-id="{{ request.user.pk }}" data-username="{{ request.user.username }}" data-email="{{ request.user.email|default:'' }}"></script>
 <script src="{% static 'js/private-chat-e2ee.js' %}?v=20260609-peer-trust-reset"></script>
 <script src="{% static 'js/group-chat-e2ee.js' %}"></script>
 <script src="{% static 'js/context-menu.js' %}?v=20260610-t12t14-chat-ux"></script>

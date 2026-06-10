@@ -34,6 +34,7 @@
 
   <form id="login-form" method="POST" action="{% url 'login' %}" class="space-y-5" onsubmit="return handleFormSubmit(event)">
     {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.GET.next|default:'' }}">
 
     <div class="space-y-1.5">
       <label for="username" class="block text-sm font-semibold text-textMain">Username or Email</label>

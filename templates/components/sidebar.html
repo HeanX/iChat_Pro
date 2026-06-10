@@ -28,7 +28,7 @@
           <!-- Menu Items -->
           <div class="py-1">
             <!-- Add Account -->
-            <button onclick="showToast(currentLanguage === 'zh' ? '多账号功能暂未开放' : 'Multi-account is not yet available'); toggleMainMenu(event);" class="main-menu-item-custom">
+            <button onclick="navigateSidebar('accounts-switcher'); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="plus"></i>
               <span data-i18n="menu_add_account">Add Account</span>
             </button>
@@ -271,6 +271,27 @@
       <div id="search-loading" class="hidden flex items-center justify-center py-8">
         <div class="animate-spin w-5 h-5 border-2 border-brand-light border-t-transparent rounded-full"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- P2 T11: Multi-Account Switcher -->
+  <div id="sidebar-view-accounts-switcher" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="menu_add_account">Accounts</h2>
+      <button onclick="addNewAccount()" class="py-1.5 px-3 text-xs font-semibold rounded-full bg-brand-light dark:bg-brand-dark text-white hover:opacity-90 transition-opacity">
+        <i data-lucide="plus" class="w-3.5 h-3.5 inline mr-1"></i>Add
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3" id="accounts-switcher-list">
+      <div class="text-xs text-textSecondary text-center py-8">Loading accounts...</div>
+    </div>
+    <div class="p-4 border-t border-borderColor">
+      <button onclick="addNewAccount()" class="account-add-btn w-full py-2.5 px-4 border-2 border-dashed border-borderColor rounded-xl text-textSecondary hover:text-textMain hover:border-brand-light dark:hover:border-brand-dark hover:bg-bgSearch transition-all text-sm font-medium">
+        <i data-lucide="plus" class="w-4 h-4 inline mr-2"></i>Add Another Account
+      </button>
     </div>
   </div>
 

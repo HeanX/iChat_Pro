@@ -13,6 +13,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from chat.models import Conversation, ConversationMember as ChatMember
@@ -124,6 +125,13 @@ def register_view(request):
     return render(request, 'pages/register.html', {'form': form})
 
 
+def _safe_next_url(next_url, fallback='index'):
+    """Return next_url if it is a safe same-site path, otherwise fallback."""
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts=None):
+        return next_url
+    return fallback
+
+
 def login_view(request):
     if request.user.is_authenticated:
         return redirect('index')
@@ -152,7 +160,10 @@ def login_view(request):
                     request,
                     f'Welcome back, {user.get_short_name() or username}!',
                 )
-                return redirect('index')
+                next_url = _safe_next_url(
+                    request.POST.get('next') or request.GET.get('next') or '',
+                )
+                return redirect(next_url)
 
             # credentials were valid format but authenticate returned None
             if target is not None:
@@ -207,7 +218,8 @@ def login_view(request):
 def logout_view(request):
     logout(request)
     messages.info(request, 'You have been logged out.')
-    return redirect('login')
+    next_url = _safe_next_url(request.GET.get('next') or '', fallback='login')
+    return redirect(next_url)
 
 
 # ── Contact & Friend-request views ──────────────────────────────────

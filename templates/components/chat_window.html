@@ -166,6 +166,12 @@
         
         <h3 class="text-base font-bold text-textMain" data-i18n="verify_fp_title">Verify Security Fingerprint</h3>
         <p class="text-xs text-textSecondary mt-1" data-i18n="verify_fp_desc">Comparing keys prevents potential interception.</p>
+        <div id="fp-modal-status" class="security-status-chip security-status-loading mt-3">
+          Loading trust status
+        </div>
+        <div id="fp-modal-warning" class="hidden mt-3 w-full rounded-custom-md border border-red-500/25 bg-red-500/10 px-3 py-2 text-left text-xs font-semibold text-red-600 dark:text-red-400">
+          High risk: this contact active key differs from a previously verified fingerprint.
+        </div>
 
         <!-- Mock QR code pattern -->
         <div class="my-5 p-2 bg-white rounded-lg border border-gray-200">
@@ -194,10 +200,18 @@
           </code>
         </div>
 
-        <!-- Confirmation control button -->
-        <button onclick="closeFingerprintModal()"
+        <!-- Trust controls -->
+        <button id="fp-modal-trust-btn" onclick="trustActiveFingerprintFromModal()"
           class="w-full mt-5 py-2.5 bg-brand-light dark:bg-brand-dark text-white font-semibold text-sm rounded-custom-md hover:opacity-95 focus:outline-none transition-all">
-          <span data-i18n="fp_match_btn">Fingerprints Match</span>
+          Fingerprints Match
+        </button>
+        <button id="fp-modal-untrust-btn" onclick="untrustActiveFingerprintFromModal()"
+          class="hidden w-full mt-2 py-2.5 border border-borderColor text-textSecondary hover:text-red-500 hover:border-red-500/40 font-semibold text-sm rounded-custom-md focus:outline-none transition-all">
+          Remove Trust
+        </button>
+        <button onclick="closeFingerprintModal()"
+          class="w-full mt-2 py-2 text-textSecondary hover:text-textMain font-semibold text-xs rounded-custom-md hover:bg-bgSearch focus:outline-none transition-all">
+          Close
         </button>
 
       </div>

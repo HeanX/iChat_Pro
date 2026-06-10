@@ -123,6 +123,16 @@
           <code id="key-fingerprint-display" class="block w-full px-3 py-2 rounded-custom-md bg-bgSearch border border-borderColor text-[11px] font-mono text-textMain break-all select-all">—</code>
         </div>
         <div class="grid grid-cols-2 gap-2">
+          <div class="p-2.5 bg-bgSearch rounded-custom-md border border-borderColor/60">
+            <div class="text-[10px] text-textSecondary">Active Key Version</div>
+            <div id="key-version-display" class="text-sm font-bold text-textMain mt-0.5">-</div>
+          </div>
+          <div class="p-2.5 bg-bgSearch rounded-custom-md border border-borderColor/60">
+            <div class="text-[10px] text-textSecondary">Trusted By</div>
+            <div id="key-trusted-by-display" class="text-sm font-bold text-textMain mt-0.5">-</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
           <button id="btn-key-generate" class="py-2 px-3 text-xs font-semibold rounded-custom-md bg-brand-light dark:bg-brand-dark text-white hover:opacity-90 transition-opacity" onclick="keyMgrGenerate()">Generate Keys</button>
           <button id="btn-key-upload" class="py-2 px-3 text-xs font-semibold rounded-custom-md border border-brand-light dark:border-brand-dark text-brand-light dark:text-brand-dark hover:bg-brand-light/10 transition-colors" onclick="keyMgrUpload()">Upload to Server</button>
           <button id="btn-key-export" class="py-2 px-3 text-xs font-semibold rounded-custom-md border border-borderColor text-textMain hover:bg-bgSearch transition-colors" onclick="keyMgrExport()">Export Backup</button>
@@ -147,7 +157,7 @@
         <i id="security-status-chevron" data-lucide="chevron-down" class="w-4 h-4 text-textSecondary transition-transform"></i>
       </button>
       <div id="security-status-panel" class="hidden mt-3 px-1 space-y-3">
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-3 gap-2">
           <div class="p-3 bg-bgSearch rounded-custom-md text-center">
             <div id="sec-keys-status" class="text-lg font-bold text-green-500">-</div>
             <div class="text-[10px] text-textSecondary mt-0.5">Local Keys</div>
@@ -156,7 +166,12 @@
             <div id="sec-server-status" class="text-lg font-bold text-gray-400">-</div>
             <div class="text-[10px] text-textSecondary mt-0.5">Server Synced</div>
           </div>
+          <div class="p-3 bg-bgSearch rounded-custom-md text-center">
+            <div id="sec-trust-status" class="text-lg font-bold text-gray-400">-</div>
+            <div class="text-[10px] text-textSecondary mt-0.5">Verified Contacts</div>
+          </div>
         </div>
+        <div id="security-trust-list" class="space-y-2"></div>
         <button onclick="refreshSecurityStatus()" class="w-full py-2 text-xs font-medium text-brand-light dark:text-brand-dark hover:underline">Refresh Status</button>
       </div>
     </div>

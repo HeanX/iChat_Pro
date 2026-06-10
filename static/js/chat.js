@@ -2899,7 +2899,20 @@ async function loadPrivacySettings() {
   }
 }
 
+var _P2_T28_PLACEHOLDER_FIELDS = [
+  'passcode_lock_enabled',
+  'two_step_verification_enabled',
+  'login_email',
+];
+
 async function savePrivacySetting(key, value) {
+  // T28 placeholder fields — not yet implemented server-side
+  if (_P2_T28_PLACEHOLDER_FIELDS.indexOf(key) >= 0) {
+    window.showToast(currentLanguage === 'zh'
+      ? '此功能尚未开放 (P2 T28)'
+      : 'This feature is not yet available (P2 T28)');
+    return;
+  }
   var payload = {};
   payload[key] = value;
   return savePrivacySettings(payload);

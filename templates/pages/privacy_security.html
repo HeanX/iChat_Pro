@@ -92,23 +92,30 @@
   <div class="px-4 py-4 space-y-2">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Security</h4>
 
-    {# Two-Step Verification #}
-    <button onclick="togglePrivacySwitch('two_step_verification_enabled')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg"><i data-lucide="shield-check" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium text-textMain">Two-Step Verification</span>
-      </div>
-      <span class="text-[10px] text-textSecondary" id="privacy-label-two_step_verification_enabled">—</span>
-    </button>
+    {# ── P2 T28 placeholders: two-step, passcode — Coming in a future update ── #}
+    <div class="space-y-2 opacity-50 pointer-events-none" data-placeholder-section="true">
+      <p class="text-[10px] italic text-textSecondary -mb-1 pl-1">🔒 Coming in a future update (P2 T28)</p>
 
-    {# Passcode Lock #}
-    <button onclick="togglePrivacySwitch('passcode_lock_enabled')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="lock" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium text-textMain">Passcode Lock</span>
-      </div>
-      <span class="text-[10px] text-textSecondary" id="privacy-label-passcode_lock_enabled">—</span>
-    </button>
+      {# Two-Step Verification #}
+      <button data-placeholder="true"
+        class="w-full py-2.5 flex items-center justify-between rounded-custom-md px-2 -mx-2 transition-colors text-left cursor-not-allowed">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg"><i data-lucide="shield-check" class="w-4 h-4"></i></div>
+          <span class="text-sm font-medium text-textMain">Two-Step Verification</span>
+        </div>
+        <span class="text-[10px] text-textSecondary" id="privacy-label-two_step_verification_enabled">—</span>
+      </button>
+
+      {# Passcode Lock #}
+      <button data-placeholder="true"
+        class="w-full py-2.5 flex items-center justify-between rounded-custom-md px-2 -mx-2 transition-colors text-left cursor-not-allowed">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="lock" class="w-4 h-4"></i></div>
+          <span class="text-sm font-medium text-textMain">Passcode Lock</span>
+        </div>
+        <span class="text-[10px] text-textSecondary" id="privacy-label-passcode_lock_enabled">—</span>
+      </button>
+    </div>
 
     {# Active Sessions #}
     <button onclick="navigateSidebar('sessions-shortcuts')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
@@ -128,15 +135,18 @@
       <span class="text-[10px] text-textSecondary" id="privacy-blocked-count">0</span>
     </button>
 
-    {# Login Email #}
-    <div class="w-full py-2.5 flex items-center justify-between px-2 -mx-2">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg"><i data-lucide="mail" class="w-4 h-4"></i></div>
-        <div class="flex-1">
-          <div class="text-sm font-medium text-textMain">Login Email</div>
-          <input type="email" id="privacy-input-login_email" placeholder="email@example.com"
-            class="mt-1 w-full bg-bgSearch border border-borderColor rounded-custom-md px-2 py-1 text-xs text-textMain focus:outline-none focus:ring-1 focus:ring-brand-light"
-            onblur="savePrivacySetting('login_email', this.value)" />
+    {# ── P2 T28 placeholder: Login Email — Coming in a future update ── #}
+    <div class="opacity-50 pointer-events-none" data-placeholder-section="true">
+      {# Login Email #}
+      <div class="w-full py-2.5 flex items-center justify-between px-2 -mx-2" data-placeholder="true">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg"><i data-lucide="mail" class="w-4 h-4"></i></div>
+          <div class="flex-1">
+            <div class="text-sm font-medium text-textMain">Login Email</div>
+            <input type="email" id="privacy-input-login_email" placeholder="email@example.com"
+              class="mt-1 w-full bg-bgSearch border border-borderColor rounded-custom-md px-2 py-1 text-xs text-textMain focus:outline-none focus:ring-1 focus:ring-brand-light"
+              disabled />
+          </div>
         </div>
       </div>
     </div>

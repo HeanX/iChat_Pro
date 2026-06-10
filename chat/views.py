@@ -13,7 +13,7 @@ from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET
 
-from accounts.models import BlockedUser, Contact, FriendRequest, UserPrivacySettings
+from accounts.models import BlockedUser, Contact, FriendRequest, UserPrivacySettings, UserStorageSettings
 from .consumers import ChatConsumer
 from .models import (
     Conversation,
@@ -1571,9 +1571,10 @@ def storage_settings_view(request):
 
     GET  — return current settings.
     POST — merge the provided settings keys.
-    Currently backed by the session as a lightweight placeholder.
-    A future T24 will persist these in a StorageSettings model.
+    Persisted in UserStorageSettings (DB-backed, survives session expiry).
     """
+    ss, _ = UserStorageSettings.objects.get_or_create(user=request.user)
+
     if request.method == 'GET':
         defaults = {
             'auto_download': {
@@ -1589,17 +1590,17 @@ def storage_settings_view(request):
             'cache_retention_days': 30,
             'cache_max_size_mb': 500,
         }
-        stored = request.session.get('ichat_storage_settings', {})
+        stored = ss.settings_json or {}
         # Deep-merge stored into defaults
         merged = _deep_merge(defaults, stored)
         return JsonResponse({'settings': merged})
 
     if request.method == 'POST':
         data = _json_body(request)
-        current = request.session.get('ichat_storage_settings', {})
+        current = ss.settings_json or {}
         updated = _deep_merge(current, data)
-        request.session['ichat_storage_settings'] = updated
-        request.session.modified = True
+        ss.settings_json = updated
+        ss.save(update_fields=['settings_json', 'updated_at'])
         return JsonResponse({'status': 'ok', 'settings': updated})
 
     return JsonResponse({'error': 'Method not allowed.'}, status=405)

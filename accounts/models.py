@@ -92,6 +92,28 @@ class BlockedUser(models.Model):
         return f'{self.blocker.username} blocked {self.blocked.username}'
 
 
+class UserStorageSettings(models.Model):
+    """Per-user storage & auto-download preferences (P2 T05).
+
+    Persisted in the database so settings survive session expiry and sync
+    across the user's login sessions.  The `settings_json` field holds the
+    full auto-download, file-size-limit, cache-retention and cache-max-size
+    blob that the frontend reads and saves.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='storage_settings',
+    )
+    settings_json = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'StorageSettings for {self.user.username}'
+
+
 class FriendRequest(models.Model):
     """A friend request from one user to another."""
 
@@ -263,10 +285,11 @@ class KeyTrust(models.Model):
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def create_user_profile(sender, instance, created, **kwargs):
-    """Ensure every new user gets a UserProfile and UserPrivacySettings immediately."""
+    """Ensure every new user gets a UserProfile, UserPrivacySettings and UserStorageSettings immediately."""
     if created:
         UserProfile.objects.get_or_create(user=instance)
         UserPrivacySettings.objects.get_or_create(user=instance)
+        UserStorageSettings.objects.get_or_create(user=instance)
 
 
 # Group and GroupMember have been consolidated into chat.Conversation

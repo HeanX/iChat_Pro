@@ -19,6 +19,9 @@ class PrivateRealtimeMessageTests(TransactionTestCase):
         )
         ConversationMember.objects.create(conversation=self.conversation, user=self.sender)
         ConversationMember.objects.create(conversation=self.conversation, user=self.receiver)
+        # Contact required for private messaging (P1 fix).
+        from accounts.models import Contact
+        Contact.objects.get_or_create(user=self.sender, contact=self.receiver)
         self.sender_headers = self._session_headers(self.sender)
         self.receiver_headers = self._session_headers(self.receiver)
 

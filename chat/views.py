@@ -2050,6 +2050,7 @@ def _require_admin(conversation_id, user):
 
 
 @login_required(login_url='login')
+@require_POST
 def group_promote_view(request, conversation_id, user_id):
     """Promote a member to admin. Owner or admin only."""
     result, err = _require_admin(conversation_id, request.user)
@@ -2069,6 +2070,7 @@ def group_promote_view(request, conversation_id, user_id):
 
 
 @login_required(login_url='login')
+@require_POST
 def group_demote_view(request, conversation_id, user_id):
     """Demote an admin to member. Owner only."""
     member = _get_member(conversation_id, request.user)

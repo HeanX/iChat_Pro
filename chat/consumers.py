@@ -69,13 +69,21 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         user = self.scope.get('user')
         user_group_name = getattr(self, 'user_group_name', None)
 
-        # T22: Discard first so current connection doesn't receive its own
-        # offline presence event, then broadcast to other sessions.
         if user_group_name:
             await self.channel_layer.group_discard(user_group_name, self.channel_name)
 
         if user and not user.is_anonymous:
-            await self._set_presence_offline(user.pk)
+            # Only set offline if user has NO remaining connections.
+            has_other_sessions = False
+            try:
+                remaining = await self.channel_layer.group_channels(user_group_name or self.user_group(user.pk))
+                has_other_sessions = bool(remaining)
+            except (AttributeError, Exception):
+                pass  # in-memory backend; skip multi-connection detection
+
+            if not has_other_sessions:
+                await self._set_presence_offline(user.pk)
+
             await self.channel_layer.group_send(
                 user_group_name or self.user_group(user.pk),
                 {
@@ -371,6 +379,22 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 or not active_members.filter(user_id=data['receiver_id']).exists()
             ):
                 raise ClientPayloadError('conversation_forbidden', '无权在该私聊会话中发送消息')
+
+            # Block/contact enforcement (P1 fix — matches HTTP fallback).
+            from accounts.models import BlockedUser, Contact
+            receiver_id = data['receiver_id']
+            blocked = (
+                BlockedUser.objects.filter(blocker=receiver_id, blocked=sender_id).exists()
+                or BlockedUser.objects.filter(blocker=sender_id, blocked=receiver_id).exists()
+            )
+            if blocked:
+                raise ClientPayloadError('conversation_forbidden', '已拉黑或已被拉黑，无法发送消息')
+            is_contact = (
+                Contact.objects.filter(user=sender_id, contact=receiver_id).exists()
+                or Contact.objects.filter(user=receiver_id, contact=sender_id).exists()
+            )
+            if not is_contact:
+                raise ClientPayloadError('conversation_forbidden', '双方不是联系人，无法发送私聊')
 
             try:
                 with transaction.atomic():
@@ -694,6 +718,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 raise ClientPayloadError('group_too_large', f'群聊活跃成员数超过上限 {cls.max_group_active_members}')
             if sender_id not in active_member_ids:
                 raise ClientPayloadError('conversation_forbidden', '无权在该群聊中发送消息')
+
+            # Mute enforcement (P1 fix — match HTTP fallback in views.py).
+            if conversation.muted_until and conversation.muted_until > timezone.now():
+                sender_role = active_members.filter(user_id=sender_id).values_list('role', flat=True).first()
+                if sender_role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+                    raise ClientPayloadError('group_muted', '该群已被禁言，仅群主和管理员可发送消息')
 
             if data['membership_version'] != conversation.membership_version:
                 raise ClientPayloadError('membership_conflict', '群成员版本已变更，请重新拉取成员列表')

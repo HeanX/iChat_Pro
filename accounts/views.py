@@ -450,22 +450,39 @@ def contact_chat_view(request, contact_id):
 
 @login_required(login_url='login')
 def profile_edit_view(request):
-    """Edit nickname, bio, and avatar."""
+    """Edit nickname, bio, avatar, username, and name fields."""
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
 
+    is_sidebar = request.POST.get('_sidebar') if request.method == 'POST' else False
+
     if request.method == 'POST':
-        form = ProfileForm(request.POST, request.FILES, instance=profile)
+        form = ProfileForm(
+            request.POST, request.FILES, instance=profile, user=request.user,
+        )
         if form.is_valid():
             form.save()
+            # Save User model fields
+            user = request.user
+            user.first_name = form.cleaned_data.get('first_name', '').strip()
+            user.last_name = form.cleaned_data.get('last_name', '').strip()
+            new_username = form.cleaned_data.get('username', '').strip().lower()
+            if new_username and new_username != user.username:
+                user.username = new_username
+            user.save(update_fields=['first_name', 'last_name', 'username'])
             messages.success(request, 'Profile updated.')
             return redirect('index')
         for field, errors in form.errors.items():
             for error in errors:
                 messages.error(request, error)
     else:
-        form = ProfileForm(instance=profile)
+        form = ProfileForm(instance=profile, user=request.user, initial={
+            'first_name': request.user.first_name,
+            'last_name': request.user.last_name,
+            'username': request.user.username,
+        })
 
-    return render(request, 'pages/profile_edit.html', {
+    template = 'pages/profile_edit_sidebar.html' if is_sidebar else 'pages/profile_edit.html'
+    return render(request, template, {
         'form': form,
         'profile': profile,
     })

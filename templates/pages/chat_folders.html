@@ -1,61 +1,260 @@
 {# chat_folders.html — P2 T07 Chat Folders, Stickers & Emoji #}
-<div class="divide-y divide-borderColor/60">
+<div class="divide-y divide-borderColor/60" id="chat-folders-root">
 
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 1: Chat Folders
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-4">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Chat Folders</h4>
     <p class="text-xs text-textSecondary">Create folders for different groups of chats to easily access them.</p>
 
-    <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between cursor-pointer hover-bg-search-op-65" onclick="showToast('Create folder coming soon')">
+    {# Create New Folder #}
+    <button onclick="showToast(currentLanguage === 'zh' ? '创建文件夹功能暂未开放' : 'Create folder coming soon')"
+      class="w-full p-3 bg-bgSearch rounded-custom-md flex items-center justify-between hover:opacity-80 transition-opacity">
       <div class="flex items-center space-x-3">
         <div class="p-2 bg-brand-light/10 text-brand-light dark:text-brand-dark rounded-lg"><i data-lucide="plus" class="w-4 h-4"></i></div>
         <span class="text-sm font-medium text-textMain">Create New Folder</span>
       </div>
       <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+
+    {# Folder: Folders view toggle #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Folders View</span>
+        <p class="text-[10px] text-textSecondary">Show folders as tabs at the top of chat list</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" checked onchange="saveChatFolderSetting('folders_view', this.checked)" data-folders-view>
+        <span class="toggle-slider"></span>
+      </label>
     </div>
 
-    <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between opacity-60">
+    {# Demo folder: Team Chats #}
+    <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg"><i data-lucide="users" class="w-4 h-4"></i></div>
-        <div><div class="text-sm font-medium text-textMain">Team Chats</div><div class="text-[10px] text-textSecondary">3 chats</div></div>
+        <div>
+          <div class="text-sm font-medium text-textMain">Team Chats</div>
+          <div class="text-[10px] text-textSecondary">3 chats — All chats that have a group</div>
+        </div>
       </div>
       <span class="text-[9px] bg-zinc-200 dark:bg-zinc-700 text-textSecondary px-1.5 py-0.5 rounded">Demo</span>
     </div>
+
+    {# Demo folder: Unread #}
+    <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between opacity-60">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg"><i data-lucide="messages-square" class="w-4 h-4"></i></div>
+        <div>
+          <div class="text-sm font-medium text-textMain">Unread</div>
+          <div class="text-[10px] text-textSecondary">0 chats — Automatically managed</div>
+        </div>
+      </div>
+      <span class="text-[9px] bg-zinc-200 dark:bg-zinc-700 text-textSecondary px-1.5 py-0.5 rounded">Auto</span>
+    </div>
   </div>
 
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 2: Quick Reaction
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <div class="px-4 py-4 space-y-3">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Quick Reaction</h4>
+
+    <div class="flex items-center justify-between py-1">
+      <div>
+        <span class="text-sm font-medium text-textMain">Double Tap to React</span>
+        <p class="text-[10px] text-textSecondary">Tap twice on a message to send 👍</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" checked onchange="saveChatFolderSetting('double_tap_react', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    {# Quick reaction emoji selector #}
+    <div class="flex items-center space-x-2 py-1">
+      <span class="text-xs text-textSecondary flex-shrink-0">Default:</span>
+      <div class="flex space-x-1" id="quick-reaction-picker">
+        <button onclick="setQuickReaction('👍')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Thumbs Up">👍</button>
+        <button onclick="setQuickReaction('❤️')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Heart">❤️</button>
+        <button onclick="setQuickReaction('😂')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Joy">😂</button>
+        <button onclick="setQuickReaction('😮')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Wow">😮</button>
+        <button onclick="setQuickReaction('😢')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Sad">😢</button>
+        <button onclick="setQuickReaction('😡')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Angry">😡</button>
+      </div>
+    </div>
+  </div>
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Section 3: Stickers & Emoji
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <div class="px-4 py-4 space-y-4">
     <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Stickers & Emoji</h4>
 
-    <button onclick="showToast('Sticker sets coming in a future update')" class="w-full py-3 flex items-center justify-between">
+    {# Suggest Emoji #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Suggest Emoji</span>
+        <p class="text-[10px] text-textSecondary">Replace text like :) with emoji as you type</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" checked onchange="saveChatFolderSetting('suggest_emoji', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    {# Emoji Autocomplete #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Emoji Autocomplete</span>
+        <p class="text-[10px] text-textSecondary">Show emoji suggestions when typing :emoji_name</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" checked onchange="saveChatFolderSetting('emoji_autocomplete', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    {# Animated Stickers #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Loop Animated Stickers</span>
+        <p class="text-[10px] text-textSecondary">Play sticker animations continuously</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" checked onchange="saveChatFolderSetting('loop_stickers', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    {# Large Emoji #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Large Emoji</span>
+        <p class="text-[10px] text-textSecondary">Show up to 3 emoji without text in large size</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" checked onchange="saveChatFolderSetting('large_emoji', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    {# Sticker Sets #}
+    <button onclick="showToast(currentLanguage === 'zh' ? '贴纸包功能暂未开放' : 'Sticker sets coming in a future update')"
+      class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-1 transition-colors">
       <div class="flex items-center space-x-3">
         <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="sticker" class="w-4 h-4"></i></div>
-        <div><div class="text-sm font-medium text-textMain">Sticker Sets</div><div class="text-[10px] text-textSecondary">0 installed</div></div>
+        <div>
+          <div class="text-sm font-medium text-textMain">Sticker Sets</div>
+          <div class="text-[10px] text-textSecondary">0 installed — Shop sticker packs</div>
+        </div>
       </div>
       <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
     </button>
 
-    <button onclick="showToast('Emoji suggestions coming soon')" class="w-full py-3 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="smile" class="w-4 h-4"></i></div>
-        <div><div class="text-sm font-medium text-textMain">Suggest Emoji</div><div class="text-[10px] text-textSecondary">Replace text like :) with emoji</div></div>
-      </div>
-      <label class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-    </button>
-
-    <button onclick="showToast('Custom emoji coming soon')" class="w-full py-3 flex items-center justify-between">
+    {# Custom Emoji #}
+    <button onclick="showToast(currentLanguage === 'zh' ? '自定义表情暂未开放' : 'Custom emoji coming soon')"
+      class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-1 transition-colors">
       <div class="flex items-center space-x-3">
         <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="image" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium text-textMain">Custom Emoji</span>
+        <div>
+          <div class="text-sm font-medium text-textMain">Custom Emoji</div>
+          <div class="text-[10px] text-textSecondary">Upload your own emoji images</div>
+        </div>
       </div>
       <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
     </button>
+
+    {# Dynamic Sticker Order #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Dynamic Sticker Order</span>
+        <p class="text-[10px] text-textSecondary">Sort sticker suggestions by usage frequency</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" checked onchange="saveChatFolderSetting('dynamic_stickers', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    {# Trending Stickers #}
+    <div class="flex items-center justify-between py-2">
+      <div>
+        <span class="text-sm font-medium text-textMain">Trending Stickers</span>
+        <p class="text-[10px] text-textSecondary">Show popular stickers at the top of the panel</p>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" onchange="saveChatFolderSetting('trending_stickers', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
   </div>
+
 </div>
 
+{# ── Toggle Switch Styles ── #}
 <style>
   .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
   .toggle-switch input { opacity:0; width:0; height:0 }
   .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
   .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
+  .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
   .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
   .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
 </style>
+
+{# ── Chat Folders & Stickers JavaScript ── #}
+<script>
+  var CHAT_FOLDER_DEFAULTS = {
+    folders_view: true,
+    double_tap_react: true,
+    quick_reaction: '👍',
+    suggest_emoji: true,
+    emoji_autocomplete: true,
+    loop_stickers: true,
+    large_emoji: true,
+    dynamic_stickers: true,
+    trending_stickers: false
+  };
+
+  function loadChatFolderSettings() {
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('ichat_folders') || '{}'); } catch(e) {}
+    return Object.assign({}, CHAT_FOLDER_DEFAULTS, saved);
+  }
+
+  function saveChatFolderSetting(key, value) {
+    var settings = loadChatFolderSettings();
+    settings[key] = value;
+    localStorage.setItem('ichat_folders', JSON.stringify(settings));
+    applyChatFolderSettingsUI(settings);
+  }
+
+  function setQuickReaction(emoji) {
+    saveChatFolderSetting('quick_reaction', emoji);
+    // Highlight selected
+    var buttons = document.querySelectorAll('#quick-reaction-picker button');
+    buttons.forEach(function(b) {
+      b.style.outline = b.textContent.trim() === emoji ? '2px solid var(--color-primary)' : '2px solid transparent';
+    });
+  }
+
+  function applyChatFolderSettingsUI(s) {
+    // Apply checkboxes
+    var root = document.getElementById('chat-folders-root');
+    if (!root) return;
+    var toggles = root.querySelectorAll('input[type=checkbox]');
+    toggles.forEach(function(cb) {
+      var key = cb.getAttribute('onchange') ? cb.getAttribute('onchange').match(/saveChatFolderSetting\('([^']+)'/)?.[1] : null;
+      if (key && s[key] !== undefined) cb.checked = !!s[key];
+    });
+    // Quick reaction highlight
+    var buttons = document.querySelectorAll('#quick-reaction-picker button');
+    buttons.forEach(function(b) {
+      b.style.outline = b.textContent.trim() === s.quick_reaction ? '2px solid var(--color-primary)' : '2px solid transparent';
+    });
+  }
+
+  (function() { applyChatFolderSettingsUI(loadChatFolderSettings()); })();
+</script>

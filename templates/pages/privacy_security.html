@@ -1,69 +1,261 @@
 {# privacy_security.html — P2 T06 Privacy & Security Settings #}
 <div class="divide-y divide-borderColor/60">
 
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Privacy</h4>
+  {# ── Privacy: Visibility Settings ── #}
+  <div class="px-4 py-4 space-y-2">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Privacy</h4>
 
-    <div class="flex items-center justify-between py-1">
+    <button onclick="showVisibilityPicker(this, 'last_seen_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
       <div class="flex items-center space-x-3">
         <i data-lucide="clock" class="w-4 h-4 text-textSecondary"></i>
-        <div><div class="text-sm text-textMain">Last Seen & Online</div><div class="text-[10px] text-textSecondary">Everybody</div></div>
+        <div>
+          <div class="text-sm text-textMain">Last Seen & Online</div>
+          <div class="text-[10px] text-textSecondary" id="privacy-label-last_seen_visibility">—</div>
+        </div>
       </div>
       <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </div>
-
-    <div class="flex items-center justify-between py-1">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="image" class="w-4 h-4 text-textSecondary"></i>
-        <div><div class="text-sm text-textMain">Profile Photo</div><div class="text-[10px] text-textSecondary">Everybody</div></div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </div>
-
-    <div class="flex items-center justify-between py-1">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="phone" class="w-4 h-4 text-textSecondary"></i>
-        <div><div class="text-sm text-textMain">Phone Number</div><div class="text-[10px] text-textSecondary">My Contacts</div></div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </div>
-  </div>
-
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Security</h4>
-
-    <button onclick="showToast('Two-step verification coming in Phase 2')" class="w-full py-3 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg"><i data-lucide="shield-check" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium text-textMain">Two-Step Verification</span>
-      </div>
-      <span class="text-[10px] text-textSecondary">Off</span>
     </button>
 
-    <button onclick="showToast('Active sessions coming in P2 T08')" class="w-full py-3 flex items-center justify-between">
+    <button onclick="showVisibilityPicker(this, 'profile_photo_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="image" class="w-4 h-4 text-textSecondary"></i>
+        <div>
+          <div class="text-sm text-textMain">Profile Photo</div>
+          <div class="text-[10px] text-textSecondary" id="privacy-label-profile_photo_visibility">—</div>
+        </div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+
+    <button onclick="showVisibilityPicker(this, 'phone_number_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="phone" class="w-4 h-4 text-textSecondary"></i>
+        <div>
+          <div class="text-sm text-textMain">Phone Number</div>
+          <div class="text-[10px] text-textSecondary" id="privacy-label-phone_number_visibility">—</div>
+        </div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+
+    <button onclick="showVisibilityPicker(this, 'bio_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="file-text" class="w-4 h-4 text-textSecondary"></i>
+        <div>
+          <div class="text-sm text-textMain">Bio</div>
+          <div class="text-[10px] text-textSecondary" id="privacy-label-bio_visibility">—</div>
+        </div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+
+    <button onclick="showVisibilityPicker(this, 'forward_link_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="link" class="w-4 h-4 text-textSecondary"></i>
+        <div>
+          <div class="text-sm text-textMain">Forward Link</div>
+          <div class="text-[10px] text-textSecondary" id="privacy-label-forward_link_visibility">—</div>
+        </div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+  </div>
+
+  {# ── Permissions ── #}
+  <div class="px-4 py-4 space-y-2">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Permissions</h4>
+
+    <button onclick="showVisibilityPicker(this, 'who_can_send_messages', true)" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="message-circle" class="w-4 h-4 text-textSecondary"></i>
+        <div>
+          <div class="text-sm text-textMain">Who Can Send Me Messages</div>
+          <div class="text-[10px] text-textSecondary" id="privacy-label-who_can_send_messages">—</div>
+        </div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+
+    <button onclick="showVisibilityPicker(this, 'who_can_voice_video_call', true)" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="phone-call" class="w-4 h-4 text-textSecondary"></i>
+        <div>
+          <div class="text-sm text-textMain">Who Can Voice / Video Call Me</div>
+          <div class="text-[10px] text-textSecondary" id="privacy-label-who_can_voice_video_call">—</div>
+        </div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    </button>
+  </div>
+
+  {# ── Security ── #}
+  <div class="px-4 py-4 space-y-2">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Security</h4>
+
+    {# ── P2 T28 placeholders: two-step, passcode — Coming in a future update ── #}
+    <div class="space-y-2 opacity-50 pointer-events-none" data-placeholder-section="true">
+      <p class="text-[10px] italic text-textSecondary -mb-1 pl-1">🔒 Coming in a future update (P2 T28)</p>
+
+      {# Two-Step Verification #}
+      <button data-placeholder="true"
+        class="w-full py-2.5 flex items-center justify-between rounded-custom-md px-2 -mx-2 transition-colors text-left cursor-not-allowed">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg"><i data-lucide="shield-check" class="w-4 h-4"></i></div>
+          <span class="text-sm font-medium text-textMain">Two-Step Verification</span>
+        </div>
+        <span class="text-[10px] text-textSecondary" id="privacy-label-two_step_verification_enabled">—</span>
+      </button>
+
+      {# Passcode Lock #}
+      <button data-placeholder="true"
+        class="w-full py-2.5 flex items-center justify-between rounded-custom-md px-2 -mx-2 transition-colors text-left cursor-not-allowed">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="lock" class="w-4 h-4"></i></div>
+          <span class="text-sm font-medium text-textMain">Passcode Lock</span>
+        </div>
+        <span class="text-[10px] text-textSecondary" id="privacy-label-passcode_lock_enabled">—</span>
+      </button>
+    </div>
+
+    {# Active Sessions #}
+    <button onclick="navigateSidebar('sessions-shortcuts')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
       <div class="flex items-center space-x-3">
         <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg"><i data-lucide="smartphone" class="w-4 h-4"></i></div>
         <span class="text-sm font-medium text-textMain">Active Sessions</span>
       </div>
-      <span class="text-[10px] text-textSecondary">3 devices</span>
+      <span class="text-[10px] text-textSecondary">Manage devices</span>
     </button>
 
-    <button onclick="showToast('Blocked users list coming soon')" class="w-full py-3 flex items-center justify-between">
+    {# Blocked Users #}
+    <button onclick="openBlockedUsersList()" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
       <div class="flex items-center space-x-3">
         <div class="p-2 bg-red-500/10 text-red-600 dark:text-red-400 rounded-lg"><i data-lucide="user-x" class="w-4 h-4"></i></div>
         <span class="text-sm font-medium text-textMain">Blocked Users</span>
       </div>
-      <span class="text-[10px] text-textSecondary">0</span>
+      <span class="text-[10px] text-textSecondary" id="privacy-blocked-count">0</span>
+    </button>
+
+    {# ── P2 T28 placeholder: Login Email — Coming in a future update ── #}
+    <div class="opacity-50 pointer-events-none" data-placeholder-section="true">
+      {# Login Email #}
+      <div class="w-full py-2.5 flex items-center justify-between px-2 -mx-2" data-placeholder="true">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg"><i data-lucide="mail" class="w-4 h-4"></i></div>
+          <div class="flex-1">
+            <div class="text-sm font-medium text-textMain">Login Email</div>
+            <input type="email" id="privacy-input-login_email" placeholder="email@example.com"
+              class="mt-1 w-full bg-bgSearch border border-borderColor rounded-custom-md px-2 py-1 text-xs text-textMain focus:outline-none focus:ring-1 focus:ring-brand-light"
+              disabled />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Auto-Delete Messages #}
+    <button onclick="showAutoDeletePicker(this)" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-lg"><i data-lucide="timer" class="w-4 h-4"></i></div>
+        <div>
+          <div class="text-sm font-medium text-textMain">Auto-Delete Messages</div>
+          <div class="text-[10px] text-textSecondary" id="privacy-label-auto_delete_messages_days">—</div>
+        </div>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
     </button>
   </div>
 
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Data</h4>
-    <button onclick="window.showToast('Contact list cleared')" class="w-full py-3 text-left text-red-500">
+  {# ── Content & Data ── #}
+  <div class="px-4 py-4 space-y-2">
+    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Content &amp; Data</h4>
+
+    {# Sensitive Content Filter #}
+    <button onclick="togglePrivacySwitch('sensitive_content_filter')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-lg"><i data-lucide="eye-off" class="w-4 h-4"></i></div>
+        <span class="text-sm font-medium text-textMain">Sensitive Content Filter</span>
+      </div>
+      <span class="text-[10px] text-textSecondary" id="privacy-label-sensitive_content_filter">—</span>
+    </button>
+
+    {# Delete Synced Contacts #}
+    <button onclick="deleteSyncedContacts()" class="w-full py-2.5 text-left text-red-500 flex items-center space-x-3 hover:bg-red-500/5 rounded-custom-md px-2 -mx-2 transition-colors">
+      <i data-lucide="users-round" class="w-4 h-4"></i>
       <span class="text-sm font-medium">Delete Synced Contacts</span>
     </button>
-    <button onclick="if(confirm('Delete your account? This cannot be undone.')){window.showToast('Account deletion requested')}" class="w-full py-3 text-left text-red-500">
+
+    {# Delete Account #}
+    <button onclick="deleteAccount()" class="w-full py-2.5 text-left text-red-500 flex items-center space-x-3 hover:bg-red-500/5 rounded-custom-md px-2 -mx-2 transition-colors">
+      <i data-lucide="trash-2" class="w-4 h-4"></i>
       <span class="text-sm font-medium">Delete Account</span>
     </button>
   </div>
+
+  {# ── Visibility Picker Dropdown (hidden, shown on click) ── #}
+  <div id="privacy-visibility-picker" class="hidden fixed inset-0 z-50" onclick="closeVisibilityPicker()">
+    <div class="absolute bottom-0 left-0 right-0 bg-bgSidebar border-t border-borderColor rounded-t-[20px] shadow-2xl p-4 animate-slide-up max-w-[420px] mx-auto"
+         onclick="event.stopPropagation()">
+      <div class="w-8 h-1 bg-borderColor rounded-full mx-auto mb-4"></div>
+      <h4 class="text-sm font-bold text-textMain mb-3" id="privacy-picker-title">Who can see this?</h4>
+      <div class="space-y-1" id="privacy-picker-options">
+        <!-- Dynamically populated -->
+      </div>
+      <button onclick="closeVisibilityPicker()" class="w-full mt-3 py-2.5 text-sm font-semibold text-textSecondary hover:text-textMain transition-colors">Cancel</button>
+    </div>
+  </div>
+
+  {# ── Blocked Users Modal ── #}
+  <div id="privacy-blocked-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
+    <div class="bg-bgSidebar border border-borderColor rounded-[20px] shadow-2xl w-full max-w-[380px] max-h-[70vh] flex flex-col">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-borderColor/60">
+        <h3 class="text-base font-bold text-textMain">Blocked Users</h3>
+        <button onclick="closeBlockedUsersList()" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="flex-1 overflow-y-auto custom-scrollbar p-4" id="privacy-blocked-list">
+        <p class="text-sm text-textSecondary text-center py-8">Loading...</p>
+      </div>
+    </div>
+  </div>
+
+  {# ── Auto-Delete Picker Dropdown ── #}
+  <div id="privacy-autodelete-picker" class="hidden fixed inset-0 z-50" onclick="closeAutoDeletePicker()">
+    <div class="absolute bottom-0 left-0 right-0 bg-bgSidebar border-t border-borderColor rounded-t-[20px] shadow-2xl p-4 animate-slide-up max-w-[420px] mx-auto"
+         onclick="event.stopPropagation()">
+      <div class="w-8 h-1 bg-borderColor rounded-full mx-auto mb-4"></div>
+      <h4 class="text-sm font-bold text-textMain mb-3">Auto-Delete Messages</h4>
+      <div class="space-y-1">
+        <button onclick="savePrivacySetting('auto_delete_messages_days', 0); closeAutoDeletePicker();" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">
+          <span>Off</span>
+          <i data-lucide="check" class="w-4 h-4 text-brand-light hidden" id="autodelete-check-0"></i>
+        </button>
+        <button onclick="savePrivacySetting('auto_delete_messages_days', 1); closeAutoDeletePicker();" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">
+          <span>1 Day</span>
+          <i data-lucide="check" class="w-4 h-4 text-brand-light hidden" id="autodelete-check-1"></i>
+        </button>
+        <button onclick="savePrivacySetting('auto_delete_messages_days', 7); closeAutoDeletePicker();" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">
+          <span>7 Days</span>
+          <i data-lucide="check" class="w-4 h-4 text-brand-light hidden" id="autodelete-check-7"></i>
+        </button>
+        <button onclick="savePrivacySetting('auto_delete_messages_days', 30); closeAutoDeletePicker();" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">
+          <span>30 Days</span>
+          <i data-lucide="check" class="w-4 h-4 text-brand-light hidden" id="autodelete-check-30"></i>
+        </button>
+      </div>
+      <button onclick="closeAutoDeletePicker()" class="w-full mt-2 py-2.5 text-sm font-semibold text-textSecondary hover:text-textMain transition-colors">Cancel</button>
+    </div>
+  </div>
+
+  {# ── Confirm Action Modal (generic) ── #}
+  <div id="privacy-confirm-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
+    <div class="bg-bgSidebar/95 dark:bg-bgSidebar/98 border border-borderColor rounded-[20px] shadow-2xl w-full max-w-[340px] p-6 select-none flex flex-col">
+      <div class="text-base font-bold text-textMain mb-2" id="privacy-confirm-title">Confirm Action</div>
+      <div class="text-xs text-textSecondary leading-relaxed mb-6" id="privacy-confirm-desc">Are you sure?</div>
+      <div class="flex items-center justify-end space-x-3">
+        <button onclick="closePrivacyConfirmModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors">Cancel</button>
+        <button id="privacy-confirm-btn" class="px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-custom-md hover:bg-red-600 transition-colors">Confirm</button>
+      </div>
+    </div>
+  </div>
+
 </div>

@@ -104,6 +104,17 @@ urlpatterns = [
     path('api/groups/<int:conversation_id>/disband/', views.disband_group_view, name='api_disband_group'),
     path('api/groups/<int:conversation_id>/members/', views.group_members_view, name='api_group_members'),
     path('api/groups/<int:conversation_id>/messages/', views.group_messages_view, name='api_group_messages'),
+    # P2 T05: Data & Storage
+    path('api/storage/stats/', views.storage_stats_view, name='api_storage_stats'),
+    path('api/storage/clear/', views.storage_clear_view, name='api_storage_clear'),
+    path('api/storage/settings/', views.storage_settings_view, name='api_storage_settings'),
+    # P2 T06: Privacy & Security
+    path('api/privacy/settings/', views.privacy_settings_view, name='api_privacy_settings'),
+    path('api/privacy/blocked/', views.blocked_users_list_view, name='api_blocked_users_list'),
+    path('api/privacy/block/', views.block_user_view, name='api_block_user'),
+    path('api/privacy/unblock/', views.unblock_user_view, name='api_unblock_user'),
+    path('api/privacy/delete-contacts/', views.delete_synced_contacts_view, name='api_delete_synced_contacts'),
+    path('api/privacy/delete-account/', views.delete_account_view, name='api_delete_account'),
     # T27: Auto-delete
     path('api/settings/auto-delete/', views.auto_delete_setting_view, name='api_auto_delete_setting'),
     path('api/conversations/<int:conversation_id>/auto-delete/', views.conversation_auto_delete_view, name='api_conversation_auto_delete'),

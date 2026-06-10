@@ -783,7 +783,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     def _build_recipients_payload(cls, group_message, conversation):
         recipients = GroupMessageRecipient.objects.filter(
             group_message=group_message,
-        ).select_related('group_message')
+        ).select_related('group_message__sender__profile')
         return [
             cls.serialize_group_recipient(r)
             for r in recipients
@@ -849,11 +849,16 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     @staticmethod
     def serialize_group_recipient(recipient, membership_version=None):
         mv = membership_version if membership_version is not None else recipient.membership_version
+        sender_name = ChatConsumer.display_name(recipient.group_message.sender)
         return {
             'message_id': recipient.group_message_id,
             'group_id': recipient.group_message.conversation_id,
             'membership_version': mv,
             'sender_id': recipient.group_message.sender_id,
+            'sender_username': recipient.group_message.sender.username,
+            'sender_name': sender_name,
+            'sender_initials': ChatConsumer.initials(sender_name),
+            'sender_avatar_color': ChatConsumer.avatar_color(sender_name),
             'receiver_id': recipient.receiver_id,
             'message_type': recipient.group_message.message_type,
             'ciphertext': recipient.ciphertext,
@@ -867,3 +872,27 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'recalled_at': recipient.group_message.recalled_at.isoformat() if recipient.group_message.recalled_at else None,
             'created_at': recipient.group_message.created_at.isoformat(),
         }
+
+    @staticmethod
+    def display_name(user):
+        try:
+            nickname = user.profile.nickname
+        except Exception:
+            nickname = ''
+        return nickname or user.get_full_name() or user.username
+
+    @staticmethod
+    def initials(name):
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            return (parts[0][0] + parts[-1][0]).upper()
+        return (name.strip()[:2] or '?').upper()
+
+    @staticmethod
+    def avatar_color(name):
+        colors = [
+            '#5c6bc0', '#26a69a', '#42a5f5', '#ffa726', '#ef5350',
+            '#ab47bc', '#66bb6a', '#ec407a', '#8d6e63', '#78909c',
+        ]
+        checksum = sum(ord(char) for char in name)
+        return colors[checksum % len(colors)]

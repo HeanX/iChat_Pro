@@ -29,7 +29,7 @@
     {% if not is_self %}
       {% if show_avatar %}
         <div class="message-avatar {{ avatar_bg|default:'bg-purple-600' }}" title="{{ sender_name|default:'' }}">
-          {{ avatar_text|default:'AV' }}
+          {{ avatar_text|default:'??' }}
         </div>
       {% else %}
         <div class="message-avatar-spacer" aria-hidden="true"></div>

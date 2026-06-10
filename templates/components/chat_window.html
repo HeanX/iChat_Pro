@@ -25,19 +25,19 @@
 
         <!-- Active Chat Avatar -->
         <div id="chat-header-avatar" class="w-10 h-10 rounded-full bg-brand-light text-white flex items-center justify-center font-bold text-sm shadow-sm">
-          AV
+          --
         </div>
 
         <!-- Identity Name and Encryption Badge -->
         <div class="leading-tight cursor-pointer" id="chat-header-details">
           <div class="flex items-center space-x-1.5">
-            <span id="chat-header-name" class="text-sm font-bold text-textMain hover:underline">Alice Vance</span>
+            <span id="chat-header-name" class="text-sm font-bold text-textMain hover:underline">Select a chat</span>
             <!-- Lock Icon indicating E2E Encryption Status -->
             <button id="chat-header-lock" class="text-brand-light dark:text-brand-dark p-0.5 rounded-full hover:bg-bgSearch transition-colors" title="E2E Encrypted. Click to verify fingerprint." data-i18n-title="verify_fp_desc">
               <i data-lucide="lock" class="w-4 h-4"></i>
             </button>
           </div>
-          <span id="chat-header-status" class="text-xs text-textSecondary">online</span>
+          <span id="chat-header-status" class="text-xs text-textSecondary">Waiting for conversation</span>
         </div>
       </div>
 
@@ -94,7 +94,7 @@
     </main>
 
     <!-- 3. Dynamic Emoji Picker Panel -->
-    <div id="emoji-picker-mock" class="hidden absolute bottom-[72px] right-6 p-3 bg-bgSidebar border border-borderColor rounded-custom-lg shadow-xl z-20 w-[240px]">
+    <div id="emoji-picker" class="hidden absolute bottom-[72px] right-6 p-3 bg-bgSidebar border border-borderColor rounded-custom-lg shadow-xl z-20 w-[240px]">
       <div class="text-xs font-bold text-textSecondary mb-2 border-b border-borderColor/40 pb-1">Quick Emojis</div>
       <div class="grid grid-cols-5 gap-2 text-center text-xl">
         <button onclick="insertEmoji('😀')" class="hover:scale-125 transition-transform p-1">😀</button>
@@ -184,13 +184,13 @@
 
         <!-- Explanatory note -->
         <p class="text-[11px] text-textSecondary px-2 leading-relaxed" id="fp-modal-explain-container">
-          Verify with <strong id="fp-modal-name">Alice Vance</strong> that the fingerprints in their security panel matches the string below:
+          Verify with <strong id="fp-modal-name">this contact</strong> that the fingerprints in their security panel match the string below:
         </p>
 
         <!-- Encrypted fingerprint string -->
         <div class="mt-3.5 p-3 bg-bgSearch rounded-custom-md border border-borderColor w-full">
           <code id="fp-modal-key" class="text-xs font-mono font-bold text-textMain break-all tracking-wider block">
-            ECC: 9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A
+            Loading real fingerprint...
           </code>
         </div>
 
@@ -206,23 +206,23 @@
   </div>
 
   <!-- Right Side: Details & Security Dashboard Drawer Panel -->
-  <div id="right-details-panel" class="hidden w-[350px] border-l border-borderColor bg-bgSidebar h-full flex flex-col flex-shrink-0 z-20 overflow-y-auto custom-scrollbar select-none">
+  <div id="legacy-right-details-panel" class="hidden w-[350px] border-l border-borderColor bg-bgSidebar h-full flex flex-col flex-shrink-0 z-20 overflow-y-auto custom-scrollbar select-none">
     
     <!-- Drawer Header -->
     <div class="p-4 border-b border-borderColor flex items-center justify-between bg-search-op-10">
       <h3 class="font-bold text-textMain text-sm">Contact Info</h3>
-      <button id="close-details-btn" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="Close Panel">
+      <button id="legacy-close-details-btn" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="Close Panel">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
     </div>
     
     <!-- Profile Hero Info -->
     <div class="p-6 flex flex-col items-center border-b border-borderColor">
-      <div id="details-avatar" class="w-20 h-20 rounded-full bg-brand-light text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3">
-        AV
+      <div id="legacy-details-avatar" class="w-20 h-20 rounded-full bg-brand-light text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3">
+        --
       </div>
-      <h4 id="details-name" class="font-bold text-textMain text-base">Alice Vance</h4>
-      <p id="details-status" class="text-xs text-[#31B545] font-semibold mt-0.5">online</p>
+      <h4 id="legacy-details-name" class="font-bold text-textMain text-base">Select a chat</h4>
+      <p id="legacy-details-status" class="text-xs text-[#31B545] font-semibold mt-0.5">Waiting for conversation</p>
     </div>
     
     <!-- E2EE security description & Fingerprint -->
@@ -233,8 +233,8 @@
           <i data-lucide="shield-check" class="w-4 h-4 text-emerald-500 fill-emerald-500/10"></i>
           <span>End-to-End Encrypted (ECDH P-256 + AES-GCM)</span>
         </div>
-        <div class="p-2.5 bg-bgSearch rounded border border-borderColor text-[10px] font-mono text-textMain break-all" id="details-fingerprint">
-          ECC: 9F8D 7E6A 5B4C 3D2E 1F0A 9B8C 7D6E 5F4A
+        <div class="p-2.5 bg-bgSearch rounded border border-borderColor text-[10px] font-mono text-textMain break-all" id="legacy-details-fingerprint">
+          Loading real fingerprint...
         </div>
       </div>
     </div>

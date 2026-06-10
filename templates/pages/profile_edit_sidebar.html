@@ -18,6 +18,7 @@
 
   <form method="POST" action="{% url 'profile_edit' %}" enctype="multipart/form-data" class="divide-y divide-borderColor/60">
     {% csrf_token %}
+    <input type="hidden" name="_sidebar" value="1">
 
     <!-- Avatar Section -->
     <div class="flex flex-col items-center py-6 px-4 text-center bg-search-op-10">
@@ -37,13 +38,13 @@
     <div class="px-4 py-4 space-y-4">
       <div class="space-y-1.5">
         <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">First Name</label>
-        <input type="text" name="first_name" value="{{ request.user.first_name }}"
+        <input type="text" name="first_name" value="{{ form.first_name.value|default:request.user.first_name }}"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
           placeholder="Your first name">
       </div>
       <div class="space-y-1.5">
         <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Last Name</label>
-        <input type="text" name="last_name" value="{{ request.user.last_name }}"
+        <input type="text" name="last_name" value="{{ form.last_name.value|default:request.user.last_name }}"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
           placeholder="Your last name">
       </div>
@@ -59,7 +60,7 @@
     <!-- Username -->
     <div class="px-4 py-4 space-y-1.5">
       <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Username</label>
-      <input type="text" name="username" id="profile-username-input" value="{{ request.user.username }}"
+      <input type="text" name="username" id="profile-username-input" value="{{ form.username.value|default:request.user.username }}"
         class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
         placeholder="a-z, 0-9, underscores"
         pattern="^[a-z0-9_]{5,}$"

@@ -173,7 +173,7 @@
       </svg>
     </div>
     <p class="text-[11px] text-textSecondary mb-4">iChat Pro — {{ request.user.username }}</p>
-    <button onclick="copyQRCode()" class="w-full py-2.5 bg-brand-light dark:bg-brand-dark text-white font-semibold text-sm rounded-custom-md hover:opacity-95 transition-all">
+    <button onclick="copyQRCode()" class="w-full py-2.5 bg-brand-light dark:bg-brand-dark text-white font-semibold text-sm rounded-custom-md hover:opacity-95 transition-all" data-qr-username="{{ request.user.username }}">
       <i data-lucide="copy" class="w-4 h-4 inline mr-1.5"></i>
       Copy QR Code
     </button>

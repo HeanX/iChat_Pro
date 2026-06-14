@@ -1,316 +1,662 @@
-{# general_settings.html — P2 T07 General/Appearance Settings #}
-<div class="divide-y divide-borderColor/60" id="general-settings-root">
+<div id="general-settings-root" class="telegram-general">
+  <style>
+    .telegram-general {
+      --tg-blue: #3390ec;
+      --tg-card: #fff;
+      --tg-panel: #f4f4f5;
+      --tg-muted: #707579;
+      --tg-line: rgba(0, 0, 0, .07);
+      min-height: 100%;
+      padding: 14px 18px 22px;
+      background: var(--tg-panel);
+      color: #111;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
 
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 1: Theme & Appearance
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Appearance</h4>
+    .telegram-general .general-card {
+      margin-bottom: 14px;
+      padding: 20px 22px 18px;
+      border-radius: 24px;
+      background: var(--tg-card);
+      box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06);
+    }
 
-    {# Theme Mode #}
-    <div class="space-y-2">
-      <span class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider">Theme Mode</span>
-      <div class="grid grid-cols-3 gap-2">
-        <button onclick="setThemeMode('light')" data-theme-btn="light"
-          class="p-3 rounded-custom-md border text-center transition-all hover:border-brand-light bg-white text-zinc-800"
-          id="theme-btn-light">
-          <i data-lucide="sun" class="w-5 h-5 mx-auto mb-1"></i>
-          <span class="text-[10px] font-semibold">Light</span>
-        </button>
-        <button onclick="setThemeMode('dark')" data-theme-btn="dark"
-          class="p-3 rounded-custom-md border text-center transition-all hover:border-brand-light bg-zinc-800 text-white"
-          id="theme-btn-dark">
-          <i data-lucide="moon" class="w-5 h-5 mx-auto mb-1"></i>
-          <span class="text-[10px] font-semibold">Dark</span>
-        </button>
-        <button onclick="setThemeMode('system')" data-theme-btn="system"
-          class="p-3 rounded-custom-md border text-center transition-all hover:border-brand-light bg-gradient-to-b from-white to-zinc-700 text-zinc-600"
-          id="theme-btn-system">
-          <i data-lucide="monitor" class="w-5 h-5 mx-auto mb-1"></i>
-          <span class="text-[10px] font-semibold">System</span>
-        </button>
-      </div>
+    .telegram-general .general-section-title {
+      margin: 0 0 16px;
+      color: var(--tg-blue);
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .telegram-general .general-row {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      align-items: center;
+      min-height: 46px;
+      gap: 12px;
+      color: #111827;
+      font-size: 17px;
+      line-height: 1.2;
+    }
+
+    .telegram-general .general-row.compact {
+      grid-template-columns: minmax(0, 1fr) auto;
+      min-height: 42px;
+    }
+
+    .telegram-general .general-row + .general-row {
+      border-top: 1px solid var(--tg-line);
+    }
+
+    .telegram-general button.general-row {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .telegram-general .general-icon {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      color: var(--tg-muted);
+    }
+
+    .telegram-general .general-icon svg {
+      width: 24px;
+      height: 24px;
+      stroke-width: 2;
+    }
+
+    .telegram-general .general-value {
+      color: var(--tg-muted);
+      font-size: 17px;
+    }
+
+    .telegram-general .general-range {
+      width: 100%;
+      margin: 10px 0 18px;
+      accent-color: var(--tg-blue);
+    }
+
+    .telegram-general .wallpaper-strip {
+      display: flex;
+      flex-direction: row;
+      gap: 16px;
+      margin: 12px 0 20px;
+      overflow-x: auto;
+      padding: 6px 6px 12px;
+      scrollbar-width: none; /* Hide scrollbar for standard browsers */
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .telegram-general .wallpaper-strip::-webkit-scrollbar {
+      display: none; /* Hide scrollbar for Chrome/Safari */
+    }
+
+    .telegram-general .wallpaper-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 72px;
+      flex-shrink: 0;
+      border: 2px solid transparent;
+      border-radius: 20px;
+      padding: 10px 8px;
+      box-sizing: border-box;
+      background: transparent;
+      cursor: pointer;
+      position: relative;
+      outline: none;
+      transition: border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .telegram-general .wallpaper-pill-top {
+      width: 44px;
+      height: 18px;
+      border-radius: 9999px;
+      align-self: flex-end;
+      position: relative;
+      z-index: 2;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.06);
+    }
+
+    .telegram-general .wallpaper-pill-bottom {
+      width: 44px;
+      height: 18px;
+      border-radius: 9999px;
+      align-self: flex-start;
+      margin-top: -8px;
+      position: relative;
+      z-index: 1;
+      background: var(--bubble-incoming, #eef0f2);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.04);
+    }
+
+    .telegram-general .wallpaper-emoji {
+      margin-top: 10px;
+      font-size: 22px;
+      line-height: 1.2;
+      display: inline-block;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Colors for top pills in light theme */
+    .telegram-general .wallpaper-item[data-wallpaper="default"] .wallpaper-pill-top {
+      background: #deecf9;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="blue"] .wallpaper-pill-top {
+      background: #d7ebff;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="green"] .wallpaper-pill-top {
+      background: #d4e6c9;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="pink"] .wallpaper-pill-top {
+      background: #fce7f3;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="purple"] .wallpaper-pill-top {
+      background: #ebdcf9;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="orange"] .wallpaper-pill-top {
+      background: #ffedd5;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="cyan"] .wallpaper-pill-top {
+      background: #e0f7fa;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="yellow"] .wallpaper-pill-top {
+      background: #fef9c3;
+    }
+
+    .telegram-general {
+      --bubble-incoming: #eef0f2;
+    }
+
+    /* Selected state */
+    .telegram-general .wallpaper-item.is-selected {
+      border-color: var(--color-primary, var(--tg-blue, #3390ec));
+    }
+    
+    /* Interactive states */
+    .telegram-general .wallpaper-item:hover {
+      background: rgba(0, 0, 0, 0.03);
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .telegram-general .wallpaper-item:hover .wallpaper-emoji {
+      transform: scale(1.15);
+    }
+    .telegram-general .wallpaper-item:active {
+      transform: scale(0.96);
+    }
+
+    .telegram-general .general-option {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      align-items: center;
+      width: 100%;
+      min-height: 46px;
+      gap: 12px;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .telegram-general .telegram-radio {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      border: 2px solid #b1b5b9;
+      border-radius: 50%;
+      box-sizing: border-box;
+      display: inline-block;
+      flex-shrink: 0;
+      transition: border-color 0.16s ease;
+    }
+
+    .telegram-general .telegram-radio::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--tg-blue, #3390ec);
+      transition: transform 0.16s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .telegram-general .general-option.is-selected .telegram-radio {
+      border-color: var(--tg-blue);
+    }
+
+    .telegram-general .general-option.is-selected .telegram-radio::after {
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .telegram-general .general-option-title {
+      display: block;
+      color: #111827;
+      font-size: 17px;
+      line-height: 1.2;
+    }
+
+    .telegram-general .general-option-subtitle {
+      display: block;
+      margin-top: 3px;
+      color: var(--tg-muted);
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .telegram-general .general-toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 120;
+      padding: 10px 14px;
+      border-radius: 18px;
+      background: rgba(17, 24, 39, .9);
+      color: #fff;
+      font-size: 14px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .telegram-general .general-toast.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Dark Mode Settings */
+    [data-theme="dark"] .telegram-general {
+      --tg-card: #212121;
+      --tg-panel: #181818;
+      --tg-muted: #aaaaaa;
+      --tg-line: rgba(255, 255, 255, .08);
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-general .general-row,
+    [data-theme="dark"] .telegram-general .general-option-title,
+    [data-theme="dark"] .telegram-general .general-value {
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-general .telegram-radio {
+      border-color: #555555;
+    }
+
+    [data-theme="dark"] .telegram-general .general-option.is-selected .telegram-radio {
+      border-color: var(--tg-blue);
+    }
+
+    [data-theme="dark"] .telegram-general {
+      --bubble-incoming: #2c2c2e;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="default"] .wallpaper-pill-top {
+      background: #2b3036;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="blue"] .wallpaper-pill-top {
+      background: #1c2536;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="green"] .wallpaper-pill-top {
+      background: #1b2a1c;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="pink"] .wallpaper-pill-top {
+      background: #2d1c25;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="purple"] .wallpaper-pill-top {
+      background: #231c2d;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="orange"] .wallpaper-pill-top {
+      background: #2d221c;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="cyan"] .wallpaper-pill-top {
+      background: #1c2d2f;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="yellow"] .wallpaper-pill-top {
+      background: #2a281c;
+    }
+  </style>
+
+  <section class="general-card">
+    <h3 class="general-section-title">设置</h3>
+    <div class="general-row compact">
+      <span>消息字号</span>
+      <span id="general-font-size-label" class="general-value">16</span>
     </div>
-
-    {# Accent Color #}
-    <div class="space-y-2">
-      <span class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider">Accent Color</span>
-      <div class="flex items-center space-x-3">
-        {% with 'blue green purple red orange' as colors %}
-        {% for color in colors.split %}
-        <button onclick="setAccentColor('{{ color }}')" data-accent-btn="{{ color }}"
-          class="w-8 h-8 rounded-full bg-{{ color }}-500 hover:scale-110 transition-transform flex items-center justify-center"
-          id="accent-btn-{{ color }}">
-          <i data-lucide="check" class="w-4 h-4 text-white hidden" id="accent-check-{{ color }}"></i>
-        </button>
-        {% endfor %}
-        {% endwith %}
-      </div>
-    </div>
-
-    {# Chat Wallpaper #}
-    <div class="space-y-2">
-      <span class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider">Chat Wallpaper</span>
-      <div class="flex items-center space-x-2">
-        <button onclick="setWallpaper('#ffffff')" data-wallpaper-btn="#ffffff" id="wallpaper-btn-#ffffff"
-          class="w-10 h-10 rounded-lg border-2 bg-white hover:scale-105 transition-transform"></button>
-        <button onclick="setWallpaper('#f0f4f8')" data-wallpaper-btn="#f0f4f8" id="wallpaper-btn-#f0f4f8"
-          class="w-10 h-10 rounded-lg border-2 bg-[#f0f4f8] hover:scale-105 transition-transform"></button>
-        <button onclick="setWallpaper('#e8f5e9')" data-wallpaper-btn="#e8f5e9" id="wallpaper-btn-#e8f5e9"
-          class="w-10 h-10 rounded-lg border-2 bg-[#e8f5e9] hover:scale-105 transition-transform"></button>
-        <button onclick="setWallpaper('#fff3e0')" data-wallpaper-btn="#fff3e0" id="wallpaper-btn-#fff3e0"
-          class="w-10 h-10 rounded-lg border-2 bg-[#fff3e0] hover:scale-105 transition-transform"></button>
-        <button onclick="setWallpaper('#fce4ec')" data-wallpaper-btn="#fce4ec" id="wallpaper-btn-#fce4ec"
-          class="w-10 h-10 rounded-lg border-2 bg-[#fce4ec] hover:scale-105 transition-transform"></button>
-        <button onclick="setWallpaper('default')" data-wallpaper-btn="default" id="wallpaper-btn-default"
-          class="w-10 h-10 rounded-lg border-2 bg-bgMain flex items-center justify-center hover:scale-105 transition-transform">
-          <i data-lucide="rotate-ccw" class="w-4 h-4 text-textSecondary"></i>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 2: Text & Display
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Text & Display</h4>
-
-    {# Message Text Size #}
-    <div class="space-y-2">
-      <div class="flex items-center justify-between">
-        <span class="text-sm font-medium text-textMain">Message Text Size</span>
-        <span class="text-xs font-bold text-brand-light dark:text-brand-dark" id="font-size-val">16px</span>
-      </div>
-      <input type="range" min="12" max="24" value="16" step="1" id="font-size-slider"
-        class="w-full h-1.5 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-brand-light dark:accent-brand-dark"
-        oninput="updateMessageFontSize(this.value)">
-      <div class="flex justify-between text-[9px] text-textSecondary">
-        <span>12px</span><span>16px</span><span>20px</span><span>24px</span>
-      </div>
-      {# Preview #}
-      <div class="p-3 bg-bgSearch rounded-custom-md mt-2" id="font-size-preview">
-        <p class="text-textMain" style="font-size: 16px">The quick brown fox jumps over the lazy dog.</p>
-      </div>
-    </div>
-
-    {# Time Format #}
-    <div class="flex items-center justify-between py-2">
-      <span class="text-sm font-medium text-textMain">Time Format</span>
-      <div class="flex bg-bgSearch rounded-full p-0.5">
-        <button onclick="setTimeFormat('12h')" data-time-btn="12h" id="time-btn-12h"
-          class="px-3 py-1 rounded-full text-xs font-semibold transition-colors">12h</button>
-        <button onclick="setTimeFormat('24h')" data-time-btn="24h" id="time-btn-24h"
-          class="px-3 py-1 rounded-full text-xs font-semibold transition-colors">24h</button>
-      </div>
-    </div>
-  </div>
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 3: Power & Performance
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-3">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Power & Performance</h4>
-
-    {# Power Saving Mode #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Power Saving Mode</span>
-        <p class="text-[10px] text-textSecondary">Reduce animations and background activity</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" id="power-saving-toggle" onchange="togglePowerSaving(this.checked)" data-power-saving>
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-
-    {# Animations #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Reduce Motion</span>
-        <p class="text-[10px] text-textSecondary">Minimize transition and animation effects</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" id="reduce-motion-toggle" onchange="toggleReduceMotion(this.checked)" data-reduce-motion>
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-  </div>
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 4: Reset
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4">
-    <button onclick="resetGeneralSettings()"
-      class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
-      Reset All Appearance Settings
+    <input id="general-font-size-range" class="general-range" type="range" min="12" max="24" value="16" step="1">
+    <button type="button" class="general-row" data-action="wallpaper">
+      <span class="general-icon"><i data-lucide="image"></i></span>
+      <span>聊天壁纸</span>
+      <i data-lucide="chevron-right" style="color: var(--tg-muted);"></i>
     </button>
-  </div>
+    <button type="button" class="general-row" data-action="power-saving">
+      <span class="general-icon"><i data-lucide="gauge"></i></span>
+      <span>省电模式</span>
+      <span id="general-power-label" class="general-value">已停用</span>
+    </button>
+  </section>
 
+  <section class="general-card">
+    <h3 class="general-section-title">主题颜色</h3>
+    <div class="wallpaper-strip">
+      <button type="button" class="wallpaper-item" data-wallpaper="default" aria-label="Default wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">⛄</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="blue" aria-label="Blue wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">💎</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="green" aria-label="Green wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">👨‍🏫</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="pink" aria-label="Pink wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">🌷</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="purple" aria-label="Purple wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">💜</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="orange" aria-label="Orange wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">🍁</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="cyan" aria-label="Cyan wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">🌐</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="yellow" aria-label="Yellow wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">🌻</span>
+      </button>
+    </div>
+    <button type="button" class="general-option" data-theme="light">
+      <span class="telegram-radio"></span>
+      <span class="general-option-title">日光白</span>
+    </button>
+    <button type="button" class="general-option" data-theme="dark">
+      <span class="telegram-radio"></span>
+      <span class="general-option-title">夜间</span>
+    </button>
+    <button type="button" class="general-option" data-theme="system">
+      <span class="telegram-radio"></span>
+      <span class="general-option-title">系统默认</span>
+    </button>
+  </section>
+
+  <section class="general-card">
+    <h3 class="general-section-title">时间格式</h3>
+    <button type="button" class="general-option" data-time-format="12h">
+      <span class="telegram-radio"></span>
+      <span>
+        <span class="general-option-title">12小时制</span>
+        <span class="general-option-subtitle">下午 04:39</span>
+      </span>
+    </button>
+    <button type="button" class="general-option" data-time-format="24h">
+      <span class="telegram-radio"></span>
+      <span>
+        <span class="general-option-title">24小时制</span>
+        <span class="general-option-subtitle">16:39</span>
+      </span>
+    </button>
+  </section>
+
+  <div id="general-toast" class="general-toast"></div>
 </div>
 
-{# ── Toggle Switch Styles ── #}
-<style>
-  .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
-  .toggle-switch input { opacity:0; width:0; height:0 }
-  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
-  .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
-  .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
-  .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
-  .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
-</style>
-
-{# ── General Settings JavaScript ── #}
 <script>
-  var GENERAL_DEFAULTS = {
-    theme: 'system',
-    accent_color: 'blue',
-    wallpaper: 'default',
-    message_font_size: '16',
-    time_format: '24h',
-    power_saving: false,
-    reduce_motion: false
-  };
-
-  function loadGeneralSettings() {
-    var saved = {};
-    try { saved = JSON.parse(localStorage.getItem('ichat_general') || '{}'); } catch(e) {}
-    var s = Object.assign({}, GENERAL_DEFAULTS, saved);
-    return s;
-  }
-
-  function saveGeneralSettings(settings) {
-    var current = loadGeneralSettings();
-    var merged = Object.assign({}, current, settings);
-    localStorage.setItem('ichat_general', JSON.stringify(merged));
-    applyGeneralSettingsUI(merged);
-  }
-
-  function applyGeneralSettingsUI(s) {
-    // Theme buttons
-    ['light','dark','system'].forEach(function(t) {
-      var btn = document.getElementById('theme-btn-' + t);
-      if (btn) btn.style.outline = s.theme === t ? '2px solid var(--color-primary)' : '2px solid transparent';
-    });
-
-    // Accent color
-    ['blue','green','purple','red','orange'].forEach(function(c) {
-      var check = document.getElementById('accent-check-' + c);
-      if (check) {
-        if (s.accent_color === c) check.classList.remove('hidden');
-        else check.classList.add('hidden');
-      }
-    });
-
-    // Wallpaper — HTML id uses "#" (e.g. wallpaper-btn-#ffffff), match exactly
-    ['#ffffff','#f0f4f8','#e8f5e9','#fff3e0','#fce4ec','default'].forEach(function(w) {
-      var btn = document.getElementById('wallpaper-btn-' + w);
-      if (btn) btn.style.outline = s.wallpaper === w ? '2px solid var(--color-primary)' : '2px solid transparent';
-    });
-
-    // Font size
-    var slider = document.getElementById('font-size-slider');
-    var valEl = document.getElementById('font-size-val');
-    if (slider) slider.value = s.message_font_size;
-    if (valEl) valEl.textContent = s.message_font_size + 'px';
-    var preview = document.getElementById('font-size-preview');
-    if (preview) {
-      var p = preview.querySelector('p');
-      if (p) p.style.fontSize = s.message_font_size + 'px';
-    }
-
-    // Time format
-    ['12h','24h'].forEach(function(f) {
-      var btn = document.getElementById('time-btn-' + f);
-      if (!btn) return;
-      if (s.time_format === f) {
-        btn.classList.add('bg-brand-light','dark:bg-brand-dark','text-white');
-      } else {
-        btn.classList.remove('bg-brand-light','dark:bg-brand-dark','text-white');
-      }
-    });
-
-    // Toggles
-    var powerToggle = document.getElementById('power-saving-toggle');
-    if (powerToggle) powerToggle.checked = !!s.power_saving;
-    var motionToggle = document.getElementById('reduce-motion-toggle');
-    if (motionToggle) motionToggle.checked = !!s.reduce_motion;
-
-    // Apply accent color to CSS variable
-    var hex = ACCENT_COLORS[s.accent_color] || '#3b82f6';
-    document.documentElement.style.setProperty('--color-primary', hex);
-
-    // Apply wallpaper to chat background (default clears inline style)
-    var chatBg = document.getElementById('chat-window-container');
-    if (chatBg) chatBg.style.backgroundColor = s.wallpaper === 'default' ? '' : (s.wallpaper || '');
-  }
-
-  function setThemeMode(mode) {
-    saveGeneralSettings({ theme: mode });
-    applyThemeGlobally(mode);
-  }
-
-  var ACCENT_COLORS = {
-    blue:   '#3b82f6',
-    green:  '#22c55e',
-    purple: '#8b5cf6',
-    red:    '#ef4444',
-    orange: '#f97316'
-  };
-
-  function setAccentColor(color) {
-    saveGeneralSettings({ accent_color: color });
-    var hex = ACCENT_COLORS[color] || '#3b82f6';
-    document.documentElement.style.setProperty('--color-primary', hex);
-    window.showToast('Accent color updated');
-  }
-
-  function setWallpaper(color) {
-    saveGeneralSettings({ wallpaper: color });
-    var bg = color === 'default' ? '' : color;
-    var chatBg = document.getElementById('chat-window-container');
-    if (chatBg) chatBg.style.backgroundColor = bg;
-    window.showToast('Wallpaper updated');
-  }
-
-  function updateMessageFontSize(size) {
-    saveGeneralSettings({ message_font_size: String(size) });
-  }
-
-  function setTimeFormat(format) {
-    saveGeneralSettings({ time_format: format });
-    window.showToast(format === '12h' ? '12-hour format' : '24-hour format');
-  }
-
-  function togglePowerSaving(on) {
-    saveGeneralSettings({ power_saving: !!on });
-    window.showToast(on ? 'Power saving enabled' : 'Power saving disabled');
-  }
-
-  function toggleReduceMotion(on) {
-    saveGeneralSettings({ reduce_motion: !!on });
-    window.showToast(on ? 'Reduce motion enabled' : 'Reduce motion disabled');
-  }
-
-  function applyThemeGlobally(mode) {
-    var root = document.documentElement;
-    if (mode === 'light') {
-      root.classList.remove('dark');
-    } else if (mode === 'dark') {
-      root.classList.add('dark');
-    }
-    // 'system' uses OS preference (no forced class change)
-  }
-
-  function resetGeneralSettings() {
-    if (!confirm('Reset all appearance settings to defaults?')) return;
-    localStorage.removeItem('ichat_general');
-    applyGeneralSettingsUI(GENERAL_DEFAULTS);
-    window.showToast('Appearance settings reset to defaults');
-  }
-
-  // Initialize on load
   (function() {
+    const GENERAL_SETTINGS_URL = '/api/settings/general/';
+    const DEFAULTS = {
+      theme: 'system',
+      accent_color: 'blue',
+      wallpaper: 'default',
+      message_font_size: '16',
+      time_format: '24h',
+      power_saving: false,
+      reduce_motion: false
+    };
+    const WALLPAPER_COLORS = {
+      default: '#deecf9',
+      blue: '#d7ebff',
+      green: '#d4e6c9',
+      pink: '#fce7f3',
+      purple: '#ebdcf9',
+      orange: '#ffedd5',
+      cyan: '#e0f7fa',
+      yellow: '#fef9c3'
+    };
+    const ACCENT_COLORS = {
+      blue: '#3390ec',
+      green: '#22c55e',
+      purple: '#8b5cf6',
+      red: '#ef4444',
+      orange: '#f97316'
+    };
+    let toastTimer = null;
+
+    function csrfToken() {
+      if (typeof getCookie === 'function') return getCookie('csrftoken') || '';
+      const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+
+    function toast(text) {
+      if (window.showToast) {
+        window.showToast(text);
+        return;
+      }
+      const el = document.getElementById('general-toast');
+      if (!el) return;
+      el.textContent = text;
+      el.classList.add('is-visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function() { el.classList.remove('is-visible'); }, 1800);
+    }
+
+    function loadGeneralSettings() {
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem('ichat_general') || '{}'); } catch (error) {}
+      return Object.assign({}, DEFAULTS, saved);
+    }
+
+    function saveGeneralSettings(partial) {
+      const settings = Object.assign({}, loadGeneralSettings(), partial || {});
+      localStorage.setItem('ichat_general', JSON.stringify(settings));
+      applyGeneralSettingsUI(settings);
+      fetch(GENERAL_SETTINGS_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken(),
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify(partial || settings)
+      }).then(function(response) {
+        if (!response.ok) throw new Error('save_failed');
+        return response.json();
+      }).then(function(data) {
+        if (data.settings) {
+          localStorage.setItem('ichat_general', JSON.stringify(data.settings));
+          applyGeneralSettingsUI(data.settings);
+        }
+      }).catch(function() {
+        toast('保存失败');
+      });
+      return settings;
+    }
+
+    async function loadGeneralSettingsFromServer() {
+      const response = await fetch(GENERAL_SETTINGS_URL, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      });
+      if (!response.ok) throw new Error('load_failed');
+      const data = await response.json();
+      const settings = Object.assign({}, DEFAULTS, data.settings || {});
+      localStorage.setItem('ichat_general', JSON.stringify(settings));
+      applyGeneralSettingsUI(settings);
+      return settings;
+    }
+
+    function effectiveTheme(theme) {
+      if (theme === 'dark' || theme === 'night') return 'dark';
+      if (theme === 'system') {
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      return 'light';
+    }
+
+    function applyThemeGlobally(theme) {
+      const applied = effectiveTheme(theme);
+      document.documentElement.setAttribute('data-theme', applied);
+      document.documentElement.classList.toggle('dark', applied === 'dark');
+      localStorage.setItem('ichat-theme', applied);
+    }
+
+    function hexToRgba(hex, alpha) {
+      if (!hex || hex.indexOf('#') !== 0) return '';
+      const clean = hex.replace('#', '');
+      const r = parseInt(clean.slice(0, 2), 16);
+      const g = parseInt(clean.slice(2, 4), 16);
+      const b = parseInt(clean.slice(4, 6), 16);
+      return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
+    }
+
+    function applyWallpaper(settings) {
+      const wallpaper = settings.wallpaper || 'default';
+      document.documentElement.setAttribute('data-wallpaper', wallpaper);
+      
+      let color = WALLPAPER_COLORS[wallpaper] || '';
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      
+      if (isDark && color) {
+        const darkWallpapers = {
+          '#deecf9': '#0f1218', // Default
+          '#d7ebff': '#1c2536', // Blue
+          '#d4e6c9': '#1b2a1c', // Green
+          '#fce7f3': '#2d1c25', // Pink
+          '#ebdcf9': '#231c2d', // Purple
+          '#ffedd5': '#2d221c', // Orange
+          '#e0f7fa': '#1c2d2f', // Cyan
+          '#fef9c3': '#2a281c'  // Yellow
+        };
+        color = darkWallpapers[color] || color;
+      }
+
+      const layout = document.querySelector('.chat-layout');
+      if (layout) layout.style.backgroundColor = color;
+      if (color) {
+        document.documentElement.style.setProperty('--chat-layout-bg', color);
+        document.documentElement.style.setProperty('--chat-footer-bg', color);
+        document.documentElement.style.setProperty('--chat-footer-bg-rgba', hexToRgba(color, .88));
+      } else {
+        document.documentElement.style.removeProperty('--chat-layout-bg');
+        document.documentElement.style.removeProperty('--chat-footer-bg');
+        document.documentElement.style.removeProperty('--chat-footer-bg-rgba');
+      }
+    }
+
+    function applyGeneralSettingsUI(settings) {
+      const sizeRange = document.getElementById('general-font-size-range');
+      const sizeLabel = document.getElementById('general-font-size-label');
+      if (sizeRange) sizeRange.value = settings.message_font_size;
+      if (sizeLabel) sizeLabel.textContent = settings.message_font_size;
+
+      document.querySelectorAll('#general-settings-root [data-theme]').forEach(function(button) {
+        button.classList.toggle('is-selected', button.dataset.theme === settings.theme);
+      });
+      document.querySelectorAll('#general-settings-root [data-time-format]').forEach(function(button) {
+        button.classList.toggle('is-selected', button.dataset.timeFormat === settings.time_format);
+      });
+      document.querySelectorAll('#general-settings-root [data-wallpaper]').forEach(function(button) {
+        button.classList.toggle('is-selected', button.dataset.wallpaper === settings.wallpaper);
+      });
+
+      const powerLabel = document.getElementById('general-power-label');
+      if (powerLabel) powerLabel.textContent = settings.power_saving ? '已启用' : '已停用';
+
+      document.documentElement.style.setProperty('--color-primary', ACCENT_COLORS[settings.accent_color] || '#3390ec');
+      document.documentElement.style.setProperty('--message-font-size', settings.message_font_size + 'px');
+      applyThemeGlobally(settings.theme);
+      applyWallpaper(settings);
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function bindGeneralSettings() {
+      const root = document.getElementById('general-settings-root');
+      if (!root || root.dataset.bound === 'true') return;
+      root.dataset.bound = 'true';
+
+      document.getElementById('general-font-size-range')?.addEventListener('input', function(event) {
+        saveGeneralSettings({ message_font_size: String(event.target.value) });
+      });
+
+      root.addEventListener('click', function(event) {
+        const themeButton = event.target.closest('button[data-theme]');
+        if (themeButton) {
+          saveGeneralSettings({ theme: themeButton.dataset.theme });
+          toast('主题已更新');
+          return;
+        }
+        const timeButton = event.target.closest('button[data-time-format]');
+        if (timeButton) {
+          saveGeneralSettings({ time_format: timeButton.dataset.timeFormat });
+          toast(timeButton.dataset.timeFormat === '12h' ? '12小时制' : '24小时制');
+          if (window.renderChatList) window.renderChatList();
+          if (window.renderMessages) window.renderMessages();
+          if (window.activeChatId && window.conversationsById && window.conversationsById[window.activeChatId] && window.updateHeaderPresence) {
+            window.updateHeaderPresence(window.conversationsById[window.activeChatId]);
+          }
+          return;
+        }
+        const wallpaperButton = event.target.closest('button[data-wallpaper]');
+        if (wallpaperButton) {
+          saveGeneralSettings({ wallpaper: wallpaperButton.dataset.wallpaper });
+          toast('聊天壁纸已更新');
+          return;
+        }
+        const action = event.target.closest('button[data-action]')?.dataset.action;
+        if (action === 'power-saving') {
+          const current = loadGeneralSettings();
+          saveGeneralSettings({ power_saving: !current.power_saving, reduce_motion: !current.power_saving });
+          toast(!current.power_saving ? '省电模式已启用' : '省电模式已停用');
+        }
+        if (action === 'wallpaper') {
+          toast('请选择下方壁纸预览');
+        }
+      });
+    }
+
+    window.refreshGeneralSettings = function() {
+      bindGeneralSettings();
+      applyGeneralSettingsUI(loadGeneralSettings());
+      loadGeneralSettingsFromServer().catch(function() {});
+    };
+
+    bindGeneralSettings();
     applyGeneralSettingsUI(loadGeneralSettings());
+    loadGeneralSettingsFromServer().catch(function() {});
   })();
 </script>

@@ -1,132 +1,109 @@
-{# profile_edit_sidebar.html — P2 T03 sidebar profile edit with QR code #}
+{# profile_edit_sidebar.html - Telegram-style sidebar profile editor #}
 {% load static %}
-<div class="divide-y divide-borderColor/60">
 
-  <!-- Messages -->
+<div class="profile-edit-view">
   {% if messages %}
-  <div class="px-4 pt-4 space-y-2">
+  <div class="profile-edit-messages">
     {% for message in messages %}
-    <div class="p-3 rounded-custom-md text-sm font-medium
-      {% if message.tags == 'error' %}bg-red-50 border border-red-200 text-red-700 dark:bg-red-950/20 dark:border-red-900/50 dark:text-red-400
-      {% elif message.tags == 'success' %}bg-green-50 border border-green-200 text-green-700 dark:bg-green-950/20 dark:border-green-900/50 dark:text-green-400
-      {% else %}bg-blue-50 border border-blue-200 text-blue-700 dark:bg-blue-950/20 dark:border-blue-900/50 dark:text-blue-400{% endif %}">
+    <div class="profile-edit-alert
+      {% if message.tags == 'error' %}is-error
+      {% elif message.tags == 'success' %}is-success
+      {% else %}is-info{% endif %}">
       {{ message }}
     </div>
     {% endfor %}
   </div>
   {% endif %}
 
-  <form method="POST" action="{% url 'profile_edit' %}" enctype="multipart/form-data" class="divide-y divide-borderColor/60">
+  <form id="profile-edit-form" method="POST" action="{% url 'api-profile-me' %}" enctype="multipart/form-data" class="profile-edit-form" onsubmit="submitProfileEditForm(event)">
     {% csrf_token %}
     <input type="hidden" name="_sidebar" value="1">
+    <input type="hidden" name="nickname" value="{{ form.nickname.value|default:request.user.profile.nickname }}">
 
-    <!-- Avatar Section -->
-    <div class="flex flex-col items-center py-6 px-4 text-center bg-search-op-10">
-      <div class="relative group cursor-pointer" onclick="document.getElementById('profile-avatar-input').click()">
-        <div class="w-24 h-24 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90">
-          {{ request.user.username|slice:":1"|upper }}
-        </div>
-        <div class="absolute inset-0 w-24 h-24 rounded-full bg-black/40 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
-          <i data-lucide="camera" class="w-6 h-6"></i>
-        </div>
-      </div>
-      <input type="file" id="profile-avatar-input" name="avatar" accept="image/*" class="hidden" onchange="this.form.submit()">
-      <p class="text-xs text-textSecondary mt-2">Tap to change avatar</p>
-    </div>
+    <section class="profile-edit-hero">
+      <button type="button" class="profile-edit-avatar" onclick="document.getElementById('profile-avatar-input').click()" title="Change avatar">
+        {% if settings_avatar_url %}
+        <img src="{{ settings_avatar_url }}" alt="{{ request.user.username }}">
+        {% else %}
+        <span>{{ settings_initials|default:request.user.username|slice:":1"|upper }}</span>
+        {% endif %}
+        <span class="profile-edit-avatar-icon">
+          <i data-lucide="camera" aria-hidden="true"></i>
+          <i data-lucide="plus" aria-hidden="true"></i>
+        </span>
+      </button>
+      <input type="file" id="profile-avatar-input" name="avatar" accept="image/*" class="hidden" onchange="submitProfileAvatar(this.form)">
+    </section>
 
-    <!-- Name Fields -->
-    <div class="px-4 py-4 space-y-4">
-      <div class="space-y-1.5">
-        <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">First Name</label>
-        <input type="text" name="first_name" value="{{ form.first_name.value|default:request.user.first_name }}"
-          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
-          placeholder="Your first name">
-      </div>
-      <div class="space-y-1.5">
-        <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Last Name</label>
-        <input type="text" name="last_name" value="{{ form.last_name.value|default:request.user.last_name }}"
-          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
-          placeholder="Your last name">
-      </div>
-      <div class="space-y-1.5">
-        <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Nickname</label>
-        <input type="text" name="nickname" value="{{ form.nickname.value|default:'' }}"
-          class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
-          placeholder="How others see you">
-        {% if form.nickname.errors %}<p class="text-xs text-red-500 mt-1">{{ form.nickname.errors.0 }}</p>{% endif %}
-      </div>
-    </div>
+    <section class="profile-edit-card">
+      <label class="profile-edit-field">
+        <span>名字</span>
+        <input type="text" name="first_name" value="{{ form.first_name.value|default:request.user.first_name }}" placeholder="名字">
+      </label>
+      {% if form.first_name.errors %}<p class="profile-edit-error">{{ form.first_name.errors.0 }}</p>{% endif %}
 
-    <!-- Username -->
-    <div class="px-4 py-4 space-y-1.5">
-      <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Username</label>
-      <input type="text" name="username" id="profile-username-input" value="{{ form.username.value|default:request.user.username }}"
-        class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
-        placeholder="a-z, 0-9, underscores"
-        pattern="^[a-z0-9_]{5,}$"
-        oninput="validateUsername()">
-      <p class="text-[10px] text-textSecondary">You can use a–z, 0–9 and underscores. Minimum length is 5 characters.</p>
-      <p id="username-error" class="text-xs text-red-500 hidden"></p>
-    </div>
+      <label class="profile-edit-field">
+        <span>姓氏</span>
+        <input type="text" name="last_name" value="{{ form.last_name.value|default:request.user.last_name }}" placeholder="姓氏">
+      </label>
+      {% if form.last_name.errors %}<p class="profile-edit-error">{{ form.last_name.errors.0 }}</p>{% endif %}
 
-    <!-- Bio -->
-    <div class="px-4 py-4 space-y-1.5">
-      <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wide">Bio</label>
-      <textarea name="bio" rows="3"
-        class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all resize-none"
-        placeholder="Tell people about yourself…">{{ form.bio.value|default:'' }}</textarea>
-      {% if form.bio.errors %}<p class="text-xs text-red-500 mt-1">{{ form.bio.errors.0 }}</p>{% endif %}
-    </div>
+      <label class="profile-edit-field profile-edit-field-large">
+        <span>个人简介（可选）</span>
+        <textarea name="bio" rows="2" placeholder="个人简介（可选）">{{ form.bio.value|default:'' }}</textarea>
+      </label>
+      {% if form.bio.errors %}<p class="profile-edit-error">{{ form.bio.errors.0 }}</p>{% endif %}
 
-    <!-- Birthday (placeholder) -->
-    <div class="px-4 py-4 flex items-center justify-between cursor-pointer hover-bg-search-op-65 transition-colors"
-         onclick="showToast('Birthday setting coming soon')">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-lg">
-          <i data-lucide="cake" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Add Birthday</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </div>
+      <input type="date" id="profile-birthday-input" name="birthday" value="{{ request.user.profile.birthday|date:'Y-m-d' }}" class="profile-edit-date-input">
+      <button type="button" class="profile-edit-row" onclick="openProfileBirthdayPicker()">
+        <i data-lucide="gift" aria-hidden="true"></i>
+        <span id="profile-birthday-label">{% if request.user.profile.birthday %}{{ request.user.profile.birthday|date:'Y-m-d' }}{% else %}Add Birthday{% endif %}</span>
+      </button>
+    </section>
 
-    <!-- Personal Channel (Phase 3 placeholder) -->
-    <div class="px-4 py-4 flex items-center justify-between cursor-pointer hover-bg-search-op-65 transition-colors"
-         onclick="showToast('Personal Channel coming in Phase 3')">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg">
-          <i data-lucide="radio" class="w-4 h-4"></i>
-        </div>
-        <div class="flex-1 leading-snug">
-          <div class="text-sm font-medium text-textMain">Personal Channel</div>
-          <div class="text-[10px] text-textSecondary">Create your own broadcast channel — coming in Phase 3</div>
-        </div>
-        <span class="text-[9px] bg-brand-light/10 text-brand-light dark:bg-brand-dark/10 dark:text-brand-dark px-2 py-0.5 rounded font-semibold">Phase 3</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary ml-2"></i>
-    </div>
+    <p class="profile-edit-help">
+      您可以在此输入任何有关您个人的信息，诸如：年龄、工作或居住城市。<br>
+      示例：23岁，来自旧金山的设计师。
+    </p>
 
-    <!-- QR Code -->
-    <div class="px-4 py-4 flex items-center justify-between cursor-pointer hover-bg-search-op-65 transition-colors"
-         onclick="showQRCodeModal()">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-teal-500/10 text-teal-600 dark:text-teal-400 rounded-lg">
-          <i data-lucide="qr-code" class="w-4 h-4"></i>
-        </div>
-        <div class="flex-1 leading-snug">
-          <div class="text-sm font-medium text-textMain">QR Code</div>
-          <div class="text-[10px] text-textSecondary">Share your contact via QR code</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </div>
+    <section class="profile-edit-card">
+      <div class="profile-edit-section-title">用户名</div>
+      <label class="profile-edit-field">
+        <span>用户名（可选）</span>
+        <input type="text" name="username" id="profile-username-input"
+          value="{{ form.username.value|default:request.user.username }}"
+          placeholder="用户名（可选）"
+          pattern="^[a-z0-9_]{5,}$"
+          oninput="validateUsername()">
+      </label>
+      <p id="username-error" class="profile-edit-error hidden"></p>
+      {% if form.username.errors %}<p class="profile-edit-error">{{ form.username.errors.0 }}</p>{% endif %}
+    </section>
 
-    <!-- Save Button -->
-    <div class="px-4 py-6">
-      <button type="submit"
-        class="w-full py-3 bg-brand-light dark:bg-brand-dark text-white font-semibold rounded-custom-md shadow-md hover:opacity-90 transition-opacity flex items-center justify-center space-x-2">
-        <i data-lucide="save" class="w-4 h-4"></i>
-        <span>Save Changes</span>
+    <p class="profile-edit-help">
+      您可以在 Telegram 上设置一个用户名。设置后，别人可以通过此用户名找到您并与您联系，而不需要您的手机号。
+    </p>
+    <p class="profile-edit-help">
+      您可以使用 a-z、0-9 和下划线。最小长度为 5 个字符。
+    </p>
+
+    <section class="profile-edit-card">
+      <button type="button" class="profile-edit-row has-chevron" onclick="showToast('Personal Channel coming in Phase 3')">
+        <i data-lucide="radio" aria-hidden="true"></i>
+        <span>Personal Channel</span>
+        <i data-lucide="chevron-right" aria-hidden="true"></i>
+      </button>
+      <button type="button" class="profile-edit-row has-chevron" onclick="showQRCodeModal()">
+        <i data-lucide="qr-code" aria-hidden="true"></i>
+        <span>QR Code</span>
+        <i data-lucide="chevron-right" aria-hidden="true"></i>
+      </button>
+    </section>
+
+    <div class="profile-edit-save-wrap">
+      <button type="submit" class="profile-edit-save">
+        <i data-lucide="check" aria-hidden="true"></i>
+        <span>保存修改</span>
       </button>
     </div>
   </form>
@@ -144,4 +121,196 @@
       error.classList.add('hidden');
     }
   }
+
+  function getProfileCsrfToken() {
+    if (typeof getCookie === 'function') {
+      return getCookie('csrftoken') || '';
+    }
+    var match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function profileToast(message) {
+    if (window.showToast) {
+      window.showToast(message);
+    }
+  }
+
+  function openProfileBirthdayPicker() {
+    var modal = document.getElementById('birthday-modal');
+    if (!modal) return;
+    
+    // Prefill day, month, year from hidden input value
+    var currentVal = document.getElementById('profile-birthday-input').value; // e.g. YYYY-MM-DD
+    if (currentVal) {
+      var parts = currentVal.split('-');
+      if (parts.length === 3) {
+        document.getElementById('birthday-year').value = parseInt(parts[0], 10);
+        document.getElementById('birthday-month').value = parseInt(parts[1], 10);
+        document.getElementById('birthday-day').value = parseInt(parts[2], 10);
+      }
+    } else {
+      document.getElementById('birthday-year').value = '';
+      document.getElementById('birthday-month').value = '';
+      document.getElementById('birthday-day').value = '';
+    }
+    
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+
+  window.closeBirthdayModal = function() {
+    var modal = document.getElementById('birthday-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+  };
+
+  window.validateBirthdayInput = function(input, min, max) {
+    var val = parseInt(input.value, 10);
+    if (isNaN(val)) return;
+    if (val < min) input.value = min;
+    if (val > max) input.value = max;
+  };
+
+  window.openBirthdayPrivacyFromModal = function() {
+    window.closeBirthdayModal();
+    navigateSidebar('settings-birthday');
+  };
+
+  window.saveBirthdayFromModal = async function() {
+    var dayVal = document.getElementById('birthday-day').value;
+    var monthVal = document.getElementById('birthday-month').value;
+    var yearVal = document.getElementById('birthday-year').value;
+    
+    if (!dayVal || !monthVal || !yearVal) {
+      profileToast(currentLanguage === 'zh' ? '请填写完整的出生日期' : 'Please fill all date fields');
+      return;
+    }
+    
+    var d = parseInt(dayVal, 10);
+    var m = parseInt(monthVal, 10);
+    var y = parseInt(yearVal, 10);
+    
+    // Basic date validation
+    if (d < 1 || d > 31 || m < 1 || m > 12 || y < 1900 || y > 2026) {
+      profileToast(currentLanguage === 'zh' ? '请输入有效的日期' : 'Please enter a valid date');
+      return;
+    }
+    
+    // Pad with leading zeros
+    var pad = function(n) { return n < 10 ? '0' + n : n; };
+    var dateString = y + '-' + pad(m) + '-' + pad(d);
+    
+    var input = document.getElementById('profile-birthday-input');
+    var label = document.getElementById('profile-birthday-label');
+    if (input) input.value = dateString;
+    if (label) label.textContent = dateString;
+    
+    window.closeBirthdayModal();
+    
+    // Automatically submit form to save immediately (matching Telegram UX)
+    var form = document.getElementById('profile-edit-form');
+    if (form) {
+      var button = form.querySelector('.profile-edit-save');
+      if (button) button.disabled = true;
+      try {
+        var profile = await postProfileForm(form);
+        syncProfileUi(profile);
+        profileToast(currentLanguage === 'zh' ? '生日已更新' : 'Birthday updated');
+      } catch (error) {
+        profileToast(error.message || '更新失败');
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+  };
+
+  function syncProfileUi(profile) {
+    if (!profile) return;
+    var displayName = profile.display_name || profile.username;
+    var initials = profile.initials || (displayName || '?').slice(0, 1).toUpperCase();
+
+    document.querySelectorAll('.settings-template-name').forEach(function(el) {
+      el.textContent = displayName;
+    });
+
+    var usernameInput = document.getElementById('profile-username-input');
+    if (usernameInput) usernameInput.value = profile.username || '';
+
+    var avatarButtons = document.querySelectorAll('.settings-template-avatar-wrap, .profile-edit-avatar');
+    avatarButtons.forEach(function(el) {
+      var overlay = el.querySelector('.settings-template-avatar-overlay, .profile-edit-avatar-icon');
+      if (profile.avatar) {
+        el.querySelectorAll('img, .settings-template-avatar-fallback, .profile-edit-avatar > span:first-child').forEach(function(child) {
+          child.remove();
+        });
+        var img = document.createElement('img');
+        img.src = profile.avatar;
+        img.alt = displayName;
+        if (el.classList.contains('settings-template-avatar-wrap')) {
+          img.className = 'settings-template-avatar-image';
+        }
+        el.insertBefore(img, overlay || null);
+      } else {
+        var fallback = el.querySelector('.settings-template-avatar-fallback') || el.querySelector('.profile-edit-avatar > span:first-child');
+        if (fallback) fallback.textContent = initials;
+      }
+    });
+  }
+
+  async function postProfileForm(form) {
+    var response = await fetch(form.action, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': getProfileCsrfToken(),
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: new FormData(form)
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!response.ok) {
+      var errors = data.errors || {};
+      var firstKey = Object.keys(errors)[0];
+      var message = firstKey ? errors[firstKey][0] : (data.error || '保存失败');
+      throw new Error(message);
+    }
+    return data.profile;
+  }
+
+  async function submitProfileEditForm(event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    var button = form.querySelector('.profile-edit-save');
+    if (button) button.disabled = true;
+    try {
+      var profile = await postProfileForm(form);
+      syncProfileUi(profile);
+      profileToast('个人资料已保存');
+    } catch (error) {
+      profileToast(error.message || '保存失败');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function submitProfileAvatar(form) {
+    try {
+      var profile = await postProfileForm(form);
+      syncProfileUi(profile);
+      profileToast('头像已更新');
+    } catch (error) {
+      profileToast(error.message || '头像更新失败');
+    }
+  }
+
+  (function initProfileBirthdayInput() {
+    var input = document.getElementById('profile-birthday-input');
+    var label = document.getElementById('profile-birthday-label');
+    if (!input || !label) return;
+    input.addEventListener('change', function() {
+      label.textContent = input.value || 'Add Birthday';
+    });
+  })();
 </script>

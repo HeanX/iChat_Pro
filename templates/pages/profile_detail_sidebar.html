@@ -1,0 +1,108 @@
+{# profile_detail_sidebar.html — P2 T17 unified profile/direct-chat view #}
+<div id="profile-detail-content" class="h-full flex flex-col">
+  <!-- Loading state -->
+  <div id="profile-detail-loading" class="flex-1 flex items-center justify-center">
+    <div class="animate-spin w-6 h-6 border-2 border-brand-light border-t-transparent rounded-full"></div>
+  </div>
+
+  <!-- Loaded content (hidden initially) -->
+  <div id="profile-detail-loaded" class="hidden flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+
+    <!-- Profile Hero -->
+    <div class="flex flex-col items-center text-center px-4 py-8 border-b border-borderColor/55 bg-search-op-10">
+      <div id="profile-detail-avatar" class="w-24 h-24 rounded-full text-white flex items-center justify-center font-bold text-3xl shadow-md mb-4" style="background-color:#5c6bc0">
+        ??
+      </div>
+      <h2 id="profile-detail-name" class="text-lg font-bold text-textMain"></h2>
+      <p id="profile-detail-username" class="text-sm text-textSecondary mt-0.5"></p>
+      <p id="profile-detail-bio" class="text-xs text-textSecondary mt-1.5 max-w-[280px] hidden"></p>
+      <div id="profile-detail-status" class="mt-2">
+        <span class="text-xs font-medium px-2.5 py-0.5 rounded-full bg-bgSearch text-textSecondary">Loading...</span>
+      </div>
+    </div>
+
+    <!-- Primary Action (relationship-based) -->
+    <div id="profile-detail-primary-action" class="px-4 py-4 border-b border-borderColor/55">
+      <!-- Dynamically populated -->
+    </div>
+
+    <!-- Info Section -->
+    <div id="profile-detail-info-section" class="px-4 py-4 border-b border-borderColor/55 space-y-3 hidden">
+      <h3 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Info</h3>
+      <div id="profile-detail-info-items" class="space-y-2 text-sm">
+        <!-- Dynamically populated -->
+      </div>
+    </div>
+
+    <!-- Menu Entries -->
+    <div id="profile-detail-menu" class="divide-y divide-borderColor/40">
+      <!-- Auto-Delete -->
+      <div id="profile-detail-auto-delete-row" class="px-4 py-3.5 flex items-center justify-between cursor-pointer hover:bg-bgSearch transition-colors"
+           onclick="profileDetailToggleAutoDelete()">
+        <div class="flex items-center space-x-3">
+          <div class="p-1.5 rounded-lg bg-red-500/10 text-red-500">
+            <i data-lucide="clock" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm text-textMain">Auto-Delete</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span id="profile-auto-delete-label" class="text-xs text-textSecondary">Off</span>
+          <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+        </div>
+      </div>
+
+      <!-- Mute -->
+      <div id="profile-detail-mute-row" class="px-4 py-3.5 flex items-center justify-between cursor-pointer hover:bg-bgSearch transition-colors"
+           onclick="profileDetailToggleMute()">
+        <div class="flex items-center space-x-3">
+          <div class="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+            <i data-lucide="bell-off" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm text-textMain">Mute</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span id="profile-mute-label" class="text-xs text-textSecondary">Off</span>
+          <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+        </div>
+      </div>
+
+      <!-- Call (placeholder - phase 3) -->
+      <div class="px-4 py-3.5 flex items-center justify-between cursor-pointer hover:bg-bgSearch transition-colors opacity-60"
+           onclick="showToast(currentLanguage === 'zh' ? '通话功能将在 Phase 3 接入' : 'Voice/Video calls coming in Phase 3')">
+        <div class="flex items-center space-x-3">
+          <div class="p-1.5 rounded-lg bg-green-500/10 text-green-500">
+            <i data-lucide="phone" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm text-textMain">Call</span>
+        </div>
+        <span class="text-[9px] bg-brand-light/10 text-brand-light dark:bg-brand-dark/10 dark:text-brand-dark px-1.5 py-0.5 rounded font-semibold mr-2">Phase 3</span>
+      </div>
+
+      <!-- Block User -->
+      <div id="profile-detail-block-row" class="px-4 py-3.5 flex items-center justify-between cursor-pointer hover:bg-bgSearch transition-colors"
+           onclick="profileDetailToggleBlock()">
+        <div class="flex items-center space-x-3">
+          <div class="p-1.5 rounded-lg bg-red-500/10 text-red-500">
+            <i data-lucide="shield-off" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm text-textMain">Block User</span>
+        </div>
+        <span id="profile-block-label" class="text-xs text-textSecondary mr-2">Not blocked</span>
+      </div>
+
+      <!-- Disable Sharing (placeholder - phase 3) -->
+      <div class="px-4 py-3.5 flex items-center justify-between cursor-pointer hover:bg-bgSearch transition-colors opacity-60"
+           onclick="showToast(currentLanguage === 'zh' ? '共享设置将在 Phase 3 接入' : 'Sharing controls coming in Phase 3')">
+        <div class="flex items-center space-x-3">
+          <div class="p-1.5 rounded-lg bg-purple-500/10 text-purple-500">
+            <i data-lucide="share-2" class="w-4 h-4"></i>
+          </div>
+          <span class="text-sm text-textMain">Disable Sharing</span>
+        </div>
+        <span class="text-[9px] bg-brand-light/10 text-brand-light dark:bg-brand-dark/10 dark:text-brand-dark px-1.5 py-0.5 rounded font-semibold mr-2">Phase 3</span>
+      </div>
+
+    </div>
+
+  </div>
+</div>

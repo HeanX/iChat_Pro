@@ -1,260 +1,438 @@
-{# chat_folders.html — P2 T07 Chat Folders, Stickers & Emoji #}
-<div class="divide-y divide-borderColor/60" id="chat-folders-root">
+<div id="chat-folders-root" class="telegram-folders">
+  <style>
+    .telegram-folders {
+      --tg-blue: #3390ec;
+      --tg-card: #fff;
+      --tg-panel: #f4f4f5;
+      --tg-muted: #707579;
+      --tg-line: rgba(0, 0, 0, .07);
+      min-height: 100%;
+      padding: 14px 18px 22px;
+      background: var(--tg-panel);
+      color: #111;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
 
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 1: Chat Folders
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Chat Folders</h4>
-    <p class="text-xs text-textSecondary">Create folders for different groups of chats to easily access them.</p>
+    .telegram-folders .folders-hero {
+      display: grid;
+      justify-items: center;
+      padding: 18px 12px 16px;
+      text-align: center;
+    }
 
-    {# Create New Folder #}
-    <button onclick="showToast(currentLanguage === 'zh' ? '创建文件夹功能暂未开放' : 'Create folder coming soon')"
-      class="w-full p-3 bg-bgSearch rounded-custom-md flex items-center justify-between hover:opacity-80 transition-opacity">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-brand-light/10 text-brand-light dark:text-brand-dark rounded-lg"><i data-lucide="plus" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium text-textMain">Create New Folder</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    .telegram-folders .folder-illustration {
+      position: relative;
+      width: 92px;
+      height: 82px;
+      margin-bottom: 18px;
+    }
+
+    .telegram-folders .folder-illustration::before {
+      content: "";
+      position: absolute;
+      left: 10px;
+      top: 22px;
+      width: 72px;
+      height: 48px;
+      border: 2px solid #b77d40;
+      border-radius: 7px;
+      background: linear-gradient(#e9b873, #d69a55);
+      box-shadow: inset 0 2px rgba(255,255,255,.45);
+    }
+
+    .telegram-folders .folder-illustration::after {
+      content: "";
+      position: absolute;
+      left: 15px;
+      top: 15px;
+      width: 56px;
+      height: 18px;
+      border-radius: 6px 6px 0 0;
+      background:
+        linear-gradient(90deg, #f08d33 0 24px, #536df4 24px 40px, #ef3f4a 40px);
+      border: 2px solid #b77d40;
+      border-bottom: 0;
+    }
+
+    .telegram-folders .folders-description {
+      margin: 0 0 18px;
+      color: var(--tg-muted);
+      font-size: 16px;
+      line-height: 1.35;
+    }
+
+    .telegram-folders .folders-create {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 48px;
+      padding: 0 24px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--tg-blue);
+      color: #fff;
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 2px 5px rgba(51, 144, 236, .25);
+    }
+
+    .telegram-folders .folders-card {
+      margin-bottom: 14px;
+      padding: 20px 22px 18px;
+      border-radius: 24px;
+      background: var(--tg-card);
+      box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .telegram-folders .folders-section-title {
+      margin: 0 0 16px;
+      color: var(--tg-blue);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .telegram-folders .folder-item,
+    .telegram-folders .folder-option {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      align-items: center;
+      width: 100%;
+      min-height: 46px;
+      gap: 12px;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      font: inherit;
+    }
+
+    .telegram-folders .folder-item + .folder-item,
+    .telegram-folders .folder-option + .folder-option {
+      border-top: 1px solid var(--tg-line);
+    }
+
+    .telegram-folders .folder-icon {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      color: var(--tg-muted);
+    }
+
+    .telegram-folders .folder-icon svg {
+      width: 24px;
+      height: 24px;
+      stroke-width: 2;
+    }
+
+    .telegram-folders .folder-title {
+      display: block;
+      overflow: hidden;
+      color: #111827;
+      font-size: 17px;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .telegram-folders .folder-subtitle {
+      display: block;
+      margin-top: 3px;
+      color: var(--tg-muted);
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .telegram-folders .folder-action {
+      border: 0;
+      background: transparent;
+      color: var(--tg-muted);
+      cursor: pointer;
+    }
+
+    .telegram-folders .folder-option {
+      grid-template-columns: 42px minmax(0, 1fr);
+      cursor: pointer;
+    }
+
+    .telegram-folders .telegram-radio {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      border: 2px solid #b1b5b9;
+      border-radius: 50%;
+      box-sizing: border-box;
+      display: inline-block;
+      flex-shrink: 0;
+      transition: border-color 0.16s ease;
+    }
+
+    .telegram-folders .telegram-radio::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--tg-blue, #3390ec);
+      transition: transform 0.16s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .telegram-folders .folder-option.is-selected .telegram-radio {
+      border-color: var(--tg-blue);
+    }
+
+    .telegram-folders .folder-option.is-selected .telegram-radio::after {
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .telegram-folders .folder-empty {
+      padding: 10px 0 2px;
+      color: var(--tg-muted);
+      font-size: 15px;
+    }
+
+    .telegram-folders .folders-toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 120;
+      padding: 10px 14px;
+      border-radius: 18px;
+      background: rgba(17, 24, 39, .9);
+      color: #fff;
+      font-size: 14px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .telegram-folders .folders-toast.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Dark Mode Settings */
+    [data-theme="dark"] .telegram-folders {
+      --tg-card: #212121;
+      --tg-panel: #181818;
+      --tg-muted: #aaaaaa;
+      --tg-line: rgba(255, 255, 255, .08);
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-folders .folder-title,
+    [data-theme="dark"] .telegram-folders .folder-item,
+    [data-theme="dark"] .telegram-folders .folder-option {
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-folders .telegram-radio {
+      border-color: #555555;
+    }
+
+    [data-theme="dark"] .telegram-folders .folder-option.is-selected .telegram-radio {
+      border-color: var(--tg-blue);
+    }
+  </style>
+
+  <section class="folders-hero">
+    <div class="folder-illustration" aria-hidden="true"></div>
+    <p class="folders-description">为不同组别的聊天建立分组以快速切换聊天。</p>
+    <button type="button" id="folder-create-btn" class="folders-create">
+      <i data-lucide="plus"></i>
+      <span>创建文件夹</span>
     </button>
+  </section>
 
-    {# Folder: Folders view toggle #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Folders View</span>
-        <p class="text-[10px] text-textSecondary">Show folders as tabs at the top of chat list</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" checked onchange="saveChatFolderSetting('folders_view', this.checked)" data-folders-view>
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
+  <section class="folders-card">
+    <h3 class="folders-section-title">文件夹</h3>
+    <div id="folders-list"></div>
+  </section>
 
-    {# Demo folder: Team Chats #}
-    <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg"><i data-lucide="users" class="w-4 h-4"></i></div>
-        <div>
-          <div class="text-sm font-medium text-textMain">Team Chats</div>
-          <div class="text-[10px] text-textSecondary">3 chats — All chats that have a group</div>
-        </div>
-      </div>
-      <span class="text-[9px] bg-zinc-200 dark:bg-zinc-700 text-textSecondary px-1.5 py-0.5 rounded">Demo</span>
-    </div>
-
-    {# Demo folder: Unread #}
-    <div class="p-3 bg-bgSearch rounded-custom-md flex items-center justify-between opacity-60">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg"><i data-lucide="messages-square" class="w-4 h-4"></i></div>
-        <div>
-          <div class="text-sm font-medium text-textMain">Unread</div>
-          <div class="text-[10px] text-textSecondary">0 chats — Automatically managed</div>
-        </div>
-      </div>
-      <span class="text-[9px] bg-zinc-200 dark:bg-zinc-700 text-textSecondary px-1.5 py-0.5 rounded">Auto</span>
-    </div>
-  </div>
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 2: Quick Reaction
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-3">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Quick Reaction</h4>
-
-    <div class="flex items-center justify-between py-1">
-      <div>
-        <span class="text-sm font-medium text-textMain">Double Tap to React</span>
-        <p class="text-[10px] text-textSecondary">Tap twice on a message to send 👍</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" checked onchange="saveChatFolderSetting('double_tap_react', this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-
-    {# Quick reaction emoji selector #}
-    <div class="flex items-center space-x-2 py-1">
-      <span class="text-xs text-textSecondary flex-shrink-0">Default:</span>
-      <div class="flex space-x-1" id="quick-reaction-picker">
-        <button onclick="setQuickReaction('👍')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Thumbs Up">👍</button>
-        <button onclick="setQuickReaction('❤️')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Heart">❤️</button>
-        <button onclick="setQuickReaction('😂')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Joy">😂</button>
-        <button onclick="setQuickReaction('😮')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Wow">😮</button>
-        <button onclick="setQuickReaction('😢')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Sad">😢</button>
-        <button onclick="setQuickReaction('😡')" class="w-8 h-8 rounded-full hover:bg-bgSearch flex items-center justify-center text-sm" title="Angry">😡</button>
-      </div>
-    </div>
-  </div>
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 3: Stickers & Emoji
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Stickers & Emoji</h4>
-
-    {# Suggest Emoji #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Suggest Emoji</span>
-        <p class="text-[10px] text-textSecondary">Replace text like :) with emoji as you type</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" checked onchange="saveChatFolderSetting('suggest_emoji', this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-
-    {# Emoji Autocomplete #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Emoji Autocomplete</span>
-        <p class="text-[10px] text-textSecondary">Show emoji suggestions when typing :emoji_name</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" checked onchange="saveChatFolderSetting('emoji_autocomplete', this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-
-    {# Animated Stickers #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Loop Animated Stickers</span>
-        <p class="text-[10px] text-textSecondary">Play sticker animations continuously</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" checked onchange="saveChatFolderSetting('loop_stickers', this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-
-    {# Large Emoji #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Large Emoji</span>
-        <p class="text-[10px] text-textSecondary">Show up to 3 emoji without text in large size</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" checked onchange="saveChatFolderSetting('large_emoji', this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-
-    {# Sticker Sets #}
-    <button onclick="showToast(currentLanguage === 'zh' ? '贴纸包功能暂未开放' : 'Sticker sets coming in a future update')"
-      class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-1 transition-colors">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="sticker" class="w-4 h-4"></i></div>
-        <div>
-          <div class="text-sm font-medium text-textMain">Sticker Sets</div>
-          <div class="text-[10px] text-textSecondary">0 installed — Shop sticker packs</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+  <section class="folders-card">
+    <h3 class="folders-section-title">Folders view</h3>
+    <button type="button" class="folder-option" data-folder-view="sidebar">
+      <span class="telegram-radio"></span>
+      <span class="folder-title">左侧文件夹</span>
     </button>
-
-    {# Custom Emoji #}
-    <button onclick="showToast(currentLanguage === 'zh' ? '自定义表情暂未开放' : 'Custom emoji coming soon')"
-      class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-1 transition-colors">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="image" class="w-4 h-4"></i></div>
-        <div>
-          <div class="text-sm font-medium text-textMain">Custom Emoji</div>
-          <div class="text-[10px] text-textSecondary">Upload your own emoji images</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    <button type="button" class="folder-option" data-folder-view="above">
+      <span class="telegram-radio"></span>
+      <span class="folder-title">Folders above chats</span>
     </button>
+  </section>
 
-    {# Dynamic Sticker Order #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Dynamic Sticker Order</span>
-        <p class="text-[10px] text-textSecondary">Sort sticker suggestions by usage frequency</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" checked onchange="saveChatFolderSetting('dynamic_stickers', this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-
-    {# Trending Stickers #}
-    <div class="flex items-center justify-between py-2">
-      <div>
-        <span class="text-sm font-medium text-textMain">Trending Stickers</span>
-        <p class="text-[10px] text-textSecondary">Show popular stickers at the top of the panel</p>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" onchange="saveChatFolderSetting('trending_stickers', this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-  </div>
-
+  <div id="folders-toast" class="folders-toast"></div>
 </div>
 
-{# ── Toggle Switch Styles ── #}
-<style>
-  .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
-  .toggle-switch input { opacity:0; width:0; height:0 }
-  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
-  .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
-  .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
-  .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
-  .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
-</style>
-
-{# ── Chat Folders & Stickers JavaScript ── #}
 <script>
-  var CHAT_FOLDER_DEFAULTS = {
-    folders_view: true,
-    double_tap_react: true,
-    quick_reaction: '👍',
-    suggest_emoji: true,
-    emoji_autocomplete: true,
-    loop_stickers: true,
-    large_emoji: true,
-    dynamic_stickers: true,
-    trending_stickers: false
-  };
+  (function() {
+    const FOLDER_SETTINGS_URL = '/api/settings/chat-folders/';
+    const DEFAULTS = {
+      folders: [],
+      folders_view: 'above'
+    };
+    let toastTimer = null;
 
-  function loadChatFolderSettings() {
-    var saved = {};
-    try { saved = JSON.parse(localStorage.getItem('ichat_folders') || '{}'); } catch(e) {}
-    return Object.assign({}, CHAT_FOLDER_DEFAULTS, saved);
-  }
+    function csrfToken() {
+      if (typeof getCookie === 'function') return getCookie('csrftoken') || '';
+      const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
 
-  function saveChatFolderSetting(key, value) {
-    var settings = loadChatFolderSettings();
-    settings[key] = value;
-    localStorage.setItem('ichat_folders', JSON.stringify(settings));
-    applyChatFolderSettingsUI(settings);
-  }
+    function toast(text) {
+      if (window.showToast) {
+        window.showToast(text);
+        return;
+      }
+      const el = document.getElementById('folders-toast');
+      if (!el) return;
+      el.textContent = text;
+      el.classList.add('is-visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function() { el.classList.remove('is-visible'); }, 1800);
+    }
 
-  function setQuickReaction(emoji) {
-    saveChatFolderSetting('quick_reaction', emoji);
-    // Highlight selected
-    var buttons = document.querySelectorAll('#quick-reaction-picker button');
-    buttons.forEach(function(b) {
-      b.style.outline = b.textContent.trim() === emoji ? '2px solid var(--color-primary)' : '2px solid transparent';
-    });
-  }
+    function loadFolderSettings() {
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem('ichat_folders') || '{}'); } catch (error) {}
+      const settings = Object.assign({}, DEFAULTS, saved);
+      if (!Array.isArray(settings.folders)) settings.folders = [];
+      if (settings.folders_view === true) settings.folders_view = 'above';
+      if (settings.folders_view === false) settings.folders_view = 'sidebar';
+      return settings;
+    }
 
-  function applyChatFolderSettingsUI(s) {
-    // Apply checkboxes
-    var root = document.getElementById('chat-folders-root');
-    if (!root) return;
-    var toggles = root.querySelectorAll('input[type=checkbox]');
-    toggles.forEach(function(cb) {
-      var key = cb.getAttribute('onchange') ? cb.getAttribute('onchange').match(/saveChatFolderSetting\('([^']+)'/)?.[1] : null;
-      if (key && s[key] !== undefined) cb.checked = !!s[key];
-    });
-    // Quick reaction highlight
-    var buttons = document.querySelectorAll('#quick-reaction-picker button');
-    buttons.forEach(function(b) {
-      b.style.outline = b.textContent.trim() === s.quick_reaction ? '2px solid var(--color-primary)' : '2px solid transparent';
-    });
-  }
+    function saveFolderSettings(partial) {
+      const settings = Object.assign({}, loadFolderSettings(), partial || {});
+      localStorage.setItem('ichat_folders', JSON.stringify(settings));
+      renderFolderSettings(settings);
+      fetch(FOLDER_SETTINGS_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken(),
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify(partial || settings)
+      }).then(function(response) {
+        if (!response.ok) throw new Error('save_failed');
+        return response.json();
+      }).then(function(data) {
+        if (data.settings) {
+          localStorage.setItem('ichat_folders', JSON.stringify(data.settings));
+          renderFolderSettings(data.settings);
+        }
+      }).catch(function() {
+        toast('保存失败');
+      });
+      return settings;
+    }
 
-  (function() { applyChatFolderSettingsUI(loadChatFolderSettings()); })();
+    async function loadFolderSettingsFromServer() {
+      const response = await fetch(FOLDER_SETTINGS_URL, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      });
+      if (!response.ok) throw new Error('load_failed');
+      const data = await response.json();
+      const settings = Object.assign({}, DEFAULTS, data.settings || {});
+      localStorage.setItem('ichat_folders', JSON.stringify(settings));
+      renderFolderSettings(settings);
+      return settings;
+    }
+
+    function escapeHtml(text) {
+      return String(text || '').replace(/[&<>"']/g, function(ch) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+      });
+    }
+
+    function renderFoldersList(settings) {
+      const list = document.getElementById('folders-list');
+      if (!list) return;
+      if (!settings.folders.length) {
+        list.innerHTML = '<p class="folder-empty">暂无文件夹</p>';
+        return;
+      }
+      list.innerHTML = settings.folders.map(function(folder) {
+        return '<div class="folder-item">'
+          + '<span class="folder-icon"><i data-lucide="folder"></i></span>'
+          + '<span><span class="folder-title">' + escapeHtml(folder.name) + '</span><span class="folder-subtitle">' + (folder.chat_count || 0) + ' chats</span></span>'
+          + '<button type="button" class="folder-action" data-folder-delete="' + escapeHtml(folder.id) + '"><i data-lucide="trash-2"></i></button>'
+          + '</div>';
+      }).join('');
+    }
+
+    function applyFolderView(settings) {
+      document.querySelectorAll('#chat-folders-root [data-folder-view]').forEach(function(button) {
+        button.classList.toggle('is-selected', button.dataset.folderView === settings.folders_view);
+      });
+      document.documentElement.dataset.folderView = settings.folders_view;
+    }
+
+    function renderFolderSettings(settings) {
+      renderFoldersList(settings);
+      applyFolderView(settings);
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function createFolder() {
+      const name = prompt('文件夹名称');
+      if (!name) return;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const settings = loadFolderSettings();
+      settings.folders.push({
+        id: String(Date.now()),
+        name: trimmed,
+        chat_count: 0,
+        created_at: new Date().toISOString()
+      });
+      saveFolderSettings({ folders: settings.folders });
+      toast('文件夹已创建');
+    }
+
+    function deleteFolder(folderId) {
+      const settings = loadFolderSettings();
+      saveFolderSettings({
+        folders: settings.folders.filter(function(folder) { return String(folder.id) !== String(folderId); })
+      });
+      toast('文件夹已删除');
+    }
+
+    function bindFolderSettings() {
+      const root = document.getElementById('chat-folders-root');
+      if (!root || root.dataset.bound === 'true') return;
+      root.dataset.bound = 'true';
+
+      document.getElementById('folder-create-btn')?.addEventListener('click', createFolder);
+
+      root.addEventListener('click', function(event) {
+        const viewButton = event.target.closest('[data-folder-view]');
+        if (viewButton) {
+          saveFolderSettings({ folders_view: viewButton.dataset.folderView });
+          toast('文件夹显示方式已保存');
+          return;
+        }
+        const deleteButton = event.target.closest('[data-folder-delete]');
+        if (deleteButton) {
+          deleteFolder(deleteButton.dataset.folderDelete);
+        }
+      });
+    }
+
+    window.refreshChatFoldersSettings = function() {
+      bindFolderSettings();
+      renderFolderSettings(loadFolderSettings());
+      loadFolderSettingsFromServer().catch(function() {});
+    };
+
+    bindFolderSettings();
+    renderFolderSettings(loadFolderSettings());
+    loadFolderSettingsFromServer().catch(function() {});
+  })();
 </script>

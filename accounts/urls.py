@@ -10,6 +10,7 @@ urlpatterns = [
 
     # Profile
     path('profile/edit/', views.profile_edit_view, name='profile_edit'),
+    path('api/profile/me/', views.profile_me_api_view, name='api-profile-me'),
 
     # Contacts
     path('contacts/', views.contact_list_view, name='contacts'),
@@ -28,6 +29,22 @@ urlpatterns = [
         'contacts/request/<int:request_id>/reject/',
         views.friend_request_reject,
         name='friend_request_reject',
+    ),
+    # T17: friend request actions by user_id (JSON API for profile detail)
+    path(
+        'contacts/request/cancel/<int:user_id>/',
+        views.friend_request_cancel,
+        name='friend_request_cancel',
+    ),
+    path(
+        'contacts/request/accept-by-user/<int:user_id>/',
+        views.friend_request_accept_by_user,
+        name='friend_request_accept_by_user',
+    ),
+    path(
+        'contacts/request/reject-by-user/<int:user_id>/',
+        views.friend_request_reject_by_user,
+        name='friend_request_reject_by_user',
     ),
     path(
         'contacts/<int:contact_id>/delete/',
@@ -104,6 +121,17 @@ urlpatterns = [
         'api/settings/notifications/update/',
         views.notification_settings_update_view,
         name='notification-settings-update',
+    ),
+    # General settings and chat folders
+    path(
+        'api/settings/general/',
+        views.general_settings_view,
+        name='general-settings',
+    ),
+    path(
+        'api/settings/chat-folders/',
+        views.chat_folder_settings_view,
+        name='chat-folder-settings',
     ),
     # Storage, privacy, and blocked-user endpoints have been consolidated
     # into chat/urls.py (ketter1024's P2 T05/T06/T19-T40 views).

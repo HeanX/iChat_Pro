@@ -1,0 +1,393 @@
+{# stickers_emoji.html - Telegram-style Stickers & Emoji settings #}
+<div class="stickers-settings-view">
+
+  <!-- Section 1: Quick Reactions & Playback -->
+  <section class="stickers-card">
+    <!-- Quick Reactions row -->
+    <button type="button" class="stickers-row stickers-row--link" onclick="showToast('快速回应设置即将推出')">
+      <span class="stickers-row-icon stickers-row-icon--heart">❤️</span>
+      <span class="stickers-row-label">快速回应</span>
+      <i data-lucide="chevron-right" class="stickers-chevron"></i>
+    </button>
+    <div class="stickers-divider"></div>
+
+    <!-- Suggest Emoji row -->
+    <button type="button" class="stickers-row stickers-row--link" onclick="showToast('推荐表情设置即将推出')">
+      <span class="stickers-row-icon"><i data-lucide="lightbulb"></i></span>
+      <span class="stickers-row-label">根据 Emoji 联想表情</span>
+      <span class="stickers-row-value">全部</span>
+      <i data-lucide="chevron-right" class="stickers-chevron"></i>
+    </button>
+    <div class="stickers-divider"></div>
+
+    <!-- Loop animated stickers toggle -->
+    <label class="stickers-row">
+      <span class="stickers-row-icon"><i data-lucide="repeat-2"></i></span>
+      <span class="stickers-row-label">循环播放动态贴纸</span>
+      <input type="checkbox" id="sticker-loop" checked>
+      <span class="stickers-switch"></span>
+    </label>
+  </section>
+
+  <p class="stickers-hint">动态贴纸将在聊天中重复循环。</p>
+
+  <!-- Section 2: Emoji -->
+  <section class="stickers-card">
+    <h3 class="stickers-section-header">emoji</h3>
+
+    <label class="stickers-row">
+      <span class="stickers-row-icon"><i data-lucide="lightbulb"></i></span>
+      <span class="stickers-row-label">推荐的表情</span>
+      <input type="checkbox" id="sticker-suggest-emoji" checked>
+      <span class="stickers-switch"></span>
+    </label>
+    <div class="stickers-divider"></div>
+
+    <label class="stickers-row">
+      <span class="stickers-row-icon"><i data-lucide="smile"></i></span>
+      <span class="stickers-row-label">大号表情</span>
+      <input type="checkbox" id="sticker-large-emoji" checked>
+      <span class="stickers-switch"></span>
+    </label>
+  </section>
+
+  <!-- Section 3: Sticker pack order -->
+  <section class="stickers-card">
+    <h3 class="stickers-section-header">贴纸包动态顺序</h3>
+
+    <label class="stickers-row">
+      <span class="stickers-row-icon"><i data-lucide="layout-grid"></i></span>
+      <span class="stickers-row-label">贴纸包动态顺序</span>
+      <input type="checkbox" id="sticker-dynamic-order" checked>
+      <span class="stickers-switch"></span>
+    </label>
+  </section>
+
+  <p class="stickers-hint">将最近使用的贴纸包自动置于前列。</p>
+
+  <!-- Section 4: Sticker Packs -->
+  <section class="stickers-card">
+    <h3 class="stickers-section-header">表情</h3>
+
+    <button type="button" class="stickers-row stickers-row--pack" onclick="showToast('贴纸包管理即将推出')">
+      <span class="stickers-pack-icon">🍒</span>
+      <span class="stickers-row-main">
+        <span class="stickers-pack-name">Hot Cherry</span>
+        <span class="stickers-pack-count">34 张表情</span>
+      </span>
+      <span class="stickers-pack-handle">
+        <i data-lucide="grip-vertical"></i>
+      </span>
+    </button>
+
+    <div class="stickers-divider"></div>
+
+    <button type="button" class="stickers-row stickers-row--pack" onclick="showToast('贴纸包管理即将推出')">
+      <span class="stickers-pack-icon">🐱</span>
+      <span class="stickers-row-main">
+        <span class="stickers-pack-name">Kitty Whiskers</span>
+        <span class="stickers-pack-count">28 张表情</span>
+      </span>
+      <span class="stickers-pack-handle">
+        <i data-lucide="grip-vertical"></i>
+      </span>
+    </button>
+
+    <div class="stickers-divider"></div>
+
+    <button type="button" class="stickers-row stickers-row--pack" onclick="showToast('贴纸包管理即将推出')">
+      <span class="stickers-pack-icon">🐸</span>
+      <span class="stickers-row-main">
+        <span class="stickers-pack-name">Pepe Vibes</span>
+        <span class="stickers-pack-count">42 张表情</span>
+      </span>
+      <span class="stickers-pack-handle">
+        <i data-lucide="grip-vertical"></i>
+      </span>
+    </button>
+  </section>
+
+  <p class="stickers-hint">艺术家们可以自由地使用机器人 @stickers 创建自己的贴纸包。</p>
+
+</div>
+
+<style>
+  /* ─── Layout ─────────────────────────────────────────────── */
+  .stickers-settings-view {
+    padding: 14px 14px 32px;
+    background: #f4f4f5;
+    min-height: 100%;
+  }
+
+  /* ─── Card ───────────────────────────────────────────────── */
+  .stickers-card {
+    width: 100%;
+    background: #ffffff;
+    border-radius: 18px;
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+    margin-bottom: 0;
+  }
+
+  .stickers-card + .stickers-card,
+  .stickers-hint + .stickers-card {
+    margin-top: 8px;
+  }
+
+  /* ─── Section header ──────────────────────────────────────── */
+  .stickers-section-header {
+    margin: 0;
+    padding: 14px 18px 10px;
+    color: #3390ec;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    line-height: 1;
+  }
+
+  /* ─── Hint text ───────────────────────────────────────────── */
+  .stickers-hint {
+    margin: 8px 20px 8px;
+    color: #707579;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  /* ─── Row ─────────────────────────────────────────────────── */
+  .stickers-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 52px;
+    padding: 0 16px 0 14px;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    color: #111827;
+  }
+
+  .stickers-row--link {
+    transition: background 0.12s;
+  }
+
+  .stickers-row--link:hover,
+  .stickers-row--link:focus-visible {
+    background: rgba(51, 144, 236, 0.06);
+  }
+
+  .stickers-row--link:active {
+    background: rgba(51, 144, 236, 0.12);
+  }
+
+  /* ─── Icon ────────────────────────────────────────────────── */
+  .stickers-row-icon {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #707579;
+  }
+
+  .stickers-row-icon svg {
+    width: 22px;
+    height: 22px;
+    stroke-width: 1.8;
+  }
+
+  .stickers-row-icon--heart {
+    font-size: 22px;
+  }
+
+  /* ─── Label ───────────────────────────────────────────────── */
+  .stickers-row-label {
+    flex: 1;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.2;
+  }
+
+  /* ─── Value (e.g. 全部) ───────────────────────────────────── */
+  .stickers-row-value {
+    color: #707579;
+    font-size: 15px;
+    font-weight: 400;
+    flex-shrink: 0;
+  }
+
+  /* ─── Chevron ──────────────────────────────────────────────── */
+  .stickers-chevron {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    color: #b8bec4;
+    stroke-width: 2.2;
+  }
+
+  /* ─── Divider ──────────────────────────────────────────────── */
+  .stickers-divider {
+    height: 1px;
+    background: rgba(0, 0, 0, 0.06);
+    margin-left: 64px;
+  }
+
+  /* ─── Toggle switch ──────────────────────────────────────── */
+  .stickers-row > input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .stickers-switch {
+    position: relative;
+    width: 50px;
+    height: 28px;
+    border-radius: 999px;
+    background: #d1d5db;
+    transition: background 0.18s ease;
+    flex: 0 0 auto;
+    cursor: pointer;
+  }
+
+  .stickers-switch::before {
+    content: "";
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    left: 2px;
+    top: 2px;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.22);
+    transition: transform 0.18s ease;
+  }
+
+  .stickers-row input:checked + .stickers-switch {
+    background: #3390ec;
+  }
+
+  .stickers-row input:checked + .stickers-switch::before {
+    transform: translateX(22px);
+  }
+
+  /* ─── Sticker pack rows ───────────────────────────────────── */
+  .stickers-row--pack {
+    gap: 12px;
+    padding: 10px 14px;
+    min-height: 60px;
+    transition: background 0.12s;
+  }
+
+  .stickers-row--pack:hover {
+    background: rgba(51, 144, 236, 0.05);
+  }
+
+  .stickers-pack-icon {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: #f4f4f5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    line-height: 1;
+  }
+
+  .stickers-row-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .stickers-pack-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stickers-pack-count {
+    font-size: 13px;
+    color: #707579;
+  }
+
+  .stickers-pack-handle {
+    flex-shrink: 0;
+    color: #c4c9cf;
+    display: flex;
+    align-items: center;
+  }
+
+  .stickers-pack-handle svg {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2;
+  }
+
+  /* ─── Dark Mode ───────────────────────────────────────────── */
+  [data-theme="dark"] .stickers-settings-view {
+    background: #181818;
+  }
+
+  [data-theme="dark"] .stickers-card {
+    background: #212121;
+    box-shadow: none;
+  }
+
+  [data-theme="dark"] .stickers-row {
+    color: #f1f5f9;
+  }
+
+  [data-theme="dark"] .stickers-row--link:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  [data-theme="dark"] .stickers-row-icon {
+    color: #9aa0a6;
+  }
+
+  [data-theme="dark"] .stickers-row-value {
+    color: #9aa0a6;
+  }
+
+  [data-theme="dark"] .stickers-hint {
+    color: #9aa0a6;
+  }
+
+  [data-theme="dark"] .stickers-divider {
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  [data-theme="dark"] .stickers-switch {
+    background: #4a4d52;
+  }
+
+  [data-theme="dark"] .stickers-pack-icon {
+    background: #2c2c2c;
+  }
+
+  [data-theme="dark"] .stickers-pack-name {
+    color: #f1f5f9;
+  }
+
+  [data-theme="dark"] .stickers-pack-count {
+    color: #9aa0a6;
+  }
+
+  [data-theme="dark"] .stickers-chevron {
+    color: #5a5f65;
+  }
+
+  [data-theme="dark"] .stickers-pack-handle {
+    color: #4a4d52;
+  }
+</style>

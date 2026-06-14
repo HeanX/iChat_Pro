@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}iChat Pro{% endblock %}</title>
     {% if use_tailwind_cdn %}
+    <link rel="stylesheet" href="{% static 'css/tailwind.css' %}?v=20260611-local-fallback">
     <!-- Tailwind CSS Play CDN (development) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>

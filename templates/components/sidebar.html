@@ -1,4 +1,4 @@
-﻿<!-- sidebar.html - Sidebar Container for search, chat list, and settings panel -->
+<!-- sidebar.html - Sidebar Container for search, chat list, and settings panel -->
 <div id="sidebar-container" class="w-full md:w-[420px] border-r border-borderColor flex flex-col h-full bg-bgSidebar relative flex-shrink-0">
   
   <!-- View 1: Chats (Default view) -->
@@ -13,7 +13,7 @@
         </button>
         
         <!-- Main Menu Dropdown Floating Card -->
-        <div id="main-menu-dropdown" class="hidden absolute left-0 mt-1.5 w-[280px] bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[22px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
+        <div id="main-menu-dropdown" class="main-menu-dropdown hidden absolute left-0 mt-1.5 bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[22px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
           <!-- User Account info section -->
           <div onclick="triggerMyProfileFromInfo(event)" class="main-menu-account-area">
             <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-base shadow-sm">
@@ -33,7 +33,7 @@
               <span data-i18n="menu_add_account">Add Account</span>
             </button>
             <!-- My Profile -->
-            <button id="menu-profile-btn" onclick="toggleMainMenu(event);" class="main-menu-item-custom">
+            <button id="menu-profile-btn" onclick="navigateSidebar('settings-home'); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="user"></i>
               <span data-i18n="menu_profile">My Profile</span>
             </button>
@@ -70,7 +70,7 @@
               </button>
               
               <!-- Submenu overlay -->
-              <div id="main-menu-more-submenu" class="hidden absolute left-full top-0 ml-1.5 w-[190px] bg-bgSidebar border border-borderColor/60 rounded-[18px] shadow-xl z-50 py-1.5 animate-fadeIn">
+              <div id="main-menu-more-submenu" class="main-menu-more-submenu hidden absolute left-full top-0 ml-1.5 w-[190px] bg-bgSidebar border border-borderColor/60 rounded-[18px] shadow-xl z-50 py-1.5 animate-fadeIn">
                 <!-- New Group -->
                 <button id="menu-new-group-btn" onclick="toggleMainMenu(event);" class="menu-item-custom">
                   <i data-lucide="users"></i>
@@ -126,15 +126,27 @@
 
   <!-- View 2: Settings Home (P2 T02) -->
   <div id="sidebar-view-settings-home" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
-      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+    <div class="settings-home-header px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
+      <button onclick="navigateSidebar('chat')" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="settings">Settings</h2>
-      <div class="flex items-center space-x-1">
-        <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
+      <div class="settings-home-actions flex items-center space-x-1 relative">
+        <button onclick="showQRCodeModal()" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="QR Code">
+          <i data-lucide="qr-code" class="w-5 h-5"></i>
+        </button>
+        <button onclick="navigateSidebar('settings-profile')" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
           <i data-lucide="edit-3" class="w-5 h-5"></i>
         </button>
+        <button id="settings-home-more-btn" onclick="toggleSettingsHomeMoreMenu(event)" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="More">
+          <i data-lucide="more-vertical" class="w-5 h-5"></i>
+        </button>
+        <div id="settings-home-more-dropdown" class="hidden absolute right-0 top-full mt-1.5 w-[150px] bg-bgSidebar border border-borderColor/60 rounded-[14px] shadow-xl z-50 py-1 animate-fadeIn select-none">
+          <button type="button" onclick="showLogoutConfirmModal(event); toggleSettingsHomeMoreMenu(event, true);" class="menu-item-custom danger">
+            <i data-lucide="log-out"></i>
+            <span data-i18n="menu_logout">Sign Out</span>
+          </button>
+        </div>
       </div>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">
@@ -296,8 +308,8 @@
   </div>
 
   <!-- P2 T04: Notification Settings -->
-  <div id="sidebar-view-notifications" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+  <div id="sidebar-view-notifications" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
@@ -307,8 +319,8 @@
   </div>
 
   <!-- P2 T05: Data & Storage -->
-  <div id="sidebar-view-data-storage" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+  <div id="sidebar-view-data-storage" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1">Data and Storage</h2>
     </div>
@@ -316,8 +328,8 @@
   </div>
 
   <!-- P2 T06: Privacy & Security -->
-  <div id="sidebar-view-privacy-security" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+  <div id="sidebar-view-privacy-security" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1">Privacy and Security</h2>
     </div>
@@ -325,29 +337,128 @@
   </div>
 
   <!-- P2 T07: General Settings (Appearance) -->
-  <div id="sidebar-view-general-settings" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+  <div id="sidebar-view-general-settings" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-      <h2 class="text-lg font-bold text-textMain flex-1">General Settings</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="general_settings">General Settings</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/general_settings.html' %}</div>
   </div>
 
   <!-- P2 T07: Chat Folders, Stickers & Emoji -->
-  <div id="sidebar-view-chat-folders" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+  <div id="sidebar-view-chat-folders" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1">Chat Folders</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/chat_folders.html' %}</div>
   </div>
 
+  <!-- Stickers & Emoji -->
+  <div id="sidebar-view-stickers-emoji" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <h2 class="text-lg font-bold text-textMain flex-1">贴纸与表情</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/stickers_emoji.html' %}</div>
+  </div>
+
+  <!-- Language Settings -->
+  <div id="sidebar-view-language" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="language">语言</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/language_settings.html' %}</div>
+  </div>
+
   <!-- P2 T08: Sessions, Language & Keyboard Shortcuts -->
-  <div id="sidebar-view-sessions-shortcuts" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+  <div id="sidebar-view-sessions-shortcuts" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1">Devices and Shortcuts</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/sessions_shortcuts.html' %}</div>
   </div>
+
+  <!-- Birthday Privacy Settings -->
+  <div id="sidebar-view-settings-birthday" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Edit Profile">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <h2 class="text-lg font-bold text-textMain flex-1">Birthday</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">
+      {% include 'pages/birthday_settings.html' %}
+    </div>
+  </div>
 </div>
+
+<style>
+  /* Secondary settings views style adjustments */
+  .sidebar-view.settings-view {
+    background-color: #f4f4f5 !important;
+  }
+  [data-theme="dark"] .sidebar-view.settings-view {
+    background-color: #181818 !important;
+  }
+
+  .settings-view-header {
+    background-color: #f4f4f5 !important;
+    border-bottom: 1px solid transparent !important;
+    box-shadow: none !important;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+  }
+  [data-theme="dark"] .settings-view-header {
+    background-color: #181818 !important;
+  }
+  .settings-view-header.has-divider {
+    border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08)) !important;
+  }
+</style>
+
+<script>
+  (function() {
+    function updateHeaderDivider(view) {
+      const header = view.querySelector('.settings-view-header');
+      const scrollable = view.querySelector('.overflow-y-auto');
+      if (header && scrollable) {
+        if (scrollable.scrollTop > 0) {
+          header.classList.add('has-divider');
+        } else {
+          header.classList.remove('has-divider');
+        }
+      }
+    }
+
+    function initSettingsHeaderDividers() {
+      document.querySelectorAll('.sidebar-view.settings-view').forEach(view => {
+        const scrollable = view.querySelector('.overflow-y-auto');
+        if (scrollable) {
+          updateHeaderDivider(view);
+          if (!scrollable.dataset.scrollBound) {
+            scrollable.dataset.scrollBound = 'true';
+            scrollable.addEventListener('scroll', function() {
+              updateHeaderDivider(view);
+            }, { passive: true });
+          }
+        }
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initSettingsHeaderDividers);
+    } else {
+      initSettingsHeaderDividers();
+    }
+
+    const origNavigateSidebar = window.navigateSidebar;
+    if (typeof origNavigateSidebar === 'function') {
+      window.navigateSidebar = function() {
+        origNavigateSidebar.apply(this, arguments);
+        setTimeout(initSettingsHeaderDividers, 50);
+      };
+    }
+  })();
+</script>

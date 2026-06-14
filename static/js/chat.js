@@ -1,4 +1,4 @@
-﻿// iChat Pro - Client-side Encrypted Chat Engine
+// iChat Pro - Client-side Encrypted Chat Engine
 // Vanilla JavaScript utilizing Web Crypto API for ECDH + HKDF + AES-GCM
 // Connects to real backend API, WebSocket, and E2EE modules
 
@@ -65,11 +65,33 @@ Object.defineProperty(window, 'replyToMessage', {
 Object.defineProperty(window, 'typingUsers', { get() { return typingUsers; }, enumerable: true, configurable: true });
 
 function formatClockTime(date = new Date()) {
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  });
+  let timeFormat = '24h';
+  try {
+    const saved = JSON.parse(localStorage.getItem('ichat_general') || '{}');
+    if (saved.time_format) {
+      timeFormat = saved.time_format;
+    }
+  } catch (e) {}
+
+  let hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+
+  if (timeFormat === '12h') {
+    const isPM = hours >= 12;
+    hours = hours % 12;
+    hours = hours ? hours : 12; // the hour '0' should be '12'
+    const hoursStr = String(hours).padStart(2, '0');
+    if (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh') {
+      const zhAmpm = isPM ? '下午' : '上午';
+      return `${zhAmpm} ${hoursStr}:${minutes}`;
+    } else {
+      const ampm = isPM ? 'PM' : 'AM';
+      return `${hoursStr}:${minutes} ${ampm}`;
+    }
+  } else {
+    const hoursStr = String(hours).padStart(2, '0');
+    return `${hoursStr}:${minutes}`;
+  }
 }
 
 function normalizeTimeLabel(label) {
@@ -371,36 +393,36 @@ function appendChatItemToSidebar(conv) {
   const safeId = encodeURIComponent(String(conv.id));
   const safeName = escapeHtml(conv.name || 'Unknown');
   const safeInitials = escapeHtml(conv.initials || '??');
-  const safeLastMsg = escapeHtml(lastMsgText);
+  const safeLastMsg = renderSidebarPreviewMarkdown(lastMsgText);
   const safeLastTime = escapeHtml(lastMsgTime);
   const safeUnread = escapeHtml(unreadCount);
   const safeAvatarColor = /^#[0-9a-fA-F]{6}$/.test(conv.avatar_color || '') ? conv.avatar_color : '#5c6bc0';
 
   wrapper.innerHTML = `
     <button id="chat-item-${safeId}" onclick="selectChat('${safeId}')"
-      class="chat-item-btn w-full flex items-center px-4 py-3 border-b border-borderColor hover:bg-bgSearch transition-all text-left focus:outline-none relative group select-none">
+      class="chat-item-btn telegram-chat-item w-full text-left focus:outline-none relative group select-none">
 
-      <div class="relative flex-shrink-0">
-        <div class="w-12 h-12 rounded-full text-white flex items-center justify-center font-bold text-base shadow-sm" style="background-color: ${safeAvatarColor}">
+      <div class="telegram-chat-avatar-wrap">
+        <div class="telegram-chat-avatar" style="background-color: ${safeAvatarColor}">
           ${safeInitials}
         </div>
       </div>
 
-      <div class="ml-3.5 flex-1 min-w-0">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-bold text-textMain truncate flex items-center space-x-1">
+      <div class="telegram-chat-content">
+        <div class="telegram-chat-topline">
+          <h3 class="telegram-chat-title">
             <span>${safeName}</span>
             ${conv.is_secure ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark inline-block flex-shrink-0" title="End-to-End Encrypted" data-i18n-title="e2ee_badge"></i>' : ''}
           </h3>
-          <span id="chat-time-${safeId}" class="chat-item-time flex-shrink-0">${safeLastTime}</span>
+          <span id="chat-time-${safeId}" class="chat-item-time telegram-chat-time">${safeLastTime}</span>
         </div>
 
-        <div class="flex items-center justify-between mt-1">
-          <p id="last-msg-${safeId}" class="text-xs text-textSecondary truncate pr-4 leading-tight">
+        <div class="telegram-chat-bottomline">
+          <p id="last-msg-${safeId}" class="telegram-chat-preview">
             ${safeLastMsg}
           </p>
 
-          <span id="unread-badge-${safeId}" class="${unreadCount > 0 ? "" : "hidden"} unread-badge flex-shrink-0">
+          <span id="unread-badge-${safeId}" class="${unreadCount > 0 ? "" : "hidden"} unread-badge telegram-chat-unread">
             ${safeUnread}
           </span>
         </div>
@@ -439,11 +461,34 @@ function appendChatItemToSidebar(conv) {
   }
 }
 
-function updateSidebarPreview(conv, text, time) {
+function formatSidebarPreviewText(conv, text, senderId) {
+  const previewText = text || '';
+  const numericSenderId = senderId == null ? null : Number(senderId);
+  if (!previewText || !numericSenderId || numericSenderId === Number(myUserId)) {
+    return previewText;
+  }
+  return `${numericSenderId}：${previewText}`;
+}
+
+function renderSidebarPreviewMarkdown(text) {
+  const singleLine = String(text || '').replace(/\s*\r?\n\s*/g, ' ').trim();
+  return renderInlineMarkdown(singleLine);
+}
+
+function formatSidebarPreviewText(conv, text, senderId) {
+  const previewText = text || '';
+  const numericSenderId = senderId == null ? null : Number(senderId);
+  if (!previewText || !numericSenderId || numericSenderId === Number(myUserId)) {
+    return previewText;
+  }
+  return `${numericSenderId}: ${previewText}`;
+}
+
+function updateSidebarPreview(conv, text, time, senderId) {
   if (!conv) return;
   const lastMsgEl = document.getElementById(`last-msg-${conv.id}`);
   const timeEl = document.getElementById(`chat-time-${conv.id}`);
-  if (lastMsgEl) lastMsgEl.textContent = text;
+  if (lastMsgEl) lastMsgEl.innerHTML = renderSidebarPreviewMarkdown(formatSidebarPreviewText(conv, text, senderId));
   if (timeEl) timeEl.textContent = time;
 }
 
@@ -457,6 +502,48 @@ async function fetchConversations() {
     conversations = data.conversations || [];
     conversationsById = {};
     conversations.forEach(c => { conversationsById[c.id] = c; });
+    // Decrypt last message preview for each conversation client-side
+    for (const conv of conversations) {
+      if (conv.last_message_data) {
+        try {
+          let plaintext = '';
+          const msg = conv.last_message_data;
+          if (msg.message_type === 'system') {
+            plaintext = msg.ciphertext;
+          } else if (conv.type === 'group') {
+            plaintext = await window.iChatGroupE2EE.decryptGroupMessage({
+              algorithm: msg.algorithm,
+              ciphertext: msg.ciphertext,
+              nonce: msg.nonce,
+              auth_tag: msg.auth_tag,
+              group_id: conv.id,
+              membership_version: msg.membership_version,
+              sender_id: msg.sender_id,
+              receiver_id: msg.receiver_id,
+              sender_key_version: msg.sender_key_version,
+              receiver_key_version: msg.receiver_key_version,
+            });
+          } else {
+            plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
+              algorithm: msg.algorithm,
+              ciphertext: msg.ciphertext,
+              nonce: msg.nonce,
+              auth_tag: msg.auth_tag,
+              conversation_id: conv.id,
+              sender_id: msg.sender_id,
+              receiver_id: msg.receiver_id,
+              sender_key_version: msg.sender_key_version,
+              receiver_key_version: msg.receiver_key_version,
+            });
+          }
+          conv.last_message_preview = formatSidebarPreviewText(conv, plaintext, msg.sender_id);
+        } catch (decryptErr) {
+          console.warn(`Failed to decrypt last message preview for conversation ${conv.id}:`, decryptErr);
+          conv.last_message_preview = decryptFailureLabel(decryptErr);
+        }
+      }
+    }
+
     renderChatList();
     // Auto-select first conversation if none active
     if (!activeChatId && conversations.length > 0) {
@@ -523,6 +610,7 @@ async function fetchMessages(conversationId, page = 1) {
         decrypted.push({
           id: msg.id,
           text: plaintext,
+          created_at: msg.created_at,
           time: formatClockTime(new Date(msg.created_at)),
           isSelf: msg.sender_id === myUserId,
           sender: msg.sender_id,
@@ -537,6 +625,7 @@ async function fetchMessages(conversationId, page = 1) {
         decrypted.push({
           id: msg.id,
           text: decryptFailureLabel(decryptErr),
+          created_at: msg.created_at,
           time: formatClockTime(new Date(msg.created_at)),
           isSelf: msg.sender_id === myUserId,
           sender: msg.sender_id,
@@ -845,6 +934,7 @@ async function handlePrivateMessageReceived(data) {
   const newMsg = {
     id: payload.message_id,
     text: plaintext,
+    created_at: payload.created_at || new Date().toISOString(),
     time: formatClockTime(new Date(payload.created_at || Date.now())),
     isSelf: payload.sender_id === myUserId,
     sender: payload.sender_id,
@@ -856,7 +946,12 @@ async function handlePrivateMessageReceived(data) {
   if (messages.some(msg => msg.id === payload.message_id)) return;
 
   if (conv) {
-    updateSidebarPreview(conv, decryptError ? 'Encrypted message' : plaintext, newMsg.time);
+    updateSidebarPreview(
+      conv,
+      decryptError ? 'Encrypted message' : plaintext,
+      newMsg.time,
+      payload.sender_id
+    );
   } else {
     fetchConversations();
   }
@@ -916,6 +1011,7 @@ async function handleGroupMessageReceived(data) {
     const newMsg = {
       id: payload.message_id,
       text: plaintext,
+      created_at: payload.created_at || new Date().toISOString(),
       time: formatClockTime(new Date(payload.created_at || Date.now())),
       isSelf: payload.sender_id === myUserId,
       sender: payload.sender_id,
@@ -938,6 +1034,9 @@ async function handleGroupMessageReceived(data) {
           badge.classList.remove('hidden');
         }
       }
+    }
+    if (conv) {
+      updateSidebarPreview(conv, plaintext, newMsg.time, payload.sender_id);
     }
   } catch (err) {
     console.error('Failed to decrypt incoming group message:', err);
@@ -1095,7 +1194,7 @@ function updateHeaderPresence(conv) {
     var diffHours = Math.floor(diffMs / 3600000);
     var diffDays = Math.floor(diffMs / 86400000);
 
-    var timeStr = lastSeen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    var timeStr = formatClockTime(lastSeen);
     var text;
     if (diffMin < 1) {
       text = currentLanguage === 'zh' ? '刚刚在线' : 'Last seen just now';
@@ -1407,6 +1506,9 @@ function renderMessages() {
   container.innerHTML = "";
   const conv = conversationsById[activeChatId];
   messages.forEach((msg, index) => {
+    if (msg.created_at) {
+      msg.time = formatClockTime(new Date(msg.created_at));
+    }
     const gm = getMessageGroupMetaNew(messages, index, conv);
     container.appendChild(createMessageBubbleElementNew(msg, gm, conv));
   });
@@ -1471,6 +1573,185 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function sanitizeMarkdownUrl(url) {
+  var value = String(url || "").trim();
+  return /^(https?:\/\/|mailto:)/i.test(value) ? value : "";
+}
+
+function renderInlineMarkdown(text) {
+  var html = escapeHtml(text);
+  var codeTokens = [];
+
+  html = html.replace(/`([^`\n]+)`/g, function(_, code) {
+    var token = "\u0000CODE" + codeTokens.length + "\u0000";
+    codeTokens.push('<code>' + code + '</code>');
+    return token;
+  });
+
+  html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/gi, function(_, label, url) {
+    var safeUrl = sanitizeMarkdownUrl(url);
+    if (!safeUrl) return label;
+    return '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+  });
+
+  html = html
+    .replace(/\|\|(.+?)\|\|/gs, '<span class="message-spoiler" tabindex="0">$1</span>')
+    .replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>')
+    .replace(/\+\+(.+?)\+\+/gs, '<u>$1</u>')
+    .replace(/~~(.+?)~~/gs, '<s>$1</s>')
+    .replace(/(^|[^\*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
+
+  codeTokens.forEach(function(codeHtml, index) {
+    html = html.replace("\u0000CODE" + index + "\u0000", codeHtml);
+  });
+  return html;
+}
+
+function renderMessageMarkdown(text) {
+  var lines = String(text || "").split(/\r?\n/);
+  var html = "";
+  var paragraph = [];
+
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    html += '<p>' + paragraph.map(renderInlineMarkdown).join('<br>') + '</p>';
+    paragraph = [];
+  }
+
+  lines.forEach(function(line) {
+    if (/^\s*&gt;/.test(escapeHtml(line))) {
+      flushParagraph();
+      html += '<blockquote>' + renderInlineMarkdown(line.replace(/^\s*>\s?/, "")) + '</blockquote>';
+      return;
+    }
+    if (line.trim() === "") {
+      flushParagraph();
+      return;
+    }
+    paragraph.push(line);
+  });
+  flushParagraph();
+  return html || "<p></p>";
+}
+
+function getChatTextarea() {
+  return document.getElementById("chat-input-textarea");
+}
+
+function textHasMarkdownSyntax(text) {
+  return /(\*\*[^*]+\*\*|\*[^*\n]+\*|_[^_\n]+_|\+\+[^+]+\+\+|~~[^~]+~~|`[^`]+`|\|\|[^|]+\|\||^\s*>|\[[^\]]+\]\((https?:\/\/|mailto:))/m.test(String(text || ""));
+}
+
+function updateMarkdownPreview() {
+  var textarea = getChatTextarea();
+  var preview = document.getElementById("chat-markdown-preview");
+  if (!textarea || !preview) return;
+
+  var value = textarea.value || "";
+  if (!value.trim() || !textHasMarkdownSyntax(value)) {
+    preview.classList.add("hidden");
+    preview.innerHTML = "";
+    return;
+  }
+
+  preview.innerHTML = renderMessageMarkdown(value);
+  preview.classList.remove("hidden");
+}
+
+function wrapTextareaSelection(format) {
+  var textarea = getChatTextarea();
+  if (!textarea || textarea.disabled) return;
+
+  var start = textarea.selectionStart || 0;
+  var end = textarea.selectionEnd || 0;
+  var selected = textarea.value.slice(start, end);
+  var hasSelection = end > start;
+  var fallback = selected || (format === "link" ? "link text" : "text");
+  var before = "";
+  var after = "";
+  var replacement = fallback;
+
+  if (format === "bold") {
+    before = "**"; after = "**";
+  } else if (format === "italic") {
+    before = "*"; after = "*";
+  } else if (format === "underline") {
+    before = "++"; after = "++";
+  } else if (format === "strike") {
+    before = "~~"; after = "~~";
+  } else if (format === "code") {
+    before = "`"; after = "`";
+    replacement = fallback.replace(/\n/g, " ");
+  } else if (format === "spoiler") {
+    before = "||"; after = "||";
+  } else if (format === "quote") {
+    replacement = fallback.split(/\r?\n/).map(function(line) {
+      return "> " + line;
+    }).join("\n");
+  } else if (format === "link") {
+    var currentUrl = /^https?:\/\//i.test(selected) ? selected : "https://";
+    var url = window.prompt(currentLanguage === "zh" ? "输入链接地址" : "Enter link URL", currentUrl);
+    if (!url) return;
+    url = sanitizeMarkdownUrl(url);
+    if (!url) {
+      window.showToast(currentLanguage === "zh" ? "链接必须以 http、https 或 mailto 开头" : "Links must start with http, https, or mailto.");
+      return;
+    }
+    replacement = "[" + fallback + "](" + url + ")";
+  }
+
+  if (format !== "quote" && format !== "link") {
+    replacement = before + replacement + after;
+  }
+
+  textarea.setRangeText(replacement, start, end, "end");
+  var selectionStart = format === "link" || format === "quote" ? start : start + before.length;
+  var selectionEnd = format === "link" || format === "quote"
+    ? start + replacement.length
+    : selectionStart + fallback.length;
+  textarea.focus();
+  if (hasSelection && format !== "link" && format !== "quote") {
+    textarea.setSelectionRange(selectionStart, selectionEnd);
+  }
+  adjustTextareaHeight(textarea);
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  updateMarkdownPreview();
+  updateFormatToolbarVisibility();
+}
+
+function updateFormatToolbarVisibility() {
+  var toolbar = document.getElementById("chat-format-toolbar");
+  var textarea = getChatTextarea();
+  if (!toolbar || !textarea) return;
+  var hasSelection = document.activeElement === textarea && textarea.selectionEnd > textarea.selectionStart;
+  toolbar.classList.toggle("hidden", !hasSelection);
+}
+
+function setupFormatToolbar() {
+  var toolbar = document.getElementById("chat-format-toolbar");
+  var textarea = getChatTextarea();
+  if (!toolbar || !textarea || toolbar.dataset.bound === "true") return;
+  toolbar.dataset.bound = "true";
+
+  toolbar.addEventListener("mousedown", function(event) {
+    event.preventDefault();
+  });
+  toolbar.addEventListener("click", function(event) {
+    var button = event.target.closest("[data-format]");
+    if (!button) return;
+    wrapTextareaSelection(button.dataset.format);
+  });
+  ["select", "keyup", "mouseup", "focus", "input"].forEach(function(eventName) {
+    textarea.addEventListener(eventName, updateFormatToolbarVisibility);
+  });
+  textarea.addEventListener("input", updateMarkdownPreview);
+  textarea.addEventListener("blur", function() {
+    setTimeout(updateFormatToolbarVisibility, 120);
+  });
+  updateMarkdownPreview();
+}
+
 // 8. Create Message Bubble DOM Node
 
 // 9. Encrypt & Send Message
@@ -1524,6 +1805,7 @@ async function sendMessage() {
   const tempMsg = {
     id: clientMsgId,
     text: text,
+    created_at: new Date().toISOString(),
     time: time,
     isSelf: true,
     status: "sending",
@@ -1535,7 +1817,8 @@ async function sendMessage() {
   updateSidebarPreview(conv, text, time);
 
   textarea.value = "";
-  textarea.style.height = "auto";
+  adjustTextareaHeight(textarea);
+  updateMarkdownPreview();
 
   try {
     if (conv.type === "group") {
@@ -1945,7 +2228,7 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
 
   var isGroup = conv && conv.type === "group";
   var senderName = msg.isSelf ? "You" : getMessageSenderName(msg, conv);
-  var messageText = escapeHtml(msg.text);
+  var messageText = renderMessageMarkdown(msg.text);
   var messageTime = escapeHtml(msg.time || "");
 
   if (msg.isSelf) {
@@ -1976,7 +2259,7 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     var statusClass = msg.status === "read" ? "text-brand-light dark:text-brand-dark" : "";
     div.innerHTML = checkboxHtml
       + '<div class="message-bubble-custom bubble-self" data-message-id="' + msg.id + '">'
-      + '<p class="message-text-content">' + messageText + '</p>'
+      + '<div class="message-text-content">' + messageText + '</div>'
       + '<div class="message-meta-line">'
       + '<span>' + messageTime + '</span>'
       + '<i data-lucide="' + statusIcon + '" class="w-3.5 h-3.5 ' + statusIconClass + ' ' + statusClass + '" title="' + statusTooltip + '"></i>'
@@ -1998,10 +2281,22 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     div.innerHTML = checkboxHtml + avatarHtml
       + '<div class="message-bubble-custom bubble-peer" data-message-id="' + msg.id + '">'
       + senderNameHtml
-      + '<p class="message-text-content">' + messageText + '</p>'
+      + '<div class="message-text-content">' + messageText + '</div>'
       + '<div class="message-meta-line"><span>' + messageTime + '</span></div>'
       + '</div>';
   }
+  div.querySelectorAll(".message-spoiler").forEach(function(spoiler) {
+    spoiler.addEventListener("click", function(event) {
+      event.stopPropagation();
+      spoiler.classList.add("is-revealed");
+    });
+    spoiler.addEventListener("keydown", function(event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        spoiler.classList.add("is-revealed");
+      }
+    });
+  });
   setTimeout(function() { if (div.querySelector("[data-lucide]")) lucide.createIcons(); }, 0);
   return div;
 }
@@ -2019,7 +2314,25 @@ function setupEventListeners() {
   // Enter to send message
   const chatInput = document.getElementById("chat-input-textarea");
   if (chatInput) {
+    setupFormatToolbar();
     chatInput.addEventListener("keydown", (e) => {
+      var key = e.key.toLowerCase();
+      var handledFormat = null;
+      if (e.ctrlKey && !e.shiftKey && key === "b") handledFormat = "bold";
+      else if (e.ctrlKey && !e.shiftKey && key === "i") handledFormat = "italic";
+      else if (e.ctrlKey && !e.shiftKey && key === "u") handledFormat = "underline";
+      else if (e.ctrlKey && e.shiftKey && key === "x") handledFormat = "strike";
+      else if (e.ctrlKey && e.shiftKey && key === "m") handledFormat = "code";
+      else if (e.ctrlKey && e.shiftKey && key === "h") handledFormat = "spoiler";
+      else if (e.ctrlKey && e.shiftKey && (key === "9" || e.key === "(")) handledFormat = "quote";
+      else if (e.ctrlKey && !e.shiftKey && key === "k") handledFormat = "link";
+
+      if (handledFormat) {
+        e.preventDefault();
+        wrapTextareaSelection(handledFormat);
+        return;
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
@@ -2129,13 +2442,35 @@ function setupEventListeners() {
     // 2. Main menu
     const mainDropdown = document.getElementById("main-menu-dropdown");
     const mainBtn = document.getElementById("drawer-btn");
+    const mainSubmenu = document.getElementById("main-menu-more-submenu");
     if (mainDropdown && !mainDropdown.classList.contains("hidden")) {
-      if (mainBtn && !mainBtn.contains(e.target) && !mainDropdown.contains(e.target)) {
+      if (
+        mainBtn
+        && !mainBtn.contains(e.target)
+        && !mainDropdown.contains(e.target)
+        && !(mainSubmenu && mainSubmenu.contains(e.target))
+      ) {
         mainDropdown.classList.add("hidden");
         mainBtn.classList.remove("bg-bgSearch", "text-textMain");
+        const menuMoreBtn = document.getElementById("menu-more-btn");
+        if (mainSubmenu) {
+          mainSubmenu.classList.add("hidden");
+          mainSubmenu.style.left = "";
+          mainSubmenu.style.top = "";
+        }
+        if (menuMoreBtn) menuMoreBtn.classList.remove("is-open");
       }
     }
-    // 3. Contacts FAB menu (P2 T09)
+    // 3. Settings home more menu
+    const settingsMoreDropdown = document.getElementById("settings-home-more-dropdown");
+    const settingsMoreBtn = document.getElementById("settings-home-more-btn");
+    if (settingsMoreDropdown && !settingsMoreDropdown.classList.contains("hidden")) {
+      if (settingsMoreBtn && !settingsMoreBtn.contains(e.target) && !settingsMoreDropdown.contains(e.target)) {
+        settingsMoreDropdown.classList.add("hidden");
+        settingsMoreBtn.classList.remove("active");
+      }
+    }
+    // 4. Contacts FAB menu (P2 T09)
     const fabMenu = document.getElementById("contacts-fab-menu");
     const fabBtn = document.getElementById("contacts-fab-btn");
     if (fabMenu && !fabMenu.classList.contains("hidden")) {
@@ -2159,6 +2494,12 @@ function setupEventListeners() {
       if (mainDropdown && !mainDropdown.classList.contains("hidden")) {
         mainDropdown.classList.add("hidden");
         if (mainBtn) mainBtn.classList.remove("bg-bgSearch", "text-textMain");
+      }
+      const settingsMoreDropdown = document.getElementById("settings-home-more-dropdown");
+      const settingsMoreBtn = document.getElementById("settings-home-more-btn");
+      if (settingsMoreDropdown && !settingsMoreDropdown.classList.contains("hidden")) {
+        settingsMoreDropdown.classList.add("hidden");
+        if (settingsMoreBtn) settingsMoreBtn.classList.remove("active");
       }
       closeReportModal();
       closeDeleteConfirmModal();
@@ -2374,8 +2715,11 @@ function navigateSidebar(viewName) {
     'privacy-security',
     'general-settings',
     'chat-folders',
+    'stickers-emoji',
+    'language',
     'sessions-shortcuts',
-    'accounts-switcher'
+    'accounts-switcher',
+    'settings-birthday'
   ];
   views.forEach(function(name) {
     var el = name === 'chat'
@@ -2394,8 +2738,14 @@ function navigateSidebar(viewName) {
     setTimeout(function() { renderStorageUsage(); }, 150);
   }
   // Refresh privacy settings when navigating to that view
-  if (viewName === 'privacy-security' && typeof loadPrivacySettings === 'function') {
-    setTimeout(function() { loadPrivacySettings(); }, 150);
+  if (viewName === 'privacy-security' && typeof refreshPrivacySecurity === 'function') {
+    setTimeout(function() { refreshPrivacySecurity(); }, 150);
+  }
+  if (viewName === 'general-settings' && typeof refreshGeneralSettings === 'function') {
+    setTimeout(function() { refreshGeneralSettings(); }, 150);
+  }
+  if (viewName === 'chat-folders' && typeof refreshChatFoldersSettings === 'function') {
+    setTimeout(function() { refreshChatFoldersSettings(); }, 150);
   }
   // Refresh account switcher list when navigating to it (P2 T11)
   if (viewName === 'accounts-switcher') {
@@ -2407,7 +2757,7 @@ function navigateSidebar(viewName) {
 
 // Backward-compatible wrappers
 function showSettingsPanel() {
-  navigateSidebar('settings');
+  navigateSidebar('settings-home');
 }
 
 function hideSettingsPanel() {
@@ -3253,8 +3603,11 @@ window.closeQRCodeModal = closeQRCodeModal;
 window.copyQRCode = copyQRCode;
 
 function adjustTextareaHeight(textarea) {
+  const minHeight = 24;
+  const maxHeight = 160;
   textarea.style.height = "auto";
-  textarea.style.height = textarea.scrollHeight + "px";
+  textarea.style.height = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight) + "px";
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
 function toggleEmojiDropdown() {
@@ -3335,6 +3688,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 // Translation Dictionary
 const translations = {
   en: {
+    general_settings: "General Settings",
+    logout_confirm_title: "Sign Out",
+    logout_confirm_desc: "Are you sure you want to sign out?",
+    logout_confirm_btn: "Confirm",
     account_details: "Account Details",
     active_sessions: "Active Sessions (3)",
     active_sessions_desc: "Manage all devices logged into your account",
@@ -3470,6 +3827,10 @@ const translations = {
     typingIndicator: "Typing"
   },
   zh: {
+    general_settings: "通用设置",
+    logout_confirm_title: "退出登录",
+    logout_confirm_desc: "确定要退出登录吗？",
+    logout_confirm_btn: "确认",
     account_details: "账号详情",
     active_sessions: "活跃会话 (3)",
     active_sessions_desc: "管理所有已登录此账号的设备",
@@ -3902,6 +4263,25 @@ window.toggleMoreMenu = function(e) {
   }
 };
 
+window.toggleSettingsHomeMoreMenu = function(e, forceClose) {
+  if (e) e.stopPropagation();
+  const dropdown = document.getElementById("settings-home-more-dropdown");
+  const btn = document.getElementById("settings-home-more-btn");
+  if (!dropdown) return;
+
+  const shouldOpen = !forceClose && dropdown.classList.contains("hidden");
+  if (shouldOpen) {
+    dropdown.classList.remove("hidden");
+    if (btn) btn.classList.add("active");
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  } else {
+    dropdown.classList.add("hidden");
+    if (btn) btn.classList.remove("active");
+  }
+};
+
 window.toggleMainMenu = function(e) {
   if (e) e.stopPropagation();
   const dropdown = document.getElementById("main-menu-dropdown");
@@ -3920,15 +4300,47 @@ window.toggleMainMenu = function(e) {
     btn.classList.remove("active");
     // Also close submenu if open
     const submenu = document.getElementById("main-menu-more-submenu");
-    if (submenu) submenu.classList.add("hidden");
+    if (submenu) {
+      submenu.classList.add("hidden");
+      submenu.style.left = "";
+      submenu.style.top = "";
+    }
+    const moreBtn = document.getElementById("menu-more-btn");
+    if (moreBtn) moreBtn.classList.remove("is-open");
   }
 };
 
 window.toggleMoreSubmenu = function(e) {
   if (e) e.stopPropagation();
   const submenu = document.getElementById("main-menu-more-submenu");
+  const moreBtn = document.getElementById("menu-more-btn");
   if (!submenu) return;
-  submenu.classList.toggle("hidden");
+  const isOpening = submenu.classList.contains("hidden");
+  if (isOpening && submenu.parentElement !== document.body) {
+    document.body.appendChild(submenu);
+  }
+  submenu.classList.toggle("hidden", !isOpening);
+  if (moreBtn) moreBtn.classList.toggle("is-open", isOpening);
+  if (isOpening && moreBtn) {
+    const rect = moreBtn.getBoundingClientRect();
+    const menuWidth = 190;
+    const gap = 8;
+    const viewportPadding = 12;
+    let left = rect.right + gap;
+    let top = rect.top - 2;
+
+    if (left + menuWidth + viewportPadding > window.innerWidth) {
+      left = Math.max(viewportPadding, rect.left - menuWidth - gap);
+    }
+
+    const estimatedHeight = 238;
+    if (top + estimatedHeight + viewportPadding > window.innerHeight) {
+      top = Math.max(viewportPadding, window.innerHeight - estimatedHeight - viewportPadding);
+    }
+
+    submenu.style.left = left + "px";
+    submenu.style.top = top + "px";
+  }
   if (window.lucide) {
     window.lucide.createIcons();
   }
@@ -4265,7 +4677,7 @@ window.triggerMyProfileFromInfo = function(e) {
   if (mainDropdown) mainDropdown.classList.add("hidden");
   if (mainBtn) mainBtn.classList.remove("active");
   
-  showSettingsPanel();
+  navigateSidebar('settings-home');
 };
 
 window.showAboutInfo = function(e) {

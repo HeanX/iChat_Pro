@@ -1,5 +1,5 @@
 <!-- chat_window.html - Primary Chat Area for iChat Pro -->
-<div class="flex-1 flex flex-row h-full bg-bgMain relative overflow-hidden">
+<div class="chat-conversation-surface flex-1 flex flex-row h-full relative overflow-hidden">
   
   <!-- Left Side: Active Chat Content Column -->
   <div class="flex-1 flex flex-col h-full min-w-0 relative">
@@ -15,74 +15,81 @@
       <button onclick="exitSelectMode()" class="px-4 py-1.5 hover:bg-bgSearch text-sm font-bold rounded-custom-md text-brand-light dark:text-brand-dark transition-colors" data-i18n="cancel">取消</button>
     </div>
 
-    <header id="chat-header-normal" class="h-[60px] border-b border-borderColor px-4 flex items-center justify-between bg-bgSidebar select-none flex-shrink-0 z-10 w-full">
-      <div class="flex items-center space-x-3">
-        
-        <!-- Back Arrow for Mobile Viewports -->
-        <button onclick="backToSidebar()" class="md:hidden p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chat List" data-i18n-title="back_to_sidebar">
-          <i data-lucide="arrow-left" class="w-5.5 h-5.5"></i>
-        </button>
+    <header id="chat-header-normal" class="select-none flex-shrink-0 z-10 w-full">
+      <div class="chat-header-bubble">
+        <div class="chat-header-main">
 
-        <!-- Active Chat Avatar -->
-        <div id="chat-header-avatar" class="w-10 h-10 rounded-full bg-brand-light text-white flex items-center justify-center font-bold text-sm shadow-sm">
-          --
-        </div>
-
-        <!-- Identity Name and Encryption Badge -->
-        <div class="leading-tight cursor-pointer" id="chat-header-details">
-          <div class="flex items-center space-x-1.5">
-            <span id="chat-header-name" class="text-sm font-bold text-textMain hover:underline">Select a chat</span>
-            <!-- Lock Icon indicating E2E Encryption Status -->
-            <button id="chat-header-lock" class="text-brand-light dark:text-brand-dark p-0.5 rounded-full hover:bg-bgSearch transition-colors" title="E2E Encrypted. Click to verify fingerprint." data-i18n-title="verify_fp_desc">
-              <i data-lucide="lock" class="w-4 h-4"></i>
-            </button>
-          </div>
-          <span id="chat-header-status" class="text-xs text-textSecondary">Waiting for conversation</span>
-        </div>
-      </div>
-
-      <!-- Extra Action Icons -->
-      <div class="flex items-center space-x-1 relative">
-        <button class="p-2 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="Search Chat" data-i18n-title="search_chat">
-          <i data-lucide="search" class="w-5 h-5"></i>
-        </button>
-        <button onclick="window.toggleRightPanel()" class="p-2 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="Chat Info" data-i18n-title="view_info">
-          <i data-lucide="info" class="w-5 h-5"></i>
-        </button>
-        <div class="relative">
-          <button id="chat-header-more-btn" onclick="toggleMoreMenu(event)" class="p-2 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all" title="More Operations" data-i18n-title="more_operations">
-            <i data-lucide="more-vertical" class="w-5 h-5"></i>
+          <!-- Back Arrow for Mobile Viewports -->
+          <button onclick="backToSidebar()" class="chat-header-icon-btn md:hidden" title="Back to Chat List" data-i18n-title="back_to_sidebar">
+            <i data-lucide="arrow-left" class="w-5.5 h-5.5"></i>
           </button>
-          
-          <!-- More Operations Dropdown Menu -->
-          <div id="chat-header-more-dropdown" class="hidden absolute right-0 mt-1.5 w-[230px] bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[20px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
-            <!-- Boost Group -->
-            <button onclick="triggerBoostGroupAction(event)" class="menu-item-custom">
-              <i data-lucide="zap"></i>
-              <span data-i18n="menu_boost_group">Boost Group</span>
+
+          <!-- Active Chat Avatar -->
+          <div id="chat-header-avatar" class="chat-header-avatar">
+            --
+          </div>
+
+          <!-- Identity Name, Presence, and Encryption Status -->
+          <div class="chat-header-identity leading-tight cursor-pointer" id="chat-header-details">
+            <span id="chat-header-name" class="text-sm font-bold text-textMain hover:underline">Select a chat</span>
+            <div class="chat-header-subline">
+              <span id="chat-header-status" class="text-xs text-textSecondary">Waiting for conversation</span>
+              <button id="chat-header-lock" class="chat-header-encryption-chip hidden" title="E2E Encrypted. Click to verify fingerprint." data-i18n-title="verify_fp_desc">
+                <i data-lucide="lock" class="w-3.5 h-3.5"></i>
+                <span data-i18n="verified">Verified</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Extra Action Icons -->
+        <div class="chat-header-actions">
+          <button class="chat-header-icon-btn" title="Search Chat" data-i18n-title="search_chat">
+            <i data-lucide="search" class="w-5 h-5"></i>
+          </button>
+          <button onclick="window.toggleRightPanel()" class="chat-header-icon-btn" title="Chat Info" data-i18n-title="view_info">
+            <i data-lucide="info" class="w-5 h-5"></i>
+          </button>
+          <div class="relative">
+            <button id="chat-header-more-btn" onclick="toggleMoreMenu(event)" class="chat-header-icon-btn" title="More Operations" data-i18n-title="more_operations">
+              <i data-lucide="more-vertical" class="w-5 h-5"></i>
             </button>
-            <!-- Mute -->
-            <button onclick="triggerMuteAction(event)" class="menu-item-custom">
-              <i id="menu-mute-group-icon" data-lucide="bell-off"></i>
-              <span id="menu-mute-group-text" data-i18n="menu_mute_group">Mute...</span>
-            </button>
-            <!-- Select messages -->
-            <button onclick="triggerSelectMessagesAction(event)" class="menu-item-custom">
-              <i data-lucide="check-circle"></i>
-              <span data-i18n="menu_select_messages">Select messages</span>
-            </button>
-            <!-- Report -->
-            <button onclick="triggerReportAction(event)" class="menu-item-custom">
-              <i data-lucide="flag"></i>
-              <span data-i18n="menu_report">Report</span>
-            </button>
-            <!-- Divider -->
-            <div class="h-px bg-borderColor/50 my-1"></div>
-            <!-- Delete Chat -->
-            <button onclick="triggerDeleteChatAction(event)" class="menu-item-custom danger">
-              <i data-lucide="trash-2"></i>
-              <span id="menu-delete-chat-text" data-i18n="menu_delete_chat">Delete Chat</span>
-            </button>
+
+            <!-- More Operations Dropdown Menu -->
+            <div id="chat-header-more-dropdown" class="hidden absolute right-0 mt-1.5 w-[230px] bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[20px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
+              <!-- Group Info (visible only for group chats) -->
+              <button id="menu-group-info-btn" onclick="triggerGroupInfoAction(event)" class="menu-item-custom hidden">
+                <i data-lucide="users"></i>
+                <span data-i18n="menu_group_info">Group Info</span>
+              </button>
+              <!-- Boost Group -->
+              <button onclick="triggerBoostGroupAction(event)" class="menu-item-custom">
+                <i data-lucide="zap"></i>
+                <span data-i18n="menu_boost_group">Boost Group</span>
+              </button>
+              <!-- Mute -->
+              <button onclick="triggerMuteAction(event)" class="menu-item-custom">
+                <i id="menu-mute-group-icon" data-lucide="bell-off"></i>
+                <span id="menu-mute-group-text" data-i18n="menu_mute_group">Mute...</span>
+              </button>
+              <!-- Select messages -->
+              <button onclick="triggerSelectMessagesAction(event)" class="menu-item-custom">
+                <i data-lucide="check-circle"></i>
+                <span data-i18n="menu_select_messages">Select messages</span>
+              </button>
+              <!-- Report -->
+              <button onclick="triggerReportAction(event)" class="menu-item-custom">
+                <i data-lucide="flag"></i>
+                <span data-i18n="menu_report">Report</span>
+              </button>
+              <!-- Divider -->
+              <div class="h-px bg-borderColor/50 my-1"></div>
+              <!-- Delete Chat -->
+              <button onclick="triggerDeleteChatAction(event)" class="menu-item-custom danger">
+                <i data-lucide="trash-2"></i>
+                <span id="menu-delete-chat-text" data-i18n="menu_delete_chat">Delete Chat</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -125,28 +132,41 @@
           <span data-i18n="e2ee_banner">🔒 Messages are secured with end-to-end encryption.</span>
         </div>
 
-        <div class="chat-input-capsule">
+        <div id="chat-format-toolbar" class="chat-format-toolbar hidden" role="toolbar" aria-label="Text formatting">
+          <button type="button" data-format="bold" title="Bold (Ctrl+B)" aria-label="Bold"><strong>B</strong></button>
+          <button type="button" data-format="italic" title="Italic (Ctrl+I)" aria-label="Italic"><span class="format-italic">I</span></button>
+          <button type="button" data-format="underline" title="Underline (Ctrl+U)" aria-label="Underline"><span class="format-underline">U</span></button>
+          <button type="button" data-format="strike" title="Strikethrough (Ctrl+Shift+X)" aria-label="Strikethrough"><span class="format-strike">S</span></button>
+          <button type="button" data-format="code" title="Monospace (Ctrl+Shift+M)" aria-label="Monospace"><span class="format-mono">M</span></button>
+          <button type="button" data-format="spoiler" title="Spoiler (Ctrl+Shift+H)" aria-label="Spoiler"><i data-lucide="scan-line" class="w-5 h-5"></i></button>
+          <button type="button" data-format="quote" title="Quote (Ctrl+Shift+9)" aria-label="Quote"><i data-lucide="quote" class="w-5 h-5"></i></button>
+          <button type="button" data-format="link" title="Link (Ctrl+K)" aria-label="Link"><i data-lucide="link" class="w-5 h-5"></i></button>
+        </div>
+
+        <div id="chat-markdown-preview" class="chat-markdown-preview hidden" aria-live="polite"></div>
+
+        <div class="chat-input-capsule telegram-composer">
         <!-- File Attachment Button -->
-        <button class="p-2.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all focus:outline-none flex-shrink-0" title="Attach Document" data-i18n-title="attach_document">
+        <button class="telegram-composer-action p-2.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all focus:outline-none flex-shrink-0" title="Attach Document" data-i18n-title="attach_document">
           <i data-lucide="paperclip" class="w-5.5 h-5.5"></i>
         </button>
         
         <!-- Auto-Growing Messaging Input Area -->
-        <div class="flex-1 bg-bgSearch border border-borderColor/50 rounded-custom-lg px-4 py-2 flex items-end space-x-2">
+        <div class="telegram-composer-field flex-1 bg-bgSearch border border-borderColor/50 rounded-custom-lg px-4 py-2 flex items-end space-x-2">
           <textarea id="chat-input-textarea" rows="1" oninput="adjustTextareaHeight(this)"
             class="flex-1 bg-transparent text-textMain placeholder-textSecondary/70 focus:outline-none resize-none max-h-[160px] text-sm py-1 font-sans custom-scrollbar"
             placeholder="Write an encrypted message..."
             data-i18n-placeholder="write_placeholder"></textarea>
           
           <!-- Emoji Trigger Button -->
-          <button onclick="toggleEmojiDropdown()" class="p-1 rounded-full text-textSecondary hover:text-textMain transition-colors focus:outline-none" title="Insert Emoji" data-i18n-title="insert_emoji">
+          <button onclick="toggleEmojiDropdown()" class="telegram-composer-emoji p-1 rounded-full text-textSecondary hover:text-textMain transition-colors focus:outline-none" title="Insert Emoji" data-i18n-title="insert_emoji">
             <i data-lucide="smile" class="w-5.5 h-5.5"></i>
           </button>
         </div>
 
         <!-- Message Dispatcher Button -->
         <button onclick="sendMessage()"
-          class="p-3 bg-brand-light dark:bg-brand-dark hover:opacity-95 text-white rounded-full shadow-md hover:scale-105 transition-all focus:outline-none flex items-center justify-center flex-shrink-0"
+          class="telegram-composer-send p-3 bg-brand-light dark:bg-brand-dark hover:opacity-95 text-white rounded-full shadow-md hover:scale-105 transition-all focus:outline-none flex items-center justify-center flex-shrink-0"
           title="Send Ciphertext">
           <i data-lucide="send" class="w-5 h-5 pl-0.5"></i>
         </button>

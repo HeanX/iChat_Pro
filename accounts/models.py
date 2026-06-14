@@ -47,10 +47,14 @@ class UserPrivacySettings(models.Model):
     phone_number_visibility = models.CharField(max_length=20, default='contacts')
     bio_visibility = models.CharField(max_length=20, default='everyone')
     forward_link_visibility = models.CharField(max_length=20, default='everyone')
+    birthday_visibility = models.CharField(max_length=20, default='contacts')
+    gifts_visibility = models.CharField(max_length=20, default='everyone')
+    saved_music_visibility = models.CharField(max_length=20, default='everyone')
 
     # ── Permissions: 'everyone' | 'contacts' ──
     who_can_send_messages = models.CharField(max_length=20, default='contacts')
     who_can_voice_video_call = models.CharField(max_length=20, default='contacts')
+    who_can_add_me_to_groups = models.CharField(max_length=20, default='everyone')
 
     # ── Auto-delete messages: 0=off, 1, 7, 30 days ──
     auto_delete_messages_days = models.PositiveSmallIntegerField(default=0)
@@ -131,6 +135,7 @@ class UserNotificationSettings(models.Model):
         on_delete=models.CASCADE,
         related_name='notification_settings',
     )
+    display_notifications = models.BooleanField(default=True)
     offline_notifications = models.BooleanField(default=True)
     all_accounts_notifications = models.BooleanField(default=True)
     notification_sound = models.CharField(max_length=100, default='default')
@@ -148,6 +153,38 @@ class UserNotificationSettings(models.Model):
 
     def __str__(self):
         return f'NotificationSettings for {self.user.username}'
+
+
+class UserGeneralSettings(models.Model):
+    """Per-user appearance and general UI preferences."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='general_settings',
+    )
+    settings_json = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'GeneralSettings for {self.user.username}'
+
+
+class UserChatFolderSettings(models.Model):
+    """Per-user chat folder layout and folder definitions."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='chat_folder_settings',
+    )
+    settings_json = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'ChatFolderSettings for {self.user.username}'
 
 
 class MultiAccountContext(models.Model):
@@ -341,11 +378,13 @@ class KeyTrust(models.Model):
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def create_user_profile(sender, instance, created, **kwargs):
-    """Ensure every new user gets a UserProfile, UserPrivacySettings and UserStorageSettings immediately."""
+    """Ensure every new user gets the account-owned companion records."""
     if created:
         UserProfile.objects.get_or_create(user=instance)
         UserPrivacySettings.objects.get_or_create(user=instance)
         UserStorageSettings.objects.get_or_create(user=instance)
+        UserGeneralSettings.objects.get_or_create(user=instance)
+        UserChatFolderSettings.objects.get_or_create(user=instance)
 
 
 # Group and GroupMember have been consolidated into chat.Conversation

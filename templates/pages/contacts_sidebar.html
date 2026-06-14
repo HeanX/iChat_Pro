@@ -96,7 +96,7 @@
         {% if entry.user == request.user %}
           {% with peer=entry.contact %}
         <div class="flex items-center space-x-3 flex-1 min-w-0">
-          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
+          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0 avatar-clickable"{% if peer %} data-user-id="{{ peer.id }}"{% endif %} style="cursor:pointer">
             {{ peer.username|slice:":1"|upper }}
           </div>
           <div class="min-w-0">
@@ -108,7 +108,7 @@
         {% else %}
           {% with peer=entry.user %}
         <div class="flex items-center space-x-3 flex-1 min-w-0">
-          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
+          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0 avatar-clickable"{% if peer %} data-user-id="{{ peer.id }}"{% endif %} style="cursor:pointer">
             {{ peer.username|slice:":1"|upper }}
           </div>
           <div class="min-w-0">

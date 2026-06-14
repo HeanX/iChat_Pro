@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <defs>
+    <!-- Purple Space Theme Pattern -->
+    <pattern id="doodlePattern" width="120" height="120" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#6b21a8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.06">
+        <!-- Planet -->
+        <circle cx="20" cy="20" r="5" />
+        <ellipse cx="20" cy="20" rx="9" ry="2.5" transform="rotate(-15 20 20)" />
+        
+        <!-- Rocket -->
+        <path d="M 75,22 L 80,10 L 85,22 L 82,27 H 78 Z" />
+        <path d="M 76,27 L 74,32 H 86 L 84,27" />
+        <circle cx="80" cy="18" r="1.5" />
+        
+        <!-- Crescent Moon -->
+        <path d="M 50,15 A 5,5 0 1 0 56,21 A 4,4 0 1 1 50,15" />
+        
+        <!-- Stars -->
+        <path d="M 10,55 L 12,57 L 10,59 L 8,57 Z" />
+        <path d="M 110,65 L 112,67 L 110,69 L 108,67 Z" />
+        
+        <!-- Crystal -->
+        <path d="M 95,65 L 100,55 L 105,65 L 100,75 Z" />
+        <line x1="100" y1="55" x2="100" y2="75" />
+        
+        <!-- Constellation -->
+        <path d="M 15,90 L 25,95 L 35,90" />
+        <circle cx="15" cy="90" r="1" fill="#6b21a8" />
+        <circle cx="25" cy="95" r="1" fill="#6b21a8" />
+        <circle cx="35" cy="90" r="1" fill="#6b21a8" />
+
+        <!-- UFO -->
+        <ellipse cx="50" cy="95" rx="8" ry="3" />
+        <path d="M 46,94 A 4,4 0 0 1 54,94 Z" />
+        
+        <!-- Sparkles -->
+        <circle cx="65" cy="50" r="1" fill="#6b21a8" opacity="0.5" />
+        <circle cx="115" cy="35" r="1" fill="#6b21a8" opacity="0.5" />
+        <circle cx="5" cy="35" r="1" fill="#6b21a8" opacity="0.5" />
+      </g>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#doodlePattern)" />
+</svg>

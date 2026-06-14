@@ -78,8 +78,11 @@ def settings_sidebar(request):
 
     presence = getattr(user, "presence", None)
     if presence is None:
-        presence = UserPresence(user=user, is_online=True, status=UserPresence.Status.ONLINE)
-    status_label = presence.get_status_display() if presence.pk else "Online"
+        status_label = "Offline"
+        is_online = False
+    else:
+        is_online = bool(presence.is_online)
+        status_label = presence.get_status_display() if is_online else "Offline"
 
     avatar_url = ""
     if profile and profile.avatar:
@@ -98,7 +101,7 @@ def settings_sidebar(request):
         "settings_email_display": email or "Not set",
         "settings_username_display": f"@{user.username.lower()}",
         "settings_presence_label": status_label,
-        "settings_is_online": bool(getattr(presence, "is_online", True)),
+        "settings_is_online": is_online,
         "settings_chat_count": active_chat_count,
         "settings_chat_count_label": f"{active_chat_count} chat" + ("" if active_chat_count == 1 else "s"),
         "settings_group_chat_count": group_chat_count,

@@ -60,9 +60,11 @@
     <div id="right-panel-group-section" class="space-y-3 hidden">
       <div class="flex items-center justify-between">
         <h5 id="right-panel-members-count" class="text-xs font-bold text-textSecondary uppercase tracking-wider" data-i18n="group_members_title">Group Members</h5>
-        <span class="text-[10px] bg-brand-light/10 text-brand-light dark:bg-brand-dark/10 dark:text-brand-dark px-2 py-0.5 rounded font-semibold">Creator</span>
+        <button id="right-panel-manage-group-btn" onclick="if(activeChatId) navigateToGroupManage(activeChatId)" class="text-[10px] bg-brand-light/10 text-brand-light dark:bg-brand-dark/10 dark:text-brand-dark px-2 py-0.5 rounded font-semibold hover:bg-brand-light/20 dark:hover:bg-brand-dark/20 transition-all">
+          Manage
+        </button>
       </div>
-      
+
       <div id="right-panel-members-list" class="space-y-3 divide-y divide-borderColor/20">
         <!-- Members dynamically populated by JS -->
       </div>

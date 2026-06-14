@@ -15,7 +15,7 @@
         <i data-lucide="refresh-cw" class="w-4 h-4 animate-spin-hover"></i>
       </button>
       <div class="message-bubble-custom bubble-self bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400">
-        <p class="message-text-content">{{ message_text }}</p>
+        <div class="message-text-content">{{ message_text }}</div>
         <div class="message-meta-line text-red-400/80">
           <span>Failed to encrypt payload</span>
           <i data-lucide="alert-circle" class="w-3 h-3"></i>
@@ -59,7 +59,7 @@
         </div>
       {% else %}
         <!-- Plain Text Content -->
-        <p class="message-text-content">{{ message_text }}</p>
+        <div class="message-text-content">{{ message_text }}</div>
       {% endif %}
       
       <!-- Timestamp & Read State -->

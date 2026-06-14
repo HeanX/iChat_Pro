@@ -23,6 +23,8 @@ from .models import (
     Contact,
     FriendRequest,
     KeyTrust,
+    UserChatFolderSettings,
+    UserGeneralSettings,
     UserProfile,
     UserPublicKey,
 )
@@ -547,6 +549,81 @@ def profile_edit_view(request):
 # ── Group views (consolidated to chat.Conversation — T22) ────────────
 
 
+def _profile_payload(request, profile):
+    avatar_url = ''
+    if profile.avatar:
+        try:
+            avatar_url = request.build_absolute_uri(profile.avatar.url)
+        except ValueError:
+            avatar_url = ''
+
+    display_name = profile.nickname or request.user.get_full_name() or request.user.username
+    return {
+        'user_id': request.user.id,
+        'username': request.user.username,
+        'first_name': request.user.first_name,
+        'last_name': request.user.last_name,
+        'nickname': profile.nickname,
+        'display_name': display_name,
+        'initials': (display_name[:1] or request.user.username[:1] or '?').upper(),
+        'bio': profile.bio,
+        'avatar': avatar_url,
+        'phone_number': profile.phone_number,
+        'location': profile.location,
+        'birthday': profile.birthday.isoformat() if profile.birthday else '',
+    }
+
+
+def _save_profile_form(request, form):
+    profile = form.save()
+    user = request.user
+    user.first_name = form.cleaned_data.get('first_name', '').strip()
+    user.last_name = form.cleaned_data.get('last_name', '').strip()
+    new_username = form.cleaned_data.get('username', '').strip().lower()
+    if new_username and new_username != user.username:
+        user.username = new_username
+    user.save(update_fields=['first_name', 'last_name', 'username'])
+    return profile
+
+
+@login_required(login_url='login')
+@require_http_methods(['GET', 'POST', 'PUT'])
+def profile_me_api_view(request):
+    """Return or update the current user's profile for the Telegram-style sidebar."""
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    if request.method == 'GET':
+        return JsonResponse({'profile': _profile_payload(request, profile)})
+
+    if request.method == 'PUT':
+        payload = _json_body(request)
+        if payload is None:
+            return JsonResponse({'error': 'invalid_json'}, status=400)
+        data = {
+            'username': payload.get('username', request.user.username),
+            'first_name': payload.get('first_name', request.user.first_name),
+            'last_name': payload.get('last_name', request.user.last_name),
+            'nickname': payload.get('nickname', profile.nickname),
+            'bio': payload.get('bio', profile.bio),
+            'phone_number': payload.get('phone_number', profile.phone_number),
+            'location': payload.get('location', profile.location),
+            'birthday': payload.get('birthday', profile.birthday.isoformat() if profile.birthday else ''),
+        }
+        form = ProfileForm(data, instance=profile, user=request.user)
+    else:
+        post_data = request.POST.copy()
+        post_data.setdefault('username', request.user.username)
+        post_data.setdefault('nickname', profile.nickname)
+        post_data.setdefault('bio', profile.bio)
+        form = ProfileForm(post_data, request.FILES, instance=profile, user=request.user)
+
+    if not form.is_valid():
+        return JsonResponse({'errors': form.errors}, status=400)
+
+    profile = _save_profile_form(request, form)
+    return JsonResponse({'profile': _profile_payload(request, profile)})
+
+
 @login_required(login_url='login')
 def group_list_view(request):
     """Show all groups the user is a member of."""
@@ -927,7 +1004,142 @@ def key_trust_list_view(request):
 # ── Notification settings API (P2 T23) ────────────────────────────
 
 
+_GENERAL_DEFAULT_SETTINGS = {
+    'theme': 'system',
+    'accent_color': 'blue',
+    'wallpaper': 'default',
+    'message_font_size': '16',
+    'time_format': '24h',
+    'power_saving': False,
+    'reduce_motion': False,
+}
+
+_GENERAL_CHOICES = {
+    'theme': {'light', 'dark', 'system'},
+    'accent_color': {'blue', 'green', 'purple', 'red', 'orange'},
+    'wallpaper': {'default', 'blue', 'green', 'pink', 'purple', 'orange', 'cyan', 'yellow'},
+    'time_format': {'12h', '24h'},
+}
+
+_FOLDER_DEFAULT_SETTINGS = {
+    'folders': [],
+    'folders_view': 'above',
+}
+
+
+def _merge_dict(defaults, values):
+    merged = dict(defaults)
+    if isinstance(values, dict):
+        merged.update(values)
+    return merged
+
+
+def _sanitize_general_settings(raw_settings):
+    current = _merge_dict(_GENERAL_DEFAULT_SETTINGS, raw_settings)
+    sanitized = dict(_GENERAL_DEFAULT_SETTINGS)
+
+    for field, choices in _GENERAL_CHOICES.items():
+        value = current.get(field)
+        if value in choices:
+            sanitized[field] = value
+
+    try:
+        font_size = int(current.get('message_font_size', 16))
+    except (TypeError, ValueError):
+        font_size = 16
+    sanitized['message_font_size'] = str(max(12, min(24, font_size)))
+
+    for field in ('power_saving', 'reduce_motion'):
+        raw = current.get(field)
+        if isinstance(raw, bool):
+            sanitized[field] = raw
+        elif isinstance(raw, int):
+            sanitized[field] = bool(raw)
+        elif isinstance(raw, str):
+            sanitized[field] = raw.lower() in ('true', '1', 'on', 'yes')
+
+    return sanitized
+
+
+def _sanitize_chat_folder_settings(raw_settings):
+    current = _merge_dict(_FOLDER_DEFAULT_SETTINGS, raw_settings)
+    folders = current.get('folders') if isinstance(current.get('folders'), list) else []
+    sanitized_folders = []
+
+    for index, folder in enumerate(folders[:50]):
+        if not isinstance(folder, dict):
+            continue
+        name = str(folder.get('name', '')).strip()[:80]
+        if not name:
+            continue
+        folder_id = str(folder.get('id') or f'folder-{index + 1}')[:80]
+        try:
+            chat_count = max(0, int(folder.get('chat_count', 0) or 0))
+        except (TypeError, ValueError):
+            chat_count = 0
+        sanitized_folders.append({
+            'id': folder_id,
+            'name': name,
+            'chat_count': chat_count,
+            'created_at': str(folder.get('created_at', ''))[:40],
+        })
+
+    folders_view = current.get('folders_view')
+    if folders_view is True:
+        folders_view = 'above'
+    elif folders_view is False:
+        folders_view = 'sidebar'
+    if folders_view not in ('above', 'sidebar'):
+        folders_view = _FOLDER_DEFAULT_SETTINGS['folders_view']
+
+    return {
+        'folders': sanitized_folders,
+        'folders_view': folders_view,
+    }
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def general_settings_view(request):
+    settings_obj, _ = UserGeneralSettings.objects.get_or_create(user=request.user)
+
+    if request.method == 'GET':
+        return JsonResponse({
+            'settings': _sanitize_general_settings(settings_obj.settings_json),
+        })
+
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    current = _sanitize_general_settings(settings_obj.settings_json)
+    settings_obj.settings_json = _sanitize_general_settings(_merge_dict(current, payload))
+    settings_obj.save(update_fields=['settings_json', 'updated_at'])
+    return JsonResponse({'status': 'ok', 'settings': settings_obj.settings_json})
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def chat_folder_settings_view(request):
+    settings_obj, _ = UserChatFolderSettings.objects.get_or_create(user=request.user)
+
+    if request.method == 'GET':
+        return JsonResponse({
+            'settings': _sanitize_chat_folder_settings(settings_obj.settings_json),
+        })
+
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    current = _sanitize_chat_folder_settings(settings_obj.settings_json)
+    settings_obj.settings_json = _sanitize_chat_folder_settings(_merge_dict(current, payload))
+    settings_obj.save(update_fields=['settings_json', 'updated_at'])
+    return JsonResponse({'status': 'ok', 'settings': settings_obj.settings_json})
+
+
 _NOTIFICATION_FIELDS = [
+    'display_notifications',
     'offline_notifications',
     'all_accounts_notifications',
     'notification_sound',
@@ -971,6 +1183,16 @@ def notification_settings_update_view(request):
         return JsonResponse({'error': 'invalid_json'}, status=400)
 
     updated = False
+    if 'volume' in payload:
+        try:
+            payload['volume'] = max(0, min(100, int(payload['volume'])))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'invalid_volume'}, status=400)
+
+    for sound_field in ('notification_sound', 'message_sent_sound'):
+        if sound_field in payload and payload[sound_field] not in ('default', 'off'):
+            return JsonResponse({'error': f'invalid_{sound_field}'}, status=400)
+
     for field in _NOTIFICATION_FIELDS:
         if field in payload:
             setattr(settings_obj, field, payload[field])

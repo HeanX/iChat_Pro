@@ -2,6 +2,8 @@
 Phase 2 backend tests: T19 (conversation management), T20 (message operations),
 T21 (message status model), T22 (online presence).
 """
+import json
+
 from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
@@ -23,6 +25,7 @@ from chat.models import (
 from chat.consumers import ChatConsumer
 from ichat_pro.asgi import application
 from chat.views import RECALL_LIMIT_MINUTES
+from accounts.models import Contact
 
 User = get_user_model()
 
@@ -350,6 +353,123 @@ class PresenceAPITests(TestCase):
 
 
 # ── T22: WebSocket Presence and Typing Tests ──────────────────────────
+
+
+class StorageSettingsAPITests(TestCase):
+    """Data & storage settings and cache-clearing API."""
+
+    def setUp(self):
+        self.alice = _create_user('storage_alice')
+        self.bob = _create_user('storage_bob')
+        self.client = Client()
+        self.client.login(username='storage_alice', password='pass1234')
+
+    def test_storage_settings_are_persisted(self):
+        response = self.client.get('/api/storage/settings/')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['settings']['auto_download_enabled'])
+        self.assertEqual(response.json()['settings']['cache_retention_days'], 7)
+
+        response = self.client.post(
+            '/api/storage/settings/',
+            data=json.dumps({
+                'auto_download_enabled': False,
+                'file_size_limit_mb': {'files': 12},
+                'cache_retention_days': 30,
+                'cache_max_size_mb': 100,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        settings = self.client.get('/api/storage/settings/').json()['settings']
+        self.assertFalse(settings['auto_download_enabled'])
+        self.assertEqual(settings['file_size_limit_mb']['files'], 12)
+        self.assertEqual(settings['cache_retention_days'], 30)
+        self.assertEqual(settings['cache_max_size_mb'], 100)
+
+    def test_storage_clear_updates_server_stats(self):
+        conv = _create_private_conversation(self.alice, self.bob)
+        EncryptedMessage.objects.create(
+            conversation=conv,
+            sender=self.alice,
+            receiver=self.bob,
+            message_type=EncryptedMessage.MessageType.IMAGE,
+            algorithm='AES-256-GCM',
+            client_message_id='storage-image-1',
+        )
+
+        before = self.client.get('/api/storage/stats/').json()
+        self.assertGreater(before['categories']['images']['size_bytes'], 0)
+
+        response = self.client.post(
+            '/api/storage/clear/',
+            data=json.dumps({'categories': ['images']}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        after = response.json()['stats']
+        self.assertEqual(after['categories']['images']['size_bytes'], 0)
+        self.assertGreater(after['categories']['images']['cleared_baseline_bytes'], 0)
+
+
+class PrivacySecurityAPITests(TestCase):
+    """Privacy settings API and enforcement for existing chat flows."""
+
+    def setUp(self):
+        self.alice = _create_user('privacy_alice')
+        self.bob = _create_user('privacy_bob')
+        self.carol = _create_user('privacy_carol')
+        self.client = Client()
+        self.client.login(username='privacy_alice', password='pass1234')
+
+    def test_extended_privacy_settings_are_persisted(self):
+        response = self.client.post(
+            '/api/privacy/settings/',
+            data=json.dumps({
+                'birthday_visibility': 'nobody',
+                'gifts_visibility': 'contacts',
+                'saved_music_visibility': 'nobody',
+                'who_can_add_me_to_groups': 'contacts',
+                'passkey_enabled': True,
+                'login_email': 'privacy@example.com',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        settings = self.client.get('/api/privacy/settings/').json()['settings']
+        self.assertEqual(settings['birthday_visibility'], 'nobody')
+        self.assertEqual(settings['gifts_visibility'], 'contacts')
+        self.assertEqual(settings['saved_music_visibility'], 'nobody')
+        self.assertEqual(settings['who_can_add_me_to_groups'], 'contacts')
+        self.assertTrue(settings['passkey_enabled'])
+        self.assertEqual(settings['login_email'], 'privacy@example.com')
+
+    def test_group_invite_respects_target_privacy(self):
+        group = _create_group(self.alice)
+        self.client.force_login(self.bob)
+        self.client.post(
+            '/api/privacy/settings/',
+            data=json.dumps({'who_can_add_me_to_groups': 'contacts'}),
+            content_type='application/json',
+        )
+        self.client.force_login(self.alice)
+
+        response = self.client.post(
+            f'/api/groups/{group.id}/invite/',
+            data=json.dumps({'user_id': self.bob.id}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+        Contact.objects.create(user=self.bob, contact=self.alice)
+        response = self.client.post(
+            f'/api/groups/{group.id}/invite/',
+            data=json.dumps({'user_id': self.bob.id}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
 
 
 class WebSocketPresenceTests(TransactionTestCase):

@@ -1,261 +1,766 @@
-{# privacy_security.html — P2 T06 Privacy & Security Settings #}
-<div class="divide-y divide-borderColor/60">
+<div id="privacy-security-settings" class="telegram-privacy">
+  <style>
+    .telegram-privacy {
+      --tg-blue: #3390ec;
+      --tg-card: #fff;
+      --tg-panel: #f4f4f5;
+      --tg-muted: #707579;
+      --tg-line: rgba(0, 0, 0, .07);
+      min-height: 100%;
+      padding: 14px 18px 22px;
+      background: var(--tg-panel);
+      color: #111;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
 
-  {# ── Privacy: Visibility Settings ── #}
-  <div class="px-4 py-4 space-y-2">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Privacy</h4>
+    .telegram-privacy .privacy-card {
+      margin-bottom: 14px;
+      padding: 20px 22px 18px;
+      border-radius: 24px;
+      background: var(--tg-card);
+      box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06);
+    }
 
-    <button onclick="showVisibilityPicker(this, 'last_seen_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="clock" class="w-4 h-4 text-textSecondary"></i>
-        <div>
-          <div class="text-sm text-textMain">Last Seen & Online</div>
-          <div class="text-[10px] text-textSecondary" id="privacy-label-last_seen_visibility">—</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
+    .telegram-privacy .privacy-section-title {
+      margin: 0 0 16px;
+      color: var(--tg-blue);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
 
-    <button onclick="showVisibilityPicker(this, 'profile_photo_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="image" class="w-4 h-4 text-textSecondary"></i>
-        <div>
-          <div class="text-sm text-textMain">Profile Photo</div>
-          <div class="text-[10px] text-textSecondary" id="privacy-label-profile_photo_visibility">—</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
+    .telegram-privacy .privacy-row {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr) auto;
+      align-items: center;
+      width: 100%;
+      min-height: 46px;
+      gap: 12px;
+      border: 0;
+      background: transparent;
+      color: #111827;
+      text-align: left;
+      font: inherit;
+      font-size: 17px;
+      line-height: 1.2;
+      cursor: pointer;
+    }
 
-    <button onclick="showVisibilityPicker(this, 'phone_number_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="phone" class="w-4 h-4 text-textSecondary"></i>
-        <div>
-          <div class="text-sm text-textMain">Phone Number</div>
-          <div class="text-[10px] text-textSecondary" id="privacy-label-phone_number_visibility">—</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
+    .telegram-privacy .privacy-row + .privacy-row {
+      border-top: 1px solid var(--tg-line);
+    }
 
-    <button onclick="showVisibilityPicker(this, 'bio_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="file-text" class="w-4 h-4 text-textSecondary"></i>
-        <div>
-          <div class="text-sm text-textMain">Bio</div>
-          <div class="text-[10px] text-textSecondary" id="privacy-label-bio_visibility">—</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
+    .telegram-privacy .privacy-row[data-detail] {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
 
-    <button onclick="showVisibilityPicker(this, 'forward_link_visibility')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="link" class="w-4 h-4 text-textSecondary"></i>
-        <div>
-          <div class="text-sm text-textMain">Forward Link</div>
-          <div class="text-[10px] text-textSecondary" id="privacy-label-forward_link_visibility">—</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
-  </div>
+    .telegram-privacy .privacy-icon {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      color: var(--tg-muted);
+    }
 
-  {# ── Permissions ── #}
-  <div class="px-4 py-4 space-y-2">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Permissions</h4>
+    .telegram-privacy .privacy-icon svg {
+      width: 23px;
+      height: 23px;
+      stroke-width: 2;
+    }
 
-    <button onclick="showVisibilityPicker(this, 'who_can_send_messages', true)" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="message-circle" class="w-4 h-4 text-textSecondary"></i>
-        <div>
-          <div class="text-sm text-textMain">Who Can Send Me Messages</div>
-          <div class="text-[10px] text-textSecondary" id="privacy-label-who_can_send_messages">—</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
+    .telegram-privacy .privacy-title {
+      display: block;
+      overflow: hidden;
+      color: #111827;
+      font-size: 17px;
+      font-weight: 400;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
-    <button onclick="showVisibilityPicker(this, 'who_can_voice_video_call', true)" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="phone-call" class="w-4 h-4 text-textSecondary"></i>
-        <div>
-          <div class="text-sm text-textMain">Who Can Voice / Video Call Me</div>
-          <div class="text-[10px] text-textSecondary" id="privacy-label-who_can_voice_video_call">—</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
-  </div>
+    .telegram-privacy .privacy-subtitle {
+      margin-top: 3px;
+      color: var(--tg-muted);
+      font-size: 13px;
+      line-height: 1.22;
+    }
 
-  {# ── Security ── #}
-  <div class="px-4 py-4 space-y-2">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Security</h4>
+    .telegram-privacy .privacy-note {
+      margin-top: 3px;
+      color: var(--tg-muted);
+      font-size: 15px;
+      line-height: 1.22;
+    }
 
-    {# ── P2 T28 placeholders: two-step, passcode — Coming in a future update ── #}
-    <div class="space-y-2 opacity-50 pointer-events-none" data-placeholder-section="true">
-      <p class="text-[10px] italic text-textSecondary -mb-1 pl-1">🔒 Coming in a future update (P2 T28)</p>
+    .telegram-privacy .privacy-note {
+      margin: 12px 22px 22px;
+    }
 
-      {# Two-Step Verification #}
-      <button data-placeholder="true"
-        class="w-full py-2.5 flex items-center justify-between rounded-custom-md px-2 -mx-2 transition-colors text-left cursor-not-allowed">
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg"><i data-lucide="shield-check" class="w-4 h-4"></i></div>
-          <span class="text-sm font-medium text-textMain">Two-Step Verification</span>
-        </div>
-        <span class="text-[10px] text-textSecondary" id="privacy-label-two_step_verification_enabled">—</span>
+    .telegram-privacy .privacy-chevron {
+      color: var(--tg-muted);
+    }
+
+    .telegram-privacy .telegram-radio {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      border: 2px solid #b1b5b9;
+      border-radius: 50%;
+      box-sizing: border-box;
+      display: inline-block;
+      flex-shrink: 0;
+      transition: border-color 0.16s ease;
+    }
+
+    .telegram-privacy .telegram-radio::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--tg-blue, #3390ec);
+      transition: transform 0.16s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .telegram-privacy .privacy-option.is-selected {
+      border-radius: 16px;
+      background: rgba(0, 0, 0, .055);
+    }
+
+    .telegram-privacy .privacy-option.is-selected .telegram-radio {
+      border-color: var(--tg-blue);
+    }
+
+    .telegram-privacy .privacy-option.is-selected .telegram-radio::after {
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .telegram-privacy .privacy-switch {
+      position: relative;
+      width: 42px;
+      height: 24px;
+      border-radius: 999px;
+      background: #e9ecef;
+      transition: background-color 0.16s ease;
+      flex: 0 0 auto;
+    }
+
+    .telegram-privacy .privacy-switch::after {
+      content: "";
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+      transition: transform 0.16s ease;
+    }
+
+    .telegram-privacy .privacy-switch.is-on {
+      background: var(--tg-blue);
+    }
+
+    .telegram-privacy .privacy-switch.is-on::after {
+      transform: translateX(18px);
+    }
+
+    .telegram-privacy .privacy-view {
+      display: none;
+    }
+
+    .telegram-privacy .privacy-view.is-active {
+      display: block;
+    }
+
+    .telegram-privacy .privacy-detail-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-height: 54px;
+      padding: 0 4px 10px;
+    }
+
+    .telegram-privacy .privacy-detail-header button {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: #6f7780;
+      cursor: pointer;
+    }
+
+    .telegram-privacy .privacy-detail-header h3 {
+      margin: 0;
+      color: #111;
+      font-size: 22px;
+      font-weight: 650;
+    }
+
+    .telegram-privacy .privacy-danger {
+      color: #d44747;
+    }
+
+    .telegram-privacy .privacy-danger .privacy-title {
+      color: #d44747;
+    }
+
+    .telegram-privacy .storage-action {
+      border: 0;
+      background: transparent;
+      color: var(--tg-blue);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .telegram-privacy .privacy-toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 120;
+      padding: 10px 14px;
+      border-radius: 18px;
+      background: rgba(17, 24, 39, .9);
+      color: #fff;
+      font-size: 14px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .telegram-privacy .privacy-toast.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Dark Mode Settings */
+    [data-theme="dark"] .telegram-privacy {
+      --tg-card: #212121;
+      --tg-panel: #181818;
+      --tg-muted: #aaaaaa;
+      --tg-line: rgba(255, 255, 255, .08);
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-row,
+    [data-theme="dark"] .telegram-privacy .privacy-title,
+    [data-theme="dark"] .telegram-privacy .privacy-detail-header h3 {
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-switch {
+      background: #2b2b2b;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-switch.is-on {
+      background: #3390ec;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-option.is-selected {
+      background: rgba(255, 255, 255, .055);
+    }
+
+    [data-theme="dark"]    .telegram-privacy .privacy-detail-header button {
+      color: #aaaaaa;
+    }
+
+    [data-theme="dark"] .telegram-privacy .telegram-radio {
+      border-color: #555555;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-option.is-selected .telegram-radio {
+      border-color: var(--tg-blue);
+    }
+  </style>
+
+  <section id="privacy-main-view" class="privacy-view is-active">
+    <div class="privacy-card">
+      <button type="button" class="privacy-row" data-action="blocked">
+        <span class="privacy-icon"><i data-lucide="user-round-x"></i></span>
+        <span>
+          <span class="privacy-title">已拉黑用户</span>
+          <span id="privacy-blocked-count" class="privacy-subtitle">无</span>
+        </span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
-
-      {# Passcode Lock #}
-      <button data-placeholder="true"
-        class="w-full py-2.5 flex items-center justify-between rounded-custom-md px-2 -mx-2 transition-colors text-left cursor-not-allowed">
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg"><i data-lucide="lock" class="w-4 h-4"></i></div>
-          <span class="text-sm font-medium text-textMain">Passcode Lock</span>
-        </div>
-        <span class="text-[10px] text-textSecondary" id="privacy-label-passcode_lock_enabled">—</span>
+      <button type="button" class="privacy-row" data-action="auto-delete">
+        <span class="privacy-icon"><i data-lucide="timer-reset"></i></span>
+        <span>
+          <span class="privacy-title">自动删除消息</span>
+          <span id="privacy-summary-auto_delete_messages_days" class="privacy-subtitle">关闭</span>
+        </span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-toggle="passcode_lock_enabled">
+        <span class="privacy-icon"><i data-lucide="key-round"></i></span>
+        <span>
+          <span class="privacy-title">密码锁</span>
+          <span id="privacy-summary-passcode_lock_enabled" class="privacy-subtitle">关闭</span>
+        </span>
+        <span id="privacy-switch-passcode_lock_enabled" class="privacy-switch"></span>
+      </button>
+      <button type="button" class="privacy-row" data-toggle="two_step_verification_enabled">
+        <span class="privacy-icon"><i data-lucide="lock-keyhole"></i></span>
+        <span>
+          <span class="privacy-title">两步验证</span>
+          <span id="privacy-summary-two_step_verification_enabled" class="privacy-subtitle">关闭</span>
+        </span>
+        <span id="privacy-switch-two_step_verification_enabled" class="privacy-switch"></span>
+      </button>
+      <button type="button" class="privacy-row" data-action="login-email">
+        <span class="privacy-icon"><i data-lucide="mail"></i></span>
+        <span>
+          <span class="privacy-title">Login Email</span>
+          <span id="privacy-summary-login_email" class="privacy-subtitle">未设置</span>
+        </span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-toggle="passkey_enabled">
+        <span class="privacy-icon"><i data-lucide="scan-face"></i></span>
+        <span>
+          <span class="privacy-title">通行密钥</span>
+          <span id="privacy-summary-passkey_enabled" class="privacy-subtitle">0 个通行密钥</span>
+        </span>
+        <span id="privacy-switch-passkey_enabled" class="privacy-switch"></span>
       </button>
     </div>
 
-    {# Active Sessions #}
-    <button onclick="navigateSidebar('sessions-shortcuts')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg"><i data-lucide="smartphone" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium text-textMain">Active Sessions</span>
-      </div>
-      <span class="text-[10px] text-textSecondary">Manage devices</span>
-    </button>
+    <p class="privacy-note">控制您在其它设备上的会话。</p>
 
-    {# Blocked Users #}
-    <button onclick="openBlockedUsersList()" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-red-500/10 text-red-600 dark:text-red-400 rounded-lg"><i data-lucide="user-x" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium text-textMain">Blocked Users</span>
-      </div>
-      <span class="text-[10px] text-textSecondary" id="privacy-blocked-count">0</span>
-    </button>
-
-    {# ── P2 T28 placeholder: Login Email — Coming in a future update ── #}
-    <div class="opacity-50 pointer-events-none" data-placeholder-section="true">
-      {# Login Email #}
-      <div class="w-full py-2.5 flex items-center justify-between px-2 -mx-2" data-placeholder="true">
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg"><i data-lucide="mail" class="w-4 h-4"></i></div>
-          <div class="flex-1">
-            <div class="text-sm font-medium text-textMain">Login Email</div>
-            <input type="email" id="privacy-input-login_email" placeholder="email@example.com"
-              class="mt-1 w-full bg-bgSearch border border-borderColor rounded-custom-md px-2 py-1 text-xs text-textMain focus:outline-none focus:ring-1 focus:ring-brand-light"
-              disabled />
-          </div>
-        </div>
-      </div>
+    <div class="privacy-card">
+      <h3 class="privacy-section-title">隐私</h3>
+      <button type="button" class="privacy-row" data-detail="phone_number_visibility">
+        <span><span class="privacy-title">谁可以看见我的手机号码?</span><span id="privacy-summary-phone_number_visibility" class="privacy-subtitle">我的联系人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="last_seen_visibility">
+        <span><span class="privacy-title">谁可以看到您最后上线的时间?</span><span id="privacy-summary-last_seen_visibility" class="privacy-subtitle">所有人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="profile_photo_visibility">
+        <span><span class="privacy-title">谁能看见我的头像?</span><span id="privacy-summary-profile_photo_visibility" class="privacy-subtitle">所有人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="bio_visibility">
+        <span><span class="privacy-title">谁可以看到我的个人简介?</span><span id="privacy-summary-bio_visibility" class="privacy-subtitle">所有人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="who_can_voice_video_call">
+        <span><span class="privacy-title">谁可以给我打电话?</span><span id="privacy-summary-who_can_voice_video_call" class="privacy-subtitle">我的联系人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="forward_link_visibility">
+        <span><span class="privacy-title">转发我的消息时，谁可以链接至我的账号?</span><span id="privacy-summary-forward_link_visibility" class="privacy-subtitle">所有人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="who_can_add_me_to_groups">
+        <span><span class="privacy-title">谁可以邀请我?</span><span id="privacy-summary-who_can_add_me_to_groups" class="privacy-subtitle">所有人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="who_can_send_messages">
+        <span><span class="privacy-title">谁可以给我发消息?</span><span id="privacy-summary-who_can_send_messages" class="privacy-subtitle">我的联系人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="birthday_visibility">
+        <span><span class="privacy-title">Who can see my birthday?</span><span id="privacy-summary-birthday_visibility" class="privacy-subtitle">我的联系人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="gifts_visibility">
+        <span><span class="privacy-title">Who can send me gifts?</span><span id="privacy-summary-gifts_visibility" class="privacy-subtitle">所有人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+      <button type="button" class="privacy-row" data-detail="saved_music_visibility">
+        <span><span class="privacy-title">Who can see my saved music?</span><span id="privacy-summary-saved_music_visibility" class="privacy-subtitle">所有人</span></span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
     </div>
 
-    {# Auto-Delete Messages #}
-    <button onclick="showAutoDeletePicker(this)" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-lg"><i data-lucide="timer" class="w-4 h-4"></i></div>
-        <div>
-          <div class="text-sm font-medium text-textMain">Auto-Delete Messages</div>
-          <div class="text-[10px] text-textSecondary" id="privacy-label-auto_delete_messages_days">—</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-    </button>
-  </div>
+    <p class="privacy-note">修改谁向您可以发送消息。</p>
 
-  {# ── Content & Data ── #}
-  <div class="px-4 py-4 space-y-2">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-1">Content &amp; Data</h4>
-
-    {# Sensitive Content Filter #}
-    <button onclick="togglePrivacySwitch('sensitive_content_filter')" class="w-full py-2.5 flex items-center justify-between hover:bg-bgSearch/50 rounded-custom-md px-2 -mx-2 transition-colors text-left">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-lg"><i data-lucide="eye-off" class="w-4 h-4"></i></div>
-        <span class="text-sm font-medium text-textMain">Sensitive Content Filter</span>
-      </div>
-      <span class="text-[10px] text-textSecondary" id="privacy-label-sensitive_content_filter">—</span>
-    </button>
-
-    {# Delete Synced Contacts #}
-    <button onclick="deleteSyncedContacts()" class="w-full py-2.5 text-left text-red-500 flex items-center space-x-3 hover:bg-red-500/5 rounded-custom-md px-2 -mx-2 transition-colors">
-      <i data-lucide="users-round" class="w-4 h-4"></i>
-      <span class="text-sm font-medium">Delete Synced Contacts</span>
-    </button>
-
-    {# Delete Account #}
-    <button onclick="deleteAccount()" class="w-full py-2.5 text-left text-red-500 flex items-center space-x-3 hover:bg-red-500/5 rounded-custom-md px-2 -mx-2 transition-colors">
-      <i data-lucide="trash-2" class="w-4 h-4"></i>
-      <span class="text-sm font-medium">Delete Account</span>
-    </button>
-  </div>
-
-  {# ── Visibility Picker Dropdown (hidden, shown on click) ── #}
-  <div id="privacy-visibility-picker" class="hidden fixed inset-0 z-50" onclick="closeVisibilityPicker()">
-    <div class="absolute bottom-0 left-0 right-0 bg-bgSidebar border-t border-borderColor rounded-t-[20px] shadow-2xl p-4 animate-slide-up max-w-[420px] mx-auto"
-         onclick="event.stopPropagation()">
-      <div class="w-8 h-1 bg-borderColor rounded-full mx-auto mb-4"></div>
-      <h4 class="text-sm font-bold text-textMain mb-3" id="privacy-picker-title">Who can see this?</h4>
-      <div class="space-y-1" id="privacy-picker-options">
-        <!-- Dynamically populated -->
-      </div>
-      <button onclick="closeVisibilityPicker()" class="w-full mt-3 py-2.5 text-sm font-semibold text-textSecondary hover:text-textMain transition-colors">Cancel</button>
+    <div class="privacy-card">
+      <h3 class="privacy-section-title">敏感内容</h3>
+      <button type="button" class="privacy-row" data-toggle="sensitive_content_filter">
+        <span class="privacy-icon"><i data-lucide="square"></i></span>
+        <span><span class="privacy-title">停用过滤</span></span>
+        <span id="privacy-switch-sensitive_content_filter" class="privacy-switch"></span>
+      </button>
     </div>
-  </div>
 
-  {# ── Blocked Users Modal ── #}
-  <div id="privacy-blocked-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
-    <div class="bg-bgSidebar border border-borderColor rounded-[20px] shadow-2xl w-full max-w-[380px] max-h-[70vh] flex flex-col">
-      <div class="flex items-center justify-between px-5 py-4 border-b border-borderColor/60">
-        <h3 class="text-base font-bold text-textMain">Blocked Users</h3>
-        <button onclick="closeBlockedUsersList()" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all">
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
-      </div>
-      <div class="flex-1 overflow-y-auto custom-scrollbar p-4" id="privacy-blocked-list">
-        <p class="text-sm text-textSecondary text-center py-8">Loading...</p>
-      </div>
+    <p class="privacy-note">不隐藏包含仅适合成人观看的媒体。</p>
+
+    <div class="privacy-card">
+      <h3 class="privacy-section-title">付款</h3>
+      <button type="button" class="privacy-row privacy-danger" data-action="clear-payment-info">
+        <span class="privacy-icon"><i data-lucide="trash-2"></i></span>
+        <span><span class="privacy-title">清除付款和配送信息</span></span>
+      </button>
     </div>
-  </div>
 
-  {# ── Auto-Delete Picker Dropdown ── #}
-  <div id="privacy-autodelete-picker" class="hidden fixed inset-0 z-50" onclick="closeAutoDeletePicker()">
-    <div class="absolute bottom-0 left-0 right-0 bg-bgSidebar border-t border-borderColor rounded-t-[20px] shadow-2xl p-4 animate-slide-up max-w-[420px] mx-auto"
-         onclick="event.stopPropagation()">
-      <div class="w-8 h-1 bg-borderColor rounded-full mx-auto mb-4"></div>
-      <h4 class="text-sm font-bold text-textMain mb-3">Auto-Delete Messages</h4>
-      <div class="space-y-1">
-        <button onclick="savePrivacySetting('auto_delete_messages_days', 0); closeAutoDeletePicker();" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">
-          <span>Off</span>
-          <i data-lucide="check" class="w-4 h-4 text-brand-light hidden" id="autodelete-check-0"></i>
-        </button>
-        <button onclick="savePrivacySetting('auto_delete_messages_days', 1); closeAutoDeletePicker();" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">
-          <span>1 Day</span>
-          <i data-lucide="check" class="w-4 h-4 text-brand-light hidden" id="autodelete-check-1"></i>
-        </button>
-        <button onclick="savePrivacySetting('auto_delete_messages_days', 7); closeAutoDeletePicker();" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">
-          <span>7 Days</span>
-          <i data-lucide="check" class="w-4 h-4 text-brand-light hidden" id="autodelete-check-7"></i>
-        </button>
-        <button onclick="savePrivacySetting('auto_delete_messages_days', 30); closeAutoDeletePicker();" class="w-full py-3 px-4 text-left text-sm text-textMain hover:bg-bgSearch rounded-custom-md transition-colors flex items-center justify-between">
-          <span>30 Days</span>
-          <i data-lucide="check" class="w-4 h-4 text-brand-light hidden" id="autodelete-check-30"></i>
-        </button>
-      </div>
-      <button onclick="closeAutoDeletePicker()" class="w-full mt-2 py-2.5 text-sm font-semibold text-textSecondary hover:text-textMain transition-colors">Cancel</button>
+    <p class="privacy-note">您可以删除您的配送信息并通知所有的支付服务提供商清除您已保存的信用卡信息。请注意：Telegram 从来不会存储您的信用卡数据。</p>
+
+    <div class="privacy-card">
+      <h3 class="privacy-section-title">聊天</h3>
+      <button type="button" class="privacy-row privacy-danger" data-action="delete-cloud-drafts">
+        <span class="privacy-icon"><i data-lucide="trash-2"></i></span>
+        <span><span class="privacy-title">删除所有的云草稿</span></span>
+      </button>
     </div>
-  </div>
+  </section>
 
-  {# ── Confirm Action Modal (generic) ── #}
-  <div id="privacy-confirm-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
-    <div class="bg-bgSidebar/95 dark:bg-bgSidebar/98 border border-borderColor rounded-[20px] shadow-2xl w-full max-w-[340px] p-6 select-none flex flex-col">
-      <div class="text-base font-bold text-textMain mb-2" id="privacy-confirm-title">Confirm Action</div>
-      <div class="text-xs text-textSecondary leading-relaxed mb-6" id="privacy-confirm-desc">Are you sure?</div>
-      <div class="flex items-center justify-end space-x-3">
-        <button onclick="closePrivacyConfirmModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors">Cancel</button>
-        <button id="privacy-confirm-btn" class="px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-custom-md hover:bg-red-600 transition-colors">Confirm</button>
+  <section id="privacy-detail-view" class="privacy-view">
+    <div class="privacy-detail-header">
+      <button type="button" data-action="detail-back"><i data-lucide="arrow-left"></i></button>
+      <h3 id="privacy-detail-title">最后上线时间</h3>
+    </div>
+
+    <div class="privacy-card">
+      <h3 id="privacy-detail-question" class="privacy-section-title">谁可以看到您最后上线的时间?</h3>
+      <button type="button" class="privacy-row privacy-option" data-option="everyone">
+        <span class="telegram-radio"></span>
+        <span><span class="privacy-title">所有人</span></span>
+      </button>
+      <button type="button" class="privacy-row privacy-option" data-option="contacts">
+        <span class="telegram-radio"></span>
+        <span><span class="privacy-title">我的联系人</span></span>
+      </button>
+      <button type="button" class="privacy-row privacy-option" data-option="nobody">
+        <span class="telegram-radio"></span>
+        <span><span class="privacy-title">不允许任何人</span></span>
+      </button>
+    </div>
+
+    <p id="privacy-detail-help" class="privacy-note">注意：如果对方没有和你分享他们的最近在线时间，则你只能看到大致的时间段，如最近，一周内，一个月内等。</p>
+
+    <div class="privacy-card">
+      <h3 class="privacy-section-title">例外</h3>
+      <button type="button" class="privacy-row" data-action="exception-placeholder">
+        <span class="privacy-icon"><i data-lucide="user-round-x"></i></span>
+        <span>
+          <span id="privacy-exception-title" class="privacy-title">从不分享给</span>
+          <span class="privacy-subtitle">添加用户</span>
+        </span>
+        <i data-lucide="chevron-right" class="privacy-chevron"></i>
+      </button>
+    </div>
+
+    <p class="privacy-note">这些设定会覆盖上面的设定。</p>
+  </section>
+
+  <div id="privacy-blocked-modal" class="hidden fixed inset-0 z-[120] items-center justify-center bg-black/45 p-4">
+    <div class="w-full max-w-[360px] max-h-[70vh] overflow-hidden rounded-[22px] bg-white shadow-2xl">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-black/10">
+        <strong>已拉黑用户</strong>
+        <button type="button" class="privacy-icon" data-action="close-blocked"><i data-lucide="x"></i></button>
       </div>
+      <div id="privacy-blocked-list" class="p-4 overflow-y-auto"></div>
     </div>
   </div>
 
+  <div id="privacy-toast" class="privacy-toast"></div>
 </div>
+
+<script>
+  (function() {
+    const SETTINGS_URL = '/api/privacy/settings/';
+    const BLOCKED_URL = '/api/privacy/blocked/';
+    const UNBLOCK_URL = '/api/privacy/unblock/';
+    const DELETE_ACCOUNT_URL = '/api/privacy/delete-account/';
+    let privacySettings = {};
+    let detailField = null;
+    let toastTimer = null;
+
+    const DETAIL_CONFIG = {
+      last_seen_visibility: {
+        title: '最后上线时间',
+        question: '谁可以看到您最后上线的时间?',
+        help: '注意：如果对方没有和你分享他们的最近在线时间，则你只能看到大致的时间段，如最近，一周内，一个月内等。',
+        options: ['everyone', 'contacts', 'nobody'],
+        exception: '从不分享给'
+      },
+      phone_number_visibility: { title: '手机号码', question: '谁可以看见我的手机号码?', options: ['everyone', 'contacts', 'nobody'], exception: '从不分享给' },
+      profile_photo_visibility: { title: '头像', question: '谁能看见我的头像?', options: ['everyone', 'contacts', 'nobody'], exception: '从不分享给' },
+      bio_visibility: { title: '个人简介', question: '谁可以看到我的个人简介?', options: ['everyone', 'contacts', 'nobody'], exception: '从不分享给' },
+      forward_link_visibility: { title: '转发消息', question: '转发我的消息时，谁可以链接至我的账号?', options: ['everyone', 'contacts', 'nobody'], exception: '从不分享给' },
+      who_can_add_me_to_groups: { title: '邀请', question: '谁可以邀请我?', options: ['everyone', 'contacts', 'nobody'], exception: '始终允许' },
+      birthday_visibility: { title: 'Birthday', question: 'Who can see my birthday?', options: ['everyone', 'contacts', 'nobody'], exception: '从不分享给' },
+      gifts_visibility: { title: 'Gifts', question: 'Who can send me gifts?', options: ['everyone', 'contacts', 'nobody'], exception: '从不分享给' },
+      saved_music_visibility: { title: 'Saved Music', question: 'Who can see my saved music?', options: ['everyone', 'contacts', 'nobody'], exception: '从不分享给' },
+      who_can_send_messages: { title: '消息', question: '谁可以给我发消息?', options: ['everyone', 'contacts'], exception: '始终允许' },
+      who_can_voice_video_call: { title: '语音和视频', question: '谁可以给我打电话?', options: ['everyone', 'contacts'], exception: '始终允许' }
+    };
+
+    function csrfToken() {
+      return typeof getCookie === 'function' ? (getCookie('csrftoken') || '') : '';
+    }
+
+    function toast(text) {
+      if (window.showToast) {
+        window.showToast(text);
+        return;
+      }
+      const el = document.getElementById('privacy-toast');
+      if (!el) return;
+      el.textContent = text;
+      el.classList.add('is-visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function() { el.classList.remove('is-visible'); }, 1800);
+    }
+
+    function visibilityLabel(value) {
+      if (value === 'everyone') return '所有人';
+      if (value === 'contacts') return '我的联系人';
+      if (value === 'nobody') return '无';
+      return '未设置';
+    }
+
+    function boolLabel(value) {
+      return value ? '开启' : '关闭';
+    }
+
+    function autoDeleteLabel(days) {
+      const value = Number(days || 0);
+      if (value === 0) return '关闭';
+      if (value === 1) return '1 天';
+      if (value === 7) return '7 天';
+      if (value === 30) return '30 天';
+      return value + ' 天';
+    }
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    function setSwitch(field, value) {
+      const el = document.getElementById('privacy-switch-' + field);
+      if (el) el.classList.toggle('is-on', Boolean(value));
+    }
+
+    function applyPrivacySettings(settings) {
+      privacySettings = settings || {};
+      Object.keys(DETAIL_CONFIG).forEach(function(field) {
+        setText('privacy-summary-' + field, visibilityLabel(privacySettings[field]));
+      });
+      setText('privacy-summary-auto_delete_messages_days', autoDeleteLabel(privacySettings.auto_delete_messages_days));
+      setText('privacy-summary-login_email', privacySettings.login_email || '未设置');
+      setText('privacy-summary-passcode_lock_enabled', boolLabel(privacySettings.passcode_lock_enabled));
+      setText('privacy-summary-two_step_verification_enabled', boolLabel(privacySettings.two_step_verification_enabled));
+      setText('privacy-summary-passkey_enabled', privacySettings.passkey_enabled ? '1 个通行密钥' : '0 个通行密钥');
+      ['passcode_lock_enabled', 'two_step_verification_enabled', 'passkey_enabled', 'sensitive_content_filter'].forEach(function(field) {
+        setSwitch(field, privacySettings[field]);
+      });
+    }
+
+    async function loadPrivacySettings() {
+      const response = await fetch(SETTINGS_URL, { headers: { 'X-CSRFToken': csrfToken() } });
+      if (!response.ok) throw new Error('privacy settings load failed');
+      const data = await response.json();
+      applyPrivacySettings(data.settings);
+    }
+
+    async function savePrivacy(partial) {
+      const response = await fetch(SETTINGS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+        body: JSON.stringify(partial)
+      });
+      if (!response.ok) throw new Error('privacy settings save failed');
+      const data = await response.json();
+      applyPrivacySettings(data.settings);
+      return data.settings;
+    }
+
+    function openDetail(field) {
+      detailField = field;
+      const config = DETAIL_CONFIG[field];
+      if (!config) return;
+      document.getElementById('privacy-main-view')?.classList.remove('is-active');
+      document.getElementById('privacy-detail-view')?.classList.add('is-active');
+      setText('privacy-detail-title', config.title);
+      setText('privacy-detail-question', config.question);
+      setText('privacy-detail-help', config.help || '这些设置会影响其他用户与您互动时看到的信息。');
+      setText('privacy-exception-title', config.exception || '从不分享给');
+      document.querySelectorAll('#privacy-detail-view [data-option]').forEach(function(row) {
+        const option = row.dataset.option;
+        row.hidden = config.options.indexOf(option) === -1;
+        row.classList.toggle('is-selected', privacySettings[field] === option);
+      });
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function closeDetail() {
+      detailField = null;
+      document.getElementById('privacy-detail-view')?.classList.remove('is-active');
+      document.getElementById('privacy-main-view')?.classList.add('is-active');
+    }
+
+    async function loadBlockedUsers() {
+      const response = await fetch(BLOCKED_URL, { headers: { 'X-CSRFToken': csrfToken() } });
+      if (!response.ok) return;
+      const data = await response.json();
+      const users = data.blocked_users || [];
+      setText('privacy-blocked-count', users.length ? String(users.length) : '无');
+      const list = document.getElementById('privacy-blocked-list');
+      if (!list) return;
+      if (!users.length) {
+        list.innerHTML = '<p class="privacy-subtitle" style="text-align:center;padding:24px 0;">无已拉黑用户</p>';
+        return;
+      }
+      list.innerHTML = users.map(function(user) {
+        const name = user.nickname || user.username;
+        return '<div class="privacy-row" style="grid-template-columns:1fr auto;">'
+          + '<span><span class="privacy-title">' + escapeHtml(name) + '</span><span class="privacy-subtitle">@' + escapeHtml(user.username) + '</span></span>'
+          + '<button type="button" class="storage-action" data-unblock="' + user.id + '">解除</button>'
+          + '</div>';
+      }).join('');
+    }
+
+    function escapeHtml(text) {
+      return String(text || '').replace(/[&<>"']/g, function(ch) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+      });
+    }
+
+    async function unblockUser(userId) {
+      const response = await fetch(UNBLOCK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+        body: JSON.stringify({ user_id: Number(userId) })
+      });
+      if (!response.ok) throw new Error('unblock failed');
+      await loadBlockedUsers();
+      toast('已解除拉黑');
+    }
+
+    function openBlockedModal() {
+      const modal = document.getElementById('privacy-blocked-modal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      }
+      loadBlockedUsers().catch(function() { toast('加载黑名单失败'); });
+    }
+
+    function closeBlockedModal() {
+      const modal = document.getElementById('privacy-blocked-modal');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      }
+    }
+
+    async function chooseAutoDelete() {
+      const raw = prompt('自动删除消息天数：0=关闭，1、7、30 为常用值', String(privacySettings.auto_delete_messages_days || 0));
+      if (raw === null) return;
+      const days = Number(raw);
+      if (![0, 1, 7, 30].includes(days)) {
+        toast('请输入 0、1、7 或 30');
+        return;
+      }
+      await savePrivacy({ auto_delete_messages_days: days });
+      toast('自动删除设置已保存');
+    }
+
+    async function editLoginEmail() {
+      const value = prompt('Login Email', privacySettings.login_email || '');
+      if (value === null) return;
+      await savePrivacy({ login_email: value.trim() });
+      toast('登录邮箱已保存');
+    }
+
+    function clearPaymentInfo() {
+      ['ichat_payment_info', 'ichat_shipping_info', 'ichat_saved_cards'].forEach(function(key) {
+        localStorage.removeItem(key);
+      });
+      toast('付款和配送信息已清除');
+    }
+
+    async function deleteCloudDrafts() {
+      localStorage.removeItem('ichat_drafts');
+      toast('云草稿已清理');
+    }
+
+    async function deleteAccount() {
+      if (!confirm('确定要注销当前账号吗？此操作不可撤销。')) return;
+      const response = await fetch(DELETE_ACCOUNT_URL, { method: 'POST', headers: { 'X-CSRFToken': csrfToken() } });
+      if (!response.ok) throw new Error('delete account failed');
+      window.location.href = '/login/';
+    }
+
+    function bindPrivacyEvents() {
+      const root = document.getElementById('privacy-security-settings');
+      if (!root || root.dataset.bound === 'true') return;
+      root.dataset.bound = 'true';
+
+      root.addEventListener('click', function(event) {
+        const detail = event.target.closest('[data-detail]');
+        if (detail) {
+          openDetail(detail.dataset.detail);
+          return;
+        }
+
+        const option = event.target.closest('[data-option]');
+        if (option && detailField) {
+          const value = option.dataset.option;
+          savePrivacy({ [detailField]: value })
+            .then(function() {
+              openDetail(detailField);
+              toast('隐私设置已保存');
+            })
+            .catch(function() { toast('保存失败'); });
+          return;
+        }
+
+        const toggle = event.target.closest('[data-toggle]');
+        if (toggle) {
+          const field = toggle.dataset.toggle;
+          savePrivacy({ [field]: !Boolean(privacySettings[field]) })
+            .then(function() { toast('设置已保存'); })
+            .catch(function() { toast('保存失败'); });
+          return;
+        }
+
+        const action = event.target.closest('[data-action]')?.dataset.action;
+        if (!action) return;
+        if (action === 'detail-back') closeDetail();
+        if (action === 'blocked') openBlockedModal();
+        if (action === 'close-blocked') closeBlockedModal();
+        if (action === 'auto-delete') chooseAutoDelete().catch(function() { toast('保存失败'); });
+        if (action === 'login-email') editLoginEmail().catch(function() { toast('保存失败'); });
+        if (action === 'clear-payment-info') clearPaymentInfo();
+        if (action === 'delete-cloud-drafts') deleteCloudDrafts();
+        if (action === 'exception-placeholder') toast('例外用户列表稍后接入联系人选择器');
+      });
+
+      document.getElementById('privacy-blocked-list')?.addEventListener('click', function(event) {
+        const button = event.target.closest('[data-unblock]');
+        if (button) unblockUser(button.dataset.unblock).catch(function() { toast('解除失败'); });
+      });
+    }
+
+    window.refreshPrivacySecurity = function() {
+      bindPrivacyEvents();
+      return Promise.all([
+        loadPrivacySettings(),
+        loadBlockedUsers()
+      ]).then(function() {
+        if (window.lucide) window.lucide.createIcons();
+      }).catch(function(error) {
+        console.warn('[Privacy]', error);
+        toast('隐私设置加载失败');
+      });
+    };
+
+    bindPrivacyEvents();
+    window.refreshPrivacySecurity();
+  })();
+</script>

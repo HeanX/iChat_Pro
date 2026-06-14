@@ -1,236 +1,429 @@
 {# sessions_shortcuts.html - P2 T08 Active Sessions, Language, Keyboard Shortcuts #}
-<div class="divide-y divide-borderColor/60" id="sessions-shortcuts-root">
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Active Sessions</h4>
-    <p class="text-xs text-textSecondary">Devices currently logged into your account.</p>
-
-    <div class="space-y-3">
+<div class="sessions-settings-view" id="sessions-shortcuts-root">
+  
+  <section class="sessions-card">
+    <h3>活跃会话</h3>
+    <div class="session-list">
       {% for session in settings_active_sessions %}
-      <div class="p-3 bg-bgSearch rounded-custom-md {% if session.is_current %}border border-green-500/20{% else %}opacity-80{% endif %}">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-3 min-w-0">
-            <div class="w-10 h-10 rounded-full {% if session.is_current %}bg-green-500/10 text-green-500{% else %}bg-zinc-500/10 text-zinc-400{% endif %} flex items-center justify-center flex-shrink-0">
-              <i data-lucide="{% if session.is_current %}monitor{% else %}smartphone{% endif %}" class="w-5 h-5"></i>
-            </div>
-            <div class="min-w-0">
-              <div class="text-sm font-semibold text-textMain flex items-center space-x-1.5">
-                <span>Session {{ session.short_key }}</span>
-                {% if session.is_current %}
-                <span class="text-[9px] bg-green-500/15 text-green-600 dark:text-green-400 px-1.5 py-0.5 rounded-full font-medium">Current</span>
-                {% endif %}
-              </div>
-              <div class="text-[10px] text-textSecondary">Expires {{ session.expires_at|date:"Y-m-d H:i" }}</div>
-            </div>
+      <div class="session-item sessions-row">
+        <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1;">
+          <div class="session-icon {% if session.is_current %}is-current{% endif %}">
+            <i data-lucide="{% if session.is_current %}monitor{% else %}smartphone{% endif %}" style="width: 20px; height: 20px;"></i>
           </div>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1;">
+            <div style="font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; color: inherit;">
+              <span>Session {{ session.short_key }}</span>
+              {% if session.is_current %}
+              <span class="current-badge">当前</span>
+              {% endif %}
+            </div>
+            <div style="font-size: 13px; color: #707579; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">过期时间 {{ session.expires_at|date:"Y-m-d H:i" }}</div>
+          </div>
+        </div>
+        <div>
           {% if session.is_current %}
-          <button onclick="showToast(currentLanguage === 'zh' ? '无法终止当前会话' : 'Cannot terminate current session')"
-            class="text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0 ml-2 font-semibold">
-            Terminate
+          <button type="button" onclick="showToast(currentLanguage === 'zh' ? '无法终止当前会话' : 'Cannot terminate current session')" class="session-btn-terminate">
+            终止
           </button>
           {% else %}
-          <button data-session-id="{{ session.session_index }}" onclick="terminateSession(this.dataset.sessionId)"
-            class="text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0 ml-2 font-semibold">
-            Terminate
+          <button type="button" data-session-id="{{ session.session_index }}" onclick="terminateSession(this.dataset.sessionId)" class="session-btn-terminate">
+            终止
           </button>
           {% endif %}
         </div>
       </div>
       {% empty %}
-      <div class="p-3 bg-bgSearch rounded-custom-md text-sm text-textSecondary">
-        No active sessions found.
+      <div class="sessions-row" style="color: #707579; font-size: 16px; justify-content: center; width: 100%;">
+        未找到活跃会话
       </div>
       {% endfor %}
     </div>
 
-    <button onclick="terminateOtherSessions()"
-      class="w-full py-2.5 text-sm font-semibold text-red-500 border border-red-500/30 rounded-custom-md hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
-      Terminate All Other Sessions
+    <button type="button" onclick="terminateOtherSessions()" class="terminate-all-btn">
+      终止其他所有会话
     </button>
-  </div>
-  <div class="px-4 py-4 space-y-3">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Language</h4>
+  </section>
 
-    {# Language selector — scrollable list #}
-    <div class="bg-bgSearch rounded-custom-md divide-y divide-borderColor/30 overflow-hidden border border-borderColor/40 max-h-[320px] overflow-y-auto custom-scrollbar" id="language-list">
-      <button onclick="selectLanguage('en')" data-lang="en" data-lang-btn="en"
-        class="w-full px-4 py-3 flex items-center justify-between hover:bg-bgMain/50 transition-colors text-left">
-        <div>
-          <div class="text-sm font-semibold text-textMain">English</div>
-          <div class="text-[10px] text-textSecondary">English (United States)</div>
-        </div>
-        <i data-lucide="check" class="w-4 h-4 text-brand-light dark:text-brand-dark hidden" id="lang-check-en"></i>
-      </button>
-      <button onclick="selectLanguage('zh')" data-lang="zh" data-lang-btn="zh"
-        class="w-full px-4 py-3 flex items-center justify-between hover:bg-bgMain/50 transition-colors text-left">
-        <div>
-          <div class="text-sm font-semibold text-textMain">中文</div>
-          <div class="text-[10px] text-textSecondary">简体中文 (Simplified Chinese)</div>
-        </div>
-        <i data-lucide="check" class="w-4 h-4 text-brand-light dark:text-brand-dark hidden" id="lang-check-zh"></i>
-      </button>
-      <button onclick="selectLanguage('ja')" data-lang="ja" data-lang-btn="ja"
-        class="w-full px-4 py-3 flex items-center justify-between hover:bg-bgMain/50 transition-colors text-left opacity-50">
-        <div>
-          <div class="text-sm font-semibold text-textMain">日本語</div>
-          <div class="text-[10px] text-textSecondary">Japanese — Coming soon</div>
-        </div>
-        <span class="text-[9px] text-textSecondary">Soon</span>
-      </button>
-      <button onclick="selectLanguage('ko')" data-lang="ko" data-lang-btn="ko"
-        class="w-full px-4 py-3 flex items-center justify-between hover:bg-bgMain/50 transition-colors text-left opacity-50">
-        <div>
-          <div class="text-sm font-semibold text-textMain">한국어</div>
-          <div class="text-[10px] text-textSecondary">Korean — Coming soon</div>
-        </div>
-        <span class="text-[9px] text-textSecondary">Soon</span>
-      </button>
-    </div>
+  <p class="sessions-hint">当前登录您账号的设备。</p>
 
-    {# Show translate button #}
-    <div class="flex items-center justify-between py-1">
-      <span class="text-sm font-medium text-textMain">Show Translate Button</span>
-      <label class="toggle-switch">
-        <input type="checkbox" checked onchange="saveSessionSetting('show_translate', this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-  </div>
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Keyboard Shortcuts</h4>
 
-    {# Text Formatting #}
-    <div class="space-y-1">
-      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Text Formatting</h5>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Bold</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + B</kbd>
+  <section class="sessions-card">
+    <h3>键盘快捷键</h3>
+
+    <div class="shortcut-category" style="margin-top: 0;">
+      <div class="shortcut-category-title" style="margin-top: 0;">文本格式化</div>
+      <div class="shortcut-row">
+        <span>粗体</span>
+        <kbd>Ctrl + B</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Italic</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + I</kbd>
+      <div class="shortcut-row">
+        <span>斜体</span>
+        <kbd>Ctrl + I</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Underline</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + U</kbd>
+      <div class="shortcut-row">
+        <span>下划线</span>
+        <kbd>Ctrl + U</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Strikethrough</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + X</kbd>
+      <div class="shortcut-row">
+        <span>删除线</span>
+        <kbd>Ctrl + Shift + X</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Monospace / Code</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + M</kbd>
+      <div class="shortcut-row">
+        <span>等宽字体 / 代码</span>
+        <kbd>Ctrl + Shift + M</kbd>
+      </div>
+      <div class="shortcut-row">
+        <span>剧透</span>
+        <kbd>Ctrl + Shift + H</kbd>
+      </div>
+      <div class="shortcut-row">
+        <span>引用</span>
+        <kbd>Ctrl + Shift + 9</kbd>
+      </div>
+      <div class="shortcut-row">
+        <span>链接</span>
+        <kbd>Ctrl + K</kbd>
       </div>
     </div>
 
-    {# Messages #}
-    <div class="space-y-1">
-      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Messages</h5>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Edit last message</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">↑</kbd>
+    <div class="shortcut-category">
+      <div class="shortcut-category-title">消息</div>
+      <div class="shortcut-row">
+        <span>编辑上一条消息</span>
+        <kbd>↑</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Reply to message</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + ↑</kbd>
+      <div class="shortcut-row">
+        <span>回复消息</span>
+        <kbd>Ctrl + ↑</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Forward message</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + F</kbd>
+      <div class="shortcut-row">
+        <span>转发消息</span>
+        <kbd>Ctrl + Shift + F</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Delete message</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Delete</kbd>
-      </div>
-    </div>
-
-    {# Chat Navigation #}
-    <div class="space-y-1">
-      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Chat Navigation</h5>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Search chats</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + K</kbd>
-      </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">New chat</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + N</kbd>
-      </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Toggle mute</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + M</kbd>
-      </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Archive chat</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + E</kbd>
-      </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Next chat</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Tab</kbd>
-      </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Previous chat</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + Tab</kbd>
-      </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Go to top of chat</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Home</kbd>
+      <div class="shortcut-row">
+        <span>删除消息</span>
+        <kbd>Ctrl + Delete</kbd>
       </div>
     </div>
 
-    {# Sending #}
-    <div class="space-y-1">
-      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Sending</h5>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Send message</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Enter</kbd>
+    <div class="shortcut-category">
+      <div class="shortcut-category-title">会话导航</div>
+      <div class="shortcut-row">
+        <span>搜索会话</span>
+        <kbd>Ctrl + K</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">New line</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Shift + Enter</kbd>
+      <div class="shortcut-row">
+        <span>新建会话</span>
+        <kbd>Ctrl + N</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Send without sound</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + Enter</kbd>
+      <div class="shortcut-row">
+        <span>静音切换</span>
+        <kbd>Ctrl + M</kbd>
       </div>
-    </div>
-
-    {# Media #}
-    <div class="space-y-1">
-      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-1">Media & Others</h5>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Toggle emoji panel</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + E</kbd>
+      <div class="shortcut-row">
+        <span>归档会话</span>
+        <kbd>Ctrl + E</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Open settings</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + ,</kbd>
+      <div class="shortcut-row">
+        <span>下一个会话</span>
+        <kbd>Ctrl + Tab</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Toggle dark mode</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Ctrl + Shift + D</kbd>
+      <div class="shortcut-row">
+        <span>上一个会话</span>
+        <kbd>Ctrl + Shift + Tab</kbd>
       </div>
-      <div class="flex items-center justify-between py-1.5 px-1 text-sm">
-        <span class="text-textMain">Close current panel</span>
-        <kbd class="px-2 py-0.5 text-xs bg-bgSearch border border-borderColor rounded text-textSecondary font-mono">Escape</kbd>
+      <div class="shortcut-row">
+        <span>跳转至会话顶部</span>
+        <kbd>Ctrl + Home</kbd>
       </div>
     </div>
 
-    <p class="text-[10px] text-textSecondary italic pt-1">
-      Shortcuts marked with * require the chat input to be focused. Some shortcuts may not be fully implemented yet.
-    </p>
-  </div>
+    <div class="shortcut-category">
+      <div class="shortcut-category-title">发送</div>
+      <div class="shortcut-row">
+        <span>发送消息</span>
+        <kbd>Enter</kbd>
+      </div>
+      <div class="shortcut-row">
+        <span>换行</span>
+        <kbd>Shift + Enter</kbd>
+      </div>
+      <div class="shortcut-row">
+        <span>无声发送</span>
+        <kbd>Ctrl + Shift + Enter</kbd>
+      </div>
+    </div>
+
+    <div class="shortcut-category">
+      <div class="shortcut-category-title">媒体及其他</div>
+      <div class="shortcut-row">
+        <span>打开表情面板</span>
+        <kbd>Ctrl + Shift + E</kbd>
+      </div>
+      <div class="shortcut-row">
+        <span>打开设置</span>
+        <kbd>Ctrl + ,</kbd>
+      </div>
+      <div class="shortcut-row">
+        <span>切换暗色模式</span>
+        <kbd>Ctrl + Shift + D</kbd>
+      </div>
+      <div class="shortcut-row">
+        <span>关闭当前面板</span>
+        <kbd>Escape</kbd>
+      </div>
+    </div>
+  </section>
+
+  <p class="sessions-hint">带有 * 标记的快捷键需要聊天输入框处于聚焦状态下才可用。</p>
 
 </div>
 
-{# ── Toggle Switch Styles ── #}
 <style>
-  .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
-  .toggle-switch input { opacity:0; width:0; height:0 }
-  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
-  .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
-  .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
-  .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
-  .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
+  .sessions-settings-view {
+    padding: 14px 18px 22px;
+    background: #f4f4f5;
+    min-height: 100%;
+    color: #111;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .sessions-card {
+    width: 100%;
+    padding: 20px 22px 18px;
+    border-radius: 24px;
+    background: #ffffff;
+    box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06);
+  }
+
+  .sessions-card + .sessions-card {
+    margin-top: 20px;
+  }
+
+  .sessions-card h3 {
+    margin: 0 0 16px;
+    color: #3390ec;
+    font-size: 18px;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+
+  .sessions-row {
+    min-height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    color: #111827;
+    font-size: 17px;
+    line-height: 1.2;
+  }
+
+  .sessions-hint {
+    margin: 12px 22px 22px;
+    color: #707579;
+    font-size: 16px;
+    line-height: 1.28;
+  }
+
+  /* Switch */
+  .sessions-row > input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .telegram-switch {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: #e9ecef;
+    transition: background-color 0.16s ease;
+    flex: 0 0 auto;
+    cursor: pointer;
+  }
+
+  .telegram-switch::before {
+    content: "";
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    left: 1px;
+    top: 1px;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+    transition: transform 0.16s ease;
+  }
+
+  .sessions-row input:checked + .telegram-switch {
+    background: #3390ec;
+  }
+
+  .sessions-row input:checked + .telegram-switch::before {
+    transform: translateX(18px);
+  }
+
+  /* Session list items styling */
+  .session-item {
+    padding: 12px 0;
+  }
+  .session-item + .session-item {
+    border-top: 1px solid rgba(0, 0, 0, .07);
+  }
+
+  .session-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    background: #f4f4f5;
+    color: #707579;
+    flex-shrink: 0;
+  }
+  .session-icon.is-current {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+  }
+
+  .current-badge {
+    font-size: 11px;
+    background: rgba(34, 197, 94, 0.15);
+    color: #16a34a;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-weight: 500;
+  }
+
+  .session-btn-terminate {
+    background: transparent;
+    border: 0;
+    color: #ef4444;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .session-btn-terminate:hover {
+    color: #b91c1c;
+  }
+
+  .terminate-all-btn {
+    width: 100%;
+    margin-top: 16px;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+    background: transparent;
+    padding: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .terminate-all-btn:hover {
+    background: rgba(239, 68, 68, 0.06);
+  }
+
+  /* Language Options */
+  .lang-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 46px;
+    padding: 10px 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    font-size: 17px;
+    color: #111827;
+  }
+  .lang-option + .lang-option {
+    border-top: 1px solid rgba(0, 0, 0, .07);
+  }
+  .lang-option.opacity-50 {
+    opacity: 0.5;
+  }
+  .lang-option svg {
+    color: #3390ec;
+  }
+
+  /* Keyboard Shortcuts */
+  .shortcut-category {
+    margin-top: 18px;
+  }
+  .shortcut-category-title {
+    font-size: 15px;
+    color: #707579;
+    font-weight: 600;
+    margin: 14px 0 6px;
+  }
+  .shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    font-size: 17px;
+    color: #111827;
+  }
+  .shortcut-row + .shortcut-row {
+    border-top: 1px solid rgba(0, 0, 0, .04);
+  }
+  
+  kbd {
+    padding: 2px 6px;
+    font-size: 13px;
+    background: #f4f4f5;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    color: #4b5563;
+  }
+
+  /* Dark Mode */
+  [data-theme="dark"] .sessions-settings-view {
+    background: #181818;
+  }
+  [data-theme="dark"] .sessions-card {
+    background: #212121;
+  }
+  [data-theme="dark"] .sessions-row,
+  [data-theme="dark"] .lang-option,
+  [data-theme="dark"] .shortcut-row {
+    color: #f1f5f9;
+  }
+  [data-theme="dark"] .sessions-row + .sessions-row,
+  [data-theme="dark"] .session-item + .session-item,
+  [data-theme="dark"] .lang-option + .lang-option {
+    border-top-color: rgba(255, 255, 255, .08);
+  }
+  [data-theme="dark"] .session-icon {
+    background: #2b2b2b;
+    color: #aaaaaa;
+  }
+  [data-theme="dark"] .session-icon.is-current {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+  }
+  [data-theme="dark"] .current-badge {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+  }
+  [data-theme="dark"] kbd {
+    background: #2b2b2b;
+    border-color: #3a3a3a;
+    color: #d1d5db;
+  }
+  [data-theme="dark"] .telegram-switch {
+    background: #2b2b2b;
+  }
+  [data-theme="dark"] .sessions-row input:checked + .telegram-switch {
+    background: #3390ec;
+  }
 </style>
 
 {# ── Sessions & Shortcuts JavaScript ── #}
@@ -253,40 +446,8 @@
     applySessionSettingsUI(settings);
   }
 
-  function selectLanguage(lang) {
-    if (lang === 'ja' || lang === 'ko') {
-      window.showToast(currentLanguage === 'zh' ? '该语言尚未支持' : 'This language is not yet supported');
-      return;
-    }
-    saveSessionSetting('language', lang);
-    // Update all lang check icons
-    ['en','zh','ja','ko'].forEach(function(l) {
-      var check = document.getElementById('lang-check-' + l);
-      if (check) {
-        if (l === lang && (l === 'en' || l === 'zh')) check.classList.remove('hidden');
-        else check.classList.add('hidden');
-      }
-    });
-    // Delegate to global language toggle
-    if (lang !== currentLanguage && typeof toggleLanguage === 'function') {
-      toggleLanguage();
-    }
-    window.showToast(lang === 'zh' ? '语言已切换为中文' : 'Language set to English');
-  }
-
   function applySessionSettingsUI(s) {
-    // Language check icons
-    var lang = s.language || 'en';
-    ['en','zh'].forEach(function(l) {
-      var check = document.getElementById('lang-check-' + l);
-      if (check) {
-        if (l === lang) check.classList.remove('hidden');
-        else check.classList.add('hidden');
-      }
-    });
-    // Translate toggle
-    var translateToggle = document.querySelector('#sessions-shortcuts-root input[type=checkbox]');
-    if (translateToggle) translateToggle.checked = !!s.show_translate;
+    // (language UI now handled in language_settings.html)
   }
 
   function terminateSessionRequest(sessionId) {

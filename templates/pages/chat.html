@@ -4,13 +4,65 @@
 {% block title %}Workspace - iChat Pro{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/chat.css' %}">
+<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260614-general-folders">
 {% endblock %}
 
 {% block content %}
+<script>
+  (function() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ichat_general') || '{}');
+      const wallpaper = saved.wallpaper || 'default';
+      const WALLPAPER_COLORS = {
+        default: '#deecf9',
+        green: '#d4e6c9',
+        blue: '#d7ebff',
+        purple: '#ebdcf9',
+        pink: '#fce7f3',
+        orange: '#ffedd5',
+        cyan: '#e0f7fa',
+        yellow: '#fef9c3'
+      };
+      let color = WALLPAPER_COLORS[wallpaper] || '';
+      
+      // Determine if dark theme is active
+      let isDark = saved.theme === 'dark';
+      if (saved.theme === 'system' || !saved.theme) {
+        isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+      
+      if (isDark && color) {
+        const darkWallpapers = {
+          '#deecf9': '#0f1218', // Default Dark Solid
+          '#d4e6c9': '#1b2a1c', // Green
+          '#d7ebff': '#1c2536', // Blue
+          '#ebdcf9': '#231c2d', // Purple
+          '#fce7f3': '#2d1c25', // Pink
+          '#ffedd5': '#2d221c', // Orange
+          '#e0f7fa': '#1c2d2f', // Cyan
+          '#fef9c3': '#2a281c'  // Yellow
+        };
+        color = darkWallpapers[color] || color;
+      }
+      
+      if (color) {
+        document.documentElement.style.setProperty('--chat-layout-bg', color);
+        document.documentElement.style.setProperty('--chat-footer-bg', color);
+        const clean = color.replace('#', '');
+        const r = parseInt(clean.slice(0, 2), 16);
+        const g = parseInt(clean.slice(2, 4), 16);
+        const b = parseInt(clean.slice(4, 6), 16);
+        document.documentElement.style.setProperty('--chat-footer-bg-rgba', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.88)');
+      }
+      
+      // Set early data-wallpaper attribute on documentElement
+      document.documentElement.setAttribute('data-wallpaper', wallpaper);
+    } catch (e) {}
+  })();
+</script>
 <!-- Main Application Workspace Viewport -->
 <div class="chat-layout flex h-screen w-screen overflow-hidden bg-bgMain text-textMain relative select-none">
-  
+
   <!-- Left Side: Collapsible Search, Contacts & Settings Sidebar -->
   {% include 'components/sidebar.html' %}
   
@@ -78,6 +130,69 @@
         </div>
     </div>
 </div>
+<!-- BIRTHDAY MODAL (Date of Birth) -->
+<div id="birthday-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
+  <div class="birthday-modal-content animate-fadeIn">
+    <button onclick="closeBirthdayModal()" class="birthday-modal-close" title="Close">
+      <i data-lucide="x" class="w-5 h-5"></i>
+    </button>
+
+    <!-- Custom SVG Mascot Duck (Yellow duck with captain hat and paper plane logo) -->
+    <div class="birthday-modal-mascot">
+      <svg viewBox="0 0 100 100" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <!-- Blue cloud background -->
+        <path d="M 15,80 C 15,70 25,65 35,68 C 40,55 60,55 65,68 C 75,65 85,70 85,80 Z" fill="#3390ec" opacity="0.8"/>
+        <!-- Duck body (Yellow) -->
+        <circle cx="50" cy="58" r="22" fill="#ffcc00"/>
+        <!-- Duck head (Yellow) -->
+        <circle cx="50" cy="36" r="16" fill="#ffcc00"/>
+        <!-- Duck cheeks -->
+        <circle cx="39" cy="40" r="3" fill="#ff6666" opacity="0.6"/>
+        <circle cx="61" cy="40" r="3" fill="#ff6666" opacity="0.6"/>
+        <!-- Duck eyes -->
+        <circle cx="44" cy="33" r="2.5" fill="#333"/>
+        <circle cx="56" cy="33" r="2.5" fill="#333"/>
+        <circle cx="45" cy="32" r="0.8" fill="#fff"/>
+        <circle cx="57" cy="32" r="0.8" fill="#fff"/>
+        <!-- Duck bill (Orange) -->
+        <path d="M 46,37 Q 50,42 54,37 Q 50,39 46,37 Z" fill="#ff6600"/>
+        <!-- Duck wings -->
+        <path d="M 28,58 Q 23,54 28,50 Q 32,54 28,58 Z" fill="#e6b800"/>
+        <path d="M 72,58 Q 77,54 72,50 Q 68,54 72,58 Z" fill="#e6b800"/>
+        <!-- Captain Hat (Blue) -->
+        <path d="M 37,24 C 37,16 63,16 63,24 Z" fill="#1d599c"/>
+        <path d="M 32,24 L 68,24 L 64,28 L 36,28 Z" fill="#113e70"/>
+        <!-- White paper plane logo on hat -->
+        <path d="M 46,20 L 55,18 L 51,23 L 49,21 Z" fill="#ffffff"/>
+        <!-- Tiny paper plane floating next to duck -->
+        <path d="M 76,28 L 86,22 L 80,31 L 78,27 Z" fill="#3390ec" opacity="0.9"/>
+      </svg>
+    </div>
+
+    <div class="birthday-modal-title">Date of Birth</div>
+
+    <div class="birthday-inputs-row">
+      <div class="birthday-input-col">
+        <input type="number" id="birthday-day" placeholder="Day" min="1" max="31" oninput="validateBirthdayInput(this, 1, 31)">
+      </div>
+      <div class="birthday-input-col">
+        <input type="number" id="birthday-month" placeholder="Month" min="1" max="12" oninput="validateBirthdayInput(this, 1, 12)">
+      </div>
+      <div class="birthday-input-col">
+        <input type="number" id="birthday-year" placeholder="Year" min="1900" max="2026" oninput="validateBirthdayInput(this, 1900, 2026)">
+      </div>
+    </div>
+
+    <a onclick="openBirthdayPrivacyFromModal()" class="birthday-privacy-link">
+      Choose who can see your birthday in 设置 &gt;
+    </a>
+
+    <button onclick="saveBirthdayFromModal()" class="birthday-modal-save-btn">
+      保存
+    </button>
+  </div>
+</div>
+
 <!-- Toast Container -->
 <div id="toast-container" class="fixed top-5 left-1/2 -translate-x-1/2 z-[100] pointer-events-none flex flex-col items-center space-y-2"></div>
 <input id="key-backup-import-input" type="file" accept="application/json" class="hidden">
@@ -190,7 +305,7 @@
 <script src="{% static 'js/context-menu.js' %}?v=20260610-t12t14-chat-ux"></script>
 <script src="{% static 'js/chat-conversation-actions.js' %}?v=20260610-t12t14-chat-ux"></script>
 <script src="{% static 'js/chat-message-actions.js' %}?v=20260610-t12t14-chat-ux"></script>
-<script src="{% static 'js/chat.js' %}?v=20260610-t12t14-chat-ux"></script>
+<script src="{% static 'js/chat.js' %}?v=20260614-general-folders"></script>
 <script>
   function exportLocalKeyBackup() {
     try {

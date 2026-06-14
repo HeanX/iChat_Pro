@@ -223,6 +223,44 @@ def conversations_list_view(request):
             membership.muted_until is not None
             and membership.muted_until > timezone.now()
         )
+
+        last_message_data = None
+        if conversation.last_message_id:
+            if conversation.type == Conversation.Type.SINGLE:
+                last_msg = EncryptedMessage.objects.filter(pk=conversation.last_message_id).first()
+                if last_msg:
+                    last_message_data = {
+                        'id': last_msg.id,
+                        'ciphertext': last_msg.ciphertext,
+                        'nonce': last_msg.nonce,
+                        'auth_tag': last_msg.auth_tag,
+                        'algorithm': last_msg.algorithm,
+                        'sender_id': last_msg.sender_id,
+                        'receiver_id': last_msg.receiver_id,
+                        'message_type': last_msg.message_type,
+                        'sender_key_version': last_msg.sender_key_version,
+                        'receiver_key_version': last_msg.receiver_key_version,
+                    }
+            else:
+                last_msg = GroupMessageRecipient.objects.filter(
+                    group_message_id=conversation.last_message_id,
+                    receiver=request.user,
+                ).select_related('group_message').first()
+                if last_msg:
+                    last_message_data = {
+                        'id': last_msg.group_message.id,
+                        'ciphertext': last_msg.ciphertext,
+                        'nonce': last_msg.nonce,
+                        'auth_tag': last_msg.auth_tag,
+                        'algorithm': last_msg.algorithm,
+                        'sender_id': last_msg.group_message.sender_id,
+                        'receiver_id': request.user.id,
+                        'message_type': last_msg.group_message.message_type,
+                        'sender_key_version': last_msg.sender_key_version,
+                        'receiver_key_version': last_msg.receiver_key_version,
+                        'membership_version': last_msg.membership_version,
+                    }
+
         item = {
             'id': conversation.id,
             'type': conversation.type,
@@ -233,6 +271,7 @@ def conversations_list_view(request):
                 else None
             ),
             'last_message_preview': 'Encrypted message' if conversation.last_message_at else '',
+            'last_message_data': last_message_data,
             'last_message_id': conversation.last_message_id,
             'is_pinned': membership.is_pinned,
             'is_muted': is_muted,
@@ -527,7 +566,7 @@ def forward_message_view(request, conversation_id):
     if conversation.status != Conversation.Status.ACTIVE:
         return JsonResponse({'error': 'Target conversation is not active.'}, status=400)
 
-    # ── Private chat forwarding ──
+    # 鈹€鈹€ Private chat forwarding 鈹€鈹€
     if conversation.type == Conversation.Type.SINGLE:
         peer_id = data.get('peer_id')
         if not peer_id:
@@ -601,7 +640,7 @@ def forward_message_view(request, conversation_id):
         except (ValueError, KeyError) as e:
             return JsonResponse({'error': f'Invalid payload: {e}'}, status=400)
 
-    # ── Group chat forwarding ──
+    # 鈹€鈹€ Group chat forwarding 鈹€鈹€
     elif conversation.type == Conversation.Type.GROUP:
         # Mute enforcement (mirrors WebSocket consumers.py:722-726)
         if conversation.muted_until and conversation.muted_until > timezone.now():
@@ -1017,6 +1056,13 @@ def invite_member_view(request, conversation_id):
     except User.DoesNotExist:
         return JsonResponse({"error": "User not found."}, status=404)
 
+    privacy, _ = UserPrivacySettings.objects.get_or_create(user=target)
+    invite_policy = privacy.who_can_add_me_to_groups
+    if invite_policy == 'nobody':
+        return JsonResponse({"error": "This user does not allow group invitations."}, status=403)
+    if invite_policy == 'contacts' and not _are_contacts(target, request.user):
+        return JsonResponse({"error": "This user only allows contacts to invite them."}, status=403)
+
     if ConversationMember.objects.filter(
         conversation=conversation, user=target
     ).exists():
@@ -1156,7 +1202,7 @@ def leave_group_view(request, conversation_id):
                 {"error": "You are the owner. Transfer ownership before leaving."},
                 status=403,
             )
-        # Owner is the only member — disband instead
+        # Owner is the only member - disband instead
         conversation.status = Conversation.Status.DELETED
         conversation.membership_version = F('membership_version') + 1
         conversation.save(update_fields=["status", "membership_version", "updated_at"])
@@ -1590,6 +1636,128 @@ def send_private_message_view(request, conversation_id):
 # P2 T05: Data & Storage API
 # ---------------------------------------------------------------------------
 
+_STORAGE_DEFAULT_SETTINGS = {
+    'auto_download_enabled': True,
+    'auto_download': {
+        'mobile_data': {'photos': True, 'videos': True, 'files': 3},
+        'wifi': {'photos': True, 'videos': True, 'files': 3},
+        'roaming': {'photos': True, 'videos': True, 'files': 3},
+    },
+    'file_size_limit_mb': {
+        'photos': 10,
+        'videos': 50,
+        'files': 3,
+    },
+    'cache_retention_days': 7,
+    'cache_max_size_mb': 0,
+    'cleared_cache_baseline': {},
+}
+
+
+def _storage_settings_obj(user):
+    settings_obj, _ = UserStorageSettings.objects.get_or_create(user=user)
+    return settings_obj
+
+
+def _merged_storage_settings(settings_obj):
+    return _deep_merge(_STORAGE_DEFAULT_SETTINGS, settings_obj.settings_json or {})
+
+
+def _storage_estimates_for_user(user):
+    private_qs = EncryptedMessage.objects.filter(
+        Q(sender=user) | Q(receiver=user),
+    )
+    private_images = private_qs.filter(message_type=EncryptedMessage.MessageType.IMAGE).count()
+    private_files = private_qs.filter(message_type=EncryptedMessage.MessageType.FILE).count()
+    private_stickers = private_qs.filter(message_type=EncryptedMessage.MessageType.STICKER).count()
+    private_other = private_qs.filter(
+        message_type__in=[
+            EncryptedMessage.MessageType.TEXT,
+            EncryptedMessage.MessageType.SYSTEM,
+        ],
+    ).count()
+
+    group_images = GroupMessageRecipient.objects.filter(
+        receiver=user,
+        group_message__message_type=GroupMessage.MessageType.IMAGE,
+    ).count()
+    group_files = GroupMessageRecipient.objects.filter(
+        receiver=user,
+        group_message__message_type=GroupMessage.MessageType.FILE,
+    ).count()
+    group_stickers = GroupMessageRecipient.objects.filter(
+        receiver=user,
+        group_message__message_type=GroupMessage.MessageType.STICKER,
+    ).count()
+    group_other = GroupMessageRecipient.objects.filter(
+        receiver=user,
+        group_message__message_type__in=[
+            GroupMessage.MessageType.TEXT,
+            GroupMessage.MessageType.SYSTEM,
+        ],
+    ).count()
+
+    est_image = 200 * 1024
+    est_video = 1200 * 1024
+    est_sticker = 30 * 1024
+    est_other = 2 * 1024
+
+    return {
+        'images': {
+            'size_bytes': (private_images + group_images) * est_image,
+            'count': private_images + group_images,
+            'label': 'Images',
+        },
+        'videos': {
+            'size_bytes': (private_files + group_files) * est_video,
+            'count': private_files + group_files,
+            'label': 'Video files',
+        },
+        'stickers': {
+            'size_bytes': (private_stickers + group_stickers) * est_sticker,
+            'count': private_stickers + group_stickers,
+            'label': 'Stickers and emojis',
+        },
+        'other': {
+            'size_bytes': (private_other + group_other) * est_other,
+            'count': private_other + group_other,
+            'label': 'Other',
+        },
+        'video_stream_chunks': {
+            'size_bytes': 0,
+            'count': 0,
+            'label': 'Cached video stream chunks',
+        },
+    }
+
+
+def _storage_stats_payload(user):
+    settings_obj = _storage_settings_obj(user)
+    settings_data = _merged_storage_settings(settings_obj)
+    estimates = _storage_estimates_for_user(user)
+    baselines = settings_data.get('cleared_cache_baseline') or {}
+    categories = {}
+    for key, value in estimates.items():
+        baseline = int(baselines.get(key, 0) or 0)
+        size_bytes = max(0, int(value.get('size_bytes', 0)) - baseline)
+        categories[key] = {
+            **value,
+            'size_bytes': size_bytes,
+            'cleared_baseline_bytes': baseline,
+        }
+
+    total_bytes = sum(item['size_bytes'] for item in categories.values())
+    cache_max_size_mb = int(settings_data.get('cache_max_size_mb') or 0)
+    quota_bytes = (cache_max_size_mb or 50) * 1024 * 1024
+    return {
+        'categories': categories,
+        'total_bytes': total_bytes,
+        'quota_bytes': quota_bytes,
+        'usage_percent': round((total_bytes / quota_bytes) * 100, 1) if quota_bytes else 0,
+        'settings': settings_data,
+    }
+
+
 @login_required(login_url='login')
 def storage_stats_view(request):
     """Return storage usage statistics for the current user.
@@ -1599,6 +1767,8 @@ def storage_stats_view(request):
     approximate per-item sizes.  A future T24 backend will replace these
     estimates with real file-system measurements.
     """
+    return JsonResponse(_storage_stats_payload(request.user))
+
     user = request.user
 
     # --- Private messages by type ---
@@ -1643,7 +1813,7 @@ def storage_stats_view(request):
     EST_OTHER = 2 * 1024         # 2 KB per text/system message (ciphertext overhead)
 
     images_bytes = (private_images + group_images) * EST_IMAGE
-    videos_bytes = 0  # No video message type yet — placeholder for T24
+    videos_bytes = 0  # No video message type yet - placeholder for T24
     stickers_bytes = (private_stickers + group_stickers) * EST_STICKER
     other_bytes = (private_other + group_other) * EST_OTHER
     # Video stream chunks are not persisted yet (T24)
@@ -1692,7 +1862,7 @@ def storage_clear_view(request):
 
     Accepts: {"categories": ["images", "videos", "stickers", "other",
     "video_stream_chunks"]} or "all".
-    Currently a stub — real file-system cleanup depends on T24.
+    Currently a stub - real file-system cleanup depends on T24.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed.'}, status=405)
@@ -1702,6 +1872,37 @@ def storage_clear_view(request):
 
     if not categories:
         return JsonResponse({'error': 'categories list is required.'}, status=400)
+
+    valid_categories = {'images', 'videos', 'stickers', 'other', 'video_stream_chunks', 'all'}
+    estimates = _storage_estimates_for_user(request.user)
+    settings_obj = _storage_settings_obj(request.user)
+    settings_data = _merged_storage_settings(settings_obj)
+    baselines = settings_data.get('cleared_cache_baseline') or {}
+    cleared = []
+    skipped = []
+
+    for cat in categories:
+        if cat not in valid_categories:
+            skipped.append(cat)
+            continue
+        if cat == 'all':
+            for key, value in estimates.items():
+                baselines[key] = int(value.get('size_bytes', 0) or 0)
+            cleared = sorted(k for k in valid_categories if k != 'all')
+            break
+        baselines[cat] = int(estimates.get(cat, {}).get('size_bytes', 0) or 0)
+        cleared.append(cat)
+
+    settings_data['cleared_cache_baseline'] = baselines
+    settings_obj.settings_json = settings_data
+    settings_obj.save(update_fields=['settings_json', 'updated_at'])
+
+    return JsonResponse({
+        'status': 'ok',
+        'cleared': cleared,
+        'skipped': skipped,
+        'stats': _storage_stats_payload(request.user),
+    })
 
     cleared = []
     skipped = []
@@ -1726,10 +1927,38 @@ def storage_clear_view(request):
 def storage_settings_view(request):
     """Get or update server-side storage settings for the user.
 
-    GET  — return current settings.
-    POST — merge the provided settings keys.
+    GET  - return current settings.
+    POST - merge the provided settings keys.
     Persisted in UserStorageSettings (DB-backed, survives session expiry).
     """
+    ss = _storage_settings_obj(request.user)
+
+    if request.method == 'GET':
+        return JsonResponse({'settings': _merged_storage_settings(ss)})
+
+    if request.method == 'POST':
+        data = _json_body(request)
+        current = _merged_storage_settings(ss)
+        updated = _deep_merge(current, data)
+        updated['auto_download_enabled'] = bool(updated.get('auto_download_enabled'))
+        updated['cache_retention_days'] = _parse_int(
+            updated.get('cache_retention_days'), 7, min_value=0, max_value=365,
+        )
+        updated['cache_max_size_mb'] = _parse_int(
+            updated.get('cache_max_size_mb'), 0, min_value=0, max_value=2048,
+        )
+        file_limits = updated.get('file_size_limit_mb') or {}
+        updated['file_size_limit_mb'] = {
+            'photos': _parse_int(file_limits.get('photos'), 10, min_value=0, max_value=1024),
+            'videos': _parse_int(file_limits.get('videos'), 50, min_value=0, max_value=2048),
+            'files': _parse_int(file_limits.get('files'), 3, min_value=0, max_value=2048),
+        }
+        ss.settings_json = updated
+        ss.save(update_fields=['settings_json', 'updated_at'])
+        return JsonResponse({'status': 'ok', 'settings': updated})
+
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
     ss, _ = UserStorageSettings.objects.get_or_create(user=request.user)
 
     if request.method == 'GET':
@@ -1786,9 +2015,13 @@ _PRIVACY_STRING_FIELDS = {
     'phone_number_visibility',
     'bio_visibility',
     'forward_link_visibility',
+    'birthday_visibility',
+    'gifts_visibility',
+    'saved_music_visibility',
+    'who_can_add_me_to_groups',
 }
 
-# Permission fields only accept 'everyone' or 'contacts' — 'nobody' is NOT valid here
+# Permission fields only accept 'everyone' or 'contacts' - 'nobody' is NOT valid here
 _PRIVACY_PERMISSION_FIELDS = {
     'who_can_send_messages',
     'who_can_voice_video_call',
@@ -1798,6 +2031,7 @@ _PRIVACY_BOOL_FIELDS = {
     'sensitive_content_filter',
     'passcode_lock_enabled',
     'two_step_verification_enabled',
+    'passkey_enabled',
 }
 
 _PRIVACY_INT_FIELDS = {
@@ -1825,12 +2059,17 @@ def _serialize_privacy_settings(ps):
         'phone_number_visibility': ps.phone_number_visibility,
         'bio_visibility': ps.bio_visibility,
         'forward_link_visibility': ps.forward_link_visibility,
+        'birthday_visibility': ps.birthday_visibility,
+        'gifts_visibility': ps.gifts_visibility,
+        'saved_music_visibility': ps.saved_music_visibility,
+        'who_can_add_me_to_groups': ps.who_can_add_me_to_groups,
         'who_can_send_messages': ps.who_can_send_messages,
         'who_can_voice_video_call': ps.who_can_voice_video_call,
         'auto_delete_messages_days': ps.auto_delete_messages_days,
         'sensitive_content_filter': ps.sensitive_content_filter,
         'passcode_lock_enabled': ps.passcode_lock_enabled,
         'two_step_verification_enabled': ps.two_step_verification_enabled,
+        'passkey_enabled': ps.passkey_enabled,
         'login_email': ps.login_email,
     }
 
@@ -1855,7 +2094,7 @@ def privacy_settings_view(request):
                 setattr(ps, field, data[field])
                 updated_fields.append(field)
 
-        # Permission fields only accept 'everyone' or 'contacts' — NOT 'nobody'
+        # Permission fields only accept 'everyone' or 'contacts' - NOT 'nobody'
         for field in _PRIVACY_PERMISSION_FIELDS:
             if field in data and data[field] in ('everyone', 'contacts'):
                 setattr(ps, field, data[field])
@@ -1906,7 +2145,7 @@ def privacy_settings_view(request):
             'updated_fields': updated_fields,
         })
 
-# ── T27: Auto-delete messages API ───────────────────────────────────
+# 鈹€鈹€ T27: Auto-delete messages API 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 @login_required(login_url='login')
 def auto_delete_setting_view(request):
@@ -2112,7 +2351,7 @@ def conversation_auto_delete_view(request, conversation_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-# ── T33/T34: Unified search API with scope filtering ────────────────
+# 鈹€鈹€ T33/T34: Unified search API with scope filtering 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 @login_required(login_url='login')
 def search_unified_view(request):
@@ -2184,13 +2423,13 @@ def search_unified_view(request):
                     })
         results['conversations'] = peer_convs[:10]
 
-    # Channels (placeholder — T33)
+    # Channels (placeholder - T33)
     results['channels'] = []
 
     return JsonResponse({'results': results, 'scope': scope, 'query': query})
 
 
-# ── T37: Advanced group management ───────────────────────────────────
+# 鈹€鈹€ T37: Advanced group management 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 def _require_admin(conversation_id, user):
     """Return (member, conversation) if user is admin/owner, else (None, error_response)."""

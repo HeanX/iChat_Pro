@@ -1,222 +1,475 @@
-{# notifications.html — P2 T04 Notification Settings #}
-<div class="divide-y divide-borderColor/60">
+{# notifications.html - Telegram-style notification settings backed by API #}
+<div class="notification-settings-view">
+  <section class="notification-card">
+    <h3>网页通知</h3>
+    <label class="notification-row">
+      <span>显示通知</span>
+      <input type="checkbox" id="notif-display" data-field="display_notifications">
+      <span class="telegram-switch"></span>
+    </label>
+    <label class="notification-row">
+      <span>显示线下通知</span>
+      <input type="checkbox" id="notif-offline" data-field="offline_notifications">
+      <span class="telegram-switch"></span>
+    </label>
+    <label class="notification-row">
+      <span>全部账号</span>
+      <input type="checkbox" id="notif-all-accounts" data-field="all_accounts_notifications">
+      <span class="telegram-switch"></span>
+    </label>
+    <button type="button" class="notification-link-row" onclick="enablePrivateNotifications()">
+      <i data-lucide="bell"></i>
+      <span>启用私聊</span>
+    </button>
+  </section>
 
-  <!-- Permission Banner -->
-  <div class="px-4 py-3 bg-blue-50/50 dark:bg-blue-950/20 border-b border-blue-200 dark:border-blue-900/30">
-    <div class="flex items-center space-x-3">
-      <i data-lucide="bell" class="w-5 h-5 text-blue-500 flex-shrink-0"></i>
-      <div class="flex-1">
-        <p class="text-sm font-semibold text-textMain">Desktop Notifications</p>
-        <p class="text-[10px] text-textSecondary">Enable browser notifications for new messages</p>
+  <p class="notification-hint">
+    Give Telegram permission to send notifications.<br>
+    You may need to refresh the page to see the changes.
+  </p>
+
+  <section class="notification-card">
+    <h3>音效</h3>
+    <label class="notification-row">
+      <span>通知音</span>
+      <input type="checkbox" id="notif-sound" data-sound-field="notification_sound">
+      <span class="telegram-switch"></span>
+    </label>
+    <div class="notification-volume-row">
+      <div class="notification-volume-label">
+        <span>音量</span>
+        <button type="button" id="notif-volume-val" onclick="testNotificationVolume()">80%</button>
       </div>
-      <button id="notif-permission-btn" onclick="requestNotifPermission()"
-        class="px-3 py-1.5 text-xs font-semibold bg-blue-500 text-white rounded-custom-md hover:opacity-90 transition-opacity">
-        Enable
-      </button>
+      <input type="range" min="0" max="100" value="80" id="notif-volume" data-field="volume">
     </div>
-  </div>
+  </section>
 
-  <!-- Master Toggles -->
-  <div class="px-4 py-3 space-y-4">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg">
-          <i data-lucide="bell-off" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Offline Notifications</span>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" id="notif-offline" onchange="saveNotifSetting()" checked>
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
+  <p class="notification-hint">Drag and release or click to test the volume.</p>
 
-    <div class="flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg">
-          <i data-lucide="monitor" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Show Notifications from All Accounts</span>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" id="notif-all-accounts" onchange="saveNotifSetting()">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-  </div>
+  <section class="notification-card compact">
+    <h3>声音特效</h3>
+    <label class="notification-row is-highlighted">
+      <span>消息已发送</span>
+      <input type="checkbox" id="notif-sent-sound" data-sound-field="message_sent_sound">
+      <span class="telegram-switch"></span>
+    </label>
+  </section>
 
-  <!-- Sound Settings -->
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Sound</h4>
+  <section class="notification-card compact">
+    <h3>私聊</h3>
+    <label class="notification-row">
+      <span>私聊通知</span>
+      <input type="checkbox" id="notif-private" data-field="private_chat_notifications">
+      <span class="telegram-switch"></span>
+    </label>
+    <label class="notification-row">
+      <span>消息预览</span>
+      <input type="checkbox" id="notif-private-preview" data-field="message_preview_private">
+      <span class="telegram-switch"></span>
+    </label>
+  </section>
 
-    <div class="flex items-center justify-between">
-      <span class="text-sm font-medium text-textMain">Notification Sound</span>
-      <label class="toggle-switch">
-        <input type="checkbox" id="notif-sound" onchange="saveNotifSetting()" checked>
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
+  <section class="notification-card compact">
+    <h3>群组</h3>
+    <label class="notification-row">
+      <span>群组通知</span>
+      <input type="checkbox" id="notif-groups" data-field="group_chat_notifications">
+      <span class="telegram-switch"></span>
+    </label>
+    <label class="notification-row">
+      <span>消息预览</span>
+      <input type="checkbox" id="notif-groups-preview" data-field="message_preview_group">
+      <span class="telegram-switch"></span>
+    </label>
+  </section>
 
-    <div class="space-y-2">
-      <div class="flex items-center justify-between">
-        <span class="text-sm text-textMain">Volume</span>
-        <span id="notif-volume-val" class="text-xs font-bold text-brand-light dark:text-brand-dark">80%</span>
-      </div>
-      <input type="range" min="0" max="100" value="80" id="notif-volume"
-        class="w-full h-1.5 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-brand-light dark:accent-brand-dark"
-        oninput="updateNotifVolume(this.value)">
-    </div>
+  <section class="notification-card compact">
+    <h3>频道</h3>
+    <label class="notification-row">
+      <span>频道通知</span>
+      <input type="checkbox" id="notif-channel" data-field="channel_notifications">
+      <span class="telegram-switch"></span>
+    </label>
+    <label class="notification-row">
+      <span>消息预览</span>
+      <input type="checkbox" id="notif-channel-preview" data-field="message_preview_channel">
+      <span class="telegram-switch"></span>
+    </label>
+  </section>
 
-    <div class="flex items-center justify-between">
-      <span class="text-sm font-medium text-textMain">Message Sent Sound</span>
-      <label class="toggle-switch">
-        <input type="checkbox" id="notif-sent-sound" onchange="saveNotifSetting()" checked>
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-  </div>
-
-  <!-- Per-Chat-Type Notifications -->
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Chat Notifications</h4>
-
-    <!-- Private Chats -->
-    <div class="p-3 bg-bgSearch rounded-custom-md space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-2">
-          <i data-lucide="user" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm font-medium text-textMain">Private Chats</span>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox" id="notif-private" onchange="saveNotifSetting()" checked>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="flex items-center justify-between pl-6">
-        <span class="text-xs text-textSecondary">Message Preview</span>
-        <label class="toggle-switch">
-          <input type="checkbox" id="notif-private-preview" onchange="saveNotifSetting()" checked>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-
-    <!-- Groups -->
-    <div class="p-3 bg-bgSearch rounded-custom-md space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-2">
-          <i data-lucide="users" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm font-medium text-textMain">Groups</span>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox" id="notif-groups" onchange="saveNotifSetting()" checked>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="flex items-center justify-between pl-6">
-        <span class="text-xs text-textSecondary">Message Preview</span>
-        <label class="toggle-switch">
-          <input type="checkbox" id="notif-groups-preview" onchange="saveNotifSetting()" checked>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-
-    <!-- Channels (placeholder) -->
-    <div class="p-3 bg-bgSearch rounded-custom-md space-y-3 opacity-60">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-2">
-          <i data-lucide="radio" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm font-medium text-textMain">Channels</span>
-          <span class="text-[9px] bg-zinc-200 dark:bg-zinc-700 text-textSecondary px-1.5 py-0.5 rounded">Phase 3</span>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox" disabled>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-  </div>
-
-  <!-- Other Notifications -->
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Other</h4>
-
-    <div class="flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg">
-          <i data-lucide="user-plus" class="w-4 h-4"></i>
-        </div>
-        <div class="flex-1 leading-snug">
-          <div class="text-sm font-medium text-textMain">Contact Joined</div>
-          <div class="text-[10px] text-textSecondary">Notify when a contact joins iChat</div>
-        </div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" id="notif-contact-joined" onchange="saveNotifSetting()" checked>
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-  </div>
-
+  <section class="notification-card compact">
+    <h3>其它</h3>
+    <label class="notification-row">
+      <span>联系人已加入 Telegram</span>
+      <input type="checkbox" id="notif-contact-joined" data-field="contact_join_notifications">
+      <span class="telegram-switch"></span>
+    </label>
+  </section>
 </div>
 
 <style>
-  .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
-  .toggle-switch input { opacity: 0; width: 0; height: 0; }
-  .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; border-radius: 24px; transition: .3s; }
-  .toggle-switch input:checked + .toggle-slider { background-color: var(--color-primary); }
-  .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
-  .toggle-slider:before { content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
-  .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
+  .notification-settings-view {
+    padding: 14px 18px 22px;
+    background: #f4f4f5;
+    min-height: 100%;
+  }
+
+  .notification-card {
+    width: 100%;
+    padding: 20px 22px 18px;
+    border-radius: 24px;
+    background: #ffffff;
+    box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06);
+  }
+
+  .notification-card + .notification-card {
+    margin-top: 20px;
+  }
+
+  .notification-card.compact {
+    padding: 18px 12px 10px 22px;
+  }
+
+  .notification-card h3 {
+    margin: 0 0 16px;
+    color: #3390ec;
+    font-size: 18px;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+
+  .notification-row {
+    min-height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    color: #111827;
+    font-size: 17px;
+    line-height: 1.2;
+    font-weight: 400;
+    cursor: pointer;
+  }
+
+  .notification-card.compact .notification-row {
+    padding: 0 10px 0 0;
+  }
+
+  .notification-row.is-highlighted {
+    min-height: 58px;
+    margin-left: -10px;
+    padding-left: 20px !important;
+    border-radius: 18px;
+    background: #f4f4f5;
+  }
+
+  .notification-link-row {
+    min-height: 48px;
+    border: 0;
+    margin-top: 4px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 24px;
+    color: #3390ec;
+    background: transparent;
+    font-size: 17px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .notification-link-row svg {
+    width: 26px;
+    height: 26px;
+    stroke-width: 2.1;
+  }
+
+  .notification-hint {
+    margin: 12px 22px 22px;
+    color: #707579;
+    font-size: 16px;
+    line-height: 1.28;
+  }
+
+  .notification-volume-row {
+    padding-top: 12px;
+  }
+
+  .notification-volume-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    color: #111827;
+    font-size: 17px;
+  }
+
+  #notif-volume-val {
+    border: 0;
+    color: #707579;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  #notif-volume {
+    width: 100%;
+    height: 3px;
+    accent-color: #3390ec;
+    cursor: pointer;
+  }
+
+  .notification-row > input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .telegram-switch {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: #e9ecef;
+    transition: background-color 0.16s ease;
+    flex: 0 0 auto;
+  }
+
+  .telegram-switch::before {
+    content: "";
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    left: 1px;
+    top: 1px;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+    transition: transform 0.16s ease;
+  }
+
+  .notification-row input:checked + .telegram-switch {
+    background: #3390ec;
+  }
+
+  .notification-row input:checked + .telegram-switch::before {
+    transform: translateX(18px);
+  }
+
+  .notification-row.is-disabled {
+    color: #a5acb3;
+  }
+
+  .notification-row.is-disabled .telegram-switch {
+    opacity: 0.62;
+  }
+
+  [data-theme="dark"] .notification-settings-view {
+    background: #181818;
+  }
+
+  [data-theme="dark"] .notification-card {
+    background: #212121;
+  }
+
+  [data-theme="dark"] .notification-row,
+  [data-theme="dark"] .notification-volume-label {
+    color: #f1f5f9;
+  }
+
+  [data-theme="dark"] .notification-row.is-highlighted {
+    background: #2b2b2b;
+  }
 </style>
 
 <script>
-  var NOTIF_DEFAULTS = {
-    offline: true, allAccounts: false, sound: true, volume: 80, sentSound: true,
-    private: true, privatePreview: true, groups: true, groupsPreview: true,
-    contactJoined: true
-  };
+  var NOTIF_API_URL = '/api/settings/notifications/';
+  var NOTIF_UPDATE_URL = '/api/settings/notifications/update/';
+  var notifSaveTimer = null;
+  var notifSettingsLoaded = false;
+  var notifAudioCtx = null;
 
-  function loadNotifSettings() {
-    try { return JSON.parse(localStorage.getItem('ichat_notif_settings')) || {}; } catch(e) { return {}; }
+  function notifCsrfToken() {
+    if (typeof getCookie === 'function') return getCookie('csrftoken') || '';
+    var match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
   }
-  function saveNotifSetting() {
-    var s = {};
-    ['offline','allAccounts','sound','sentSound','private','privatePreview','groups','groupsPreview','contactJoined'].forEach(function(k) {
-      var el = document.getElementById('notif-' + k.replace(/([A-Z])/g, '-$1').toLowerCase());
-      if (el) s[k] = el.checked;
+
+  function notificationPayloadFromUi() {
+    var payload = {};
+    document.querySelectorAll('.notification-settings-view input[data-field]').forEach(function(input) {
+      if (input.type === 'checkbox') {
+        payload[input.dataset.field] = input.checked;
+      } else if (input.type === 'range') {
+        payload[input.dataset.field] = parseInt(input.value, 10);
+      }
     });
-    s.volume = parseInt(document.getElementById('notif-volume').value);
-    localStorage.setItem('ichat_notif_settings', JSON.stringify(s));
+    document.querySelectorAll('.notification-settings-view input[data-sound-field]').forEach(function(input) {
+      payload[input.dataset.soundField] = input.checked ? 'default' : 'off';
+    });
+    return payload;
   }
-  function applyNotifSettings() {
-    var s = loadNotifSettings();
-    var d = NOTIF_DEFAULTS;
-    document.getElementById('notif-offline').checked = s.offline !== undefined ? s.offline : d.offline;
-    document.getElementById('notif-all-accounts').checked = s.allAccounts !== undefined ? s.allAccounts : d.allAccounts;
-    document.getElementById('notif-sound').checked = s.sound !== undefined ? s.sound : d.sound;
-    document.getElementById('notif-sent-sound').checked = s.sentSound !== undefined ? s.sentSound : d.sentSound;
-    document.getElementById('notif-private').checked = s.private !== undefined ? s.private : d.private;
-    document.getElementById('notif-private-preview').checked = s.privatePreview !== undefined ? s.privatePreview : d.privatePreview;
-    document.getElementById('notif-groups').checked = s.groups !== undefined ? s.groups : d.groups;
-    document.getElementById('notif-groups-preview').checked = s.groupsPreview !== undefined ? s.groupsPreview : d.groupsPreview;
-    document.getElementById('notif-contact-joined').checked = s.contactJoined !== undefined ? s.contactJoined : d.contactJoined;
-    var vol = s.volume !== undefined ? s.volume : d.volume;
-    document.getElementById('notif-volume').value = vol;
-    document.getElementById('notif-volume-val').textContent = vol + '%';
+
+  function applyNotificationSettings(data) {
+    var fieldMap = {
+      display_notifications: 'notif-display',
+      offline_notifications: 'notif-offline',
+      all_accounts_notifications: 'notif-all-accounts',
+      private_chat_notifications: 'notif-private',
+      group_chat_notifications: 'notif-groups',
+      channel_notifications: 'notif-channel',
+      message_preview_private: 'notif-private-preview',
+      message_preview_group: 'notif-groups-preview',
+      message_preview_channel: 'notif-channel-preview',
+      contact_join_notifications: 'notif-contact-joined'
+    };
+    Object.keys(fieldMap).forEach(function(field) {
+      var el = document.getElementById(fieldMap[field]);
+      if (el) el.checked = !!data[field];
+    });
+
+    var sound = document.getElementById('notif-sound');
+    var sentSound = document.getElementById('notif-sent-sound');
+    if (sound) sound.checked = data.notification_sound !== 'off';
+    if (sentSound) sentSound.checked = data.message_sent_sound !== 'off';
+
+    var volume = document.getElementById('notif-volume');
+    var volumeVal = document.getElementById('notif-volume-val');
+    var value = data.volume === undefined ? 80 : data.volume;
+    if (volume) volume.value = value;
+    if (volumeVal) volumeVal.textContent = value + '%';
+
+    syncBrowserNotificationState();
   }
-  function updateNotifVolume(val) {
-    document.getElementById('notif-volume-val').textContent = val + '%';
-    saveNotifSetting();
+
+  async function loadNotificationSettings() {
+    try {
+      var response = await fetch(NOTIF_API_URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      if (!response.ok) throw new Error('load_failed');
+      var data = await response.json();
+      applyNotificationSettings(data);
+      notifSettingsLoaded = true;
+    } catch (error) {
+      if (window.showToast) window.showToast('加载通知设置失败');
+    }
   }
-  function requestNotifPermission() {
-    if (!('Notification' in window)) { window.showToast('Notifications not supported in this browser'); return; }
-    Notification.requestPermission().then(function(p) {
-      var btn = document.getElementById('notif-permission-btn');
-      if (p === 'granted') { btn.textContent = 'Enabled'; btn.classList.replace('bg-blue-500','bg-green-500'); btn.disabled = true; }
-      else { window.showToast('Notification permission denied'); }
+
+  async function saveNotificationSettings(partial) {
+    var payload = partial || notificationPayloadFromUi();
+    var response = await fetch(NOTIF_UPDATE_URL, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': notifCsrfToken(),
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify(payload)
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!response.ok) throw new Error(data.error || 'save_failed');
+    applyNotificationSettings(data);
+    return data;
+  }
+
+  function queueNotificationSave() {
+    if (!notifSettingsLoaded) return;
+    clearTimeout(notifSaveTimer);
+    notifSaveTimer = setTimeout(function() {
+      saveNotificationSettings().catch(function(error) {
+        if (window.showToast) window.showToast(error.message || '保存通知设置失败');
+      });
+    }, 180);
+  }
+
+  function updateNotificationVolumeLabel() {
+    var volume = document.getElementById('notif-volume');
+    var label = document.getElementById('notif-volume-val');
+    if (volume && label) label.textContent = volume.value + '%';
+  }
+
+  function testNotificationVolume() {
+    var volume = parseInt(document.getElementById('notif-volume').value || '80', 10) / 100;
+    try {
+      notifAudioCtx = notifAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      var osc = notifAudioCtx.createOscillator();
+      var gain = notifAudioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.value = Math.max(0.02, volume * 0.25);
+      osc.connect(gain);
+      gain.connect(notifAudioCtx.destination);
+      osc.start();
+      osc.stop(notifAudioCtx.currentTime + 0.12);
+    } catch (error) {
+      if (window.showToast) window.showToast('无法播放测试音');
+    }
+  }
+
+  function syncBrowserNotificationState() {
+    var display = document.getElementById('notif-display');
+    if (!display || !('Notification' in window)) return;
+    if (Notification.permission === 'denied') {
+      display.checked = false;
+      display.closest('.notification-row').classList.add('is-disabled');
+    } else {
+      display.closest('.notification-row').classList.remove('is-disabled');
+    }
+  }
+
+  async function requestNotificationPermissionIfNeeded() {
+    if (!('Notification' in window)) {
+      if (window.showToast) window.showToast('当前浏览器不支持通知');
+      return false;
+    }
+    if (Notification.permission === 'default') {
+      var permission = await Notification.requestPermission();
+      return permission === 'granted';
+    }
+    return Notification.permission === 'granted';
+  }
+
+  async function enablePrivateNotifications() {
+    var granted = await requestNotificationPermissionIfNeeded();
+    if (!granted) {
+      if (window.showToast) window.showToast('浏览器通知权限未开启');
+      syncBrowserNotificationState();
+      return;
+    }
+    ['notif-display', 'notif-private', 'notif-private-preview'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.checked = true;
+    });
+    try {
+      await saveNotificationSettings({
+        display_notifications: true,
+        private_chat_notifications: true,
+        message_preview_private: true
+      });
+      if (window.showToast) window.showToast('私聊通知已启用');
+    } catch (error) {
+      if (window.showToast) window.showToast('启用私聊通知失败');
+    }
+  }
+
+  document.querySelectorAll('.notification-settings-view input[type="checkbox"]').forEach(function(input) {
+    input.addEventListener('change', async function() {
+      if (input.id === 'notif-display' && input.checked) {
+        var granted = await requestNotificationPermissionIfNeeded();
+        if (!granted) input.checked = false;
+      }
+      queueNotificationSave();
+    });
+  });
+
+  var volumeInput = document.getElementById('notif-volume');
+  if (volumeInput) {
+    volumeInput.addEventListener('input', updateNotificationVolumeLabel);
+    volumeInput.addEventListener('change', function() {
+      updateNotificationVolumeLabel();
+      queueNotificationSave();
+      testNotificationVolume();
     });
   }
-  applyNotifSettings();
+
+  loadNotificationSettings();
 </script>

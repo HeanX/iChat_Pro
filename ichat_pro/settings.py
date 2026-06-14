@@ -87,6 +87,11 @@ ASGI_APPLICATION = 'ichat_pro.asgi.application'
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 # In production, set DATABASE_URL=postgres://USER:PASSWORD@HOST:PORT/NAME
 _DATABASE_URL = os.environ.get('DATABASE_URL', '')
+_SQLITE_OPTIONS = {
+    # WebSocket read receipts can trigger several short writes at once during
+    # local development. Give SQLite time to wait for the active writer.
+    'timeout': 20,
+}
 if _DATABASE_URL:
     import re as _re
     _m = _re.match(
@@ -116,6 +121,7 @@ if _DATABASE_URL:
             'default': {
                 'ENGINE': 'django.db.backends.sqlite3',
                 'NAME': BASE_DIR / 'db.sqlite3',
+                'OPTIONS': _SQLITE_OPTIONS,
             }
         }
 else:
@@ -123,6 +129,7 @@ else:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
+            'OPTIONS': _SQLITE_OPTIONS,
         }
     }
 

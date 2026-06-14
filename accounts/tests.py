@@ -949,6 +949,63 @@ class ProfileEditTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'pages/profile_edit_sidebar.html')
 
+    def test_profile_me_api_gets_current_profile(self):
+        self.alice.first_name = 'Alice'
+        self.alice.last_name = 'Smith'
+        self.alice.save(update_fields=['first_name', 'last_name'])
+        self.alice.profile.nickname = 'Ally'
+        self.alice.profile.bio = 'Hello'
+        self.alice.profile.save(update_fields=['nickname', 'bio'])
+
+        response = self.client.get(reverse('api-profile-me'))
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()['profile']
+        self.assertEqual(data['username'], 'alice')
+        self.assertEqual(data['first_name'], 'Alice')
+        self.assertEqual(data['last_name'], 'Smith')
+        self.assertEqual(data['nickname'], 'Ally')
+        self.assertEqual(data['bio'], 'Hello')
+
+    def test_profile_me_api_put_updates_profile(self):
+        response = self.client.put(
+            reverse('api-profile-me'),
+            data=json.dumps({
+                'username': 'alice_new',
+                'first_name': 'Alice',
+                'last_name': 'Updated',
+                'nickname': 'Ally',
+                'bio': 'Updated bio',
+                'birthday': '2000-01-02',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.alice.refresh_from_db()
+        self.alice.profile.refresh_from_db()
+        self.assertEqual(self.alice.username, 'alice_new')
+        self.assertEqual(self.alice.first_name, 'Alice')
+        self.assertEqual(self.alice.last_name, 'Updated')
+        self.assertEqual(self.alice.profile.nickname, 'Ally')
+        self.assertEqual(self.alice.profile.bio, 'Updated bio')
+        self.assertEqual(str(self.alice.profile.birthday), '2000-01-02')
+
+    def test_profile_me_api_post_accepts_sidebar_form_data(self):
+        response = self.client.post(reverse('api-profile-me'), {
+            'username': 'alice',
+            'first_name': 'Alice',
+            'last_name': 'Form',
+            'nickname': 'Ally',
+            'bio': 'Saved from sidebar',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.alice.refresh_from_db()
+        self.alice.profile.refresh_from_db()
+        self.assertEqual(self.alice.last_name, 'Form')
+        self.assertEqual(self.alice.profile.bio, 'Saved from sidebar')
+
 
 # ─── Groups ───────────────────────────────────────────────────────────
 
@@ -1195,16 +1252,18 @@ class NotificationSettingsApiTests(TestCase):
         resp = self._get()
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
+        self.assertTrue(data['display_notifications'])
         self.assertTrue(data['offline_notifications'])
         self.assertEqual(data['notification_sound'], 'default')
         self.assertEqual(data['volume'], 80)
 
     def test_update_changes_settings(self):
-        resp = self._put({'volume': 50, 'notification_sound': 'chime'})
+        resp = self._put({'volume': 50, 'notification_sound': 'off', 'display_notifications': False})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
+        self.assertFalse(data['display_notifications'])
         self.assertEqual(data['volume'], 50)
-        self.assertEqual(data['notification_sound'], 'chime')
+        self.assertEqual(data['notification_sound'], 'off')
 
     def test_get_reflects_update(self):
         self._put({'private_chat_notifications': False})
@@ -1223,6 +1282,15 @@ class NotificationSettingsApiTests(TestCase):
         first = self._get()
         second = self._get()
         self.assertEqual(first.json(), second.json())
+
+    def test_update_clamps_volume(self):
+        resp = self._put({'volume': 150})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['volume'], 100)
+
+    def test_update_rejects_invalid_sound(self):
+        resp = self._put({'notification_sound': 'chime'})
+        self.assertEqual(resp.status_code, 400)
 
 # ── P2 T30: QR card API ─────────────────────────────────────────
 

@@ -1,179 +1,125 @@
-{# settings_home.html — P2 T02 Settings Center Home Page #}
-<div class="divide-y divide-borderColor/60">
+{# settings_home.html - Telegram-style settings home #}
+<div class="settings-template-body">
 
-  <!-- User Profile Hero -->
-  <div class="flex flex-col items-center py-6 px-4 text-center bg-search-op-10">
-    <div class="relative group cursor-pointer" onclick="navigateSidebar('settings-profile')">
-      <div class="w-20 h-20 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90">
-        {{ request.user.username|slice:":1"|upper }}
-      </div>
-      <div class="absolute inset-0 w-20 h-20 rounded-full bg-black/40 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
-        <i data-lucide="camera" class="w-6 h-6"></i>
-      </div>
+  <section class="settings-template-profile" aria-label="Profile summary">
+    <button type="button" class="settings-template-avatar-wrap" onclick="navigateSidebar('settings-profile')" title="Edit Profile">
+      {% if settings_avatar_url %}
+      <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="settings-template-avatar-image">
+      {% else %}
+      <span class="settings-template-avatar-fallback">{{ settings_initials }}</span>
+      {% endif %}
+      <span class="settings-template-avatar-overlay">
+        <i data-lucide="camera"></i>
+      </span>
+    </button>
+    <h3 class="settings-template-name">{{ settings_display_name }}</h3>
+    <p class="settings-template-status {% if settings_is_online %}is-online{% endif %}">{{ settings_presence_label }}</p>
+  </section>
+
+  <section class="settings-template-card settings-template-account" aria-label="Account details">
+    <div class="settings-template-row is-static">
+      <span class="settings-template-row-icon">
+        <i data-lucide="phone"></i>
+      </span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">{{ settings_phone_display }}</span>
+        <span class="settings-template-row-subtitle" data-i18n="phone_number">Phone Number</span>
+      </span>
     </div>
-    <h3 class="text-base font-bold text-textMain mt-3">{{ request.user.username }}</h3>
-    <p class="text-xs text-[#31B545] font-semibold mt-0.5" data-i18n="online">Online</p>
-  </div>
+  </section>
 
-  <!-- Account Info Card -->
-  <div class="px-4 py-3 space-y-3">
-    <div class="flex items-center space-x-3.5">
-      <div class="text-textSecondary"><i data-lucide="phone" class="w-4.5 h-4.5"></i></div>
-      <div class="flex-1 leading-snug">
-        <div class="text-sm font-semibold text-textMain">+86 188 **** 8888</div>
-        <div class="text-[10px] text-textSecondary" data-i18n="phone_number">Phone Number</div>
-      </div>
-    </div>
-    <div class="flex items-center space-x-3.5">
-      <div class="text-textSecondary"><i data-lucide="at-sign" class="w-4.5 h-4.5"></i></div>
-      <div class="flex-1 leading-snug">
-        <div class="text-sm font-semibold text-textMain">@{{ request.user.username|lower }}</div>
-        <div class="text-[10px] text-textSecondary" data-i18n="username">Username</div>
-      </div>
-    </div>
-    <div class="flex items-center space-x-3.5">
-      <div class="text-textSecondary"><i data-lucide="mail" class="w-4.5 h-4.5"></i></div>
-      <div class="flex-1 leading-snug">
-        <div class="text-sm font-semibold text-textMain">{{ request.user.email|default:"user@ichat.pro" }}</div>
-        <div class="text-[10px] text-textSecondary" data-i18n="email_address">Email Address</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Settings Entries -->
-  <div>
-    <button onclick="navigateSidebar('general-settings')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg">
-          <i data-lucide="palette" class="w-4 h-4"></i>
-        </div>
-        <div class="flex-1 leading-snug">
-          <div class="text-sm font-medium text-textMain">General Settings</div>
-          <div class="text-[10px] text-textSecondary">Appearance, theme, text size, wallpaper</div>
-        </div>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+  <section class="settings-template-card settings-template-menu" aria-label="Settings categories">
+    <button type="button" onclick="navigateSidebar('notifications')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="bell"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Notifications and Sounds</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button onclick="navigateSidebar('notifications')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg">
-          <i data-lucide="bell" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Notifications and Sounds</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    <button type="button" onclick="navigateSidebar('data-storage')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="database"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Data and Storage</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button onclick="navigateSidebar('data-storage')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg">
-          <i data-lucide="database" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Data and Storage</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    <button type="button" onclick="navigateSidebar('privacy-security')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="lock"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Privacy and Security</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button onclick="navigateSidebar('privacy-security')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-red-500/10 text-red-600 dark:text-red-400 rounded-lg">
-          <i data-lucide="shield" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Privacy and Security</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    <button type="button" onclick="navigateSidebar('general-settings')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="settings"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">General Settings</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button onclick="navigateSidebar('chat-folders')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg">
-          <i data-lucide="folder" class="w-4 h-4"></i>
-        </div>
-        <div class="flex-1 leading-snug">
-          <div class="text-sm font-medium text-textMain">Chat Folders</div>
-          <div class="text-[10px] text-textSecondary" data-i18n="system_preferences">Customize folder appearance</div>
-        </div>
-        <span class="text-[10px] text-textSecondary">5 chats</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary ml-2"></i>
+    <button type="button" onclick="navigateSidebar('chat-folders')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="folder"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Chat Folders</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button onclick="navigateSidebar('chat-folders')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg">
-          <i data-lucide="sticker" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Stickers and Emoji</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    <button type="button" onclick="navigateSidebar('chat-folders')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="sticker"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Stickers and Emoji</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <div class="border-t border-borderColor/40"></div>
-
-    <button onclick="showToast('Speakers and camera settings coming in Phase 2')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 rounded-lg">
-          <i data-lucide="video" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Speakers and Camera</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    <button type="button" onclick="showToast('Speakers and camera settings coming in Phase 2')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="video"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Speakers and Camera</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button onclick="navigateSidebar('sessions-shortcuts')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg">
-          <i data-lucide="smartphone" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Devices</span>
-      </div>
-      <div class="flex items-center space-x-1.5">
-        <span class="text-[10px] text-textSecondary">3 active</span>
-        <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-      </div>
+    <button type="button" onclick="navigateSidebar('sessions-shortcuts')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="monitor-smartphone"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Devices</span>
+      </span>
+      <span class="settings-template-row-value">{{ settings_active_sessions_count }}</span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button onclick="toggleLanguage()" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-lg">
-          <i data-lucide="languages" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain" data-i18n="language_mode">Language / 语言</span>
-      </div>
-      <div class="flex items-center space-x-1.5">
-        <span id="lang-display-val" class="text-[10px] text-brand-light dark:text-brand-dark font-semibold" data-i18n="lang_display">English</span>
-        <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
-      </div>
+    <button type="button" onclick="toggleLanguage()" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="languages"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Language / &#35821;&#35328;</span>
+      </span>
+      <span id="lang-display-val" class="settings-template-row-value" data-i18n="lang_display">English</span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button onclick="navigateSidebar('sessions-shortcuts')" class="settings-entry w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
-      <div class="flex items-center space-x-3.5">
-        <div class="p-2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg">
-          <i data-lucide="command" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium text-textMain">Keyboard Shortcuts</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+    <button type="button" onclick="navigateSidebar('sessions-shortcuts')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="keyboard"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Keyboard Shortcuts</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
-  </div>
+  </section>
 
-  <!-- Bottom: Encryption & Logout -->
-  <div class="px-4 py-3 space-y-1">
-    <button onclick="navigateSidebar('settings')" class="settings-entry w-full px-3 py-2.5 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors rounded-custom-md">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="key" class="w-4 h-4 text-textSecondary"></i>
-        <span class="text-sm text-textMain">Manage Cryptographic Keys</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4 text-textSecondary"></i>
+  <section class="settings-template-card settings-template-danger" aria-label="Account actions">
+    <button type="button" onclick="navigateSidebar('settings')" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="key-round"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title">Manage Cryptographic Keys</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
-
-    <button onclick="showLogoutConfirmModal(event)" class="settings-entry w-full px-3 py-2.5 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors rounded-custom-md">
-      <div class="flex items-center space-x-3">
-        <i data-lucide="log-out" class="w-4 h-4 text-red-500"></i>
-        <span class="text-sm text-red-500" data-i18n="menu_logout">Sign Out</span>
-      </div>
-    </button>
-  </div>
+  </section>
 
 </div>

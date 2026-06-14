@@ -21,15 +21,19 @@
     <!-- User Profile Hero -->
     <div class="flex flex-col items-center py-6 px-4 text-center bg-search-op-10">
       <div class="relative group cursor-pointer">
+        {% if settings_avatar_url %}
+        <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="w-20 h-20 rounded-full object-cover shadow-md transition-all group-hover:opacity-90">
+        {% else %}
         <div class="w-20 h-20 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90">
-          {{ request.user.username|slice:":1"|upper }}
+          {{ settings_initials }}
         </div>
+        {% endif %}
         <div class="absolute inset-0 w-20 h-20 rounded-full bg-black/40 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
           <i data-lucide="camera" class="w-6 h-6"></i>
         </div>
       </div>
-      <h3 class="text-base font-bold text-textMain mt-3">{{ request.user.username }}</h3>
-      <p class="text-xs text-[#31B545] font-semibold mt-0.5" data-i18n="online">Online</p>
+      <h3 class="text-base font-bold text-textMain mt-3">{{ settings_display_name }}</h3>
+      <p class="text-xs {% if settings_is_online %}text-[#31B545]{% else %}text-textSecondary{% endif %} font-semibold mt-0.5">{{ settings_presence_label }}</p>
     </div>
 
     <!-- Contact Info Section -->
@@ -41,7 +45,7 @@
         <div class="flex items-center space-x-3.5">
           <div class="text-textSecondary"><i data-lucide="phone" class="w-4.5 h-4.5"></i></div>
           <div class="flex-1 leading-snug">
-            <div class="text-sm font-semibold text-textMain">+86 188 **** 8888</div>
+            <div class="text-sm font-semibold text-textMain">{{ settings_phone_display }}</div>
             <div class="text-[10px] text-textSecondary" data-i18n="phone_number">Phone Number</div>
           </div>
         </div>
@@ -50,7 +54,7 @@
         <div class="flex items-center space-x-3.5">
           <div class="text-textSecondary"><i data-lucide="at-sign" class="w-4.5 h-4.5"></i></div>
           <div class="flex-1 leading-snug">
-            <div class="text-sm font-semibold text-textMain">@{{ request.user.username|lower }}</div>
+            <div class="text-sm font-semibold text-textMain">{{ settings_username_display }}</div>
             <div class="text-[10px] text-textSecondary" data-i18n="username">Username</div>
           </div>
         </div>
@@ -59,7 +63,7 @@
         <div class="flex items-center space-x-3.5">
           <div class="text-textSecondary"><i data-lucide="mail" class="w-4.5 h-4.5"></i></div>
           <div class="flex-1 leading-snug">
-            <div class="text-sm font-semibold text-textMain">{{ request.user.email|default:"user@ichat.pro" }}</div>
+            <div class="text-sm font-semibold text-textMain">{{ settings_email_display }}</div>
             <div class="text-[10px] text-textSecondary" data-i18n="email_address">Email Address</div>
           </div>
         </div>
@@ -229,7 +233,7 @@
             <i data-lucide="smartphone" class="w-4 h-4"></i>
           </div>
           <div class="flex-1 leading-snug">
-            <div class="text-sm font-semibold text-textMain" data-i18n="active_sessions">Active Sessions (3)</div>
+            <div class="text-sm font-semibold text-textMain">{{ settings_active_sessions_title }}</div>
             <div class="text-[10px] text-textSecondary" data-i18n="active_sessions_desc">Manage all devices logged into your account</div>
           </div>
         </button>
@@ -241,7 +245,7 @@
           </div>
           <div class="flex-1 leading-snug">
             <div class="text-sm font-semibold text-textMain" data-i18n="blocked_contacts">Blocked Contacts</div>
-            <div class="text-[10px] text-textSecondary" data-i18n="blocked_contacts_desc">No users currently blocked</div>
+            <div class="text-[10px] text-textSecondary">{{ settings_blocked_label }}</div>
           </div>
         </button>
       </div>

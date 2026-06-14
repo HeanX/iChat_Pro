@@ -1,0 +1,104 @@
+{# group_manage_sidebar.html — P2 T15 group chat management view #}
+<div id="group-manage-content" class="h-full flex flex-col">
+  <!-- Loading state -->
+  <div id="group-manage-loading" class="flex-1 flex items-center justify-center">
+    <div class="animate-spin w-6 h-6 border-2 border-brand-light border-t-transparent rounded-full"></div>
+  </div>
+
+  <!-- Loaded content -->
+  <div id="group-manage-loaded" class="hidden flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+
+    <!-- Group Hero (name + avatar + member count) -->
+    <div class="flex flex-col items-center text-center px-4 py-8 border-b border-borderColor/55 bg-search-op-10">
+      <div id="group-manage-avatar" class="w-24 h-24 rounded-full text-white flex items-center justify-center font-bold text-3xl shadow-md mb-4 cursor-pointer hover:opacity-90 transition-opacity" style="background-color:#5c6bc0"
+           onclick="groupManageEditAvatar()" title="Tap to change group avatar">
+        ??
+      </div>
+      <h2 id="group-manage-name" class="text-lg font-bold text-textMain cursor-pointer hover:underline"
+          onclick="groupManageEditName()" title="Tap to edit group name"></h2>
+      <p id="group-manage-member-count" class="text-sm text-textSecondary mt-1"></p>
+      <span id="group-manage-my-role" class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-bgSearch text-textSecondary mt-1.5"></span>
+    </div>
+
+    <!-- Group Announcement -->
+    <div class="px-4 py-4 border-b border-borderColor/60">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-xs font-bold text-textSecondary uppercase tracking-wider" data-i18n="group_announcement">Announcement</h3>
+        <div id="group-announcement-actions" class="hidden flex items-center space-x-1">
+          <button onclick="groupManageEditAnnouncement()" class="p-1 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain" title="Edit announcement">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+          </button>
+          <button onclick="groupManageRemoveAnnouncement()" class="p-1 rounded-full hover:bg-bgSearch text-textSecondary hover:text-red-500" title="Remove announcement">
+            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+      <div id="group-announcement-content" class="text-sm text-textMain bg-bgSearch rounded-custom-md p-3 border border-borderColor/30">
+        <span class="text-textSecondary italic">No announcement</span>
+      </div>
+      <div id="group-announcement-editor" class="hidden mt-2 space-y-2">
+        <textarea id="group-announcement-textarea" rows="3"
+          class="w-full px-3 py-2 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all resize-none"
+          placeholder="Write a group announcement..."></textarea>
+        <div class="flex justify-end space-x-2">
+          <button onclick="groupManageCancelEditAnnouncement()" class="px-3 py-1.5 text-xs font-semibold text-textSecondary hover:text-textMain rounded-custom-md hover:bg-bgSearch transition-colors">Cancel</button>
+          <button onclick="groupManageSaveAnnouncement()" class="px-3 py-1.5 text-xs font-semibold bg-brand-light dark:bg-brand-dark text-white rounded-custom-md hover:opacity-90 transition-opacity">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Member Search -->
+    <div class="px-4 py-3 border-b border-borderColor/60">
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-textSecondary pointer-events-none">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </span>
+        <input type="text" id="group-manage-member-search"
+          class="w-full pl-9 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark text-sm transition-all"
+          placeholder="Search members..."
+          oninput="groupManageFilterMembers(this.value)">
+      </div>
+    </div>
+
+    <!-- Member List -->
+    <div id="group-manage-members-section">
+      <div class="px-4 py-3">
+        <h3 id="group-manage-members-header" class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">Members</h3>
+        <div id="group-manage-members-list" class="space-y-2">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Group Settings (admin/owner only) -->
+    <div id="group-manage-settings-section" class="border-t border-borderColor/60 px-4 py-4 space-y-2 hidden">
+      <h3 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">Group Settings</h3>
+      <button onclick="groupManageMuteGroup()"
+        class="w-full py-2.5 border border-borderColor text-textSecondary rounded-custom-md text-sm font-semibold hover:bg-bgSearch transition-colors flex items-center justify-between px-3">
+        <span><i data-lucide="bell-off" class="w-4 h-4 inline mr-2"></i>Mute Group</span>
+        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+      </button>
+      <button onclick="groupManageAutoDelete()"
+        class="w-full py-2.5 border border-borderColor text-textSecondary rounded-custom-md text-sm font-semibold hover:bg-bgSearch transition-colors flex items-center justify-between px-3">
+        <span><i data-lucide="clock" class="w-4 h-4 inline mr-2"></i>Auto-Delete Messages</span>
+        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- Danger Zone: Leave / Disband Group -->
+    <div class="border-t border-borderColor/60 px-4 py-4 space-y-2">
+      <h3 class="text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">Danger Zone</h3>
+      <button id="group-manage-leave-btn" onclick="openLeaveGroupModal()"
+        class="w-full py-2.5 border border-borderColor text-textSecondary rounded-custom-md text-sm font-semibold hover:bg-red-50 hover:text-red-500 hover:border-red-300 dark:hover:bg-red-950/20 transition-colors">
+        <i data-lucide="log-out" class="w-4 h-4 inline mr-1.5"></i>
+        <span data-i18n="leave_group">Leave Group</span>
+      </button>
+      <button id="group-manage-disband-btn" onclick="openDisbandGroupModal()"
+        class="w-full py-2.5 border border-red-500/30 text-red-500 rounded-custom-md text-sm font-semibold hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+        <i data-lucide="trash-2" class="w-4 h-4 inline mr-1.5"></i>
+        <span data-i18n="disband_group">Disband Group</span>
+      </button>
+    </div>
+
+  </div>
+</div>

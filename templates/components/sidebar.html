@@ -1,4 +1,4 @@
-﻿<!-- sidebar.html - Sidebar Container for search, chat list, and settings panel -->
+<!-- sidebar.html - Sidebar Container for search, chat list, and settings panel -->
 <div id="sidebar-container" class="w-full md:w-[420px] border-r border-borderColor flex flex-col h-full bg-bgSidebar relative flex-shrink-0">
   
   <!-- View 1: Chats (Default view) -->
@@ -33,7 +33,7 @@
               <span data-i18n="menu_add_account">Add Account</span>
             </button>
             <!-- My Profile -->
-            <button id="menu-profile-btn" onclick="toggleMainMenu(event);" class="main-menu-item-custom">
+            <button id="menu-profile-btn" onclick="navigateSidebar('settings-home'); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="user"></i>
               <span data-i18n="menu_profile">My Profile</span>
             </button>
@@ -126,15 +126,27 @@
 
   <!-- View 2: Settings Home (P2 T02) -->
   <div id="sidebar-view-settings-home" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
-      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+    <div class="settings-home-header px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
+      <button onclick="navigateSidebar('chat')" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="settings">Settings</h2>
-      <div class="flex items-center space-x-1">
-        <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
+      <div class="settings-home-actions flex items-center space-x-1 relative">
+        <button onclick="showQRCodeModal()" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="QR Code">
+          <i data-lucide="qr-code" class="w-5 h-5"></i>
+        </button>
+        <button onclick="navigateSidebar('settings-profile')" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
           <i data-lucide="edit-3" class="w-5 h-5"></i>
         </button>
+        <button id="settings-home-more-btn" onclick="toggleSettingsHomeMoreMenu(event)" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="More">
+          <i data-lucide="more-vertical" class="w-5 h-5"></i>
+        </button>
+        <div id="settings-home-more-dropdown" class="hidden absolute right-0 top-full mt-1.5 w-[150px] bg-bgSidebar border border-borderColor/60 rounded-[14px] shadow-xl z-50 py-1 animate-fadeIn select-none">
+          <button type="button" onclick="showLogoutConfirmModal(event); toggleSettingsHomeMoreMenu(event, true);" class="menu-item-custom danger">
+            <i data-lucide="log-out"></i>
+            <span data-i18n="menu_logout">Sign Out</span>
+          </button>
+        </div>
       </div>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">
@@ -349,5 +361,18 @@
       <h2 class="text-lg font-bold text-textMain flex-1">Devices and Shortcuts</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/sessions_shortcuts.html' %}</div>
+  </div>
+
+  <!-- Birthday Privacy Settings -->
+  <div id="sidebar-view-settings-birthday" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Edit Profile">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <h2 class="text-lg font-bold text-textMain flex-1">Birthday</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">
+      {% include 'pages/birthday_settings.html' %}
+    </div>
   </div>
 </div>

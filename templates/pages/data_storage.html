@@ -1,794 +1,548 @@
-{# data_storage.html — P2 T05 Data & Storage Settings (complete) #}
-<div id="data-storage-settings" class="divide-y divide-borderColor/60">
+<div id="data-storage-settings" class="telegram-data-storage">
+  <style>
+    .telegram-data-storage {
+      --tg-blue: #3390ec;
+      --tg-card: #fff;
+      --tg-panel: #f4f4f5;
+      --tg-muted: #707579;
+      --tg-line: rgba(0, 0, 0, .07);
+      min-height: 100%;
+      padding: 14px 18px 22px;
+      background: var(--tg-panel);
+      color: #111;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
 
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 1: Storage Usage (category breakdown)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-3">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Storage Usage</h4>
+    .telegram-data-storage .storage-card {
+      margin-bottom: 14px;
+      padding: 20px 22px;
+      border-radius: 24px;
+      background: var(--tg-card);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
+    }
 
-    <div class="p-4 bg-bgSearch rounded-custom-md space-y-3">
-      <div id="storage-categories">
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-textSecondary">Images</span><span class="font-semibold text-textMain" id="sz-images">—</span>
-        </div>
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-textSecondary">Video files</span><span class="font-semibold text-textMain" id="sz-videos">—</span>
-        </div>
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-textSecondary">Stickers and emojis</span><span class="font-semibold text-textMain" id="sz-stickers">—</span>
-        </div>
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-textSecondary">Other</span><span class="font-semibold text-textMain" id="sz-other">—</span>
-        </div>
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-textSecondary">Cached video stream chunks</span><span class="font-semibold text-textMain" id="sz-video-stream">—</span>
-        </div>
-      </div>
+    .telegram-data-storage .storage-section-title {
+      margin: 0 0 16px;
+      color: var(--tg-blue);
+      font-size: 18px;
+      font-weight: 650;
+      line-height: 1.25;
+    }
 
-      <div class="h-2 bg-gray-200 dark:bg-zinc-700 rounded-full overflow-hidden mt-2">
-        <div id="storage-usage-bar" class="h-full bg-brand-light dark:bg-brand-dark rounded-full transition-all duration-500" style="width: 0%"></div>
-      </div>
-      <p class="text-[10px] text-textSecondary" id="storage-usage-text">Calculating…</p>
-    </div>
-  </div>
+    .telegram-data-storage .storage-row {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      align-items: center;
+      min-height: 54px;
+      gap: 12px;
+      color: #111;
+      font-size: 18px;
+      line-height: 1.25;
+    }
 
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 2: Auto-Download Policies
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-4">
-    <div class="flex items-center justify-between">
-      <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Auto-Download</h4>
-      <button onclick="resetAutoDownloadSettings()"
-        class="text-[10px] text-brand-light dark:text-brand-dark hover:underline font-semibold">
-        Reset Auto-Download Settings
-      </button>
-    </div>
+    .telegram-data-storage button.storage-row {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+    }
 
-    {# --- Mobile Data --- #}
-    <div class="space-y-2" data-auto-download-group="mobile_data">
-      <div class="flex items-center justify-between py-1 cursor-pointer"
-        onclick="toggleAutoDownloadGroup('mobile_data')">
-        <div class="flex items-center space-x-3">
-          <i data-lucide="signal" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm font-medium text-textMain">On Mobile Data</span>
-        </div>
-        <div class="flex items-center space-x-2">
-          <span class="text-[10px] text-textSecondary" id="mobile_data-summary">All off</span>
-          <i data-lucide="chevron-down" class="w-4 h-4 text-textSecondary transition-transform" id="chevron-mobile_data"></i>
-        </div>
-      </div>
-      <div id="auto-dl-mobile_data" class="hidden space-y-2 pl-9">
-        {% include 'components/auto_download_row.html' with network='mobile_data' type='photos' icon='image' label='Photos' %}
-        {% include 'components/auto_download_row.html' with network='mobile_data' type='videos' icon='video' label='Video files' %}
-        {% include 'components/auto_download_row.html' with network='mobile_data' type='files' icon='file' label='Files' %}
-      </div>
-    </div>
+    .telegram-data-storage .storage-row + .storage-row {
+      border-top: 1px solid var(--tg-line);
+    }
 
-    {# --- Wi-Fi --- #}
-    <div class="space-y-2" data-auto-download-group="wifi">
-      <div class="flex items-center justify-between py-1 cursor-pointer"
-        onclick="toggleAutoDownloadGroup('wifi')">
-        <div class="flex items-center space-x-3">
-          <i data-lucide="wifi" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm font-medium text-textMain">On Wi-Fi</span>
-        </div>
-        <div class="flex items-center space-x-2">
-          <span class="text-[10px] text-textSecondary" id="wifi-summary">All on</span>
-          <i data-lucide="chevron-down" class="w-4 h-4 text-textSecondary transition-transform" id="chevron-wifi"></i>
-        </div>
-      </div>
-      <div id="auto-dl-wifi" class="hidden space-y-2 pl-9">
-        {% include 'components/auto_download_row.html' with network='wifi' type='photos' icon='image' label='Photos' %}
-        {% include 'components/auto_download_row.html' with network='wifi' type='videos' icon='video' label='Video files' %}
-        {% include 'components/auto_download_row.html' with network='wifi' type='files' icon='file' label='Files' %}
-      </div>
-    </div>
+    .telegram-data-storage .storage-icon {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      color: var(--tg-muted);
+    }
 
-    {# --- Roaming --- #}
-    <div class="space-y-2" data-auto-download-group="roaming">
-      <div class="flex items-center justify-between py-1 cursor-pointer"
-        onclick="toggleAutoDownloadGroup('roaming')">
-        <div class="flex items-center space-x-3">
-          <i data-lucide="wifi-off" class="w-4 h-4 text-textSecondary"></i>
-          <span class="text-sm font-medium text-textMain">On Roaming</span>
-        </div>
-        <div class="flex items-center space-x-2">
-          <span class="text-[10px] text-textSecondary" id="roaming-summary">All off</span>
-          <i data-lucide="chevron-down" class="w-4 h-4 text-textSecondary transition-transform" id="chevron-roaming"></i>
-        </div>
-      </div>
-      <div id="auto-dl-roaming" class="hidden space-y-2 pl-9">
-        {% include 'components/auto_download_row.html' with network='roaming' type='photos' icon='image' label='Photos' %}
-        {% include 'components/auto_download_row.html' with network='roaming' type='videos' icon='video' label='Video files' %}
-        {% include 'components/auto_download_row.html' with network='roaming' type='files' icon='file' label='Files' %}
-      </div>
-    </div>
+    .telegram-data-storage .storage-icon svg {
+      width: 24px;
+      height: 24px;
+      stroke-width: 2;
+    }
 
-    {# --- Per-type file size limits --- #}
-    <div class="mt-3 pt-3 border-t border-borderColor/40">
-      <h5 class="text-[11px] font-semibold text-textSecondary uppercase tracking-wider mb-2">
-        Maximum File Size for Auto-Download
-      </h5>
-      <div class="space-y-2">
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-textSecondary">Photos</span>
-          <select data-storage-setting="file_size_limit_photos"
-            onchange="saveDataStorageSetting()"
-            class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
-            <option value="1">1 MB</option>
-            <option value="5">5 MB</option>
-            <option value="10" selected>10 MB</option>
-            <option value="25">25 MB</option>
-            <option value="50">50 MB</option>
-          </select>
-        </div>
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-textSecondary">Video files</span>
-          <select data-storage-setting="file_size_limit_videos"
-            onchange="saveDataStorageSetting()"
-            class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
-            <option value="10">10 MB</option>
-            <option value="25">25 MB</option>
-            <option value="50" selected>50 MB</option>
-            <option value="100">100 MB</option>
-            <option value="500">500 MB</option>
-          </select>
-        </div>
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-textSecondary">Files / Documents</span>
-          <select data-storage-setting="file_size_limit_files"
-            onchange="saveDataStorageSetting()"
-            class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
-            <option value="5">5 MB</option>
-            <option value="10">10 MB</option>
-            <option value="25" selected>25 MB</option>
-            <option value="50">50 MB</option>
-            <option value="100">100 MB</option>
-          </select>
-        </div>
-      </div>
-    </div>
-  </div>
+    .telegram-data-storage .storage-main {
+      min-width: 0;
+    }
 
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Section 3: Cache Management
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div class="px-4 py-4 space-y-4">
-    <h4 class="text-xs font-bold text-textSecondary uppercase tracking-wider">Cache Management</h4>
+    .telegram-data-storage .storage-label {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 18px;
+      font-weight: 400;
+    }
 
-    {# Cache retention period #}
-    <div class="flex items-center justify-between text-sm">
-      <span class="text-textSecondary">Cache retention period</span>
-      <select data-storage-setting="cache_retention"
-        onchange="saveDataStorageSetting()"
-        class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
-        <option value="7">1 week</option>
-        <option value="30" selected>1 month</option>
-        <option value="90">3 months</option>
-        <option value="0">Forever</option>
-      </select>
-    </div>
+    .telegram-data-storage .storage-subtitle,
+    .telegram-data-storage .storage-value {
+      margin-top: 3px;
+      color: var(--tg-muted);
+      font-size: 16px;
+      line-height: 1.25;
+    }
 
-    {# Maximum cache size #}
-    <div class="flex items-center justify-between text-sm">
-      <span class="text-textSecondary">Maximum cache size</span>
-      <select data-storage-setting="cache_max_size"
-        onchange="saveDataStorageSetting()"
-        class="text-xs bg-bgSearch border border-borderColor rounded px-2 py-1 text-textMain custom-select-arrow">
-        <option value="50">50 MB</option>
-        <option value="100">100 MB</option>
-        <option value="200">200 MB</option>
-        <option value="500" selected>500 MB</option>
-        <option value="1024">1 GB</option>
-      </select>
-    </div>
+    .telegram-data-storage .storage-action {
+      border: 0;
+      background: transparent;
+      color: var(--tg-blue);
+      font: inherit;
+      font-size: 18px;
+      cursor: pointer;
+    }
 
-    <div class="space-y-1 pt-1">
-      {# Clear Images #}
-      <button onclick="clearCacheCategory('images')"
-        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg">
-            <i data-lucide="image" class="w-4 h-4"></i>
-          </div>
-          <span class="text-sm font-medium text-textMain">Clear Images</span>
-        </div>
-        <span class="text-xs text-textSecondary" id="clear-sz-images">—</span>
-      </button>
+    .telegram-data-storage .storage-note {
+      margin: -2px 20px 16px;
+      color: var(--tg-muted);
+      font-size: 16px;
+      line-height: 1.25;
+    }
 
-      {# Clear Videos #}
-      <button onclick="clearCacheCategory('videos')"
-        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg">
-            <i data-lucide="video" class="w-4 h-4"></i>
-          </div>
-          <span class="text-sm font-medium text-textMain">Clear Video files</span>
-        </div>
-        <span class="text-xs text-textSecondary" id="clear-sz-videos">—</span>
-      </button>
+    .telegram-data-storage .storage-check {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border: 0;
+      border-radius: 8px;
+      background: var(--tg-blue);
+      color: #fff;
+      cursor: pointer;
+    }
 
-      {# Clear Stickers & Emojis #}
-      <button onclick="clearCacheCategory('stickers')"
-        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-lg">
-            <i data-lucide="sticker" class="w-4 h-4"></i>
-          </div>
-          <span class="text-sm font-medium text-textMain">Clear Stickers & Emojis</span>
-        </div>
-        <span class="text-xs text-textSecondary" id="clear-sz-stickers">—</span>
-      </button>
+    .telegram-data-storage .storage-check[aria-checked="false"] {
+      background: #e6e7e9;
+      color: transparent;
+    }
 
-      {# Clear Other #}
-      <button onclick="clearCacheCategory('other')"
-        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg">
-            <i data-lucide="file-text" class="w-4 h-4"></i>
-          </div>
-          <span class="text-sm font-medium text-textMain">Clear Other Cached Data</span>
-        </div>
-        <span class="text-xs text-textSecondary" id="clear-sz-other">—</span>
-      </button>
+    .telegram-data-storage .storage-check svg {
+      width: 19px;
+      height: 19px;
+      stroke-width: 3;
+    }
 
-      {# Clear Video Stream Chunks #}
-      <button onclick="clearCacheCategory('video_stream_chunks')"
-        class="w-full py-3 flex items-center justify-between hover:bg-bgSearch/40 rounded-custom-md px-1 transition-colors">
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 rounded-lg">
-            <i data-lucide="film" class="w-4 h-4"></i>
-          </div>
-          <span class="text-sm font-medium text-textMain">Clear Cached Video Stream Chunks</span>
-        </div>
-        <span class="text-xs text-textSecondary" id="clear-sz-video-stream">—</span>
-      </button>
-    </div>
+    .telegram-data-storage .storage-disabled {
+      opacity: .42;
+    }
 
-    {# Clear All #}
-    <button onclick="confirmClearAllCache()"
-      class="w-full py-3 flex items-center justify-between text-red-500 hover:bg-red-500/5 rounded-custom-md px-1 transition-colors">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-red-500/10 rounded-lg">
-          <i data-lucide="alert-triangle" class="w-4 h-4"></i>
-        </div>
-        <span class="text-sm font-medium">Clear All Cache</span>
-      </div>
-      <i data-lucide="chevron-right" class="w-4 h-4"></i>
+    .telegram-data-storage .storage-range-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 0 8px;
+      font-size: 18px;
+    }
+
+    .telegram-data-storage .storage-range {
+      grid-column: 1 / -1;
+      width: 100%;
+      accent-color: var(--tg-blue);
+    }
+
+    .telegram-data-storage .storage-range-scale {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      margin-top: -3px;
+      color: #8b9298;
+      font-size: 12px;
+    }
+
+    .telegram-data-storage .storage-total {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 12px;
+      margin-bottom: 14px;
+      font-size: 18px;
+    }
+
+    .telegram-data-storage .storage-total strong {
+      display: block;
+      font-weight: 400;
+    }
+
+    .telegram-data-storage .storage-clear-all {
+      margin-top: 12px;
+      padding-top: 16px;
+      border-top: 1px solid var(--tg-line);
+    }
+
+    .telegram-data-storage .storage-toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 120;
+      padding: 10px 14px;
+      border-radius: 18px;
+      background: rgba(17, 24, 39, .9);
+      color: #fff;
+      font-size: 14px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .telegram-data-storage .storage-toast.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+
+  <section class="storage-card">
+    <h3 class="storage-section-title">自动下载媒体文件</h3>
+    <button id="storage-auto-toggle" type="button" class="storage-row" aria-checked="true">
+      <span class="storage-check" aria-hidden="true"><i data-lucide="check"></i></span>
+      <span class="storage-main"><span class="storage-label">自动下载媒体文件</span></span>
     </button>
-  </div>
-
-  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     Clear All Confirmation Modal
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <div id="clear-all-cache-modal" class="hidden fixed inset-0 z-[100] items-center justify-center bg-black/50 backdrop-blur-sm" onclick="if(event.target===this)closeClearAllModal()">
-    <div class="bg-bgMain border border-borderColor rounded-custom-lg shadow-2xl p-6 mx-4 max-w-sm w-full space-y-4">
-      <div class="flex items-center space-x-3">
-        <div class="p-2 bg-red-500/10 rounded-full">
-          <i data-lucide="alert-triangle" class="w-5 h-5 text-red-500"></i>
-        </div>
-        <h3 class="text-base font-bold text-textMain">Clear All Cache</h3>
-      </div>
-      <p class="text-sm text-textSecondary">
-        This will remove all locally cached media, stickers, and temporary files.
-        Your messages and encryption keys will be preserved.
-        Media will be re-downloaded when you view it again.
-      </p>
-      <div class="flex space-x-3">
-        <button onclick="closeClearAllModal()"
-          class="flex-1 py-2.5 text-sm font-semibold rounded-custom-md border border-borderColor text-textMain hover:bg-bgSearch transition-colors">
-          Cancel
-        </button>
-        <button onclick="executeClearAllCache()"
-          class="flex-1 py-2.5 text-sm font-semibold rounded-custom-md bg-red-500 text-white hover:bg-red-600 transition-colors">
-          Clear All
-        </button>
-      </div>
+    <div class="storage-row">
+      <span class="storage-icon"><i data-lucide="image"></i></span>
+      <span class="storage-main">
+        <span class="storage-label">照片</span>
+        <span id="storage-photo-status" class="storage-subtitle">在所有对话中开启</span>
+      </span>
     </div>
-  </div>
+    <div class="storage-row">
+      <span class="storage-icon"><i data-lucide="play"></i></span>
+      <span class="storage-main">
+        <span class="storage-label">视频</span>
+        <span id="storage-video-status" class="storage-subtitle">在所有对话中开启</span>
+      </span>
+    </div>
+    <div class="storage-row">
+      <span class="storage-icon"><i data-lucide="file"></i></span>
+      <span class="storage-main">
+        <span class="storage-label">文件</span>
+        <span id="storage-file-status" class="storage-subtitle">在所有对话中不超过 3.0 MB</span>
+      </span>
+    </div>
+    <button id="storage-reset-auto" type="button" class="storage-row storage-disabled">
+      <span class="storage-icon"><i data-lucide="trash-2"></i></span>
+      <span class="storage-main"><span class="storage-label" style="color: #8ec7fb;">重置自动下载设置</span></span>
+    </button>
+  </section>
 
+  <p class="storage-note">由于语音消息占用很小，所以它们始终会被自动下载。</p>
+
+  <section class="storage-card">
+    <h3 class="storage-section-title">Estimated storage quota</h3>
+
+    <div class="storage-total">
+      <div>
+        <strong>Cached files</strong>
+        <div id="storage-total-size" class="storage-value">0 KB</div>
+      </div>
+      <button type="button" class="storage-action" data-clear="cached_files">Clear</button>
+    </div>
+
+    <div class="storage-row">
+      <span class="storage-icon"><i data-lucide="image"></i></span>
+      <span class="storage-main">
+        <span class="storage-label">Images</span>
+        <span id="storage-images-size" class="storage-subtitle">0 KB</span>
+      </span>
+    </div>
+    <div class="storage-row">
+      <span class="storage-icon"><i data-lucide="play"></i></span>
+      <span class="storage-main">
+        <span class="storage-label">Video files</span>
+        <span id="storage-videos-size" class="storage-subtitle">0 KB</span>
+      </span>
+    </div>
+    <div class="storage-row">
+      <span class="storage-icon"><i data-lucide="sticker"></i></span>
+      <span class="storage-main">
+        <span class="storage-label">Stickers and emojis</span>
+        <span id="storage-stickers-size" class="storage-subtitle">0 KB</span>
+      </span>
+    </div>
+    <div class="storage-row">
+      <span class="storage-icon"><i data-lucide="file"></i></span>
+      <span class="storage-main">
+        <span class="storage-label">Other</span>
+        <span id="storage-other-size" class="storage-subtitle">0 KB</span>
+      </span>
+    </div>
+
+    <div class="storage-total" style="margin-top: 18px;">
+      <div>
+        <strong>Cached video stream chunks</strong>
+        <div id="storage-video-stream-size" class="storage-value">0 KB</div>
+      </div>
+      <button type="button" class="storage-action" data-clear="video_stream_chunks">Clear</button>
+    </div>
+
+    <label class="storage-range-row">
+      <span>Clear cache older than</span>
+      <span id="storage-retention-label" class="storage-value">1 周</span>
+      <input id="storage-retention-range" class="storage-range" type="range" min="0" max="4" step="1" value="1">
+      <span class="storage-range-scale"><span>关闭</span><span>1w</span><span>1m</span><span>3m</span><span>1y</span></span>
+    </label>
+
+    <label class="storage-range-row">
+      <span>Cache size limit</span>
+      <span id="storage-cache-limit-label" class="storage-value">Auto</span>
+      <input id="storage-cache-limit-range" class="storage-range" type="range" min="0" max="5" step="1" value="0">
+    </label>
+
+    <button type="button" class="storage-row storage-clear-all" data-clear="all">
+      <span class="storage-icon" style="color: var(--tg-blue);"><i data-lucide="trash-2"></i></span>
+      <span class="storage-main"><span class="storage-label" style="color: var(--tg-blue);">Clear All</span></span>
+    </button>
+  </section>
+
+  <p class="storage-note">Note that cache required for the app to function properly will not be cleared.</p>
+  <div id="storage-toast" class="storage-toast"></div>
 </div>
 
-{# ── Toggle Switch Styles ── #}
-<style>
-  .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0 }
-  .toggle-switch input { opacity:0; width:0; height:0 }
-  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#ccc; border-radius:24px; transition:.3s }
-  .toggle-switch input:checked+.toggle-slider { background-color:var(--color-primary) }
-  .toggle-switch input:disabled+.toggle-slider { opacity:.4; cursor:not-allowed }
-  .toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background-color:white; border-radius:50%; transition:.3s }
-  .toggle-switch input:checked+.toggle-slider:before { transform:translateX(20px) }
-
-  select.custom-select-arrow {
-    -webkit-appearance: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 6px center;
-    padding-right: 24px;
-  }
-</style>
-
-{# ── Storage Management JavaScript ── #}
 <script>
-  // =========================================================================
-  // State
-  // =========================================================================
-  var storageStats = {
-    categories: {},
-    total_bytes: 0,
-    quota_bytes: 50 * 1024 * 1024,
-    usage_percent: 0
-  };
+  (function() {
+    const SETTINGS_URL = '/api/storage/settings/';
+    const STATS_URL = '/api/storage/stats/';
+    const CLEAR_URL = '/api/storage/clear/';
+    const RETENTION_VALUES = [0, 7, 30, 90, 365];
+    const RETENTION_LABELS = ['关闭', '1 周', '1个月', '3个月', '1年'];
+    const CACHE_LIMIT_VALUES = [0, 50, 100, 200, 500, 1024];
+    let storageSettings = null;
+    let toastTimer = null;
 
-  var DEFAULT_AUTO_DOWNLOAD = {
-    mobile_data:  { photos: false, videos: false, files: false },
-    wifi:         { photos: true,  videos: true,  files: true  },
-    roaming:      { photos: false, videos: false, files: false }
-  };
-
-  var DEFAULT_SETTINGS = {
-    auto_download: DEFAULT_AUTO_DOWNLOAD,
-    file_size_limit_photos: '10',
-    file_size_limit_videos: '50',
-    file_size_limit_files: '25',
-    cache_retention: '30',
-    cache_max_size: '500'
-  };
-
-  // =========================================================================
-  // Formatting helpers
-  // =========================================================================
-  function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return '0 KB';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-    return (bytes / 1073741824).toFixed(2) + ' GB';
-  }
-
-  function formatBytesShort(bytes) {
-    if (!bytes || bytes === 0) return '0 KB';
-    if (bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
-    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-    return (bytes / 1073741824).toFixed(1) + ' GB';
-  }
-
-  // =========================================================================
-  // Local storage estimation (browser APIs)
-  // =========================================================================
-  async function estimateLocalStorage() {
-    var localBytes = 0;
-    try {
-      for (var i = 0; i < localStorage.length; i++) {
-        var key = localStorage.key(i);
-        var value = localStorage.getItem(key);
-        localBytes += (key.length + value.length) * 2;
-      }
-    } catch (e) { /* ignore */ }
-
-    var storageEstimate = { usage: localBytes, quota: 50 * 1024 * 1024 };
-    try {
-      if (navigator.storage && navigator.storage.estimate) {
-        var est = await navigator.storage.estimate();
-        if (est.usage) storageEstimate.usage = est.usage;
-        if (est.quota) storageEstimate.quota = est.quota;
-      }
-    } catch (e) { /* use fallback */ }
-
-    return storageEstimate;
-  }
-
-  // =========================================================================
-  // Fetch server-side storage stats
-  // =========================================================================
-  async function fetchStorageStats() {
-    try {
-      var resp = await fetch('/api/storage/stats/', {
-        headers: { 'X-CSRFToken': getCookie('csrftoken') || '' }
-      });
-      if (resp.ok) {
-        var data = await resp.json();
-        storageStats = data;
-        return data;
-      }
-    } catch (e) {
-      console.warn('[Storage] Server stats unavailable, using local estimates:', e);
+    function csrfToken() {
+      return typeof getCookie === 'function' ? (getCookie('csrftoken') || '') : '';
     }
-    return null;
-  }
 
-  // =========================================================================
-  // Render storage usage UI
-  // =========================================================================
-  async function renderStorageUsage() {
-    var serverData = await fetchStorageStats();
-    var localEstimate = await estimateLocalStorage();
+    function showStorageToast(text) {
+      const toast = document.getElementById('storage-toast');
+      if (!toast) return;
+      toast.textContent = text;
+      toast.classList.add('is-visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function() {
+        toast.classList.remove('is-visible');
+      }, 1800);
+    }
 
-    var categories = {};
-    if (serverData && serverData.categories) {
-      categories = serverData.categories;
-    } else {
-      var localMB = localEstimate.usage;
-      categories = {
-        images:              { size_bytes: Math.round(localMB * 0.15), count: 0, label: 'Images' },
-        videos:              { size_bytes: Math.round(localMB * 0.05), count: 0, label: 'Video files' },
-        stickers:            { size_bytes: Math.round(localMB * 0.10), count: 0, label: 'Stickers and emojis' },
-        other:               { size_bytes: Math.round(localMB * 0.60), count: 0, label: 'Other' },
-        video_stream_chunks: { size_bytes: Math.round(localMB * 0.10), count: 0, label: 'Cached video stream chunks' }
+    function formatBytes(bytes) {
+      const value = Number(bytes || 0);
+      if (value < 1024) return value + ' B';
+      if (value < 1024 * 1024) return Math.round(value / 1024) + ' KB';
+      if (value < 1024 * 1024 * 1024) return (value / 1024 / 1024).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1) + ' MB';
+      return (value / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+    }
+
+    function setText(id, text) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
+
+    function statusFromAuto(settings, type) {
+      if (!settings.auto_download_enabled) return '已关闭';
+      const networks = Object.values(settings.auto_download || {});
+      const enabled = networks.some(function(item) {
+        return type === 'files' ? Number(item.files || 0) > 0 : Boolean(item[type]);
+      });
+      if (!enabled) return '已关闭';
+      if (type === 'files') {
+        const limit = Number((settings.file_size_limit_mb || {}).files || 3);
+        return '在所有对话中不超过 ' + limit.toFixed(1) + ' MB';
+      }
+      return '在所有对话中开启';
+    }
+
+    function syncRangeUi(settings) {
+      const retention = Number(settings.cache_retention_days ?? 7);
+      const retentionIndex = Math.max(0, RETENTION_VALUES.indexOf(retention));
+      const retentionRange = document.getElementById('storage-retention-range');
+      if (retentionRange) retentionRange.value = String(retentionIndex);
+      setText('storage-retention-label', RETENTION_LABELS[retentionIndex] || '1 周');
+
+      const limit = Number(settings.cache_max_size_mb || 0);
+      const limitIndex = Math.max(0, CACHE_LIMIT_VALUES.indexOf(limit));
+      const limitRange = document.getElementById('storage-cache-limit-range');
+      if (limitRange) limitRange.value = String(limitIndex);
+      setText('storage-cache-limit-label', limit === 0 ? 'Auto' : formatBytes(limit * 1024 * 1024));
+    }
+
+    function applySettings(settings) {
+      storageSettings = settings;
+      const toggle = document.getElementById('storage-auto-toggle');
+      const check = toggle ? toggle.querySelector('.storage-check') : null;
+      const enabled = Boolean(settings.auto_download_enabled);
+      if (toggle) toggle.setAttribute('aria-checked', enabled ? 'true' : 'false');
+      if (check) check.setAttribute('aria-checked', enabled ? 'true' : 'false');
+      setText('storage-photo-status', statusFromAuto(settings, 'photos'));
+      setText('storage-video-status', statusFromAuto(settings, 'videos'));
+      setText('storage-file-status', statusFromAuto(settings, 'files'));
+      syncRangeUi(settings);
+    }
+
+    function renderStats(stats) {
+      const categories = stats.categories || {};
+      setText('storage-total-size', formatBytes(stats.total_bytes || 0));
+      setText('storage-images-size', formatBytes((categories.images || {}).size_bytes));
+      setText('storage-videos-size', formatBytes((categories.videos || {}).size_bytes));
+      setText('storage-stickers-size', formatBytes((categories.stickers || {}).size_bytes));
+      setText('storage-other-size', formatBytes((categories.other || {}).size_bytes));
+      setText('storage-video-stream-size', formatBytes((categories.video_stream_chunks || {}).size_bytes));
+    }
+
+    function settingsPayloadFromUi() {
+      const enabled = Boolean(storageSettings && storageSettings.auto_download_enabled);
+      const fileLimit = Number(((storageSettings || {}).file_size_limit_mb || {}).files || 3);
+      const range = document.getElementById('storage-retention-range');
+      const limitRange = document.getElementById('storage-cache-limit-range');
+      const retentionDays = RETENTION_VALUES[Number(range ? range.value : 1)] ?? 7;
+      const limitMb = CACHE_LIMIT_VALUES[Number(limitRange ? limitRange.value : 0)] ?? 0;
+      return {
+        auto_download_enabled: enabled,
+        auto_download: {
+          mobile_data: { photos: enabled, videos: enabled, files: enabled ? fileLimit : 0 },
+          wifi: { photos: enabled, videos: enabled, files: enabled ? fileLimit : 0 },
+          roaming: { photos: enabled, videos: enabled, files: enabled ? fileLimit : 0 }
+        },
+        file_size_limit_mb: {
+          photos: Number(((storageSettings || {}).file_size_limit_mb || {}).photos || 10),
+          videos: Number(((storageSettings || {}).file_size_limit_mb || {}).videos || 50),
+          files: fileLimit
+        },
+        cache_retention_days: retentionDays,
+        cache_max_size_mb: limitMb
       };
     }
 
-    var totalBytes = serverData ? serverData.total_bytes :
-      Object.values(categories).reduce(function(s, c) { return s + (c.size_bytes || 0); }, 0);
-    var quotaBytes = serverData ? serverData.quota_bytes : localEstimate.quota;
-    var usagePercent = quotaBytes > 0 ? Math.min(100, Math.round((totalBytes / quotaBytes) * 100)) : 0;
-
-    storageStats.total_bytes = totalBytes;
-    storageStats.quota_bytes = quotaBytes;
-    storageStats.usage_percent = usagePercent;
-    storageStats.categories = categories;
-
-    var catIds = ['images', 'videos', 'stickers', 'other', 'video_stream_chunks'];
-    catIds.forEach(function(cat) {
-      var szEl = document.getElementById('sz-' + cat);
-      var clearEl = document.getElementById('clear-sz-' + cat);
-      var sizeBytes = (categories[cat] && categories[cat].size_bytes) || 0;
-      var txt = formatBytesShort(sizeBytes);
-      if (szEl) szEl.textContent = txt;
-      if (clearEl) clearEl.textContent = txt;
-    });
-
-    var bar = document.getElementById('storage-usage-bar');
-    if (bar) bar.style.width = usagePercent + '%';
-
-    var textEl = document.getElementById('storage-usage-text');
-    if (textEl) {
-      textEl.textContent = formatBytes(totalBytes) + ' of ' + formatBytes(quotaBytes) + ' used';
-    }
-  }
-
-  // =========================================================================
-  // Auto-download settings management
-  // =========================================================================
-  function loadStorageSettings() {
-    var saved = {};
-    try {
-      saved = JSON.parse(localStorage.getItem('ichat_storage') || '{}');
-    } catch (e) { saved = {}; }
-    var settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-    for (var key in saved) {
-      if (Object.prototype.hasOwnProperty.call(saved, key)) {
-        if (key === 'auto_download' && typeof saved[key] === 'object') {
-          settings.auto_download = JSON.parse(JSON.stringify(DEFAULT_AUTO_DOWNLOAD));
-          for (var net in saved[key]) {
-            if (settings.auto_download[net]) {
-              for (var t in saved[key][net]) {
-                settings.auto_download[net][t] = saved[key][net][t];
-              }
-            }
-          }
-        } else {
-          settings[key] = saved[key];
-        }
-      }
-    }
-    return settings;
-  }
-
-  function normalizeServerStorageSettings(serverSettings) {
-    var normalized = {};
-    if (!serverSettings || typeof serverSettings !== 'object') return normalized;
-
-    if (serverSettings.auto_download) {
-      normalized.auto_download = serverSettings.auto_download;
+    function autoDownloadForState(enabled) {
+      const fileLimit = Number(((storageSettings || {}).file_size_limit_mb || {}).files || 3);
+      return {
+        mobile_data: { photos: enabled, videos: enabled, files: enabled ? fileLimit : 0 },
+        wifi: { photos: enabled, videos: enabled, files: enabled ? fileLimit : 0 },
+        roaming: { photos: enabled, videos: enabled, files: enabled ? fileLimit : 0 }
+      };
     }
 
-    if (serverSettings.file_size_limit_mb) {
-      normalized.file_size_limit_photos = String(serverSettings.file_size_limit_mb.photos || DEFAULT_SETTINGS.file_size_limit_photos);
-      normalized.file_size_limit_videos = String(serverSettings.file_size_limit_mb.videos || DEFAULT_SETTINGS.file_size_limit_videos);
-      normalized.file_size_limit_files = String(serverSettings.file_size_limit_mb.files || DEFAULT_SETTINGS.file_size_limit_files);
-    }
-
-    ['file_size_limit_photos', 'file_size_limit_videos', 'file_size_limit_files',
-     'cache_retention', 'cache_max_size'].forEach(function(key) {
-      if (serverSettings[key] !== undefined) {
-        normalized[key] = String(serverSettings[key]);
-      }
-    });
-
-    if (serverSettings.cache_retention_days !== undefined) {
-      normalized.cache_retention = String(serverSettings.cache_retention_days);
-    }
-    if (serverSettings.cache_max_size_mb !== undefined) {
-      normalized.cache_max_size = String(serverSettings.cache_max_size_mb);
-    }
-
-    return normalized;
-  }
-
-  async function fetchStorageSettingsFromServer() {
-    try {
-      var resp = await fetch('/api/storage/settings/', {
-        headers: { 'X-CSRFToken': getCookie('csrftoken') || '' }
-      });
-      if (!resp.ok) return;
-      var data = await resp.json();
-      var serverSettings = normalizeServerStorageSettings(data.settings);
-      if (Object.keys(serverSettings).length === 0) return;
-      var merged = loadStorageSettings();
-      merged = Object.assign(merged, serverSettings);
-      if (serverSettings.auto_download) {
-        merged.auto_download = serverSettings.auto_download;
-      }
-      localStorage.setItem('ichat_storage', JSON.stringify(merged));
-    } catch (e) {
-      console.warn('[Storage] Server settings unavailable, using local settings:', e);
-    }
-  }
-
-  function saveDataStorageSetting() {
-    var root = document.getElementById('data-storage-settings');
-    if (!root) return;
-
-    var settings = loadStorageSettings();
-
-    root.querySelectorAll('[data-storage-setting]').forEach(function(el) {
-      var key = el.dataset.storageSetting;
-      if (el.type === 'checkbox') {
-        var network = el.dataset.network;
-        var dlType = el.dataset.dlType;
-        if (network && dlType) {
-          if (!settings.auto_download) settings.auto_download = {};
-          if (!settings.auto_download[network]) settings.auto_download[network] = {};
-          settings.auto_download[network][dlType] = el.checked;
-        } else {
-          settings[key] = el.checked;
-        }
-      } else if (el.tagName === 'SELECT') {
-        settings[key] = el.value;
-      }
-    });
-
-    localStorage.setItem('ichat_storage', JSON.stringify(settings));
-    updateAutoDownloadSummaries();
-    syncStorageSettingsToServer(settings);
-  }
-
-  function applyStorageSettingsToUI() {
-    var settings = loadStorageSettings();
-    var root = document.getElementById('data-storage-settings');
-    if (!root) return;
-
-    var networks = ['mobile_data', 'wifi', 'roaming'];
-    var types = ['photos', 'videos', 'files'];
-    networks.forEach(function(network) {
-      types.forEach(function(type) {
-        var el = document.querySelector(
-          '[data-storage-setting][data-network="' + network + '"][data-dl-type="' + type + '"]'
-        );
-        if (el) {
-          var netSettings = settings.auto_download && settings.auto_download[network]
-            ? settings.auto_download[network]
-            : (DEFAULT_AUTO_DOWNLOAD[network] || {});
-          el.checked = netSettings[type] !== undefined ? Boolean(netSettings[type]) : false;
-        }
-      });
-    });
-
-    ['file_size_limit_photos', 'file_size_limit_videos', 'file_size_limit_files',
-     'cache_retention', 'cache_max_size'].forEach(function(key) {
-      var el = root.querySelector('[data-storage-setting="' + key + '"]');
-      if (el && settings[key] !== undefined) {
-        el.value = settings[key];
-      }
-    });
-
-    updateAutoDownloadSummaries();
-  }
-
-  function updateAutoDownloadSummaries() {
-    var settings = loadStorageSettings();
-    var networks = ['mobile_data', 'wifi', 'roaming'];
-    networks.forEach(function(network) {
-      var summaryEl = document.getElementById(network + '-summary');
-      if (!summaryEl) return;
-      var netSettings = settings.auto_download && settings.auto_download[network]
-        ? settings.auto_download[network]
-        : (DEFAULT_AUTO_DOWNLOAD[network] || {});
-      var allOn = netSettings.photos && netSettings.videos && netSettings.files;
-      var allOff = !netSettings.photos && !netSettings.videos && !netSettings.files;
-      if (allOn) {
-        summaryEl.textContent = 'All on';
-      } else if (allOff) {
-        summaryEl.textContent = 'All off';
-      } else {
-        var onTypes = [];
-        if (netSettings.photos) onTypes.push('Photos');
-        if (netSettings.videos) onTypes.push('Videos');
-        if (netSettings.files) onTypes.push('Files');
-        summaryEl.textContent = onTypes.join(', ');
-      }
-    });
-  }
-
-  async function syncStorageSettingsToServer(settings) {
-    try {
-      await fetch('/api/storage/settings/', {
+    async function saveSettings(partial) {
+      const next = Object.assign({}, settingsPayloadFromUi(), partial || {});
+      const response = await fetch(SETTINGS_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRFToken': getCookie('csrftoken') || ''
+          'X-CSRFToken': csrfToken()
         },
-        body: JSON.stringify(settings)
+        body: JSON.stringify(next)
       });
-    } catch (e) {
-      // Server sync is optional
+      if (!response.ok) throw new Error('Failed to save storage settings');
+      const data = await response.json();
+      applySettings(data.settings);
+      return data.settings;
     }
-  }
 
-  function resetAutoDownloadSettings() {
-    var confirmed = confirm(
-      'Reset all auto-download settings to defaults?\n\n' +
-      'Wi-Fi: Photos, Videos, Files — ON\n' +
-      'Mobile Data: All — OFF\n' +
-      'Roaming: All — OFF\n' +
-      'File size limits will also be reset.'
-    );
-    if (!confirmed) return;
-
-    var settings = loadStorageSettings();
-    settings.auto_download = JSON.parse(JSON.stringify(DEFAULT_AUTO_DOWNLOAD));
-    settings.file_size_limit_photos = DEFAULT_SETTINGS.file_size_limit_photos;
-    settings.file_size_limit_videos = DEFAULT_SETTINGS.file_size_limit_videos;
-    settings.file_size_limit_files = DEFAULT_SETTINGS.file_size_limit_files;
-    localStorage.setItem('ichat_storage', JSON.stringify(settings));
-    applyStorageSettingsToUI();
-    syncStorageSettingsToServer(settings);
-    window.showToast('Auto-download settings reset to defaults');
-  }
-
-  // =========================================================================
-  // Auto-download group expand/collapse
-  // =========================================================================
-  function toggleAutoDownloadGroup(network) {
-    var panel = document.getElementById('auto-dl-' + network);
-    var chevron = document.getElementById('chevron-' + network);
-    if (!panel || !chevron) return;
-    var isHidden = panel.classList.contains('hidden');
-    if (isHidden) {
-      panel.classList.remove('hidden');
-      chevron.style.transform = 'rotate(180deg)';
-    } else {
-      panel.classList.add('hidden');
-      chevron.style.transform = 'rotate(0deg)';
+    async function loadSettingsAndStats() {
+      const [settingsResponse, statsResponse] = await Promise.all([
+        fetch(SETTINGS_URL, { headers: { 'X-CSRFToken': csrfToken() } }),
+        fetch(STATS_URL, { headers: { 'X-CSRFToken': csrfToken() } })
+      ]);
+      if (settingsResponse.ok) {
+        const settingsData = await settingsResponse.json();
+        applySettings(settingsData.settings || {});
+      }
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        renderStats(statsData);
+      }
+      if (window.lucide) window.lucide.createIcons();
     }
-  }
 
-  // =========================================================================
-  // Cache clearing
-  // =========================================================================
-  async function clearCacheCategory(category) {
-    var catLabels = {
-      images: 'Images',
-      videos: 'Video files',
-      stickers: 'Stickers & Emojis',
-      other: 'Other cached data',
-      video_stream_chunks: 'Video stream chunks'
+    async function clearStorage(target) {
+      const categories = target === 'cached_files'
+        ? ['images', 'videos', 'stickers', 'other']
+        : [target];
+      const response = await fetch(CLEAR_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken()
+        },
+        body: JSON.stringify({ categories })
+      });
+      if (!response.ok) throw new Error('Failed to clear storage cache');
+      const data = await response.json();
+      if (data.stats) renderStats(data.stats);
+      showStorageToast(target === 'all' ? '缓存已全部清理' : '缓存已清理');
+    }
+
+    async function resetAutoDownload() {
+      const defaults = {
+        auto_download_enabled: true,
+        auto_download: {
+          mobile_data: { photos: true, videos: true, files: 3 },
+          wifi: { photos: true, videos: true, files: 3 },
+          roaming: { photos: true, videos: true, files: 3 }
+        },
+        file_size_limit_mb: { photos: 10, videos: 50, files: 3 }
+      };
+      await saveSettings(defaults);
+      showStorageToast('自动下载设置已重置');
+    }
+
+    function bindStorageEvents() {
+      const root = document.getElementById('data-storage-settings');
+      if (!root || root.dataset.bound === 'true') return;
+      root.dataset.bound = 'true';
+
+      document.getElementById('storage-auto-toggle')?.addEventListener('click', async function() {
+        const enabled = !Boolean(storageSettings && storageSettings.auto_download_enabled);
+        try {
+          await saveSettings({
+            auto_download_enabled: enabled,
+            auto_download: autoDownloadForState(enabled)
+          });
+          showStorageToast(enabled ? '已启用自动下载' : '已关闭自动下载');
+        } catch (error) {
+          showStorageToast('保存失败');
+        }
+      });
+
+      document.getElementById('storage-reset-auto')?.addEventListener('click', function() {
+        resetAutoDownload().catch(function() { showStorageToast('重置失败'); });
+      });
+
+      document.getElementById('storage-retention-range')?.addEventListener('input', function(event) {
+        setText('storage-retention-label', RETENTION_LABELS[Number(event.target.value)] || '1 周');
+      });
+      document.getElementById('storage-cache-limit-range')?.addEventListener('input', function(event) {
+        const mb = CACHE_LIMIT_VALUES[Number(event.target.value)] || 0;
+        setText('storage-cache-limit-label', mb === 0 ? 'Auto' : formatBytes(mb * 1024 * 1024));
+      });
+      document.getElementById('storage-retention-range')?.addEventListener('change', function() {
+        saveSettings().catch(function() { showStorageToast('保存失败'); });
+      });
+      document.getElementById('storage-cache-limit-range')?.addEventListener('change', function() {
+        saveSettings().catch(function() { showStorageToast('保存失败'); });
+      });
+
+      root.querySelectorAll('[data-clear]').forEach(function(button) {
+        button.addEventListener('click', function() {
+          const target = button.dataset.clear;
+          clearStorage(target).catch(function() { showStorageToast('清理失败'); });
+        });
+      });
+    }
+
+    window.renderStorageUsage = function() {
+      bindStorageEvents();
+      return loadSettingsAndStats().catch(function(error) {
+        console.warn('[Storage]', error);
+        showStorageToast('数据与存储加载失败');
+      });
     };
-    var label = catLabels[category] || category;
 
-    var confirmed = confirm('Clear ' + label + ' cache?');
-    if (!confirmed) return;
-
-    try {
-      var resp = await fetch('/api/storage/clear/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': getCookie('csrftoken') || ''
-        },
-        body: JSON.stringify({ categories: [category] })
-      });
-      if (resp.ok) {
-        var data = await resp.json();
-        if (data.message) console.log('[Storage]', data.message);
-      }
-    } catch (e) {
-      console.warn('[Storage] Server clear failed:', e);
-    }
-
-    clearLocalCategoryData(category);
-    await renderStorageUsage();
-    window.showToast(label + ' cache cleared');
-  }
-
-  function clearLocalCategoryData(category) {
-    var prefixes = {
-      images: ['ichat_img_', 'ichat_thumb_'],
-      videos: ['ichat_vid_'],
-      stickers: ['ichat_sticker_', 'ichat_emoji_'],
-      other: ['ichat_file_', 'ichat_doc_'],
-      video_stream_chunks: ['ichat_vstream_']
-    };
-    var keysToRemove = [];
-    var prefixesToCheck = prefixes[category] || [];
-    for (var i = 0; i < localStorage.length; i++) {
-      var key = localStorage.key(i);
-      for (var p = 0; p < prefixesToCheck.length; p++) {
-        if (key.indexOf(prefixesToCheck[p]) === 0) {
-          keysToRemove.push(key);
-          break;
-        }
-      }
-    }
-    keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
-  }
-
-  function confirmClearAllCache() {
-    var modal = document.getElementById('clear-all-cache-modal');
-    if (modal) {
-      modal.classList.remove('hidden');
-      modal.classList.add('flex');
-    }
-  }
-
-  function closeClearAllModal() {
-    var modal = document.getElementById('clear-all-cache-modal');
-    if (modal) {
-      modal.classList.remove('flex');
-      modal.classList.add('hidden');
-    }
-  }
-
-  async function executeClearAllCache() {
-    closeClearAllModal();
-
-    try {
-      await fetch('/api/storage/clear/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': getCookie('csrftoken') || ''
-        },
-        body: JSON.stringify({ categories: ['all'] })
-      });
-    } catch (e) { /* continue with local */ }
-
-    localStorage.removeItem('ichat_storage');
-
-    var keysToRemove = [];
-    for (var i = 0; i < localStorage.length; i++) {
-      var key = localStorage.key(i);
-      if (key.indexOf('ichat_img_') === 0 ||
-          key.indexOf('ichat_thumb_') === 0 ||
-          key.indexOf('ichat_vid_') === 0 ||
-          key.indexOf('ichat_sticker_') === 0 ||
-          key.indexOf('ichat_emoji_') === 0 ||
-          key.indexOf('ichat_file_') === 0 ||
-          key.indexOf('ichat_doc_') === 0 ||
-          key.indexOf('ichat_vstream_') === 0) {
-        keysToRemove.push(key);
-      }
-    }
-    keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
-
-    applyStorageSettingsToUI();
-    await renderStorageUsage();
-    window.showToast('All cache cleared. Settings reset to defaults.');
-  }
-
-  // =========================================================================
-  // Initialization
-  // =========================================================================
-  (async function initDataStorage() {
-    await fetchStorageSettingsFromServer();
-    applyStorageSettingsToUI();
-    renderStorageUsage();
-
-    if (window.lucide) {
-      setTimeout(function() { lucide.createIcons(); }, 100);
-    }
+    bindStorageEvents();
+    window.renderStorageUsage();
   })();
 </script>

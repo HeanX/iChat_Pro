@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import F
 from django.utils import timezone
 
@@ -227,6 +227,15 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         except ClientPayloadError as error:
             await self.send_error(request_id=request_id, code=error.code, message=error.message)
             return
+        except OperationalError as error:
+            if 'database is locked' in str(error).lower():
+                await self.send_error(
+                    request_id=request_id,
+                    code='database_busy',
+                    message='数据库正忙，请稍后重试',
+                )
+                return
+            raise
 
         await self.send_error(
             request_id=request_id,
@@ -457,14 +466,23 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 EncryptedMessage.Status.DELIVERED: 1,
                 EncryptedMessage.Status.READ: 2,
             }
-            if status_order.get(message.status, -1) < status_order[status]:
+            status_changed = status_order.get(message.status, -1) < status_order[status]
+            if status_changed:
                 message.status = status
                 message.save(update_fields=['status', 'updated_at'])
             if status == EncryptedMessage.Status.READ:
-                ConversationMember.objects.filter(
+                member = ConversationMember.objects.filter(
                     conversation=message.conversation,
                     user_id=receiver_id,
-                ).update(unread_count=0, last_read_message_id=message.pk)
+                ).only('pk', 'unread_count', 'last_read_message_id').first()
+                if member and (
+                    member.unread_count != 0
+                    or not member.last_read_message_id
+                    or member.last_read_message_id < message.pk
+                ):
+                    member.unread_count = 0
+                    member.last_read_message_id = message.pk
+                    member.save(update_fields=['unread_count', 'last_read_message_id'])
         return {
             'conversation_type': 'single',
             'message_id': message.pk,
@@ -501,15 +519,24 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 GroupMessageRecipient.Status.DELIVERED: 1,
                 GroupMessageRecipient.Status.READ: 2,
             }
-            if status_order.get(recipient.status, -1) < status_order[status]:
+            status_changed = status_order.get(recipient.status, -1) < status_order[status]
+            if status_changed:
                 recipient.status = status
                 recipient.save(update_fields=['status'])
 
             if status == GroupMessageRecipient.Status.READ:
-                ConversationMember.objects.filter(
+                member = ConversationMember.objects.filter(
                     conversation_id=recipient.group_message.conversation_id,
                     user_id=receiver_id,
-                ).update(unread_count=0, last_read_message_id=message_id)
+                ).only('pk', 'unread_count', 'last_read_message_id').first()
+                if member and (
+                    member.unread_count != 0
+                    or not member.last_read_message_id
+                    or member.last_read_message_id < message_id
+                ):
+                    member.unread_count = 0
+                    member.last_read_message_id = message_id
+                    member.save(update_fields=['unread_count', 'last_read_message_id'])
 
         return {
             'conversation_type': 'group',

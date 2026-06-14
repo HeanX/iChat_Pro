@@ -1,4 +1,4 @@
-﻿// iChat Pro - Client-side Encrypted Chat Engine
+// iChat Pro - Client-side Encrypted Chat Engine
 // Vanilla JavaScript utilizing Web Crypto API for ECDH + HKDF + AES-GCM
 // Connects to real backend API, WebSocket, and E2EE modules
 
@@ -378,29 +378,29 @@ function appendChatItemToSidebar(conv) {
 
   wrapper.innerHTML = `
     <button id="chat-item-${safeId}" onclick="selectChat('${safeId}')"
-      class="chat-item-btn w-full flex items-center px-4 py-3 border-b border-borderColor hover:bg-bgSearch transition-all text-left focus:outline-none relative group select-none">
+      class="chat-item-btn telegram-chat-item w-full text-left focus:outline-none relative group select-none">
 
-      <div class="relative flex-shrink-0">
-        <div class="w-12 h-12 rounded-full text-white flex items-center justify-center font-bold text-base shadow-sm" style="background-color: ${safeAvatarColor}">
+      <div class="telegram-chat-avatar-wrap">
+        <div class="telegram-chat-avatar" style="background-color: ${safeAvatarColor}">
           ${safeInitials}
         </div>
       </div>
 
-      <div class="ml-3.5 flex-1 min-w-0">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-bold text-textMain truncate flex items-center space-x-1">
+      <div class="telegram-chat-content">
+        <div class="telegram-chat-topline">
+          <h3 class="telegram-chat-title">
             <span>${safeName}</span>
             ${conv.is_secure ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark inline-block flex-shrink-0" title="End-to-End Encrypted" data-i18n-title="e2ee_badge"></i>' : ''}
           </h3>
-          <span id="chat-time-${safeId}" class="chat-item-time flex-shrink-0">${safeLastTime}</span>
+          <span id="chat-time-${safeId}" class="chat-item-time telegram-chat-time">${safeLastTime}</span>
         </div>
 
-        <div class="flex items-center justify-between mt-1">
-          <p id="last-msg-${safeId}" class="text-xs text-textSecondary truncate pr-4 leading-tight">
+        <div class="telegram-chat-bottomline">
+          <p id="last-msg-${safeId}" class="telegram-chat-preview">
             ${safeLastMsg}
           </p>
 
-          <span id="unread-badge-${safeId}" class="${unreadCount > 0 ? "" : "hidden"} unread-badge flex-shrink-0">
+          <span id="unread-badge-${safeId}" class="${unreadCount > 0 ? "" : "hidden"} unread-badge telegram-chat-unread">
             ${safeUnread}
           </span>
         </div>
@@ -439,11 +439,20 @@ function appendChatItemToSidebar(conv) {
   }
 }
 
-function updateSidebarPreview(conv, text, time) {
+function formatSidebarPreviewText(conv, text, senderId) {
+  const previewText = text || '';
+  const numericSenderId = senderId == null ? null : Number(senderId);
+  if (!previewText || !numericSenderId || numericSenderId === Number(myUserId)) {
+    return previewText;
+  }
+  return `${numericSenderId}：${previewText}`;
+}
+
+function updateSidebarPreview(conv, text, time, senderId) {
   if (!conv) return;
   const lastMsgEl = document.getElementById(`last-msg-${conv.id}`);
   const timeEl = document.getElementById(`chat-time-${conv.id}`);
-  if (lastMsgEl) lastMsgEl.textContent = text;
+  if (lastMsgEl) lastMsgEl.textContent = formatSidebarPreviewText(conv, text, senderId);
   if (timeEl) timeEl.textContent = time;
 }
 
@@ -457,6 +466,48 @@ async function fetchConversations() {
     conversations = data.conversations || [];
     conversationsById = {};
     conversations.forEach(c => { conversationsById[c.id] = c; });
+    // Decrypt last message preview for each conversation client-side
+    for (const conv of conversations) {
+      if (conv.last_message_data) {
+        try {
+          let plaintext = '';
+          const msg = conv.last_message_data;
+          if (msg.message_type === 'system') {
+            plaintext = msg.ciphertext;
+          } else if (conv.type === 'group') {
+            plaintext = await window.iChatGroupE2EE.decryptGroupMessage({
+              algorithm: msg.algorithm,
+              ciphertext: msg.ciphertext,
+              nonce: msg.nonce,
+              auth_tag: msg.auth_tag,
+              group_id: conv.id,
+              membership_version: msg.membership_version,
+              sender_id: msg.sender_id,
+              receiver_id: msg.receiver_id,
+              sender_key_version: msg.sender_key_version,
+              receiver_key_version: msg.receiver_key_version,
+            });
+          } else {
+            plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
+              algorithm: msg.algorithm,
+              ciphertext: msg.ciphertext,
+              nonce: msg.nonce,
+              auth_tag: msg.auth_tag,
+              conversation_id: conv.id,
+              sender_id: msg.sender_id,
+              receiver_id: msg.receiver_id,
+              sender_key_version: msg.sender_key_version,
+              receiver_key_version: msg.receiver_key_version,
+            });
+          }
+          conv.last_message_preview = formatSidebarPreviewText(conv, plaintext, msg.sender_id);
+        } catch (decryptErr) {
+          console.warn(`Failed to decrypt last message preview for conversation ${conv.id}:`, decryptErr);
+          conv.last_message_preview = decryptFailureLabel(decryptErr);
+        }
+      }
+    }
+
     renderChatList();
     // Auto-select first conversation if none active
     if (!activeChatId && conversations.length > 0) {
@@ -856,7 +907,12 @@ async function handlePrivateMessageReceived(data) {
   if (messages.some(msg => msg.id === payload.message_id)) return;
 
   if (conv) {
-    updateSidebarPreview(conv, decryptError ? 'Encrypted message' : plaintext, newMsg.time);
+    updateSidebarPreview(
+      conv,
+      decryptError ? 'Encrypted message' : plaintext,
+      newMsg.time,
+      payload.sender_id
+    );
   } else {
     fetchConversations();
   }
@@ -938,6 +994,9 @@ async function handleGroupMessageReceived(data) {
           badge.classList.remove('hidden');
         }
       }
+    }
+    if (conv) {
+      updateSidebarPreview(conv, plaintext, newMsg.time, payload.sender_id);
     }
   } catch (err) {
     console.error('Failed to decrypt incoming group message:', err);
@@ -1535,7 +1594,7 @@ async function sendMessage() {
   updateSidebarPreview(conv, text, time);
 
   textarea.value = "";
-  textarea.style.height = "auto";
+  adjustTextareaHeight(textarea);
 
   try {
     if (conv.type === "group") {
@@ -2135,7 +2194,16 @@ function setupEventListeners() {
         mainBtn.classList.remove("bg-bgSearch", "text-textMain");
       }
     }
-    // 3. Contacts FAB menu (P2 T09)
+    // 3. Settings home more menu
+    const settingsMoreDropdown = document.getElementById("settings-home-more-dropdown");
+    const settingsMoreBtn = document.getElementById("settings-home-more-btn");
+    if (settingsMoreDropdown && !settingsMoreDropdown.classList.contains("hidden")) {
+      if (settingsMoreBtn && !settingsMoreBtn.contains(e.target) && !settingsMoreDropdown.contains(e.target)) {
+        settingsMoreDropdown.classList.add("hidden");
+        settingsMoreBtn.classList.remove("active");
+      }
+    }
+    // 4. Contacts FAB menu (P2 T09)
     const fabMenu = document.getElementById("contacts-fab-menu");
     const fabBtn = document.getElementById("contacts-fab-btn");
     if (fabMenu && !fabMenu.classList.contains("hidden")) {
@@ -2159,6 +2227,12 @@ function setupEventListeners() {
       if (mainDropdown && !mainDropdown.classList.contains("hidden")) {
         mainDropdown.classList.add("hidden");
         if (mainBtn) mainBtn.classList.remove("bg-bgSearch", "text-textMain");
+      }
+      const settingsMoreDropdown = document.getElementById("settings-home-more-dropdown");
+      const settingsMoreBtn = document.getElementById("settings-home-more-btn");
+      if (settingsMoreDropdown && !settingsMoreDropdown.classList.contains("hidden")) {
+        settingsMoreDropdown.classList.add("hidden");
+        if (settingsMoreBtn) settingsMoreBtn.classList.remove("active");
       }
       closeReportModal();
       closeDeleteConfirmModal();
@@ -2375,7 +2449,8 @@ function navigateSidebar(viewName) {
     'general-settings',
     'chat-folders',
     'sessions-shortcuts',
-    'accounts-switcher'
+    'accounts-switcher',
+    'settings-birthday'
   ];
   views.forEach(function(name) {
     var el = name === 'chat'
@@ -2394,8 +2469,14 @@ function navigateSidebar(viewName) {
     setTimeout(function() { renderStorageUsage(); }, 150);
   }
   // Refresh privacy settings when navigating to that view
-  if (viewName === 'privacy-security' && typeof loadPrivacySettings === 'function') {
-    setTimeout(function() { loadPrivacySettings(); }, 150);
+  if (viewName === 'privacy-security' && typeof refreshPrivacySecurity === 'function') {
+    setTimeout(function() { refreshPrivacySecurity(); }, 150);
+  }
+  if (viewName === 'general-settings' && typeof refreshGeneralSettings === 'function') {
+    setTimeout(function() { refreshGeneralSettings(); }, 150);
+  }
+  if (viewName === 'chat-folders' && typeof refreshChatFoldersSettings === 'function') {
+    setTimeout(function() { refreshChatFoldersSettings(); }, 150);
   }
   // Refresh account switcher list when navigating to it (P2 T11)
   if (viewName === 'accounts-switcher') {
@@ -2407,7 +2488,7 @@ function navigateSidebar(viewName) {
 
 // Backward-compatible wrappers
 function showSettingsPanel() {
-  navigateSidebar('settings');
+  navigateSidebar('settings-home');
 }
 
 function hideSettingsPanel() {
@@ -3253,8 +3334,11 @@ window.closeQRCodeModal = closeQRCodeModal;
 window.copyQRCode = copyQRCode;
 
 function adjustTextareaHeight(textarea) {
+  const minHeight = 24;
+  const maxHeight = 160;
   textarea.style.height = "auto";
-  textarea.style.height = textarea.scrollHeight + "px";
+  textarea.style.height = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight) + "px";
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
 function toggleEmojiDropdown() {
@@ -3902,6 +3986,25 @@ window.toggleMoreMenu = function(e) {
   }
 };
 
+window.toggleSettingsHomeMoreMenu = function(e, forceClose) {
+  if (e) e.stopPropagation();
+  const dropdown = document.getElementById("settings-home-more-dropdown");
+  const btn = document.getElementById("settings-home-more-btn");
+  if (!dropdown) return;
+
+  const shouldOpen = !forceClose && dropdown.classList.contains("hidden");
+  if (shouldOpen) {
+    dropdown.classList.remove("hidden");
+    if (btn) btn.classList.add("active");
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  } else {
+    dropdown.classList.add("hidden");
+    if (btn) btn.classList.remove("active");
+  }
+};
+
 window.toggleMainMenu = function(e) {
   if (e) e.stopPropagation();
   const dropdown = document.getElementById("main-menu-dropdown");
@@ -4265,7 +4368,7 @@ window.triggerMyProfileFromInfo = function(e) {
   if (mainDropdown) mainDropdown.classList.add("hidden");
   if (mainBtn) mainBtn.classList.remove("active");
   
-  showSettingsPanel();
+  navigateSidebar('settings-home');
 };
 
 window.showAboutInfo = function(e) {

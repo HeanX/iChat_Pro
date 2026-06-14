@@ -1,0 +1,89 @@
+{# birthday_settings.html — Birthday Privacy Settings Subview #}
+<div class="profile-edit-view">
+  <div class="profile-edit-form">
+
+    <section class="profile-edit-card">
+      <div class="profile-edit-section-title">Who can see my birthday</div>
+      
+      <div class="birthday-settings-option selected" id="birthday-vis-everyone" onclick="selectBirthdayVis('everyone')">
+        <span class="text-sm text-textMain">所有人</span>
+        <div class="birthday-settings-radio">
+          <div class="birthday-settings-radio-inner"></div>
+        </div>
+      </div>
+      
+      <div class="birthday-settings-option" id="birthday-vis-contacts" onclick="selectBirthdayVis('contacts')">
+        <span class="text-sm text-textMain">我的联系人</span>
+        <div class="birthday-settings-radio">
+          <div class="birthday-settings-radio-inner"></div>
+        </div>
+      </div>
+      
+      <div class="birthday-settings-option" id="birthday-vis-nobody" onclick="selectBirthdayVis('nobody')">
+        <span class="text-sm text-textMain">不允许任何人</span>
+        <div class="birthday-settings-radio">
+          <div class="birthday-settings-radio-inner"></div>
+        </div>
+      </div>
+    </section>
+
+    <p class="profile-edit-help">
+      You can restrict who can see your birthday with granular precision.
+    </p>
+
+    <section class="profile-edit-card">
+      <div class="profile-edit-section-title">例外</div>
+      
+      <div class="profile-edit-row has-chevron" onclick="showToast('Exceptions coming in Phase 3')">
+        <i data-lucide="user-minus" class="w-5 h-5 text-textSecondary" aria-hidden="true"></i>
+        <div class="flex-1 flex flex-col">
+          <span class="text-sm text-textMain">永不允许</span>
+          <span class="text-[11px] text-textSecondary">添加用户</span>
+        </div>
+        <i data-lucide="chevron-right" aria-hidden="true"></i>
+      </div>
+      
+      <div class="profile-edit-row has-chevron" onclick="showToast('Exceptions coming in Phase 3')">
+        <i data-lucide="user-plus" class="w-5 h-5 text-textSecondary" aria-hidden="true"></i>
+        <div class="flex-1 flex flex-col">
+          <span class="text-sm text-textMain">总是允许</span>
+          <span class="text-[11px] text-textSecondary">添加用户</span>
+        </div>
+        <i data-lucide="chevron-right" aria-hidden="true"></i>
+      </div>
+    </section>
+
+    <p class="profile-edit-help">
+      这些设定会覆盖上面的设定。
+    </p>
+
+  </div>
+</div>
+
+<script>
+  function selectBirthdayVis(value) {
+    // Save to localStorage
+    localStorage.setItem('birthday_visibility', value);
+    
+    // Update active visual state
+    ['everyone', 'contacts', 'nobody'].forEach(function(val) {
+      var el = document.getElementById('birthday-vis-' + val);
+      if (el) {
+        el.classList.toggle('selected', val === value);
+      }
+    });
+    
+    showToast(currentLanguage === 'zh' ? '设置已更新' : 'Privacy setting updated');
+  }
+
+  // Load saved setting on init
+  (function initBirthdayVis() {
+    var saved = localStorage.getItem('birthday_visibility') || 'contacts';
+    ['everyone', 'contacts', 'nobody'].forEach(function(val) {
+      var el = document.getElementById('birthday-vis-' + val);
+      if (el) {
+        el.classList.toggle('selected', val === saved);
+      }
+    });
+  })();
+</script>

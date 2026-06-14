@@ -47,10 +47,14 @@ class UserPrivacySettings(models.Model):
     phone_number_visibility = models.CharField(max_length=20, default='contacts')
     bio_visibility = models.CharField(max_length=20, default='everyone')
     forward_link_visibility = models.CharField(max_length=20, default='everyone')
+    birthday_visibility = models.CharField(max_length=20, default='contacts')
+    gifts_visibility = models.CharField(max_length=20, default='everyone')
+    saved_music_visibility = models.CharField(max_length=20, default='everyone')
 
     # ── Permissions: 'everyone' | 'contacts' ──
     who_can_send_messages = models.CharField(max_length=20, default='contacts')
     who_can_voice_video_call = models.CharField(max_length=20, default='contacts')
+    who_can_add_me_to_groups = models.CharField(max_length=20, default='everyone')
 
     # ── Auto-delete messages: 0=off, 1, 7, 30 days ──
     auto_delete_messages_days = models.PositiveSmallIntegerField(default=0)
@@ -131,6 +135,7 @@ class UserNotificationSettings(models.Model):
         on_delete=models.CASCADE,
         related_name='notification_settings',
     )
+    display_notifications = models.BooleanField(default=True)
     offline_notifications = models.BooleanField(default=True)
     all_accounts_notifications = models.BooleanField(default=True)
     notification_sound = models.CharField(max_length=100, default='default')

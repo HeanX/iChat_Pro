@@ -23,6 +23,8 @@ from .models import (
     Contact,
     FriendRequest,
     KeyTrust,
+    UserChatFolderSettings,
+    UserGeneralSettings,
     UserProfile,
     UserPublicKey,
 )
@@ -1000,6 +1002,140 @@ def key_trust_list_view(request):
 
 
 # ── Notification settings API (P2 T23) ────────────────────────────
+
+
+_GENERAL_DEFAULT_SETTINGS = {
+    'theme': 'system',
+    'accent_color': 'blue',
+    'wallpaper': 'default',
+    'message_font_size': '16',
+    'time_format': '24h',
+    'power_saving': False,
+    'reduce_motion': False,
+}
+
+_GENERAL_CHOICES = {
+    'theme': {'light', 'dark', 'system'},
+    'accent_color': {'blue', 'green', 'purple', 'red', 'orange'},
+    'wallpaper': {'default', 'blue', 'green', 'pink', 'purple', 'orange', 'cyan', 'yellow'},
+    'time_format': {'12h', '24h'},
+}
+
+_FOLDER_DEFAULT_SETTINGS = {
+    'folders': [],
+    'folders_view': 'above',
+}
+
+
+def _merge_dict(defaults, values):
+    merged = dict(defaults)
+    if isinstance(values, dict):
+        merged.update(values)
+    return merged
+
+
+def _sanitize_general_settings(raw_settings):
+    current = _merge_dict(_GENERAL_DEFAULT_SETTINGS, raw_settings)
+    sanitized = dict(_GENERAL_DEFAULT_SETTINGS)
+
+    for field, choices in _GENERAL_CHOICES.items():
+        value = current.get(field)
+        if value in choices:
+            sanitized[field] = value
+
+    try:
+        font_size = int(current.get('message_font_size', 16))
+    except (TypeError, ValueError):
+        font_size = 16
+    sanitized['message_font_size'] = str(max(12, min(24, font_size)))
+
+    for field in ('power_saving', 'reduce_motion'):
+        raw = current.get(field)
+        if isinstance(raw, bool):
+            sanitized[field] = raw
+        elif isinstance(raw, int):
+            sanitized[field] = bool(raw)
+        elif isinstance(raw, str):
+            sanitized[field] = raw.lower() in ('true', '1', 'on', 'yes')
+
+    return sanitized
+
+
+def _sanitize_chat_folder_settings(raw_settings):
+    current = _merge_dict(_FOLDER_DEFAULT_SETTINGS, raw_settings)
+    folders = current.get('folders') if isinstance(current.get('folders'), list) else []
+    sanitized_folders = []
+
+    for index, folder in enumerate(folders[:50]):
+        if not isinstance(folder, dict):
+            continue
+        name = str(folder.get('name', '')).strip()[:80]
+        if not name:
+            continue
+        folder_id = str(folder.get('id') or f'folder-{index + 1}')[:80]
+        try:
+            chat_count = max(0, int(folder.get('chat_count', 0) or 0))
+        except (TypeError, ValueError):
+            chat_count = 0
+        sanitized_folders.append({
+            'id': folder_id,
+            'name': name,
+            'chat_count': chat_count,
+            'created_at': str(folder.get('created_at', ''))[:40],
+        })
+
+    folders_view = current.get('folders_view')
+    if folders_view is True:
+        folders_view = 'above'
+    elif folders_view is False:
+        folders_view = 'sidebar'
+    if folders_view not in ('above', 'sidebar'):
+        folders_view = _FOLDER_DEFAULT_SETTINGS['folders_view']
+
+    return {
+        'folders': sanitized_folders,
+        'folders_view': folders_view,
+    }
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def general_settings_view(request):
+    settings_obj, _ = UserGeneralSettings.objects.get_or_create(user=request.user)
+
+    if request.method == 'GET':
+        return JsonResponse({
+            'settings': _sanitize_general_settings(settings_obj.settings_json),
+        })
+
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    current = _sanitize_general_settings(settings_obj.settings_json)
+    settings_obj.settings_json = _sanitize_general_settings(_merge_dict(current, payload))
+    settings_obj.save(update_fields=['settings_json', 'updated_at'])
+    return JsonResponse({'status': 'ok', 'settings': settings_obj.settings_json})
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def chat_folder_settings_view(request):
+    settings_obj, _ = UserChatFolderSettings.objects.get_or_create(user=request.user)
+
+    if request.method == 'GET':
+        return JsonResponse({
+            'settings': _sanitize_chat_folder_settings(settings_obj.settings_json),
+        })
+
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    current = _sanitize_chat_folder_settings(settings_obj.settings_json)
+    settings_obj.settings_json = _sanitize_chat_folder_settings(_merge_dict(current, payload))
+    settings_obj.save(update_fields=['settings_json', 'updated_at'])
+    return JsonResponse({'status': 'ok', 'settings': settings_obj.settings_json})
 
 
 _NOTIFICATION_FIELDS = [

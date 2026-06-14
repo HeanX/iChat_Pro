@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <defs>
+    <!-- Green Mint Forest Theme Pattern -->
+    <pattern id="doodlePattern" width="120" height="120" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#166534" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.06">
+        <!-- Leaves -->
+        <path d="M 15,15 C 15,10 25,10 25,15 C 25,20 15,20 15,15 Z M 15,15 L 20,20" />
+        <path d="M 75,20 C 70,10 85,5 85,15 C 85,25 70,30 75,20 Z" />
+        
+        <!-- Sprout -->
+        <path d="M 50,25 v -10 M 50,20 L 45,15 M 50,18 L 55,14" />
+        
+        <!-- Tea/Coffee Cup -->
+        <path d="M 10,55 h 12 v 8 c 0,3 -2,5 -5,5 h -2 c -3,0 -5,-2 -5,-5 z M 22,57 h 3 v 3 h -3 z" />
+        
+        <!-- Seedling -->
+        <path d="M 95,65 C 95,60 100,55 105,55 C 105,60 100,65 95,65 Z" />
+        
+        <!-- Pine Tree -->
+        <path d="M 80,95 L 85,90 h -3 L 87,85 h -4 L 85,80 L 89,85 h -4 L 91,90 h -3 L 85,95 L 85,98" />
+        
+        <!-- Flower -->
+        <circle cx="50" cy="95" r="2.5" />
+        <circle cx="46" cy="95" r="1.5" />
+        <circle cx="54" cy="95" r="1.5" />
+        <circle cx="50" cy="91" r="1.5" />
+        <circle cx="50" cy="99" r="1.5" />
+
+        <!-- Acorn -->
+        <path d="M 15,95 Q 20,90 25,95 Q 20,102 15,95 Z" />
+        
+        <!-- Sparkles -->
+        <circle cx="65" cy="50" r="1" fill="#166534" opacity="0.5" />
+        <circle cx="115" cy="35" r="1" fill="#166534" opacity="0.5" />
+        <circle cx="5" cy="35" r="1" fill="#166534" opacity="0.5" />
+      </g>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#doodlePattern)" />
+</svg>

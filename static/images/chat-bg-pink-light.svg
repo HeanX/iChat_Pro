@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <defs>
+    <!-- Pink Love Theme Pattern -->
+    <pattern id="doodlePattern" width="120" height="120" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#be185d" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.06">
+        <!-- Heart -->
+        <path d="M 15,15 C 10,10 5,15 15,25 C 25,15 20,10 15,15 Z" />
+        <path d="M 75,20 C 70,15 65,20 75,30 C 85,20 80,15 75,20 Z" />
+        
+        <!-- Balloon -->
+        <circle cx="50" cy="20" r="5" />
+        <path d="M 50,25 Q 48,30 52,35" />
+        
+        <!-- Gift Box -->
+        <rect x="8" y="55" width="12" height="10" rx="1" />
+        <line x1="14" y1="55" x2="14" y2="65" />
+        <line x1="8" y1="60" x2="20" y2="60" />
+        <path d="M 11,55 Q 14,52 14,55 Q 17,52 14,55" />
+        
+        <!-- Bow -->
+        <path d="M 95,60 L 102,65 L 95,70 Z M 109,60 L 102,65 L 109,70 Z" />
+        <circle cx="102" cy="65" r="1.5" />
+        
+        <!-- Cupcake -->
+        <path d="M 20,95 h 12 L 30,101 H 22 Z" />
+        <path d="M 20,95 Q 26,88 32,95 Z" />
+        <circle cx="26" cy="88" r="1" fill="#be185d" />
+
+        <!-- Double Hearts -->
+        <path d="M 75,95 C 72,92 68,95 75,102 C 82,95 78,92 75,95 Z" />
+        <path d="M 83,99 C 81,96 78,98 83,104 C 88,98 85,96 83,99 Z" transform="scale(0.8) translate(15, 10)" />
+
+        <!-- Lollipop -->
+        <circle cx="105" cy="92" r="4.5" />
+        <path d="M 105,92 A 2.5,2.5 0 0 1 107.5,94.5" />
+        <line x1="105" y1="96.5" x2="105" y2="105" />
+
+        <!-- Sparkles -->
+        <circle cx="65" cy="50" r="1" fill="#be185d" opacity="0.5" />
+        <circle cx="115" cy="35" r="1" fill="#be185d" opacity="0.5" />
+        <circle cx="5" cy="35" r="1" fill="#be185d" opacity="0.5" />
+      </g>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#doodlePattern)" />
+</svg>

@@ -7,7 +7,7 @@
       --tg-muted: #707579;
       --tg-line: rgba(0, 0, 0, .07);
       min-height: 100%;
-      padding: 10px 14px 22px;
+      padding: 14px 18px 22px;
       background: var(--tg-panel);
       color: #111;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -15,17 +15,18 @@
 
     .telegram-privacy .privacy-card {
       margin-bottom: 14px;
-      padding: 14px 18px;
+      padding: 20px 22px 18px;
       border-radius: 24px;
       background: var(--tg-card);
-      box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
+      box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06);
     }
 
     .telegram-privacy .privacy-section-title {
-      margin: 0 0 12px;
+      margin: 0 0 16px;
       color: var(--tg-blue);
-      font-size: 17px;
-      font-weight: 650;
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.2;
     }
 
     .telegram-privacy .privacy-row {
@@ -33,13 +34,15 @@
       grid-template-columns: 38px minmax(0, 1fr) auto;
       align-items: center;
       width: 100%;
-      min-height: 54px;
+      min-height: 46px;
       gap: 12px;
       border: 0;
       background: transparent;
-      color: #111;
+      color: #111827;
       text-align: left;
       font: inherit;
+      font-size: 17px;
+      line-height: 1.2;
       cursor: pointer;
     }
 
@@ -68,15 +71,21 @@
     .telegram-privacy .privacy-title {
       display: block;
       overflow: hidden;
-      color: #111;
-      font-size: 16px;
+      color: #111827;
+      font-size: 17px;
       font-weight: 400;
       line-height: 1.2;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .telegram-privacy .privacy-subtitle,
+    .telegram-privacy .privacy-subtitle {
+      margin-top: 3px;
+      color: var(--tg-muted);
+      font-size: 13px;
+      line-height: 1.22;
+    }
+
     .telegram-privacy .privacy-note {
       margin-top: 3px;
       color: var(--tg-muted);
@@ -85,21 +94,36 @@
     }
 
     .telegram-privacy .privacy-note {
-      margin: -2px 18px 14px;
+      margin: 12px 22px 22px;
     }
 
     .telegram-privacy .privacy-chevron {
       color: var(--tg-muted);
     }
 
-    .telegram-privacy .privacy-check {
-      display: grid;
-      width: 26px;
-      height: 26px;
-      place-items: center;
-      border: 2px solid #7b858d;
-      border-radius: 999px;
-      color: transparent;
+    .telegram-privacy .telegram-radio {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      border: 2px solid #b1b5b9;
+      border-radius: 50%;
+      box-sizing: border-box;
+      display: inline-block;
+      flex-shrink: 0;
+      transition: border-color 0.16s ease;
+    }
+
+    .telegram-privacy .telegram-radio::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--tg-blue, #3390ec);
+      transition: transform 0.16s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
 
     .telegram-privacy .privacy-option.is-selected {
@@ -107,9 +131,12 @@
       background: rgba(0, 0, 0, .055);
     }
 
-    .telegram-privacy .privacy-option.is-selected .privacy-check {
+    .telegram-privacy .privacy-option.is-selected .telegram-radio {
       border-color: var(--tg-blue);
-      color: var(--tg-blue);
+    }
+
+    .telegram-privacy .privacy-option.is-selected .telegram-radio::after {
+      transform: translate(-50%, -50%) scale(1);
     }
 
     .telegram-privacy .privacy-switch {
@@ -117,21 +144,22 @@
       width: 42px;
       height: 24px;
       border-radius: 999px;
-      background: #d9dde1;
-      transition: background .18s ease;
+      background: #e9ecef;
+      transition: background-color 0.16s ease;
+      flex: 0 0 auto;
     }
 
     .telegram-privacy .privacy-switch::after {
       content: "";
       position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 20px;
-      height: 20px;
+      top: 1px;
+      left: 1px;
+      width: 22px;
+      height: 22px;
       border-radius: 999px;
       background: #fff;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
-      transition: transform .18s ease;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+      transition: transform 0.16s ease;
     }
 
     .telegram-privacy .privacy-switch.is-on {
@@ -212,6 +240,45 @@
     .telegram-privacy .privacy-toast.is-visible {
       opacity: 1;
       transform: translateY(0);
+    }
+
+    /* Dark Mode Settings */
+    [data-theme="dark"] .telegram-privacy {
+      --tg-card: #212121;
+      --tg-panel: #181818;
+      --tg-muted: #aaaaaa;
+      --tg-line: rgba(255, 255, 255, .08);
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-row,
+    [data-theme="dark"] .telegram-privacy .privacy-title,
+    [data-theme="dark"] .telegram-privacy .privacy-detail-header h3 {
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-switch {
+      background: #2b2b2b;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-switch.is-on {
+      background: #3390ec;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-option.is-selected {
+      background: rgba(255, 255, 255, .055);
+    }
+
+    [data-theme="dark"]    .telegram-privacy .privacy-detail-header button {
+      color: #aaaaaa;
+    }
+
+    [data-theme="dark"] .telegram-privacy .telegram-radio {
+      border-color: #555555;
+    }
+
+    [data-theme="dark"] .telegram-privacy .privacy-option.is-selected .telegram-radio {
+      border-color: var(--tg-blue);
     }
   </style>
 
@@ -358,15 +425,15 @@
     <div class="privacy-card">
       <h3 id="privacy-detail-question" class="privacy-section-title">谁可以看到您最后上线的时间?</h3>
       <button type="button" class="privacy-row privacy-option" data-option="everyone">
-        <span class="privacy-check"><i data-lucide="circle"></i></span>
+        <span class="telegram-radio"></span>
         <span><span class="privacy-title">所有人</span></span>
       </button>
       <button type="button" class="privacy-row privacy-option" data-option="contacts">
-        <span class="privacy-check"><i data-lucide="circle"></i></span>
+        <span class="telegram-radio"></span>
         <span><span class="privacy-title">我的联系人</span></span>
       </button>
       <button type="button" class="privacy-row privacy-option" data-option="nobody">
-        <span class="privacy-check"><i data-lucide="circle"></i></span>
+        <span class="telegram-radio"></span>
         <span><span class="privacy-title">不允许任何人</span></span>
       </button>
     </div>

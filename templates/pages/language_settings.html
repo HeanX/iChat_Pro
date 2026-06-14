@@ -1,0 +1,420 @@
+{# language_settings.html - Language & Translation settings #}
+<div class="lang-settings-view" id="language-settings-root">
+
+  <!-- Section 1: Translation -->
+  <section class="lang-card">
+    <h3 class="lang-section-header">翻译消息</h3>
+
+    <label class="lang-toggle-row">
+      <span class="lang-toggle-label">显示"翻译"按钮</span>
+      <input type="checkbox" id="lang-show-translate" checked>
+      <span class="lang-switch"></span>
+    </label>
+
+    <div class="lang-inner-divider"></div>
+
+    <label class="lang-toggle-row lang-toggle-row--disabled">
+      <span class="lang-toggle-label">翻译全部聊天记录</span>
+      <input type="checkbox" id="lang-translate-all" disabled>
+      <span class="lang-switch"></span>
+    </label>
+
+    <div class="lang-inner-divider"></div>
+
+    <button type="button" class="lang-toggle-row lang-toggle-row--link" onclick="showToast('翻译排除语言设置即将推出')">
+      <span class="lang-toggle-label">无需翻译</span>
+      <span class="lang-value-right" id="lang-no-translate-val">中文</span>
+    </button>
+  </section>
+
+  <p class="lang-hint">订阅 <span class="lang-hint--accent">iChat 高级版</span> 以翻译所有聊天。</p>
+
+  <!-- Section 2: Language list -->
+  <section class="lang-card">
+    <div class="lang-radio-list" id="lang-radio-list">
+
+      <label class="lang-radio-row" data-lang="zh">
+        <span class="lang-radio-circle" data-radio="zh"></span>
+        <span class="lang-radio-main">
+          <span class="lang-radio-name">Chinese (Simplified)</span>
+          <span class="lang-radio-native">简体中文</span>
+        </span>
+      </label>
+      <div class="lang-divider"></div>
+
+      <label class="lang-radio-row" data-lang="zh-TW">
+        <span class="lang-radio-circle" data-radio="zh-TW"></span>
+        <span class="lang-radio-main">
+          <span class="lang-radio-name">Chinese (Traditional)</span>
+          <span class="lang-radio-native">繁體中文</span>
+        </span>
+      </label>
+      <div class="lang-divider"></div>
+
+      <label class="lang-radio-row" data-lang="en">
+        <span class="lang-radio-circle" data-radio="en"></span>
+        <span class="lang-radio-main">
+          <span class="lang-radio-name">English</span>
+          <span class="lang-radio-native">English</span>
+        </span>
+      </label>
+      <div class="lang-divider"></div>
+
+      <label class="lang-radio-row" data-lang="ja">
+        <span class="lang-radio-circle" data-radio="ja"></span>
+        <span class="lang-radio-main">
+          <span class="lang-radio-name">Japanese</span>
+          <span class="lang-radio-native">日本語</span>
+        </span>
+      </label>
+
+    </div>
+  </section>
+
+</div>
+
+<style>
+  /* ─── Layout ───────────────────────────────────────────────── */
+  .lang-settings-view {
+    padding: 14px 14px 32px;
+    background: #f4f4f5;
+    min-height: 100%;
+  }
+
+  /* ─── Card ─────────────────────────────────────────────────── */
+  .lang-card {
+    width: 100%;
+    background: #ffffff;
+    border-radius: 18px;
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+    margin-bottom: 0;
+  }
+
+  .lang-card + .lang-card,
+  .lang-hint + .lang-card {
+    margin-top: 8px;
+  }
+
+  /* ─── Section header ───────────────────────────────────────── */
+  .lang-section-header {
+    margin: 0;
+    padding: 14px 18px 10px;
+    color: #3390ec;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    line-height: 1;
+  }
+
+  /* ─── Hint ─────────────────────────────────────────────────── */
+  .lang-hint {
+    margin: 8px 20px 8px;
+    color: #707579;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .lang-hint--accent {
+    color: #3390ec;
+    font-weight: 500;
+  }
+
+  /* ─── Toggle rows ──────────────────────────────────────────── */
+  .lang-toggle-row {
+    display: flex;
+    align-items: center;
+    min-height: 52px;
+    padding: 0 16px;
+    gap: 14px;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    color: #111827;
+  }
+
+  .lang-toggle-row--link {
+    transition: background 0.12s;
+  }
+
+  .lang-toggle-row--link:hover {
+    background: rgba(51, 144, 236, 0.06);
+  }
+
+  .lang-toggle-row--disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  .lang-toggle-label {
+    flex: 1;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.2;
+  }
+
+  .lang-value-right {
+    color: #707579;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  /* ─── Inner divider ────────────────────────────────────────── */
+  .lang-inner-divider {
+    height: 1px;
+    background: rgba(0, 0, 0, 0.06);
+    margin-left: 16px;
+  }
+
+  /* ─── Switch ───────────────────────────────────────────────── */
+  .lang-toggle-row > input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .lang-switch {
+    position: relative;
+    width: 50px;
+    height: 28px;
+    border-radius: 999px;
+    background: #d1d5db;
+    transition: background 0.18s ease;
+    flex: 0 0 auto;
+  }
+
+  .lang-switch::before {
+    content: "";
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    left: 2px;
+    top: 2px;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.22);
+    transition: transform 0.18s ease;
+  }
+
+  .lang-toggle-row input:checked + .lang-switch {
+    background: #3390ec;
+  }
+
+  .lang-toggle-row input:checked + .lang-switch::before {
+    transform: translateX(22px);
+  }
+
+  /* ─── Radio list ───────────────────────────────────────────── */
+  .lang-radio-list {
+    padding: 4px 0;
+  }
+
+  .lang-radio-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 18px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+
+  .lang-radio-row:hover {
+    background: rgba(51, 144, 236, 0.05);
+  }
+
+  .lang-radio-row:active {
+    background: rgba(51, 144, 236, 0.1);
+  }
+
+  /* ─── Radio circle ─────────────────────────────────────────── */
+  .lang-radio-circle {
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 2px solid #c8cdd2;
+    background: transparent;
+    position: relative;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .lang-radio-circle::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 999px;
+    background: transparent;
+    transition: background 0.15s;
+  }
+
+  .lang-radio-circle.is-selected {
+    border-color: #3390ec;
+    background: #3390ec;
+  }
+
+  .lang-radio-circle.is-selected::after {
+    background: #ffffff;
+    inset: 4px;
+  }
+
+  /* ─── Radio main text ──────────────────────────────────────── */
+  .lang-radio-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .lang-radio-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: #111827;
+    line-height: 1.2;
+  }
+
+  .lang-radio-native {
+    font-size: 13px;
+    color: #707579;
+    line-height: 1.2;
+  }
+
+  /* ─── Divider between radio rows ───────────────────────────── */
+  .lang-divider {
+    height: 1px;
+    background: rgba(0, 0, 0, 0.06);
+    margin-left: 56px;
+  }
+
+  /* ─── Dark Mode ────────────────────────────────────────────── */
+  [data-theme="dark"] .lang-settings-view {
+    background: #181818;
+  }
+
+  [data-theme="dark"] .lang-card {
+    background: #212121;
+    box-shadow: none;
+  }
+
+  [data-theme="dark"] .lang-toggle-row {
+    color: #f1f5f9;
+  }
+
+  [data-theme="dark"] .lang-toggle-row--link:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  [data-theme="dark"] .lang-value-right {
+    color: #9aa0a6;
+  }
+
+  [data-theme="dark"] .lang-switch {
+    background: #4a4d52;
+  }
+
+  [data-theme="dark"] .lang-inner-divider,
+  [data-theme="dark"] .lang-divider {
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  [data-theme="dark"] .lang-hint {
+    color: #9aa0a6;
+  }
+
+  [data-theme="dark"] .lang-radio-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  [data-theme="dark"] .lang-radio-circle {
+    border-color: #5a5f65;
+  }
+
+  [data-theme="dark"] .lang-radio-name {
+    color: #f1f5f9;
+  }
+
+  [data-theme="dark"] .lang-radio-native {
+    color: #9aa0a6;
+  }
+</style>
+
+<script>
+(function() {
+  // ── Supported languages ─────────────────────────────────────
+  var LANG_LOCALE_MAP = {
+    'zh':    { appLang: 'zh', label: '中文' },
+    'zh-TW': { appLang: 'zh', label: '繁中' },  // maps to app zh for now
+    'en':    { appLang: 'en', label: 'English' },
+    'ja':    { appLang: 'en', label: '日本語' }  // not fully supported, falls back to en UI
+  };
+
+  // ── Determine current selection from localStorage ────────────
+  function getCurrentLang() {
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('ichat_sessions') || '{}'); } catch(e) {}
+    return saved.uiLang || (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh' ? 'zh' : 'en');
+  }
+
+  // ── Render radio buttons ─────────────────────────────────────
+  function renderRadios(selected) {
+    document.querySelectorAll('#language-settings-root .lang-radio-circle').forEach(function(el) {
+      var lang = el.getAttribute('data-radio');
+      if (lang === selected) {
+        el.classList.add('is-selected');
+      } else {
+        el.classList.remove('is-selected');
+      }
+    });
+  }
+
+  // ── Handle radio row click ───────────────────────────────────
+  document.querySelectorAll('#language-settings-root .lang-radio-row').forEach(function(row) {
+    row.addEventListener('click', function() {
+      var lang = row.getAttribute('data-lang');
+      if (!lang) return;
+
+      // Persist selection
+      var saved = {};
+      try { saved = JSON.parse(localStorage.getItem('ichat_sessions') || '{}'); } catch(e) {}
+      saved.uiLang = lang;
+      localStorage.setItem('ichat_sessions', JSON.stringify(saved));
+
+      renderRadios(lang);
+
+      // Apply to app-level language toggle (en / zh)
+      var meta = LANG_LOCALE_MAP[lang];
+      if (meta && typeof currentLanguage !== 'undefined') {
+        if (meta.appLang !== currentLanguage && typeof toggleLanguage === 'function') {
+          toggleLanguage();
+        }
+      }
+
+      // Update lang display in settings home row
+      var displayEl = document.getElementById('lang-display-val');
+      if (displayEl && meta) displayEl.textContent = meta.label;
+
+      var toasts = { 'zh': '语言已切换为简体中文', 'zh-TW': '語言已切換為繁體中文', 'en': 'Language set to English', 'ja': '言語を日本語に設定しました' };
+      if (window.showToast) window.showToast(toasts[lang] || 'Language updated');
+    });
+  });
+
+  // ── Translate toggle ─────────────────────────────────────────
+  var translateToggle = document.getElementById('lang-show-translate');
+  if (translateToggle) {
+    var s = {};
+    try { s = JSON.parse(localStorage.getItem('ichat_sessions') || '{}'); } catch(e) {}
+    translateToggle.checked = s.show_translate !== false;
+    translateToggle.addEventListener('change', function() {
+      var settings = {};
+      try { settings = JSON.parse(localStorage.getItem('ichat_sessions') || '{}'); } catch(e) {}
+      settings.show_translate = translateToggle.checked;
+      localStorage.setItem('ichat_sessions', JSON.stringify(settings));
+    });
+  }
+
+  // ── Initial render ───────────────────────────────────────────
+  renderRadios(getCurrentLang());
+})();
+</script>

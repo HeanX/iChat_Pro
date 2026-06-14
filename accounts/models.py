@@ -155,6 +155,38 @@ class UserNotificationSettings(models.Model):
         return f'NotificationSettings for {self.user.username}'
 
 
+class UserGeneralSettings(models.Model):
+    """Per-user appearance and general UI preferences."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='general_settings',
+    )
+    settings_json = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'GeneralSettings for {self.user.username}'
+
+
+class UserChatFolderSettings(models.Model):
+    """Per-user chat folder layout and folder definitions."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='chat_folder_settings',
+    )
+    settings_json = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'ChatFolderSettings for {self.user.username}'
+
+
 class MultiAccountContext(models.Model):
     """Per-user multi-account context storage (P2 T35).
 
@@ -346,11 +378,13 @@ class KeyTrust(models.Model):
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def create_user_profile(sender, instance, created, **kwargs):
-    """Ensure every new user gets a UserProfile, UserPrivacySettings and UserStorageSettings immediately."""
+    """Ensure every new user gets the account-owned companion records."""
     if created:
         UserProfile.objects.get_or_create(user=instance)
         UserPrivacySettings.objects.get_or_create(user=instance)
         UserStorageSettings.objects.get_or_create(user=instance)
+        UserGeneralSettings.objects.get_or_create(user=instance)
+        UserChatFolderSettings.objects.get_or_create(user=instance)
 
 
 # Group and GroupMember have been consolidated into chat.Conversation

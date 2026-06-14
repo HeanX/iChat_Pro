@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <defs>
+    <!-- Orange Cozy Autumn Theme Pattern (Dark Mode) -->
+    <pattern id="doodlePattern" width="120" height="120" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.035">
+        <!-- Campfire -->
+        <path d="M 15,22 L 25,22 M 20,22 L 20,12 Q 16,17 20,12 Q 24,17 20,12" />
+        <path d="M 13,24 L 27,20 M 12,20 L 28,24" />
+        
+        <!-- Coffee Cup -->
+        <path d="M 70,18 h 12 v 8 c 0,2 -2,4 -4,4 h -4 c -2,0 -4,-2 -4,-4 z M 82,20 h 3 v 3 h -3 z" />
+        <path d="M 73,14 Q 75,11 74,14 M 78,14 Q 80,11 79,14" />
+        
+        <!-- Maple Leaf -->
+        <path d="M 50,15 L 48,19 L 45,17 L 47,21 L 50,23 L 53,21 L 55,17 L 52,19 Z L 50,26" />
+        
+        <!-- Acorn -->
+        <path d="M 10,57 Q 15,52 20,57 Q 15,64 10,57 Z" />
+        <path d="M 12,55 h 6 v 2 h -6 z M 15,55 v -2" />
+        
+        <!-- Sun -->
+        <circle cx="100" cy="60" r="5" />
+        <path d="M 100,52 v 2 M 100,66 v 2 M 92,60 h 2 M 106,60 h 2" />
+        
+        <!-- Hiking Boot/Footprint -->
+        <path d="M 15,95 h 8 L 21,90 L 19,90 Z" />
+        <circle cx="15" cy="95" r="0.5" fill="#ffffff" />
+        <circle cx="18" cy="95" r="0.5" fill="#ffffff" />
+        <circle cx="21" cy="95" r="0.5" fill="#ffffff" />
+
+        <!-- Umbrella -->
+        <path d="M 72,95 A 6,6 0 0 1 84,95 Z" />
+        <line x1="78" y1="95" x2="78" y2="101" />
+        <path d="M 78,101 c 0,1.5 -1.5,1.5 -1.5,1.5" />
+
+        <!-- Mushroom -->
+        <path d="M 100,96 A 5,5 0 0 1 110,96 Z" />
+        <rect x="103" y="96" width="4" height="6" rx="1" />
+
+        <!-- Sparkles -->
+        <circle cx="65" cy="50" r="1" fill="#ffffff" opacity="0.5" />
+        <circle cx="115" cy="35" r="1" fill="#ffffff" opacity="0.5" />
+        <circle cx="5" cy="35" r="1" fill="#ffffff" opacity="0.5" />
+      </g>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#doodlePattern)" />
+</svg>

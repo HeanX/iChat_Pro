@@ -122,6 +122,17 @@ urlpatterns = [
         views.notification_settings_update_view,
         name='notification-settings-update',
     ),
+    # General settings and chat folders
+    path(
+        'api/settings/general/',
+        views.general_settings_view,
+        name='general-settings',
+    ),
+    path(
+        'api/settings/chat-folders/',
+        views.chat_folder_settings_view,
+        name='chat-folder-settings',
+    ),
     # Storage, privacy, and blocked-user endpoints have been consolidated
     # into chat/urls.py (ketter1024's P2 T05/T06/T19-T40 views).
     # QR code card (P2 T30)

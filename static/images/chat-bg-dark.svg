@@ -1,12 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
   <defs>
-    <!-- Background Gradient -->
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0f1218" />
-      <stop offset="100%" stop-color="#181c24" />
-    </linearGradient>
-    
-    <!-- Repeating Telegram-like Pattern -->
+    <!-- Repeating Telegram-like Pattern (Dark Mode) -->
     <pattern id="doodlePattern" width="120" height="120" patternUnits="userSpaceOnUse">
       <g fill="none" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.035">
         <!-- Message bubble -->
@@ -42,9 +36,6 @@
     </pattern>
   </defs>
 
-  <!-- Background Rect -->
-  <rect width="100%" height="100%" fill="url(#bgGrad)" />
-  
   <!-- Pattern Rect overlay -->
   <rect width="100%" height="100%" fill="url(#doodlePattern)" />
 </svg>

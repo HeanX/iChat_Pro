@@ -1202,7 +1202,7 @@ def leave_group_view(request, conversation_id):
                 {"error": "You are the owner. Transfer ownership before leaving."},
                 status=403,
             )
-        # Owner is the only member 鈥?disband instead
+        # Owner is the only member - disband instead
         conversation.status = Conversation.Status.DELETED
         conversation.membership_version = F('membership_version') + 1
         conversation.save(update_fields=["status", "membership_version", "updated_at"])
@@ -1813,7 +1813,7 @@ def storage_stats_view(request):
     EST_OTHER = 2 * 1024         # 2 KB per text/system message (ciphertext overhead)
 
     images_bytes = (private_images + group_images) * EST_IMAGE
-    videos_bytes = 0  # No video message type yet 鈥?placeholder for T24
+    videos_bytes = 0  # No video message type yet - placeholder for T24
     stickers_bytes = (private_stickers + group_stickers) * EST_STICKER
     other_bytes = (private_other + group_other) * EST_OTHER
     # Video stream chunks are not persisted yet (T24)
@@ -1862,7 +1862,7 @@ def storage_clear_view(request):
 
     Accepts: {"categories": ["images", "videos", "stickers", "other",
     "video_stream_chunks"]} or "all".
-    Currently a stub 鈥?real file-system cleanup depends on T24.
+    Currently a stub - real file-system cleanup depends on T24.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed.'}, status=405)
@@ -1927,8 +1927,8 @@ def storage_clear_view(request):
 def storage_settings_view(request):
     """Get or update server-side storage settings for the user.
 
-    GET  鈥?return current settings.
-    POST 鈥?merge the provided settings keys.
+    GET  - return current settings.
+    POST - merge the provided settings keys.
     Persisted in UserStorageSettings (DB-backed, survives session expiry).
     """
     ss = _storage_settings_obj(request.user)
@@ -2021,7 +2021,7 @@ _PRIVACY_STRING_FIELDS = {
     'who_can_add_me_to_groups',
 }
 
-# Permission fields only accept 'everyone' or 'contacts' 鈥?'nobody' is NOT valid here
+# Permission fields only accept 'everyone' or 'contacts' - 'nobody' is NOT valid here
 _PRIVACY_PERMISSION_FIELDS = {
     'who_can_send_messages',
     'who_can_voice_video_call',
@@ -2094,7 +2094,7 @@ def privacy_settings_view(request):
                 setattr(ps, field, data[field])
                 updated_fields.append(field)
 
-        # Permission fields only accept 'everyone' or 'contacts' 鈥?NOT 'nobody'
+        # Permission fields only accept 'everyone' or 'contacts' - NOT 'nobody'
         for field in _PRIVACY_PERMISSION_FIELDS:
             if field in data and data[field] in ('everyone', 'contacts'):
                 setattr(ps, field, data[field])
@@ -2423,7 +2423,7 @@ def search_unified_view(request):
                     })
         results['conversations'] = peer_convs[:10]
 
-    # Channels (placeholder 鈥?T33)
+    # Channels (placeholder - T33)
     results['channels'] = []
 
     return JsonResponse({'results': results, 'scope': scope, 'query': query})

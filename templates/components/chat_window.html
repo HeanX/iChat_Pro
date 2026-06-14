@@ -132,6 +132,19 @@
           <span data-i18n="e2ee_banner">🔒 Messages are secured with end-to-end encryption.</span>
         </div>
 
+        <div id="chat-format-toolbar" class="chat-format-toolbar hidden" role="toolbar" aria-label="Text formatting">
+          <button type="button" data-format="bold" title="Bold (Ctrl+B)" aria-label="Bold"><strong>B</strong></button>
+          <button type="button" data-format="italic" title="Italic (Ctrl+I)" aria-label="Italic"><span class="format-italic">I</span></button>
+          <button type="button" data-format="underline" title="Underline (Ctrl+U)" aria-label="Underline"><span class="format-underline">U</span></button>
+          <button type="button" data-format="strike" title="Strikethrough (Ctrl+Shift+X)" aria-label="Strikethrough"><span class="format-strike">S</span></button>
+          <button type="button" data-format="code" title="Monospace (Ctrl+Shift+M)" aria-label="Monospace"><span class="format-mono">M</span></button>
+          <button type="button" data-format="spoiler" title="Spoiler (Ctrl+Shift+H)" aria-label="Spoiler"><i data-lucide="scan-line" class="w-5 h-5"></i></button>
+          <button type="button" data-format="quote" title="Quote (Ctrl+Shift+9)" aria-label="Quote"><i data-lucide="quote" class="w-5 h-5"></i></button>
+          <button type="button" data-format="link" title="Link (Ctrl+K)" aria-label="Link"><i data-lucide="link" class="w-5 h-5"></i></button>
+        </div>
+
+        <div id="chat-markdown-preview" class="chat-markdown-preview hidden" aria-live="polite"></div>
+
         <div class="chat-input-capsule telegram-composer">
         <!-- File Attachment Button -->
         <button class="telegram-composer-action p-2.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all focus:outline-none flex-shrink-0" title="Attach Document" data-i18n-title="attach_document">

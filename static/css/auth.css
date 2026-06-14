@@ -1,251 +1,661 @@
 /* ==========================================================================
    iChat Pro CSS - auth.css
+   Redesigned to match the settings / chat GUI design language.
    ========================================================================== */
 
-.auth-container {
-  display: flex;
+/* --------------------------------------------------------------------------
+   Auth page root — full-screen centered layout
+   -------------------------------------------------------------------------- */
+.auth-page {
   min-height: 100vh;
   width: 100vw;
+  display: flex;
   align-items: center;
   justify-content: center;
   background-color: var(--color-search-bg);
-  background-image: var(--chat-bg-image);
-  background-repeat: repeat;
-  background-position: center;
+  /* Subtle dot-grid pattern identical to settings panel background */
+  background-image: radial-gradient(circle, var(--auth-dot-color, rgba(0,0,0,.07)) 1px, transparent 1px);
+  background-size: 22px 22px;
+  padding: 24px 16px;
+  box-sizing: border-box;
   position: relative;
+  overflow: auto;
 }
 
-.auth-card {
-  background-color: var(--color-sidebar-bg);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 40px;
+[data-theme="dark"] .auth-page {
+  --auth-dot-color: rgba(255,255,255,.05);
+}
+
+/* --------------------------------------------------------------------------
+   Auth inner wrapper — constrains max width like settings panels
+   -------------------------------------------------------------------------- */
+.auth-wrapper {
   width: 100%;
-  max-width: 420px;
+  max-width: 440px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  border: 1px solid var(--color-border);
-  z-index: 10;
-  animation: authCardEntry 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  gap: 0;
+  animation: authSlideUp 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-@keyframes authCardEntry {
-  from {
-    opacity: 0;
-    transform: translateY(30px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+@keyframes authSlideUp {
+  from { opacity: 0; transform: translateY(28px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)     scale(1);    }
 }
 
-.auth-logo {
+/* --------------------------------------------------------------------------
+   Brand logo block — mirrors sidebar / settings icon style
+   -------------------------------------------------------------------------- */
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
   margin-bottom: 20px;
+}
+
+.auth-logo-ring {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 80px;
-  height: 80px;
-  background-color: var(--color-primary);
-  border-radius: var(--radius-lg);
-  color: #ffffff;
-  box-shadow: 0 8px 20px rgba(51, 144, 236, 0.35);
-  animation: logoPulse 3s infinite ease-in-out;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 24px rgba(51, 144, 236, 0.32);
+  animation: logoBreathe 3.5s ease-in-out infinite;
 }
 
-[data-theme="dark"] .auth-logo {
-  box-shadow: 0 8px 20px rgba(135, 116, 225, 0.35);
+[data-theme="dark"] .auth-logo-ring {
+  box-shadow: 0 8px 24px rgba(135, 116, 225, 0.36);
 }
 
-@keyframes logoPulse {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.05); }
-  100% { transform: scale(1); }
+@keyframes logoBreathe {
+  0%,100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
 }
 
-.auth-logo svg {
-  width: 44px;
-  height: 44px;
-  fill: currentColor;
+.auth-logo-ring svg {
+  width: 36px;
+  height: 36px;
+  color: #fff;
 }
 
-.auth-header {
-  text-align: center;
-  margin-bottom: 28px;
-}
-
-.auth-title {
-  font-size: 1.6rem;
-  font-weight: 700;
+.auth-brand-name {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
   color: var(--color-text-main);
-  margin-bottom: 8px;
+  line-height: 1.1;
 }
 
-.auth-subtitle {
-  font-size: 0.9rem;
+.auth-brand-sub {
+  font-size: 0.8rem;
   color: var(--color-text-secondary);
+  margin-top: 4px;
 }
 
-.auth-form {
+/* --------------------------------------------------------------------------
+   Auth card — mirrors .general-card from settings
+   -------------------------------------------------------------------------- */
+.auth-card {
   width: 100%;
+  background: var(--color-sidebar-bg);
+  border-radius: 24px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.09);
+  padding: 28px 28px 24px;
+  border: 1px solid var(--color-border);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 0;
 }
 
-.auth-input-group {
+[data-theme="dark"] .auth-card {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+/* Section title — matches .general-section-title */
+.auth-section-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: 4px;
+}
+
+.auth-section-sub {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.4;
+}
+
+/* --------------------------------------------------------------------------
+   Input groups — clean label + icon + field rows
+   -------------------------------------------------------------------------- */
+.auth-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 100%;
+  gap: 5px;
+  margin-bottom: 14px;
 }
 
 .auth-label {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--color-text-secondary);
+  letter-spacing: 0.02em;
 }
 
-.auth-input-wrapper {
+.auth-input-wrap {
   position: relative;
   display: flex;
   align-items: center;
-  width: 100%;
+}
+
+.auth-input-icon {
+  position: absolute;
+  left: 13px;
+  display: flex;
+  align-items: center;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  transition: color 0.18s ease;
+}
+
+.auth-input-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
 }
 
 .auth-input {
   width: 100%;
   height: 46px;
+  padding: 0 14px 0 42px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 0 16px 0 44px; /* Space for left icon */
-  font-size: 0.95rem;
-  background-color: var(--color-search-bg);
+  background: var(--color-search-bg);
   color: var(--color-text-main);
-  transition: all 0.2s ease;
+  font-size: 0.92rem;
+  font-family: var(--font-family);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  box-sizing: border-box;
+}
+
+.auth-input::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
 }
 
 .auth-input:focus {
+  outline: none;
   border-color: var(--color-primary);
-  background-color: var(--color-bg);
+  background: var(--color-bg);
   box-shadow: 0 0 0 3px var(--color-primary-light);
 }
 
-.auth-input-icon {
-  position: absolute;
-  left: 14px;
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-  pointer-events: none;
-  transition: color 0.2s ease;
-}
-
-.auth-input:focus + .auth-input-icon {
+.auth-input:focus ~ .auth-input-icon,
+.auth-input-wrap:focus-within .auth-input-icon {
   color: var(--color-primary);
 }
 
-.auth-btn {
-  height: 48px;
-  background-color: var(--color-primary);
-  color: #ffffff;
-  border-radius: var(--radius-md);
-  font-weight: 600;
-  font-size: 1rem;
-  border: none;
+/* Password toggle button */
+.auth-pw-toggle {
+  position: absolute;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  color: var(--color-text-secondary);
   cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.auth-pw-toggle:hover {
+  color: var(--color-text-main);
+  background: var(--color-hover-state);
+}
+
+.auth-pw-toggle svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2;
+}
+
+/* --------------------------------------------------------------------------
+   Password strength meter
+   -------------------------------------------------------------------------- */
+.auth-strength {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.auth-strength-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--color-border);
+  transition: background 0.25s ease;
+}
+
+.auth-strength-bar.weak   { background: #ef4444; }
+.auth-strength-bar.medium { background: #f59e0b; }
+.auth-strength-bar.strong { background: #22c55e; }
+
+.auth-strength-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  min-width: 38px;
+  text-align: right;
+  transition: color 0.2s ease;
+}
+
+/* --------------------------------------------------------------------------
+   Inline label-row helpers (remember me, label + link side by side)
+   -------------------------------------------------------------------------- */
+.auth-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.auth-check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.auth-check-label input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-search-bg);
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.auth-forgot {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Info notice block — mirrors .general-card info style
+   -------------------------------------------------------------------------- */
+.auth-notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-light);
+  border: 1px solid rgba(51, 144, 236, 0.18);
+  margin-bottom: 16px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--color-primary);
+}
+
+[data-theme="dark"] .auth-notice {
+  border-color: rgba(135, 116, 225, 0.2);
+}
+
+.auth-notice svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  stroke-width: 2.2;
+}
+
+/* --------------------------------------------------------------------------
+   Error alert — shake + red border
+   -------------------------------------------------------------------------- */
+.auth-error {
+  display: none;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  margin-bottom: 14px;
+  font-size: 0.82rem;
+  color: var(--color-error);
+  line-height: 1.4;
+  animation: authShake 0.38s ease;
+}
+
+.auth-error.is-visible {
+  display: flex;
+}
+
+.auth-error svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  stroke-width: 2;
+}
+
+@keyframes authShake {
+  0%,100% { transform: translateX(0); }
+  20%,60%  { transform: translateX(-5px); }
+  40%,80%  { transform: translateX(5px); }
+}
+
+/* --------------------------------------------------------------------------
+   Submit button — mirrors .auth-btn style aligned to primary theme
+   -------------------------------------------------------------------------- */
+.auth-submit {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: 10px;
-  box-shadow: 0 4px 12px rgba(51, 144, 236, 0.2);
-  transition: all 0.2s ease;
+  width: 100%;
+  height: 48px;
+  margin-top: 6px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(51, 144, 236, 0.28);
+  transition: background 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
 }
 
-[data-theme="dark"] .auth-btn {
-  box-shadow: 0 4px 12px rgba(135, 116, 225, 0.2);
+[data-theme="dark"] .auth-submit {
+  box-shadow: 0 4px 14px rgba(135, 116, 225, 0.28);
 }
 
-.auth-btn:hover {
-  background-color: var(--color-primary-hover);
+.auth-submit:hover:not(:disabled) {
+  background: var(--color-primary-hover);
   transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(51, 144, 236, 0.34);
 }
 
-.auth-btn:active {
+.auth-submit:active:not(:disabled) {
   transform: translateY(1px);
+  box-shadow: 0 2px 8px rgba(51, 144, 236, 0.2);
 }
 
-.auth-btn:disabled {
-  background-color: var(--color-text-secondary);
+.auth-submit:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
 }
 
-.auth-footer {
-  margin-top: 24px;
-  font-size: 0.9rem;
-  text-align: center;
-  color: var(--color-text-secondary);
+.auth-submit svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.2;
+  flex-shrink: 0;
 }
 
-.auth-link {
-  color: var(--color-primary);
-  font-weight: 600;
-  transition: color 0.2s ease;
-}
-
-.auth-link:hover {
-  color: var(--color-primary-hover);
-  text-decoration: none;
-}
-
-/* Alert styles */
-.auth-alert {
-  padding: 12px 16px;
-  border-radius: var(--radius-md);
-  font-size: 0.875rem;
-  margin-bottom: 20px;
-  width: 100%;
+/* --------------------------------------------------------------------------
+   Divider with text
+   -------------------------------------------------------------------------- */
+.auth-divider {
   display: flex;
   align-items: center;
   gap: 10px;
-  animation: shake 0.4s ease-in-out;
+  margin: 18px 0 14px;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
 }
 
-.auth-alert-danger {
-  background-color: #ffebee;
-  color: #c62828;
-  border: 1px solid #ffcdd2;
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
 }
 
-[data-theme="dark"] .auth-alert-danger {
-  background-color: rgba(239, 83, 80, 0.1);
-  color: #ef5350;
-  border: 1px solid rgba(239, 83, 80, 0.2);
+/* --------------------------------------------------------------------------
+   Navigation footer (sign in / create account link)
+   -------------------------------------------------------------------------- */
+.auth-nav {
+  text-align: center;
+  margin-top: 18px;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
 }
 
-@keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  20%, 60% { transform: translateX(-6px); }
-  40%, 80% { transform: translateX(6px); }
+.auth-nav a {
+  color: var(--color-primary);
+  font-weight: 700;
+  text-decoration: none;
+  transition: color 0.18s ease;
 }
 
-/* Loading animation on Button */
-.spinner {
-  width: 20px;
-  height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.35);
+.auth-nav a:hover {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   Footer trust badges — mirrors base_auth.html footer
+   -------------------------------------------------------------------------- */
+.auth-footer-badges {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.73rem;
+  color: var(--color-text-secondary);
+  opacity: 0.85;
+  text-align: center;
+}
+
+.auth-footer-badges .badge-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.auth-footer-badges svg {
+  width: 13px;
+  height: 13px;
+  color: #22c55e;
+}
+
+/* --------------------------------------------------------------------------
+   Theme toggle — top-right floating button
+   -------------------------------------------------------------------------- */
+.auth-theme-btn {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  border-top-color: #ffffff;
-  animation: spin 0.8s linear infinite;
-  display: inline-block;
+  background: var(--color-sidebar-bg);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-main);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  z-index: 100;
+}
+
+.auth-theme-btn:hover {
+  transform: scale(1.08);
+  box-shadow: var(--shadow-md);
+}
+
+.auth-theme-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+
+.auth-theme-btn .icon-sun  { display: block; }
+.auth-theme-btn .icon-moon { display: none;  }
+
+[data-theme="dark"] .auth-theme-btn .icon-sun  { display: none;  }
+[data-theme="dark"] .auth-theme-btn .icon-moon { display: block; }
+
+/* --------------------------------------------------------------------------
+   Agreement checkbox block
+   -------------------------------------------------------------------------- */
+.auth-agreement {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 10px;
+  margin-top: 2px;
+}
+
+.auth-agreement input[type="checkbox"] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-search-bg);
+  accent-color: var(--color-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.auth-agreement label {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  line-height: 1.45;
+}
+
+/* --------------------------------------------------------------------------
+   Key-gen loading overlay
+   -------------------------------------------------------------------------- */
+.auth-keygen {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0 8px;
+  text-align: center;
+}
+
+.auth-keygen.is-visible { display: flex; }
+
+.auth-keygen-spinner {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-keygen-spinner::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid var(--color-primary-light);
+}
+
+.auth-keygen-spinner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: var(--color-primary);
+  animation: spin 0.75s linear infinite;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.auth-keygen-spinner svg {
+  width: 20px;
+  height: 20px;
+  color: var(--color-primary);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,100% { opacity: 1;   transform: scale(1);    }
+  50%      { opacity: 0.6; transform: scale(0.88); }
+}
+
+.auth-keygen-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-text-main);
+}
+
+.auth-keygen-sub {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  margin-top: -4px;
+}
+
+/* --------------------------------------------------------------------------
+   Demo quick-fill strip
+   -------------------------------------------------------------------------- */
+.auth-demo-strip {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.auth-demo-btn {
+  font-size: 0.75rem;
+  color: var(--color-primary);
+  border: 1.5px dashed rgba(51, 144, 236, 0.35);
+  border-radius: 99px;
+  padding: 4px 14px;
+  cursor: pointer;
+  background: transparent;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+[data-theme="dark"] .auth-demo-btn {
+  border-color: rgba(135, 116, 225, 0.35);
+}
+
+.auth-demo-btn:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+/* --------------------------------------------------------------------------
+   Spinner inside submit button (loading state)
+   -------------------------------------------------------------------------- */
+.auth-btn-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
 }

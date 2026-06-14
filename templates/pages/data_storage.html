@@ -15,29 +15,29 @@
 
     .telegram-data-storage .storage-card {
       margin-bottom: 14px;
-      padding: 20px 22px;
+      padding: 20px 22px 18px;
       border-radius: 24px;
       background: var(--tg-card);
-      box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
+      box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06);
     }
 
     .telegram-data-storage .storage-section-title {
       margin: 0 0 16px;
       color: var(--tg-blue);
       font-size: 18px;
-      font-weight: 650;
-      line-height: 1.25;
+      font-weight: 700;
+      line-height: 1.2;
     }
 
     .telegram-data-storage .storage-row {
       display: grid;
       grid-template-columns: 42px minmax(0, 1fr) auto;
       align-items: center;
-      min-height: 54px;
+      min-height: 46px;
       gap: 12px;
-      color: #111;
-      font-size: 18px;
-      line-height: 1.25;
+      color: #111827;
+      font-size: 17px;
+      line-height: 1.2;
     }
 
     .telegram-data-storage button.storage-row {
@@ -76,7 +76,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 400;
     }
 
@@ -84,8 +84,8 @@
     .telegram-data-storage .storage-value {
       margin-top: 3px;
       color: var(--tg-muted);
-      font-size: 16px;
-      line-height: 1.25;
+      font-size: 13px;
+      line-height: 1.22;
     }
 
     .telegram-data-storage .storage-action {
@@ -93,38 +93,52 @@
       background: transparent;
       color: var(--tg-blue);
       font: inherit;
-      font-size: 18px;
+      font-size: 17px;
       cursor: pointer;
     }
 
     .telegram-data-storage .storage-note {
-      margin: -2px 20px 16px;
+      margin: 12px 22px 22px;
       color: var(--tg-muted);
       font-size: 16px;
-      line-height: 1.25;
+      line-height: 1.28;
     }
 
     .telegram-data-storage .storage-check {
-      display: grid;
-      width: 27px;
-      height: 27px;
-      place-items: center;
-      border: 0;
-      border-radius: 8px;
-      background: var(--tg-blue);
-      color: #fff;
+      position: relative;
+      width: 42px;
+      height: 24px;
+      border-radius: 999px;
+      background: #e9ecef;
+      transition: background-color 0.16s ease;
       cursor: pointer;
+      display: inline-block;
+      flex: 0 0 auto;
     }
 
-    .telegram-data-storage .storage-check[aria-checked="false"] {
-      background: #e6e7e9;
-      color: transparent;
+    .telegram-data-storage .storage-check::before {
+      content: "";
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      left: 1px;
+      top: 1px;
+      border-radius: 999px;
+      background: #ffffff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+      transition: transform 0.16s ease;
+    }
+
+    .telegram-data-storage .storage-check[aria-checked="true"] {
+      background: #3390ec;
+    }
+
+    .telegram-data-storage .storage-check[aria-checked="true"]::before {
+      transform: translateX(18px);
     }
 
     .telegram-data-storage .storage-check svg {
-      width: 19px;
-      height: 19px;
-      stroke-width: 3;
+      display: none;
     }
 
     .telegram-data-storage .storage-disabled {
@@ -137,7 +151,7 @@
       align-items: center;
       gap: 12px;
       padding: 18px 0 8px;
-      font-size: 18px;
+      font-size: 17px;
     }
 
     .telegram-data-storage .storage-range {
@@ -161,7 +175,7 @@
       align-items: end;
       gap: 12px;
       margin-bottom: 14px;
-      font-size: 18px;
+      font-size: 17px;
     }
 
     .telegram-data-storage .storage-total strong {
@@ -194,6 +208,28 @@
     .telegram-data-storage .storage-toast.is-visible {
       opacity: 1;
       transform: translateY(0);
+    }
+
+    /* Dark Mode Settings */
+    [data-theme="dark"] .telegram-data-storage {
+      --tg-card: #212121;
+      --tg-panel: #181818;
+      --tg-muted: #aaaaaa;
+      --tg-line: rgba(255, 255, 255, .08);
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-data-storage .storage-row,
+    [data-theme="dark"] .telegram-data-storage .storage-total {
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-data-storage .storage-check {
+      background: #2b2b2b;
+    }
+
+    [data-theme="dark"] .telegram-data-storage .storage-check[aria-checked="true"] {
+      background: #3390ec;
     }
   </style>
 
@@ -319,6 +355,10 @@
     }
 
     function showStorageToast(text) {
+      if (window.showToast) {
+        window.showToast(text);
+        return;
+      }
       const toast = document.getElementById('storage-toast');
       if (!toast) return;
       toast.textContent = text;

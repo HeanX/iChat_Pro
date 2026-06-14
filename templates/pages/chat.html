@@ -8,6 +8,58 @@
 {% endblock %}
 
 {% block content %}
+<script>
+  (function() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ichat_general') || '{}');
+      const wallpaper = saved.wallpaper || 'default';
+      const WALLPAPER_COLORS = {
+        default: '#deecf9',
+        green: '#d4e6c9',
+        blue: '#d7ebff',
+        purple: '#ebdcf9',
+        pink: '#fce7f3',
+        orange: '#ffedd5',
+        cyan: '#e0f7fa',
+        yellow: '#fef9c3'
+      };
+      let color = WALLPAPER_COLORS[wallpaper] || '';
+      
+      // Determine if dark theme is active
+      let isDark = saved.theme === 'dark';
+      if (saved.theme === 'system' || !saved.theme) {
+        isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+      
+      if (isDark && color) {
+        const darkWallpapers = {
+          '#deecf9': '#0f1218', // Default Dark Solid
+          '#d4e6c9': '#1b2a1c', // Green
+          '#d7ebff': '#1c2536', // Blue
+          '#ebdcf9': '#231c2d', // Purple
+          '#fce7f3': '#2d1c25', // Pink
+          '#ffedd5': '#2d221c', // Orange
+          '#e0f7fa': '#1c2d2f', // Cyan
+          '#fef9c3': '#2a281c'  // Yellow
+        };
+        color = darkWallpapers[color] || color;
+      }
+      
+      if (color) {
+        document.documentElement.style.setProperty('--chat-layout-bg', color);
+        document.documentElement.style.setProperty('--chat-footer-bg', color);
+        const clean = color.replace('#', '');
+        const r = parseInt(clean.slice(0, 2), 16);
+        const g = parseInt(clean.slice(2, 4), 16);
+        const b = parseInt(clean.slice(4, 6), 16);
+        document.documentElement.style.setProperty('--chat-footer-bg-rgba', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.88)');
+      }
+      
+      // Set early data-wallpaper attribute on documentElement
+      document.documentElement.setAttribute('data-wallpaper', wallpaper);
+    } catch (e) {}
+  })();
+</script>
 <!-- Main Application Workspace Viewport -->
 <div class="chat-layout flex h-screen w-screen overflow-hidden bg-bgMain text-textMain relative select-none">
 

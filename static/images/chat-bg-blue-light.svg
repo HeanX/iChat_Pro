@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <defs>
+    <!-- Blue Ocean Breeze Theme Pattern -->
+    <pattern id="doodlePattern" width="120" height="120" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#1e3a8a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.06">
+        <!-- Waves -->
+        <path d="M 15,15 Q 20,10 25,15 T 35,15" />
+        <path d="M 10,20 Q 15,15 20,20 T 30,20" />
+        
+        <!-- Sailboat -->
+        <path d="M 70,25 L 85,25 L 77,15 Z M 65,25 h 25 L 85,30 h -15 Z" />
+        
+        <!-- Anchor -->
+        <path d="M 50,15 v 10 M 45,20 h 10 M 43,22 c 0,5 14,5 14,0" />
+        <circle cx="50" cy="13" r="1.5" />
+        
+        <!-- Fish -->
+        <path d="M 10,55 c 5,-5 12,0 12,0 c 0,0 -7,5 -12,0 z M 22,55 L 25,52 v 6 z" />
+        <circle cx="13" cy="54" r="0.5" fill="#1e3a8a" />
+
+        <!-- Shell -->
+        <path d="M 95,65 Q 100,55 105,65 T 115,65" />
+        
+        <!-- Cloud -->
+        <path d="M 75,95 A 4,4 0 0 1 79,91 A 6,6 0 0 1 89,93 A 5,5 0 0 1 92,97 A 3,3 0 0 1 89,100 H 77 A 3,3 0 0 1 75,95 Z" />
+        
+        <!-- Starfish -->
+        <path d="M 45,95 L 47,99 L 52,99 L 48,102 L 50,106 L 45,104 L 40,106 L 42,102 L 38,99 L 43,99 Z" />
+
+        <!-- Compass Rose -->
+        <path d="M 15,95 L 18,90 L 15,85 L 12,90 Z" />
+        <path d="M 15,90 h 6 M 9,90 h 6" />
+
+        <!-- Sparkles -->
+        <circle cx="65" cy="50" r="1" fill="#1e3a8a" opacity="0.5" />
+        <circle cx="115" cy="35" r="1" fill="#1e3a8a" opacity="0.5" />
+        <circle cx="5" cy="35" r="1" fill="#1e3a8a" opacity="0.5" />
+      </g>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#doodlePattern)" />
+</svg>

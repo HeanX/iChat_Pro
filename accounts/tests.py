@@ -563,7 +563,7 @@ class ContactViewTests(TestCase):
         FriendRequest.objects.create(sender=self.alice, receiver=self.bob)
         response = self.client.get(self.CONTACTS_URL)
         self.assertContains(response, 'Request pending...')
-        self.assertNotContains(response, 'Request pending鈥')
+        self.assertNotContains(response, 'Request pending')
 
     def test_send_friend_request(self):
         response = self.client.post(
@@ -1231,6 +1231,69 @@ class GroupViewTests(TestCase):
         self.assertTrue(response.status_code in (301, 302))
 
 # ── P2 T23: Notification settings API ───────────────────────────
+
+class GeneralAndChatFolderSettingsApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='settingstest', password='p')
+        self.client.force_login(self.user)
+
+    def test_general_settings_are_persisted_and_sanitized(self):
+        response = self.client.get('/api/settings/general/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['settings']['theme'], 'system')
+
+        response = self.client.post(
+            '/api/settings/general/',
+            data=json.dumps({
+                'theme': 'dark',
+                'wallpaper': 'green',
+                'message_font_size': 99,
+                'time_format': '12h',
+                'power_saving': True,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        settings = self.client.get('/api/settings/general/').json()['settings']
+        self.assertEqual(settings['theme'], 'dark')
+        self.assertEqual(settings['wallpaper'], 'green')
+        self.assertEqual(settings['message_font_size'], '24')
+        self.assertEqual(settings['time_format'], '12h')
+        self.assertTrue(settings['power_saving'])
+
+    def test_chat_folder_settings_are_persisted_and_sanitized(self):
+        response = self.client.post(
+            '/api/settings/chat-folders/',
+            data=json.dumps({
+                'folders_view': 'sidebar',
+                'folders': [
+                    {
+                        'id': 'work',
+                        'name': 'Work',
+                        'chat_count': -3,
+                        'created_at': '2026-06-14T00:00:00.000Z',
+                    },
+                    {'id': 'empty', 'name': '   '},
+                ],
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        settings = self.client.get('/api/settings/chat-folders/').json()['settings']
+        self.assertEqual(settings['folders_view'], 'sidebar')
+        self.assertEqual(len(settings['folders']), 1)
+        self.assertEqual(settings['folders'][0]['name'], 'Work')
+        self.assertEqual(settings['folders'][0]['chat_count'], 0)
+
+    def test_settings_require_login(self):
+        self.client.logout()
+        general = self.client.get('/api/settings/general/')
+        folders = self.client.get('/api/settings/chat-folders/')
+        self.assertIn(general.status_code, (301, 302))
+        self.assertIn(folders.status_code, (301, 302))
+
 
 class NotificationSettingsApiTests(TestCase):
     def setUp(self):

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <defs>
+    <!-- Yellow Summer Sun Theme Pattern (Dark Mode) -->
+    <pattern id="doodlePattern" width="120" height="120" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.035">
+        <!-- Sun -->
+        <circle cx="20" cy="20" r="6" />
+        <path d="M 20,10 v 2 M 20,28 v 2 M 10,20 h 2 M 28,20 h 2 M 13,13 L 15,15 M 27,27 L 25,25 M 27,13 L 25,15 M 13,27 L 15,25" />
+        
+        <!-- Sunflower -->
+        <circle cx="80" cy="20" r="3.5" />
+        <path d="M 80,14 c -2,0 -2,6 0,6 c 2,0 2,-6 0,-6 M 80,20 c 0,2 -6,2 -6,0 c 0,-2 6,-2 6,0 M 80,20 c 0,-2 6,-2 6,0 c 0,2 -6,2 -6,0 M 80,20 c -2,0 -2,-6 0,-6" />
+        
+        <!-- Bee -->
+        <ellipse cx="50" cy="20" rx="5" ry="3" />
+        <line x1="48" y1="17" x2="48" y2="23" />
+        <line x1="51" y1="17" x2="51" y2="23" />
+        <ellipse cx="50" cy="15" rx="1.5" ry="3" />
+        
+        <!-- Light Bulb -->
+        <circle cx="15" cy="58" r="4.5" />
+        <path d="M 12.5,62 h 5 L 16.5,65 h -3 Z" />
+        <path d="M 11,58 h -2 M 19,58 h 2 M 15,51 v -2" />
+        
+        <!-- Ice Cream Cone -->
+        <path d="M 98,60 L 105,72 L 112,60 Z" />
+        <circle cx="105" cy="57" r="5" />
+        <circle cx="102" cy="55" r="1.5" />
+        
+        <!-- Butterfly -->
+        <path d="M 22,95 C 17,90 17,100 22,95 C 27,90 27,100 22,95 Z" />
+        <line x1="22" y1="92" x2="22" y2="98" />
+
+        <!-- Slices of Lemon/Orange -->
+        <circle cx="50" cy="95" r="5" />
+        <line x1="45" y1="95" x2="55" y2="95" />
+        <line x1="50" y1="90" x2="50" y2="100" />
+
+        <!-- Sailboat (classic summer) -->
+        <path d="M 80,95 L 90,95 L 85,88 Z M 77,95 h 16 L 90,98 h -10 Z" />
+
+        <!-- Sparkles -->
+        <circle cx="65" cy="50" r="1" fill="#ffffff" opacity="0.5" />
+        <circle cx="115" cy="35" r="1" fill="#ffffff" opacity="0.5" />
+        <circle cx="5" cy="35" r="1" fill="#ffffff" opacity="0.5" />
+      </g>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#doodlePattern)" />
+</svg>

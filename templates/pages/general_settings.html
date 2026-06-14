@@ -7,36 +7,36 @@
       --tg-muted: #707579;
       --tg-line: rgba(0, 0, 0, .07);
       min-height: 100%;
-      padding: 14px 18px 26px;
+      padding: 14px 18px 22px;
       background: var(--tg-panel);
       color: #111;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
     .telegram-general .general-card {
-      margin-bottom: 16px;
-      padding: 18px 22px;
+      margin-bottom: 14px;
+      padding: 20px 22px 18px;
       border-radius: 24px;
       background: var(--tg-card);
-      box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
+      box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06);
     }
 
     .telegram-general .general-section-title {
       margin: 0 0 16px;
       color: var(--tg-blue);
       font-size: 18px;
-      font-weight: 650;
+      font-weight: 700;
     }
 
     .telegram-general .general-row {
       display: grid;
       grid-template-columns: 42px minmax(0, 1fr) auto;
       align-items: center;
-      min-height: 56px;
+      min-height: 46px;
       gap: 12px;
-      color: #111;
-      font-size: 18px;
-      line-height: 1.25;
+      color: #111827;
+      font-size: 17px;
+      line-height: 1.2;
     }
 
     .telegram-general .general-row.compact {
@@ -73,7 +73,7 @@
 
     .telegram-general .general-value {
       color: var(--tg-muted);
-      font-size: 18px;
+      font-size: 17px;
     }
 
     .telegram-general .general-range {
@@ -83,73 +83,114 @@
     }
 
     .telegram-general .wallpaper-strip {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      margin: 4px 0 18px;
+      display: flex;
+      flex-direction: row;
+      gap: 16px;
+      margin: 12px 0 20px;
+      overflow-x: auto;
+      padding: 6px 6px 12px;
+      scrollbar-width: none; /* Hide scrollbar for standard browsers */
+      -webkit-overflow-scrolling: touch;
     }
 
-    .telegram-general .wallpaper-preview {
-      position: relative;
-      height: 92px;
-      overflow: hidden;
-      border: 0;
-      border-radius: 16px;
-      background:
-        radial-gradient(circle at 22px 20px, rgba(255,255,255,.5) 0 12px, transparent 13px),
-        linear-gradient(135deg, #a9cf89, #76b47d);
+    .telegram-general .wallpaper-strip::-webkit-scrollbar {
+      display: none; /* Hide scrollbar for Chrome/Safari */
+    }
+
+    .telegram-general .wallpaper-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 72px;
+      flex-shrink: 0;
+      border: 2px solid transparent;
+      border-radius: 20px;
+      padding: 10px 8px;
+      box-sizing: border-box;
+      background: transparent;
       cursor: pointer;
+      position: relative;
+      outline: none;
+      transition: border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .telegram-general .wallpaper-pill-top {
+      width: 44px;
+      height: 18px;
+      border-radius: 9999px;
+      align-self: flex-end;
+      position: relative;
+      z-index: 2;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.06);
+    }
+
+    .telegram-general .wallpaper-pill-bottom {
+      width: 44px;
+      height: 18px;
+      border-radius: 9999px;
+      align-self: flex-start;
+      margin-top: -8px;
+      position: relative;
+      z-index: 1;
+      background: var(--bubble-incoming, #eef0f2);
       box-shadow: inset 0 0 0 1px rgba(0,0,0,.04);
     }
 
-    .telegram-general .wallpaper-preview[data-wallpaper="light"] {
-      background: linear-gradient(135deg, #cfe6b0, #8ec48b);
+    .telegram-general .wallpaper-emoji {
+      margin-top: 10px;
+      font-size: 22px;
+      line-height: 1.2;
+      display: inline-block;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    .telegram-general .wallpaper-preview[data-wallpaper="duck"] {
-      background: linear-gradient(135deg, #d5e9aa, #92c982);
+    /* Colors for top pills in light theme */
+    .telegram-general .wallpaper-item[data-wallpaper="default"] .wallpaper-pill-top {
+      background: #deecf9;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="blue"] .wallpaper-pill-top {
+      background: #d7ebff;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="green"] .wallpaper-pill-top {
+      background: #d4e6c9;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="pink"] .wallpaper-pill-top {
+      background: #fce7f3;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="purple"] .wallpaper-pill-top {
+      background: #ebdcf9;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="orange"] .wallpaper-pill-top {
+      background: #ffedd5;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="cyan"] .wallpaper-pill-top {
+      background: #e0f7fa;
+    }
+    .telegram-general .wallpaper-item[data-wallpaper="yellow"] .wallpaper-pill-top {
+      background: #fef9c3;
     }
 
-    .telegram-general .wallpaper-preview[data-wallpaper="snow"] {
-      background: linear-gradient(135deg, #c8e7ff, #98c1ff);
+    .telegram-general {
+      --bubble-incoming: #eef0f2;
     }
 
-    .telegram-general .wallpaper-preview[data-wallpaper="gem"] {
-      background: linear-gradient(135deg, #d8c5ff, #9eddf0);
+    /* Selected state */
+    .telegram-general .wallpaper-item.is-selected {
+      border-color: var(--color-primary, var(--tg-blue, #3390ec));
     }
-
-    .telegram-general .wallpaper-preview::before,
-    .telegram-general .wallpaper-preview::after {
-      content: "";
-      position: absolute;
-      left: 12px;
-      right: 12px;
-      height: 22px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.82);
+    
+    /* Interactive states */
+    .telegram-general .wallpaper-item:hover {
+      background: rgba(0, 0, 0, 0.03);
     }
-
-    .telegram-general .wallpaper-preview::before {
-      top: 16px;
-      left: 28px;
+    [data-theme="dark"] .telegram-general .wallpaper-item:hover {
+      background: rgba(255, 255, 255, 0.04);
     }
-
-    .telegram-general .wallpaper-preview::after {
-      bottom: 18px;
-      right: 42px;
+    .telegram-general .wallpaper-item:hover .wallpaper-emoji {
+      transform: scale(1.15);
     }
-
-    .telegram-general .wallpaper-preview.is-selected {
-      outline: 3px solid var(--tg-blue);
-      outline-offset: 2px;
-    }
-
-    .telegram-general .wallpaper-mark {
-      position: absolute;
-      left: 12px;
-      bottom: 8px;
-      font-size: 24px;
-      line-height: 1;
+    .telegram-general .wallpaper-item:active {
+      transform: scale(0.96);
     }
 
     .telegram-general .general-option {
@@ -157,7 +198,7 @@
       grid-template-columns: 42px minmax(0, 1fr);
       align-items: center;
       width: 100%;
-      min-height: 54px;
+      min-height: 46px;
       gap: 12px;
       border: 0;
       background: transparent;
@@ -166,25 +207,43 @@
       cursor: pointer;
     }
 
-    .telegram-general .general-radio {
-      display: grid;
-      width: 26px;
-      height: 26px;
-      place-items: center;
-      border: 2px solid #7b858d;
-      border-radius: 999px;
-      color: transparent;
+    .telegram-general .telegram-radio {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      border: 2px solid #b1b5b9;
+      border-radius: 50%;
+      box-sizing: border-box;
+      display: inline-block;
+      flex-shrink: 0;
+      transition: border-color 0.16s ease;
     }
 
-    .telegram-general .general-option.is-selected .general-radio {
+    .telegram-general .telegram-radio::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--tg-blue, #3390ec);
+      transition: transform 0.16s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .telegram-general .general-option.is-selected .telegram-radio {
       border-color: var(--tg-blue);
-      color: var(--tg-blue);
+    }
+
+    .telegram-general .general-option.is-selected .telegram-radio::after {
+      transform: translate(-50%, -50%) scale(1);
     }
 
     .telegram-general .general-option-title {
       display: block;
-      color: #111;
-      font-size: 18px;
+      color: #111827;
+      font-size: 17px;
       line-height: 1.2;
     }
 
@@ -192,7 +251,7 @@
       display: block;
       margin-top: 3px;
       color: var(--tg-muted);
-      font-size: 16px;
+      font-size: 13px;
       line-height: 1.2;
     }
 
@@ -215,6 +274,57 @@
     .telegram-general .general-toast.is-visible {
       opacity: 1;
       transform: translateY(0);
+    }
+
+    /* Dark Mode Settings */
+    [data-theme="dark"] .telegram-general {
+      --tg-card: #212121;
+      --tg-panel: #181818;
+      --tg-muted: #aaaaaa;
+      --tg-line: rgba(255, 255, 255, .08);
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-general .general-row,
+    [data-theme="dark"] .telegram-general .general-option-title,
+    [data-theme="dark"] .telegram-general .general-value {
+      color: #f1f5f9;
+    }
+
+    [data-theme="dark"] .telegram-general .telegram-radio {
+      border-color: #555555;
+    }
+
+    [data-theme="dark"] .telegram-general .general-option.is-selected .telegram-radio {
+      border-color: var(--tg-blue);
+    }
+
+    [data-theme="dark"] .telegram-general {
+      --bubble-incoming: #2c2c2e;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="default"] .wallpaper-pill-top {
+      background: #2b3036;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="blue"] .wallpaper-pill-top {
+      background: #1c2536;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="green"] .wallpaper-pill-top {
+      background: #1b2a1c;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="pink"] .wallpaper-pill-top {
+      background: #2d1c25;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="purple"] .wallpaper-pill-top {
+      background: #231c2d;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="orange"] .wallpaper-pill-top {
+      background: #2d221c;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="cyan"] .wallpaper-pill-top {
+      background: #1c2d2f;
+    }
+    [data-theme="dark"] .telegram-general .wallpaper-item[data-wallpaper="yellow"] .wallpaper-pill-top {
+      background: #2a281c;
     }
   </style>
 
@@ -240,29 +350,57 @@
   <section class="general-card">
     <h3 class="general-section-title">主题颜色</h3>
     <div class="wallpaper-strip">
-      <button type="button" class="wallpaper-preview" data-wallpaper="light" aria-label="Green wallpaper"><span class="wallpaper-mark">⌂</span></button>
-      <button type="button" class="wallpaper-preview" data-wallpaper="duck" aria-label="Duck wallpaper"><span class="wallpaper-mark">•</span></button>
-      <button type="button" class="wallpaper-preview" data-wallpaper="snow" aria-label="Snow wallpaper"><span class="wallpaper-mark">*</span></button>
-      <button type="button" class="wallpaper-preview" data-wallpaper="gem" aria-label="Gem wallpaper"><span class="wallpaper-mark">◇</span></button>
+      <button type="button" class="wallpaper-item" data-wallpaper="default" aria-label="Default wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">⛄</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="blue" aria-label="Blue wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">💎</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="green" aria-label="Green wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">👨‍🏫</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="pink" aria-label="Pink wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">🌷</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="purple" aria-label="Purple wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">💜</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="orange" aria-label="Orange wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">🍁</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="cyan" aria-label="Cyan wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">🌐</span>
+      </button>
+      <button type="button" class="wallpaper-item" data-wallpaper="yellow" aria-label="Yellow wallpaper">
+        <div class="wallpaper-pill-top"></div>
+        <div class="wallpaper-pill-bottom"></div>
+        <span class="wallpaper-emoji">🌻</span>
+      </button>
     </div>
     <button type="button" class="general-option" data-theme="light">
-      <span class="general-radio"><i data-lucide="circle"></i></span>
+      <span class="telegram-radio"></span>
       <span class="general-option-title">日光白</span>
     </button>
     <button type="button" class="general-option" data-theme="dark">
-      <span class="general-radio"><i data-lucide="circle"></i></span>
+      <span class="telegram-radio"></span>
       <span class="general-option-title">夜间</span>
     </button>
-    <button type="button" class="general-option" data-theme="day">
-      <span class="general-radio"><i data-lucide="circle"></i></span>
-      <span class="general-option-title">Day</span>
-    </button>
-    <button type="button" class="general-option" data-theme="night">
-      <span class="general-radio"><i data-lucide="circle"></i></span>
-      <span class="general-option-title">Dark</span>
-    </button>
     <button type="button" class="general-option" data-theme="system">
-      <span class="general-radio"><i data-lucide="circle"></i></span>
+      <span class="telegram-radio"></span>
       <span class="general-option-title">系统默认</span>
     </button>
   </section>
@@ -270,14 +408,14 @@
   <section class="general-card">
     <h3 class="general-section-title">时间格式</h3>
     <button type="button" class="general-option" data-time-format="12h">
-      <span class="general-radio"><i data-lucide="circle"></i></span>
+      <span class="telegram-radio"></span>
       <span>
         <span class="general-option-title">12小时制</span>
-        <span class="general-option-subtitle">04:39 PM</span>
+        <span class="general-option-subtitle">下午 04:39</span>
       </span>
     </button>
     <button type="button" class="general-option" data-time-format="24h">
-      <span class="general-radio"><i data-lucide="circle"></i></span>
+      <span class="telegram-radio"></span>
       <span>
         <span class="general-option-title">24小时制</span>
         <span class="general-option-subtitle">16:39</span>
@@ -290,21 +428,25 @@
 
 <script>
   (function() {
+    const GENERAL_SETTINGS_URL = '/api/settings/general/';
     const DEFAULTS = {
       theme: 'system',
       accent_color: 'blue',
-      wallpaper: 'light',
+      wallpaper: 'default',
       message_font_size: '16',
       time_format: '24h',
       power_saving: false,
       reduce_motion: false
     };
     const WALLPAPER_COLORS = {
-      light: '#d9eeb8',
-      duck: '#d1e9a5',
-      snow: '#d7ebff',
-      gem: '#d8f0f3',
-      default: ''
+      default: '#deecf9',
+      blue: '#d7ebff',
+      green: '#d4e6c9',
+      pink: '#fce7f3',
+      purple: '#ebdcf9',
+      orange: '#ffedd5',
+      cyan: '#e0f7fa',
+      yellow: '#fef9c3'
     };
     const ACCENT_COLORS = {
       blue: '#3390ec',
@@ -314,6 +456,12 @@
       orange: '#f97316'
     };
     let toastTimer = null;
+
+    function csrfToken() {
+      if (typeof getCookie === 'function') return getCookie('csrftoken') || '';
+      const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
 
     function toast(text) {
       if (window.showToast) {
@@ -336,6 +484,37 @@
 
     function saveGeneralSettings(partial) {
       const settings = Object.assign({}, loadGeneralSettings(), partial || {});
+      localStorage.setItem('ichat_general', JSON.stringify(settings));
+      applyGeneralSettingsUI(settings);
+      fetch(GENERAL_SETTINGS_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken(),
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify(partial || settings)
+      }).then(function(response) {
+        if (!response.ok) throw new Error('save_failed');
+        return response.json();
+      }).then(function(data) {
+        if (data.settings) {
+          localStorage.setItem('ichat_general', JSON.stringify(data.settings));
+          applyGeneralSettingsUI(data.settings);
+        }
+      }).catch(function() {
+        toast('保存失败');
+      });
+      return settings;
+    }
+
+    async function loadGeneralSettingsFromServer() {
+      const response = await fetch(GENERAL_SETTINGS_URL, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      });
+      if (!response.ok) throw new Error('load_failed');
+      const data = await response.json();
+      const settings = Object.assign({}, DEFAULTS, data.settings || {});
       localStorage.setItem('ichat_general', JSON.stringify(settings));
       applyGeneralSettingsUI(settings);
       return settings;
@@ -366,13 +545,34 @@
     }
 
     function applyWallpaper(settings) {
-      const color = WALLPAPER_COLORS[settings.wallpaper] || '';
+      const wallpaper = settings.wallpaper || 'default';
+      document.documentElement.setAttribute('data-wallpaper', wallpaper);
+      
+      let color = WALLPAPER_COLORS[wallpaper] || '';
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      
+      if (isDark && color) {
+        const darkWallpapers = {
+          '#deecf9': '#0f1218', // Default
+          '#d7ebff': '#1c2536', // Blue
+          '#d4e6c9': '#1b2a1c', // Green
+          '#fce7f3': '#2d1c25', // Pink
+          '#ebdcf9': '#231c2d', // Purple
+          '#ffedd5': '#2d221c', // Orange
+          '#e0f7fa': '#1c2d2f', // Cyan
+          '#fef9c3': '#2a281c'  // Yellow
+        };
+        color = darkWallpapers[color] || color;
+      }
+
       const layout = document.querySelector('.chat-layout');
       if (layout) layout.style.backgroundColor = color;
       if (color) {
+        document.documentElement.style.setProperty('--chat-layout-bg', color);
         document.documentElement.style.setProperty('--chat-footer-bg', color);
         document.documentElement.style.setProperty('--chat-footer-bg-rgba', hexToRgba(color, .88));
       } else {
+        document.documentElement.style.removeProperty('--chat-layout-bg');
         document.documentElement.style.removeProperty('--chat-footer-bg');
         document.documentElement.style.removeProperty('--chat-footer-bg-rgba');
       }
@@ -414,25 +614,30 @@
       });
 
       root.addEventListener('click', function(event) {
-        const themeButton = event.target.closest('[data-theme]');
+        const themeButton = event.target.closest('button[data-theme]');
         if (themeButton) {
           saveGeneralSettings({ theme: themeButton.dataset.theme });
           toast('主题已更新');
           return;
         }
-        const timeButton = event.target.closest('[data-time-format]');
+        const timeButton = event.target.closest('button[data-time-format]');
         if (timeButton) {
           saveGeneralSettings({ time_format: timeButton.dataset.timeFormat });
           toast(timeButton.dataset.timeFormat === '12h' ? '12小时制' : '24小时制');
+          if (window.renderChatList) window.renderChatList();
+          if (window.renderMessages) window.renderMessages();
+          if (window.activeChatId && window.conversationsById && window.conversationsById[window.activeChatId] && window.updateHeaderPresence) {
+            window.updateHeaderPresence(window.conversationsById[window.activeChatId]);
+          }
           return;
         }
-        const wallpaperButton = event.target.closest('[data-wallpaper]');
+        const wallpaperButton = event.target.closest('button[data-wallpaper]');
         if (wallpaperButton) {
           saveGeneralSettings({ wallpaper: wallpaperButton.dataset.wallpaper });
           toast('聊天壁纸已更新');
           return;
         }
-        const action = event.target.closest('[data-action]')?.dataset.action;
+        const action = event.target.closest('button[data-action]')?.dataset.action;
         if (action === 'power-saving') {
           const current = loadGeneralSettings();
           saveGeneralSettings({ power_saving: !current.power_saving, reduce_motion: !current.power_saving });
@@ -447,9 +652,11 @@
     window.refreshGeneralSettings = function() {
       bindGeneralSettings();
       applyGeneralSettingsUI(loadGeneralSettings());
+      loadGeneralSettingsFromServer().catch(function() {});
     };
 
     bindGeneralSettings();
     applyGeneralSettingsUI(loadGeneralSettings());
+    loadGeneralSettingsFromServer().catch(function() {});
   })();
 </script>

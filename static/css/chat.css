@@ -1928,6 +1928,7 @@ input:checked + .slider:before {
   line-height: 1;
   box-shadow: var(--shadow-sm);
   user-select: none;
+  overflow: hidden;
 }
 
 .message-avatar-spacer {

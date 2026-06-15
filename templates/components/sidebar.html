@@ -5,7 +5,7 @@
   <div id="sidebar-chat-view" class="h-full flex flex-col">
     
     <!-- Header: Drawer trigger + search bar -->
-    <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3.5 flex-shrink-0">
+    <div id="sidebar-chat-header" class="px-4 py-3 flex items-center space-x-3.5 flex-shrink-0 border-b border-transparent">
       <!-- Hamburger Menu button -->
       <div class="relative">
         <button id="drawer-btn" onclick="toggleMainMenu(event)" class="p-2 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none" title="Main Menu" data-i18n-title="main_menu">
@@ -32,11 +32,7 @@
               <i data-lucide="plus"></i>
               <span data-i18n="menu_add_account">Add Account</span>
             </button>
-            <!-- My Profile -->
-            <button id="menu-profile-btn" onclick="navigateSidebar('settings-home'); toggleMainMenu(event);" class="main-menu-item-custom">
-              <i data-lucide="user"></i>
-              <span data-i18n="menu_profile">My Profile</span>
-            </button>
+
             <!-- Saved Messages -->
             <button onclick="showToast(currentLanguage === 'zh' ? '暂无收藏消息' : 'No saved messages'); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="bookmark"></i>
@@ -50,7 +46,7 @@
             <!-- Groups -->
             <a href="{% url 'groups' %}" class="main-menu-item-custom" onclick="toggleMainMenu(event);">
               <i data-lucide="users-round"></i>
-              <span>Groups</span>
+              <span>群聊</span>
             </a>
             <!-- Settings -->
             <button id="menu-settings-btn" onclick="navigateSidebar('settings-home'); toggleMainMenu(event);" class="main-menu-item-custom">
@@ -393,6 +389,178 @@
       {% include 'pages/birthday_settings.html' %}
     </div>
   </div>
+
+  <!-- Step 1: Add Members (添加成员) -->
+  <div id="sidebar-view-group-add-members" class="sidebar-view settings-view group-creation-view hidden h-full flex flex-col bg-bgSidebar relative">
+    <!-- Header -->
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <h2 class="text-lg font-bold text-textMain flex-1">添加成员</h2>
+    </div>
+
+    <!-- Search Input -->
+    <div class="px-4 py-2 flex-shrink-0">
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary pointer-events-none">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </span>
+        <input type="text" id="group-add-search-input" 
+          class="w-full pl-10 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all"
+          placeholder="搜索"
+          oninput="filterGroupAddMembers(this.value)">
+      </div>
+    </div>
+
+    <!-- Contact List Card / Scroll -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar px-3 py-2" id="group-add-members-scroll">
+      <!-- Checked members card (dynamic card layout matching settings design) -->
+      <div class="settings-template-card" id="group-add-members-list-card">
+        {% if contacts %}
+          {% for entry in contacts %}
+            {% if entry.user == request.user %}
+              {% with peer=entry.contact %}
+                <div class="settings-template-row group-add-member-item cursor-pointer" data-user-id="{{ peer.id }}" data-username="{{ peer.username }}" data-nickname="{{ peer.profile.nickname|default:'' }}" onclick="toggleGroupMemberSelection(this, '{{ peer.id }}')">
+                  <div class="flex items-center justify-center" onclick="event.stopPropagation();">
+                    <input type="checkbox" class="group-member-checkbox-custom w-5 h-5 rounded border-borderColor text-brand-light focus:ring-brand-light bg-transparent" value="{{ peer.id }}" onclick="updateGroupMemberCount()">
+                  </div>
+                  <!-- Avatar -->
+                  <div class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm bg-brand-light flex-shrink-0 overflow-hidden">
+                    {% if peer.profile.avatar %}
+                      <img src="{{ peer.profile.avatar.url }}" alt="{{ peer.username }}" class="w-full h-full object-cover">
+                    {% else %}
+                      <span>{{ peer.username|slice:":1"|upper }}</span>
+                    {% endif %}
+                  </div>
+                  <!-- Details -->
+                  <div class="settings-template-row-main">
+                    <span class="settings-template-row-title">
+                      {% if peer.profile.nickname %}{{ peer.profile.nickname }}{% else %}{{ peer.username }}{% endif %}
+                    </span>
+                    <span class="settings-template-row-subtitle">
+                      {% if "bot" in peer.username|lower %}机器人{% else %}离线{% endif %}
+                    </span>
+                  </div>
+                </div>
+              {% endwith %}
+            {% else %}
+              {% with peer=entry.user %}
+                <div class="settings-template-row group-add-member-item cursor-pointer" data-user-id="{{ peer.id }}" data-username="{{ peer.username }}" data-nickname="{{ peer.profile.nickname|default:'' }}" onclick="toggleGroupMemberSelection(this, '{{ peer.id }}')">
+                  <div class="flex items-center justify-center" onclick="event.stopPropagation();">
+                    <input type="checkbox" class="group-member-checkbox-custom w-5 h-5 rounded border-borderColor text-brand-light focus:ring-brand-light bg-transparent" value="{{ peer.id }}" onclick="updateGroupMemberCount()">
+                  </div>
+                  <!-- Avatar -->
+                  <div class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm bg-brand-light flex-shrink-0 overflow-hidden">
+                    {% if peer.profile.avatar %}
+                      <img src="{{ peer.profile.avatar.url }}" alt="{{ peer.username }}" class="w-full h-full object-cover">
+                    {% else %}
+                      <span>{{ peer.username|slice:":1"|upper }}</span>
+                    {% endif %}
+                  </div>
+                  <!-- Details -->
+                  <div class="settings-template-row-main">
+                    <span class="settings-template-row-title">
+                      {% if peer.profile.nickname %}{{ peer.profile.nickname }}{% else %}{{ peer.username }}{% endif %}
+                    </span>
+                    <span class="settings-template-row-subtitle">
+                      {% if "bot" in peer.username|lower %}机器人{% else %}离线{% endif %}
+                    </span>
+                  </div>
+                </div>
+              {% endwith %}
+            {% endif %}
+          {% endfor %}
+        {% else %}
+          <div class="p-6 text-center text-sm text-textSecondary">暂无联系人</div>
+        {% endif %}
+      </div>
+
+      <!-- Mascot Duck Empty State (Centered) -->
+      <div id="group-add-empty-state" class="hidden flex flex-col items-center justify-center py-12 px-6 text-center select-none">
+        <div class="w-32 h-32 mb-4 mx-auto opacity-95">
+          <svg viewBox="0 0 100 100" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+            <ellipse cx="50" cy="85" rx="35" ry="6" fill="none" stroke="#3390ec" stroke-width="1.5" opacity="0.6"/>
+            <ellipse cx="50" cy="88" rx="20" ry="4" fill="none" stroke="#3390ec" stroke-width="1" opacity="0.4"/>
+            <circle cx="50" cy="62" r="18" fill="#ffcc00"/>
+            <circle cx="50" cy="42" r="13" fill="#ffcc00"/>
+            <circle cx="39" cy="45" r="2.2" fill="#ff6666" opacity="0.5"/>
+            <path d="M 40 39 Q 43 42 46 39" fill="none" stroke="#333" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M 54 39 Q 57 42 60 39" fill="none" stroke="#333" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M 46 44 Q 50 48 54 44 Q 50 45 46 44 Z" fill="#ff6600"/>
+            <line x1="28" y1="58" x2="38" y2="48" stroke="#333" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="26" cy="60" r="10" fill="#e0f2fe" stroke="#333" stroke-width="2.2"/>
+            <path d="M 21 57 A 7 7 0 0 1 29 53" fill="none" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="text-sm font-bold text-textMain">无结果</div>
+        <div class="text-xs text-textSecondary mt-1">Try searching.</div>
+      </div>
+    </div>
+
+    <!-- Floating Action Button -->
+    <div class="absolute bottom-5 right-5 z-20">
+      <button id="group-add-next-btn" onclick="goToGroupCreateFinalStep()"
+        class="w-12 h-12 rounded-full bg-brand-light dark:bg-brand-dark text-white shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 focus:outline-none">
+        <i data-lucide="arrow-right" class="w-6 h-6 text-white"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 2: Create Group (新建群聊) -->
+  <div id="sidebar-view-group-create-final" class="sidebar-view settings-view group-creation-view hidden h-full flex flex-col bg-bgSidebar relative">
+    <!-- Header -->
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button onclick="navigateSidebar('group-add-members')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回上一步">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <h2 class="text-lg font-bold text-textMain flex-1">新建群聊</h2>
+    </div>
+
+    <!-- Body / Form -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar">
+      <div class="profile-edit-view p-4">
+        <!-- Avatar Uploader -->
+        <div class="profile-edit-hero py-4 flex flex-col items-center">
+          <button type="button" class="profile-edit-avatar w-24 h-24 rounded-full relative group overflow-hidden bg-brand-light flex items-center justify-center text-white" onclick="document.getElementById('group-avatar-file-input').click()" title="上传群头像">
+            <span id="group-avatar-placeholder" class="text-3xl font-bold">G</span>
+            <img id="group-avatar-preview" class="hidden w-full h-full object-cover" alt="群头像">
+            <span class="profile-edit-avatar-icon absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <i data-lucide="camera" class="w-6 h-6 text-white"></i>
+            </span>
+          </button>
+          <input type="file" id="group-avatar-file-input" accept="image/*" class="hidden" onchange="previewGroupAvatar(this)">
+        </div>
+
+        <!-- Group Name Input Box (Cards) -->
+        <section class="profile-edit-card">
+          <label class="profile-edit-field flex flex-col">
+            <span class="text-xs text-brand-light font-bold mb-1">群聊名称</span>
+            <input type="text" id="group-create-name-input" class="w-full bg-transparent border-0 outline-none text-sm text-textMain focus:ring-0" placeholder="请输入群聊名称" required>
+          </label>
+        </section>
+
+        <!-- Selected Members Preview -->
+        <section class="profile-edit-card mt-4">
+          <div class="px-4 py-3 border-b border-borderColor/40 flex justify-between items-center">
+            <span class="text-xs font-semibold text-textSecondary uppercase tracking-wide">已选择成员</span>
+            <span id="group-create-members-count" class="text-xs text-brand-light font-bold">0 人</span>
+          </div>
+          <div id="group-create-selected-list" class="divide-y divide-borderColor/30">
+            <!-- Will be populated dynamically by JS when transitioning to step 2 -->
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Floating Action Button for creation -->
+    <div class="absolute bottom-5 right-5 z-20">
+      <button id="group-create-submit-btn" onclick="submitCreateGroupForm()"
+        class="w-12 h-12 rounded-full bg-brand-light dark:bg-brand-dark text-white shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 focus:outline-none">
+        <i data-lucide="check" class="w-6 h-6 text-white"></i>
+      </button>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -408,12 +576,29 @@
     background-color: #f4f4f5 !important;
     border-bottom: 1px solid transparent !important;
     box-shadow: none !important;
-    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+    transition: background-color 0.2s ease, border-bottom-color 0.2s ease, box-shadow 0.2s ease !important;
   }
   [data-theme="dark"] .settings-view-header {
     background-color: #181818 !important;
   }
   .settings-view-header.has-divider {
+    border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08)) !important;
+  }
+
+  /* Group creation views style overrides to match main sidebar background */
+  .sidebar-view.group-creation-view {
+    background-color: var(--color-sidebar-bg) !important;
+  }
+  .sidebar-view.group-creation-view .settings-view-header {
+    background-color: var(--color-sidebar-bg) !important;
+  }
+
+  /* Sidebar chat list header divider styling */
+  #sidebar-chat-header {
+    border-bottom: 1px solid transparent !important;
+    transition: border-bottom-color 0.2s ease !important;
+  }
+  #sidebar-chat-header.has-divider {
     border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08)) !important;
   }
 </style>
@@ -447,17 +632,43 @@
       });
     }
 
+    function initSidebarChatDivider() {
+      const chatList = document.getElementById("sidebar-chat-list");
+      const chatHeader = document.getElementById("sidebar-chat-header");
+      if (chatList && chatHeader) {
+        const update = () => {
+          if (chatList.scrollTop > 0) {
+            chatHeader.classList.add("has-divider");
+          } else {
+            chatHeader.classList.remove("has-divider");
+          }
+        };
+        update();
+        if (!chatList.dataset.scrollBound) {
+          chatList.dataset.scrollBound = 'true';
+          chatList.addEventListener("scroll", update, { passive: true });
+        }
+      }
+    }
+
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initSettingsHeaderDividers);
+      document.addEventListener('DOMContentLoaded', () => {
+        initSettingsHeaderDividers();
+        initSidebarChatDivider();
+      });
     } else {
       initSettingsHeaderDividers();
+      initSidebarChatDivider();
     }
 
     const origNavigateSidebar = window.navigateSidebar;
     if (typeof origNavigateSidebar === 'function') {
       window.navigateSidebar = function() {
         origNavigateSidebar.apply(this, arguments);
-        setTimeout(initSettingsHeaderDividers, 50);
+        setTimeout(() => {
+          initSettingsHeaderDividers();
+          initSidebarChatDivider();
+        }, 50);
       };
     }
   })();

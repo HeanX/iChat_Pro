@@ -221,9 +221,12 @@
       var item = document.createElement('button');
       var color = /^#[0-9a-fA-F]{6}$/.test(target.avatar_color || '') ? target.avatar_color : '#5c6bc0';
       item.className = 'flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-bgSearch transition-colors text-left border-none bg-transparent cursor-pointer';
+      var avatarInner = typeof buildAvatarHtml === 'function'
+        ? buildAvatarHtml(target.avatar_url || '', target.initials || '??', color, '', target.name || '')
+        : (target.initials || '??');
       item.innerHTML =
-        '<div class="w-9 h-9 rounded-full text-white flex items-center justify-center font-bold text-xs flex-shrink-0" style="background-color:' + color + '">' +
-        (target.initials || '??') +
+        '<div class="w-9 h-9 rounded-full overflow-hidden text-white flex items-center justify-center font-bold text-xs flex-shrink-0" style="background-color:' + color + '">' +
+        avatarInner +
         '</div>' +
         '<span class="text-sm font-medium text-textMain truncate">' + (target.name || 'Unknown') + '</span>';
       item.addEventListener('click', function () {

@@ -10,7 +10,9 @@ urlpatterns = [
 
     # Profile
     path('profile/edit/', views.profile_edit_view, name='profile_edit'),
+    path('profile/avatar/edit/', views.avatar_editor_view, name='avatar_editor'),
     path('api/profile/me/', views.profile_me_api_view, name='api-profile-me'),
+    path('api/profile/avatar/crop/', views.avatar_crop_save_view, name='api-avatar-crop'),
 
     # Contacts
     path('contacts/', views.contact_list_view, name='contacts'),

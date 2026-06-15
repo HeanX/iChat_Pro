@@ -87,9 +87,13 @@ def settings_sidebar(request):
     avatar_url = ""
     if profile and profile.avatar:
         try:
-            avatar_url = profile.avatar.url
-        except ValueError:
-            avatar_url = ""
+            timestamp = int(profile.updated_at.timestamp())
+            avatar_url = f"{profile.avatar.url}?t={timestamp}"
+        except Exception:
+            try:
+                avatar_url = profile.avatar.url
+            except ValueError:
+                avatar_url = ""
 
     return {
         "settings_display_name": display_name,

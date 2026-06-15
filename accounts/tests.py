@@ -377,7 +377,7 @@ class LoginViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'pages/login.html')
         self.assertContains(response, 'action="/login/"')
-        self.assertContains(response, 'placeholder="Enter your password"')
+        self.assertContains(response, 'placeholder="输入您的密码"')
         self.assertContains(response, 'href="/register/"')
 
     def test_login_with_valid_credentials(self):
@@ -563,7 +563,6 @@ class ContactViewTests(TestCase):
         FriendRequest.objects.create(sender=self.alice, receiver=self.bob)
         response = self.client.get(self.CONTACTS_URL)
         self.assertContains(response, 'Request pending...')
-        self.assertNotContains(response, 'Request pending')
 
     def test_send_friend_request(self):
         response = self.client.post(

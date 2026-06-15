@@ -1,14 +1,14 @@
 # iChat Pro Bot、LLM Agent 与 Channel 扩展方案文档
 
 > 状态：Draft v1.0
-> 适用范围：二期扩展设计
-> 前置条件：完成当前仍开放的 T16 真实聊天数据接入、群聊模型统一和基础联调
+> 适用范围：Phase 4 扩展生态设计；Phase 3 仅提前实现最小 LLM Assistant 展示能力
+> 前置条件：完成 Phase 2 基础通信产品可用性补全和 Phase 3 产品化收口/最小 LLM 展示
 > 核心原则：先引入受控 Bot，再接入 LLM，最后开放带工具调用能力的 Agent
-> 阶段约束：本文档全部能力均属于 Phase 2。Phase 1 验收门槛详见 `docs/iChat Pro Phase 规划与一期交付审查文档.md`。
+> 阶段约束：本文档中的完整 Bot、Agent、Channel 和 OpenClaw 能力均属于 Phase 4。Phase 3 只允许实现独立、低风险、可降级的最小 LLM Assistant，不进入完整 Bot/Agent 生态。
 
 ## 1. 文档目的
 
-iChat Pro 一期聚焦端到端加密私聊、群聊、联系人和实时通信。二期可以在此基础上扩展：
+iChat Pro Phase 1 聚焦端到端加密私聊、群聊、联系人和实时通信；Phase 2 补齐基础通信产品可用性；Phase 3 用于产品化收口、稳定化和最小 LLM Assistant 展示。Phase 4 可以在此基础上扩展：
 
 1. 平台 Bot：支持命令、通知、自动回复和系统服务。
 2. LLM Bot：支持问答、摘要、翻译和知识库检索。

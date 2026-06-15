@@ -48,7 +48,7 @@
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
     {% block extra_css %}{% endblock %}
 </head>
-<body>
+<body class="preload">
     
     {% block content %}{% endblock %}
 
@@ -60,9 +60,12 @@
             document.body.classList.add('dark');
         }
         
-        // Initialize all Lucide icons
+        // Initialize all Lucide icons and remove preload to enable transitions
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
+            setTimeout(() => {
+                document.body.classList.remove('preload');
+            }, 100);
         });
     </script>
     {% block extra_js %}{% endblock %}

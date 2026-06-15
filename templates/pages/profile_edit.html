@@ -59,9 +59,9 @@
         <input type="text" name="username" id="{{ form.username.id_for_label }}"
           value="{{ form.username.value|default:'' }}"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
-          placeholder="a-z, 0-9, underscores (min. 5 chars)"
-          pattern="^[a-z0-9_]{5,}$">
-        <p class="text-xs text-textSecondary">You can use a–z, 0–9 and underscores. Minimum length is 5 characters.</p>
+          placeholder="a-zA-Z, 0-9, underscores (min. 5 chars)"
+          pattern="^[a-zA-Z0-9_]{5,}$">
+        <p class="text-xs text-textSecondary">You can use a–z, A–Z, 0–9 and underscores. Minimum length is 5 characters.</p>
         {% if form.username.errors %}<p class="text-xs text-red-500">{{ form.username.errors.0 }}</p>{% endif %}
       </div>
 

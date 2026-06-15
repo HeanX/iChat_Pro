@@ -916,6 +916,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'sender_name': sender_name,
             'sender_initials': ChatConsumer.initials(sender_name),
             'sender_avatar_color': ChatConsumer.avatar_color(sender_name),
+            'sender_avatar_url': ChatConsumer.avatar_url(recipient.group_message.sender),
             'receiver_id': recipient.receiver_id,
             'message_type': recipient.group_message.message_type,
             'ciphertext': recipient.ciphertext,
@@ -929,6 +930,15 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'recalled_at': recipient.group_message.recalled_at.isoformat() if recipient.group_message.recalled_at else None,
             'created_at': recipient.group_message.created_at.isoformat(),
         }
+
+    @staticmethod
+    def avatar_url(user):
+        try:
+            if user.profile and user.profile.avatar:
+                return user.profile.avatar.url
+        except Exception:
+            pass
+        return ''
 
     @staticmethod
     def display_name(user):

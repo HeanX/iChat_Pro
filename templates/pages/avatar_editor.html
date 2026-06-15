@@ -1,0 +1,1473 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>编辑头像 - iChat Pro</title>
+  <meta name="description" content="裁剪并调整您的头像图片">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.min.js"
+          integrity="sha384-8nT3SpButyvenpAdKYPJzXdSz3zidMGduMoaMvwjKnAWVv238n6P1mhveiJJQWrV"
+          crossorigin="anonymous"></script>
+  <!-- Base CSS -->
+  <link rel="stylesheet" href="{% static 'css/base.css' %}">
+  <!-- Chat CSS (for design tokens) -->
+  <link rel="stylesheet" href="{% static 'css/chat.css' %}">
+  <style>
+    /* =====================================================================
+       Avatar Editor — Dedicated Page Styles
+       ===================================================================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      overflow: hidden;
+      height: 100dvh;
+      width: 100dvw;
+      display: flex;
+      flex-direction: column;
+      background: #111111;
+      color: #f1f1f1;
+      font-family: var(--font-family);
+      user-select: none;
+    }
+
+    /* ── Top Bar ── */
+    .ae-topbar {
+      flex: 0 0 auto;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      background: #1a1a1a;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      z-index: 20;
+    }
+
+    .ae-topbar-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: #f1f1f1;
+    }
+
+    .ae-topbar-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: #a0a0a0;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .ae-topbar-btn:hover {
+      background: rgba(255,255,255,0.08);
+      color: #f1f1f1;
+    }
+
+    .ae-topbar-btn svg { width: 20px; height: 20px; stroke-width: 2.2; }
+
+    /* ── Body Split ── */
+    .ae-body {
+      flex: 1 1 0;
+      display: flex;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* ── Canvas Area ── */
+    .ae-canvas-area {
+      flex: 1 1 0;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #111111;
+    }
+
+    /* dark checkerboard for transparent areas */
+    .ae-canvas-area::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(45deg, #1c1c1c 25%, transparent 25%),
+        linear-gradient(-45deg, #1c1c1c 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #1c1c1c 75%),
+        linear-gradient(-45deg, transparent 75%, #1c1c1c 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+      opacity: 0.3;
+      pointer-events: none;
+    }
+
+    /* ── Crop Stage ── */
+    .ae-stage {
+      position: relative;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .ae-stage.is-dragging { cursor: grabbing; }
+
+    /* The actual image inside the stage */
+    #ae-image {
+      display: block;
+      max-width: none;
+      max-height: none;
+      transform-origin: center center;
+      pointer-events: none;
+      will-change: transform;
+      transition: none;
+    }
+
+    /* ── Crop Mask Overlay ── */
+    .ae-crop-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    /* ── Crop Box ── */
+    .ae-cropbox {
+      position: absolute;
+      border: 2px solid rgba(255,255,255,0.85);
+      box-shadow:
+        0 0 0 9999px rgba(0,0,0,0.55),
+        0 0 0 2px rgba(255,255,255,0.85);
+      box-sizing: border-box;
+    }
+
+    .ae-cropbox.is-circle {
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 9999px rgba(0,0,0,0.55),
+        0 0 0 2px rgba(255,255,255,0.85);
+    }
+
+    /* crop handle corners */
+    .ae-cropbox-corner {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      border-color: #ffffff;
+      border-style: solid;
+      pointer-events: all;
+      cursor: nwse-resize;
+    }
+
+    .ae-cropbox-corner.tl { top: -4px; left: -4px; border-width: 4px 0 0 4px; cursor: nwse-resize; }
+    .ae-cropbox-corner.tr { top: -4px; right: -4px; border-width: 4px 4px 0 0; cursor: nesw-resize; }
+    .ae-cropbox-corner.bl { bottom: -4px; left: -4px; border-width: 0 0 4px 4px; cursor: nesw-resize; }
+    .ae-cropbox-corner.br { bottom: -4px; right: -4px; border-width: 0 4px 4px 0; cursor: nwse-resize; }
+
+    .ae-cropbox-corner {
+      width: 24px;
+      height: 24px;
+      /* invisible hit-area padding */
+      padding: 6px;
+      box-sizing: content-box;
+      transition: border-color 0.12s;
+    }
+    .ae-cropbox-corner:hover { border-color: var(--color-primary, #3390ec); }
+
+    /* Grid lines inside crop box */
+    .ae-cropbox-grid {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .ae-cropbox-grid::before,
+    .ae-cropbox-grid::after {
+      content: '';
+      position: absolute;
+      background: rgba(255,255,255,0.22);
+    }
+
+    .ae-cropbox-grid::before {
+      width: 1px;
+      height: 100%;
+      left: 33.33%;
+      top: 0;
+      box-shadow: calc(33.33% + 1px) 0 0 rgba(255,255,255,0.22);
+    }
+
+    .ae-cropbox-grid::after {
+      width: 100%;
+      height: 1px;
+      left: 0;
+      top: 33.33%;
+      box-shadow: 0 calc(33.33% + 1px) 0 rgba(255,255,255,0.22);
+    }
+
+    /* ── Rotation Ruler ── */
+    .ae-ruler-wrap {
+      flex: 0 0 auto;
+      padding: 12px 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      z-index: 5;
+    }
+
+    .ae-ruler-reset {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 0;
+      background: rgba(255,255,255,0.08);
+      color: #c0c0c0;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      flex: 0 0 auto;
+    }
+
+    .ae-ruler-reset:hover { background: rgba(255,255,255,0.16); color: #fff; }
+    .ae-ruler-reset svg { width: 16px; height: 16px; stroke-width: 2.3; }
+
+    .ae-ruler {
+      position: relative;
+      width: 320px;
+      height: 34px;
+      overflow: hidden;
+      cursor: ew-resize;
+      flex: 0 0 auto;
+    }
+
+    .ae-ruler-track {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      align-items: center;
+      gap: 0;
+      will-change: transform;
+    }
+
+    .ae-ruler-tick {
+      width: 1px;
+      flex: 0 0 1px;
+      background: rgba(255,255,255,0.25);
+      transition: none;
+    }
+
+    .ae-ruler-tick.major { background: rgba(255,255,255,0.55); }
+
+    .ae-ruler-label {
+      position: absolute;
+      bottom: 0;
+      font-size: 10px;
+      color: rgba(255,255,255,0.4);
+      transform: translateX(-50%);
+      pointer-events: none;
+      line-height: 1;
+    }
+
+    .ae-ruler-center-marker {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 2px;
+      height: 28px;
+      background: var(--color-primary, #3390ec);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+
+    .ae-angle-display {
+      min-width: 40px;
+      text-align: center;
+      font-size: 13px;
+      color: rgba(255,255,255,0.65);
+      letter-spacing: -0.2px;
+      flex: 0 0 auto;
+    }
+
+    .ae-flip-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 0;
+      background: rgba(255,255,255,0.08);
+      color: #c0c0c0;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      flex: 0 0 auto;
+    }
+
+    .ae-flip-btn:hover { background: rgba(255,255,255,0.16); color: #fff; }
+    .ae-flip-btn svg { width: 17px; height: 17px; stroke-width: 2.1; }
+
+    /* ── Right Panel ── */
+    .ae-panel {
+      width: 280px;
+      flex: 0 0 280px;
+      background: #1e1e1e;
+      border-left: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    /* Panel header tabs */
+    .ae-panel-tabs {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      padding: 0 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      flex: 0 0 auto;
+      height: 48px;
+    }
+
+    .ae-panel-tab {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 48px;
+      border: 0;
+      background: transparent;
+      color: #707070;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      gap: 6px;
+    }
+
+    .ae-panel-tab:hover { color: #c0c0c0; }
+
+    .ae-panel-tab.is-active {
+      color: var(--color-primary, #3390ec);
+      border-bottom-color: var(--color-primary, #3390ec);
+    }
+
+    .ae-panel-tab svg { width: 18px; height: 18px; stroke-width: 2.1; }
+
+    /* Panel sections */
+    .ae-panel-section {
+      padding: 16px 16px 0;
+      display: none;
+    }
+
+    .ae-panel-section.is-active { display: block; }
+
+    .ae-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: #606060;
+      margin-bottom: 10px;
+    }
+
+    /* ── Aspect Ratio Grid ── */
+    .ae-ratio-option {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 10px 12px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: #c0c0c0;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 400;
+      transition: background 0.12s, color 0.12s;
+      margin-bottom: 2px;
+    }
+
+    .ae-ratio-option:hover { background: rgba(255,255,255,0.06); color: #f1f1f1; }
+
+    .ae-ratio-option.is-active {
+      background: rgba(51,144,236,0.15);
+      color: var(--color-primary, #3390ec);
+      font-weight: 600;
+    }
+
+    [data-theme="dark"] .ae-ratio-option.is-active {
+      background: rgba(135,116,225,0.15);
+      color: var(--color-primary, #8774e1);
+    }
+
+    .ae-ratio-icon {
+      width: 20px;
+      height: 20px;
+      border: 2px solid currentColor;
+      border-radius: 3px;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .ae-ratio-icon.circle { border-radius: 50%; }
+    .ae-ratio-icon.wide { width: 26px; height: 17px; }
+    .ae-ratio-icon.tall { width: 17px; height: 26px; }
+    .ae-ratio-icon.free { border-style: dashed; border-color: currentColor; }
+
+    .ae-ratio-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+    }
+
+    /* ── Zoom Slider ── */
+    .ae-zoom-wrap {
+      padding: 16px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      flex: 0 0 auto;
+    }
+
+    .ae-zoom-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #707070;
+    }
+
+    .ae-zoom-value {
+      font-size: 12px;
+      color: #a0a0a0;
+      font-weight: 600;
+    }
+
+    .ae-zoom-slider {
+      width: 100%;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 4px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.12);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .ae-zoom-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--color-primary, #3390ec);
+      cursor: pointer;
+      box-shadow: 0 1px 4px rgba(51,144,236,0.4);
+    }
+
+    .ae-zoom-slider::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--color-primary, #3390ec);
+      cursor: pointer;
+      border: 0;
+    }
+
+    /* ── Confirm FAB ── */
+    .ae-confirm-btn {
+      position: fixed;
+      bottom: 28px;
+      right: 300px; /* right of panel */
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: 0;
+      background: var(--color-primary, #3390ec);
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(51,144,236,0.45);
+      transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+      z-index: 50;
+    }
+
+    .ae-confirm-btn:hover {
+      background: var(--color-primary-hover, #2d8adf);
+      transform: scale(1.06);
+      box-shadow: 0 8px 24px rgba(51,144,236,0.55);
+    }
+
+    .ae-confirm-btn:active { transform: scale(0.96); }
+    .ae-confirm-btn svg { width: 24px; height: 24px; stroke-width: 2.5; }
+
+    /* loading state */
+    .ae-confirm-btn.is-loading { pointer-events: none; opacity: 0.75; }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .ae-confirm-btn.is-loading svg {
+      animation: spin 0.9s linear infinite;
+    }
+
+    /* ── Responsive: hide panel on narrow screens ── */
+    @media (max-width: 600px) {
+      .ae-panel { display: none; }
+      .ae-confirm-btn { right: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Top Bar ── -->
+  <header class="ae-topbar">
+    <button class="ae-topbar-btn" id="ae-close-btn" title="取消" aria-label="取消编辑">
+      <i data-lucide="x"></i>
+    </button>
+    <span class="ae-topbar-title">编辑头像</span>
+    <button class="ae-topbar-btn" id="ae-undo-btn" title="撤销旋转" aria-label="撤销">
+      <i data-lucide="rotate-ccw"></i>
+    </button>
+  </header>
+
+  <!-- ── Body ── -->
+  <div class="ae-body">
+
+    <!-- ── Canvas Area ── -->
+    <div class="ae-canvas-area" id="ae-canvas-area">
+      <div class="ae-stage" id="ae-stage" aria-label="拖动以移动图像">
+        <img id="ae-image" src="" alt="待裁剪的头像" draggable="false">
+        <!-- Crop Box -->
+        <div class="ae-cropbox is-circle" id="ae-cropbox" role="region" aria-label="裁剪框">
+          <div class="ae-cropbox-grid"></div>
+          <div class="ae-cropbox-corner tl"></div>
+          <div class="ae-cropbox-corner tr"></div>
+          <div class="ae-cropbox-corner bl"></div>
+          <div class="ae-cropbox-corner br"></div>
+        </div>
+      </div>
+
+      <!-- Rotation Ruler -->
+      <div class="ae-ruler-wrap">
+        <button class="ae-ruler-reset" id="ae-rotate-reset" title="重置旋转" aria-label="重置角度">
+          <i data-lucide="refresh-ccw"></i>
+        </button>
+
+        <div class="ae-ruler" id="ae-ruler" role="slider" aria-label="旋转角度" aria-valuemin="-45" aria-valuemax="45" aria-valuenow="0" tabindex="0">
+          <div class="ae-ruler-track" id="ae-ruler-track"></div>
+          <div class="ae-ruler-center-marker"></div>
+        </div>
+
+        <span class="ae-angle-display" id="ae-angle-display">0°</span>
+
+        <button class="ae-flip-btn" id="ae-flip-h" title="水平翻转" aria-label="水平翻转">
+          <i data-lucide="flip-horizontal-2"></i>
+        </button>
+        <button class="ae-flip-btn" id="ae-flip-v" title="垂直翻转" aria-label="垂直翻转">
+          <i data-lucide="flip-vertical-2"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Right Panel ── -->
+    <aside class="ae-panel" id="ae-panel">
+
+      <!-- Tabs -->
+      <div class="ae-panel-tabs" role="tablist">
+        <button class="ae-panel-tab is-active" id="tab-crop" role="tab" aria-selected="true" data-tab="crop" title="裁剪">
+          <i data-lucide="crop"></i>
+        </button>
+        <button class="ae-panel-tab" id="tab-rotate" role="tab" aria-selected="false" data-tab="rotate" title="旋转">
+          <i data-lucide="rotate-cw"></i>
+        </button>
+        <button class="ae-panel-tab" id="tab-text" role="tab" aria-selected="false" data-tab="text" title="文字（即将推出）">
+          <i data-lucide="type"></i>
+        </button>
+        <button class="ae-panel-tab" id="tab-draw" role="tab" aria-selected="false" data-tab="draw" title="绘图（即将推出）">
+          <i data-lucide="pencil"></i>
+        </button>
+        <button class="ae-panel-tab" id="tab-emoji" role="tab" aria-selected="false" data-tab="emoji" title="表情（即将推出）">
+          <i data-lucide="smile"></i>
+        </button>
+      </div>
+
+      <!-- Crop Tab -->
+      <div class="ae-panel-section is-active" id="section-crop" role="tabpanel">
+        <div class="ae-section-label">裁剪比例</div>
+
+        <!-- Free / Original -->
+        <button class="ae-ratio-option" data-ratio="free" id="ratio-free">
+          <span class="ae-ratio-icon free"></span>
+          <span>自由裁剪</span>
+        </button>
+        <button class="ae-ratio-option" data-ratio="original" id="ratio-original">
+          <span class="ae-ratio-icon"></span>
+          <span>原始比例</span>
+        </button>
+        <!-- Circle / Square -->
+        <button class="ae-ratio-option is-active" data-ratio="circle" id="ratio-circle">
+          <span class="ae-ratio-icon circle"></span>
+          <span>圆形（头像）</span>
+        </button>
+        <button class="ae-ratio-option" data-ratio="1:1" id="ratio-square">
+          <span class="ae-ratio-icon"></span>
+          <span>正方形</span>
+        </button>
+
+        <!-- Grid ratios -->
+        <div class="ae-ratio-grid" style="margin-top: 2px;">
+          <button class="ae-ratio-option" data-ratio="3:2">
+            <span class="ae-ratio-icon wide"></span><span>3:2</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="2:3">
+            <span class="ae-ratio-icon tall"></span><span>2:3</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="4:3">
+            <span class="ae-ratio-icon wide"></span><span>4:3</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="3:4">
+            <span class="ae-ratio-icon tall"></span><span>3:4</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="5:4">
+            <span class="ae-ratio-icon wide"></span><span>5:4</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="4:5">
+            <span class="ae-ratio-icon tall"></span><span>4:5</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="7:5">
+            <span class="ae-ratio-icon wide"></span><span>7:5</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="5:7">
+            <span class="ae-ratio-icon tall"></span><span>5:7</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="16:9">
+            <span class="ae-ratio-icon wide"></span><span>16:9</span>
+          </button>
+          <button class="ae-ratio-option" data-ratio="9:16">
+            <span class="ae-ratio-icon tall"></span><span>9:16</span>
+          </button>
+        </div>
+
+        <div style="padding: 16px 0 0;"></div>
+      </div>
+
+      <!-- Rotate Tab -->
+      <div class="ae-panel-section" id="section-rotate" role="tabpanel">
+        <div class="ae-section-label">旋转与翻转</div>
+
+        <button class="ae-ratio-option" id="panel-rotate-cw">
+          <i data-lucide="rotate-cw" style="width:18px;height:18px;flex:0 0 auto"></i>
+          <span>顺时针旋转 90°</span>
+        </button>
+        <button class="ae-ratio-option" id="panel-rotate-ccw">
+          <i data-lucide="rotate-ccw" style="width:18px;height:18px;flex:0 0 auto"></i>
+          <span>逆时针旋转 90°</span>
+        </button>
+        <button class="ae-ratio-option" id="panel-flip-h">
+          <i data-lucide="flip-horizontal-2" style="width:18px;height:18px;flex:0 0 auto"></i>
+          <span>水平翻转</span>
+        </button>
+        <button class="ae-ratio-option" id="panel-flip-v">
+          <i data-lucide="flip-vertical-2" style="width:18px;height:18px;flex:0 0 auto"></i>
+          <span>垂直翻转</span>
+        </button>
+      </div>
+
+      <!-- Text Tab (placeholder) -->
+      <div class="ae-panel-section" id="section-text" role="tabpanel">
+        <div style="padding: 40px 0; text-align: center; color: #505050; font-size: 13px;">文字功能即将推出</div>
+      </div>
+
+      <!-- Draw Tab (placeholder) -->
+      <div class="ae-panel-section" id="section-draw" role="tabpanel">
+        <div style="padding: 40px 0; text-align: center; color: #505050; font-size: 13px;">绘图功能即将推出</div>
+      </div>
+
+      <!-- Emoji Tab (placeholder) -->
+      <div class="ae-panel-section" id="section-emoji" role="tabpanel">
+        <div style="padding: 40px 0; text-align: center; color: #505050; font-size: 13px;">表情功能即将推出</div>
+      </div>
+
+      <!-- Zoom Slider (always visible at bottom of panel) -->
+      <div style="flex: 1 1 0;"></div>
+      <div class="ae-zoom-wrap">
+        <div class="ae-zoom-label-row">
+          <span>缩放</span>
+          <span class="ae-zoom-value" id="ae-zoom-value">100%</span>
+        </div>
+        <input type="range" class="ae-zoom-slider" id="ae-zoom-slider"
+               min="0" max="100" value="50" step="1" aria-label="缩放">
+      </div>
+    </aside>
+  </div>
+
+  <!-- ── Confirm FAB ── -->
+  <button class="ae-confirm-btn" id="ae-confirm-btn" title="应用" aria-label="应用裁剪">
+    <i data-lucide="check"></i>
+  </button>
+
+  <!-- Hidden form for submission -->
+  <form id="ae-submit-form" method="POST" action="{% url 'api-avatar-crop' %}" enctype="multipart/form-data" style="display:none">
+    {% csrf_token %}
+    <input type="hidden" name="cropped_data" id="ae-cropped-data">
+    <input type="hidden" name="is_circle" id="ae-is-circle" value="1">
+  </form>
+
+  <script>
+  (function() {
+    'use strict';
+
+    // ── State ──────────────────────────────────────────────────────────────
+    var state = {
+      imageDataUrl: null,   // original file as data URL
+      rotation: 0,          // degrees, free rotation (ruler)
+      snapRotation: 0,      // snapped 90° steps
+      flipH: false,
+      flipV: false,
+      scale: 1.0,           // zoom factor
+      ratio: 'circle',      // current aspect ratio key
+      isCircle: true,
+      // Image drag
+      isDragging: false,
+      dragStart: null,
+      imgOffset: { x: 0, y: 0 },
+      // Cropbox drag
+      isCropDragging: false,
+      cropDragStart: null,
+      // Cropbox resize (corner drag)
+      isResizing: false,
+      resizeCorner: null,   // 'tl' | 'tr' | 'bl' | 'br'
+      resizeDragStart: null,
+      cropbox: { x: 0, y: 0, w: 0, h: 0 },
+      stageSize: { w: 0, h: 0 },
+      naturalSize: { w: 0, h: 0 },
+      rulerDragging: false,
+      rulerDragStartX: 0,
+      rulerDragStartAngle: 0,
+      // Snapshot of initial layout for reset
+      initialSnapshot: null,
+    };
+
+    // ── Zoom: exponential mapping ──────────────────────────────────────────
+    // slider range: 0–100  →  scale: 0.2×–4×  (exponential)
+    var ZOOM_MIN = 0.2, ZOOM_MAX = 4.0;
+    function sliderToScale(v) {
+      // v in [0,100], returns scale
+      return ZOOM_MIN * Math.pow(ZOOM_MAX / ZOOM_MIN, v / 100);
+    }
+    function scaleToSlider(s) {
+      return Math.round(100 * Math.log(s / ZOOM_MIN) / Math.log(ZOOM_MAX / ZOOM_MIN));
+    }
+
+    // ── DOM refs ───────────────────────────────────────────────────────────
+    var img         = document.getElementById('ae-image');
+    var stage       = document.getElementById('ae-stage');
+    var canvasArea  = document.getElementById('ae-canvas-area');
+    var cropbox     = document.getElementById('ae-cropbox');
+    var ruler       = document.getElementById('ae-ruler');
+    var rulerTrack  = document.getElementById('ae-ruler-track');
+    var angleDisplay = document.getElementById('ae-angle-display');
+    var zoomSlider  = document.getElementById('ae-zoom-slider');
+    var zoomValue   = document.getElementById('ae-zoom-value');
+    var confirmBtn  = document.getElementById('ae-confirm-btn');
+    var closeBtn    = document.getElementById('ae-close-btn');
+    var undoBtn     = document.getElementById('ae-undo-btn');
+    var croppedDataInput = document.getElementById('ae-cropped-data');
+    var isCircleInput = document.getElementById('ae-is-circle');
+    var submitForm  = document.getElementById('ae-submit-form');
+
+    // ── Load image from sessionStorage (set by profile edit page) ──────────
+    function loadImage() {
+      var dataUrl = sessionStorage.getItem('ae_pending_image');
+      if (!dataUrl) {
+        // No pending image — go back
+        history.back();
+        return;
+      }
+      state.imageDataUrl = dataUrl;
+      img.onload = function() {
+        state.naturalSize.w = img.naturalWidth;
+        state.naturalSize.h = img.naturalHeight;
+        initLayout();
+      };
+      img.src = dataUrl;
+    }
+
+    // ── Layout initialisation ──────────────────────────────────────────────
+    function initLayout() {
+      var area = canvasArea.getBoundingClientRect();
+      var areaW = area.width;
+      var areaH = area.height - 80; // reserve room for ruler
+
+      var stageW = areaW;
+      var stageH = areaH;
+      state.stageSize.w = stageW;
+      state.stageSize.h = stageH;
+
+      // Scale image to fit within the stage with comfortable margin
+      var nat = state.naturalSize;
+      var scaleToFit = Math.min(stageW / nat.w, stageH / nat.h) * 0.85;
+      state.scale = scaleToFit;
+
+      // Position image: horizontally centred, top edge at stage top
+      var displayH = nat.h * state.scale;
+      state.imgOffset.x = 0;
+      // Push image up so its top aligns with stage top
+      // imgOffset is relative to the centred position, so offset = -(stageH - displayH)/2
+      state.imgOffset.y = -(stageH - displayH) / 2;
+
+      applyImageTransform();
+      setCropRatioAtTop(state.ratio);
+      buildRuler();
+
+      // Save snapshot for reset
+      state.initialSnapshot = {
+        scale: state.scale,
+        imgOffset: { x: state.imgOffset.x, y: state.imgOffset.y },
+        cropbox: { x: state.cropbox.x, y: state.cropbox.y, w: state.cropbox.w, h: state.cropbox.h },
+        rotation: 0,
+        snapRotation: 0,
+        flipH: false,
+        flipV: false,
+      };
+    }
+
+    // ── Image transform ────────────────────────────────────────────────────
+    function applyImageTransform() {
+      var nat = state.naturalSize;
+      var displayW = nat.w * state.scale;
+      var displayH = nat.h * state.scale;
+
+      stage.style.width  = state.stageSize.w + 'px';
+      stage.style.height = state.stageSize.h + 'px';
+
+      img.style.width  = displayW + 'px';
+      img.style.height = displayH + 'px';
+      img.style.position = 'absolute';
+
+      // Center within stage, then apply offset
+      img.style.left = ((state.stageSize.w - displayW) / 2 + state.imgOffset.x) + 'px';
+      img.style.top  = ((state.stageSize.h - displayH) / 2 + state.imgOffset.y) + 'px';
+
+      // Rotation + flip
+      var totalRot = state.rotation + state.snapRotation;
+      var scaleX = state.flipH ? -1 : 1;
+      var scaleY = state.flipV ? -1 : 1;
+      img.style.transform = 'rotate(' + totalRot + 'deg) scale(' + scaleX + ',' + scaleY + ')';
+      img.style.transformOrigin = 'center center';
+
+      // Sync zoom slider (exponential)
+      var sv = Math.max(0, Math.min(100, scaleToSlider(state.scale)));
+      zoomSlider.value = sv;
+      zoomValue.textContent = Math.round(state.scale * 100) + '%';
+    }
+
+    // ── Crop box ───────────────────────────────────────────────────────────
+    // Compute crop box size and place it at the TOP of the visible image
+    function setCropRatioAtTop(ratioKey) {
+      state.ratio = ratioKey;
+      state.isCircle = (ratioKey === 'circle');
+      isCircleInput.value = state.isCircle ? '1' : '0';
+
+      if (state.isCircle) cropbox.classList.add('is-circle');
+      else cropbox.classList.remove('is-circle');
+
+      var sw = state.stageSize.w;
+      var sh = state.stageSize.h;
+
+      // Width of the displayed image in stage coords
+      var nat = state.naturalSize;
+      var displayW = nat.w * state.scale;
+      var displayH = nat.h * state.scale;
+
+      // Image left/top in stage coords
+      var imgLeft = (sw - displayW) / 2 + state.imgOffset.x;
+      var imgTop  = (sh - displayH) / 2 + state.imgOffset.y;
+
+      // Crop box size: use the SHORTER side of the displayed image → perfect square/circle
+      var side = Math.min(displayW, displayH);
+      // Cap at stage bounds with a small margin
+      side = Math.min(side, sw * 0.95, sh * 0.95);
+
+      var cw, ch;
+      if (ratioKey === 'free' || ratioKey === 'circle' || ratioKey === '1:1') {
+        cw = side; ch = side;
+      } else if (ratioKey === 'original') {
+        var aspect = nat.w / nat.h;
+        cw = side * (aspect >= 1 ? 1 : aspect);
+        ch = side * (aspect >= 1 ? 1 / aspect : 1);
+      } else {
+        var parts = ratioKey.split(':');
+        var rw = parseFloat(parts[0]);
+        var rh = parseFloat(parts[1]);
+        var aspect = rw / rh;
+        if (aspect >= 1) { cw = side; ch = side / aspect; }
+        else { ch = side; cw = side * aspect; }
+      }
+
+      cw = Math.round(cw); ch = Math.round(ch);
+      state.cropbox.w = cw;
+      state.cropbox.h = ch;
+      // Horizontally centred on image, top edge aligned with image top
+      state.cropbox.x = Math.round(imgLeft + (displayW - cw) / 2);
+      state.cropbox.y = Math.round(Math.max(0, imgTop));
+      // Clamp within stage
+      state.cropbox.x = Math.max(0, Math.min(state.cropbox.x, sw - cw));
+      state.cropbox.y = Math.max(0, Math.min(state.cropbox.y, sh - ch));
+
+      applyCropbox();
+    }
+
+    // Used by ratio buttons when user clicks a ratio (keeps current position, adjusts size)
+    function setCropRatio(ratioKey) {
+      var prevCx = state.cropbox.x + state.cropbox.w / 2;
+      var prevCy = state.cropbox.y + state.cropbox.h / 2;
+
+      state.ratio = ratioKey;
+      state.isCircle = (ratioKey === 'circle');
+      isCircleInput.value = state.isCircle ? '1' : '0';
+
+      if (state.isCircle) cropbox.classList.add('is-circle');
+      else cropbox.classList.remove('is-circle');
+
+      var sw = state.stageSize.w;
+      var sh = state.stageSize.h;
+      var nat = state.naturalSize;
+      var displayW = nat.w * state.scale;
+      var maxCW = Math.min(displayW, sw * 0.95);
+
+      var cw, ch;
+      if (ratioKey === 'free' || ratioKey === 'circle' || ratioKey === '1:1') {
+        cw = maxCW; ch = maxCW;
+      } else if (ratioKey === 'original') {
+        var aspect = nat.w / nat.h;
+        cw = maxCW; ch = cw / aspect;
+        if (ch > sh * 0.95) { ch = sh * 0.95; cw = ch * aspect; }
+      } else {
+        var parts = ratioKey.split(':');
+        var rw = parseFloat(parts[0]);
+        var rh = parseFloat(parts[1]);
+        var aspect = rw / rh;
+        cw = maxCW; ch = cw / aspect;
+        if (ch > sh * 0.95) { ch = sh * 0.95; cw = ch * aspect; }
+      }
+
+      cw = Math.round(cw); ch = Math.round(ch);
+      state.cropbox.w = cw;
+      state.cropbox.h = ch;
+      // Keep centre position from before
+      state.cropbox.x = Math.round(Math.max(0, Math.min(prevCx - cw / 2, sw - cw)));
+      state.cropbox.y = Math.round(Math.max(0, Math.min(prevCy - ch / 2, sh - ch)));
+
+      applyCropbox();
+    }
+
+    function applyCropbox() {
+      var cb = state.cropbox;
+      cropbox.style.left   = cb.x + 'px';
+      cropbox.style.top    = cb.y + 'px';
+      cropbox.style.width  = cb.w + 'px';
+      cropbox.style.height = cb.h + 'px';
+    }
+
+    // ── Ratio buttons ──────────────────────────────────────────────────────
+    document.querySelectorAll('.ae-ratio-option').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var ratio = btn.dataset.ratio;
+        if (!ratio) return;
+        document.querySelectorAll('.ae-ratio-option').forEach(function(b) {
+          b.classList.remove('is-active');
+        });
+        btn.classList.add('is-active');
+        setCropRatio(ratio);
+      });
+    });
+
+    // ── Ruler construction ─────────────────────────────────────────────────
+    function buildRuler() {
+      rulerTrack.innerHTML = '';
+      var tickSpacing = 6; // px per degree
+      var totalRange = 180; // -90 to +90
+      var totalTicks = totalRange + 1;
+
+      for (var i = 0; i <= totalRange; i++) {
+        var angle = i - 90;
+        var tick = document.createElement('div');
+        tick.className = 'ae-ruler-tick';
+        var h;
+        if (angle % 10 === 0) {
+          h = 22; tick.classList.add('major');
+          var lbl = document.createElement('span');
+          lbl.className = 'ae-ruler-label';
+          lbl.textContent = angle + '°';
+          lbl.style.left = (i * tickSpacing) + 'px';
+          lbl.style.bottom = '0';
+          rulerTrack.appendChild(lbl);
+        } else if (angle % 5 === 0) {
+          h = 14;
+        } else {
+          h = 8;
+        }
+        tick.style.height = h + 'px';
+        tick.style.marginRight = (tickSpacing - 1) + 'px';
+        rulerTrack.appendChild(tick);
+      }
+
+      rulerTrack.style.width = (totalTicks * tickSpacing) + 'px';
+      updateRulerPosition();
+    }
+
+    function updateRulerPosition() {
+      var rulerW = ruler.offsetWidth;
+      var tickSpacing = 6;
+      // angle=0 → index 90, each degree is tickSpacing px
+      var offset = (state.rotation + 90) * tickSpacing;
+      rulerTrack.style.transform = 'translateX(' + (rulerW / 2 - offset) + 'px) translateY(-50%)';
+      angleDisplay.textContent = (state.rotation > 0 ? '+' : '') + state.rotation.toFixed(1) + '°';
+      ruler.setAttribute('aria-valuenow', state.rotation.toFixed(1));
+    }
+
+    // Ruler drag
+    ruler.addEventListener('mousedown', startRulerDrag);
+    ruler.addEventListener('touchstart', startRulerDrag, { passive: true });
+
+    function startRulerDrag(e) {
+      state.rulerDragging = true;
+      state.rulerDragStartX = e.touches ? e.touches[0].clientX : e.clientX;
+      state.rulerDragStartAngle = state.rotation;
+      ruler.style.cursor = 'ew-resize';
+    }
+
+    document.addEventListener('mousemove', onRulerMove);
+    document.addEventListener('touchmove', onRulerMove, { passive: true });
+
+    function onRulerMove(e) {
+      if (!state.rulerDragging) return;
+      var x = e.touches ? e.touches[0].clientX : e.clientX;
+      var dx = x - state.rulerDragStartX;
+      // 6px = 1 degree
+      var newAngle = state.rulerDragStartAngle + (dx / 6);
+      newAngle = Math.max(-45, Math.min(45, newAngle));
+      state.rotation = parseFloat(newAngle.toFixed(1));
+      updateRulerPosition();
+      applyImageTransform();
+    }
+
+    document.addEventListener('mouseup', endRulerDrag);
+    document.addEventListener('touchend', endRulerDrag);
+
+    function endRulerDrag() {
+      state.rulerDragging = false;
+      ruler.style.cursor = '';
+    }
+
+    // Reset rotation
+    document.getElementById('ae-rotate-reset').addEventListener('click', function() {
+      state.rotation = 0;
+      updateRulerPosition();
+      applyImageTransform();
+    });
+
+    // ── Flip buttons ───────────────────────────────────────────────────────
+    function bindFlip(id, axis) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        if (axis === 'h') state.flipH = !state.flipH;
+        else state.flipV = !state.flipV;
+        applyImageTransform();
+      });
+    }
+
+    bindFlip('ae-flip-h', 'h');
+    bindFlip('ae-flip-v', 'v');
+    bindFlip('panel-flip-h', 'h');
+    bindFlip('panel-flip-v', 'v');
+
+    // 90° rotations from panel
+    document.getElementById('panel-rotate-cw').addEventListener('click', function() {
+      state.snapRotation = (state.snapRotation + 90) % 360;
+      applyImageTransform();
+    });
+    document.getElementById('panel-rotate-ccw').addEventListener('click', function() {
+      state.snapRotation = (state.snapRotation - 90 + 360) % 360;
+      applyImageTransform();
+    });
+
+    // Undo / Reset button — restore full initial snapshot
+    undoBtn.addEventListener('click', function() {
+      if (!state.initialSnapshot) return;
+      var s = state.initialSnapshot;
+      state.rotation = s.rotation;
+      state.snapRotation = s.snapRotation;
+      state.flipH = s.flipH;
+      state.flipV = s.flipV;
+      state.scale = s.scale;
+      state.imgOffset = { x: s.imgOffset.x, y: s.imgOffset.y };
+      state.cropbox = { x: s.cropbox.x, y: s.cropbox.y, w: s.cropbox.w, h: s.cropbox.h };
+      updateRulerPosition();
+      applyImageTransform();
+      applyCropbox();
+    });
+
+    // ── Zoom Slider (exponential) ──────────────────────────────────────────
+    zoomSlider.min = 0;
+    zoomSlider.max = 100;
+    zoomSlider.step = 1;
+    zoomSlider.addEventListener('input', function() {
+      state.scale = sliderToScale(parseInt(this.value));
+      applyImageTransform();
+    });
+
+    // Mouse wheel zoom
+    canvasArea.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      // Zoom in/out by ~8% per notch
+      var factor = e.deltaY > 0 ? 0.92 : 1.08;
+      state.scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, state.scale * factor));
+      applyImageTransform();
+    }, { passive: false });
+
+    // ── Cropbox drag ───────────────────────────────────────────────────────
+    // Cropbox is draggable independently from the image.
+    // Clicking on the cropbox body (not corners) drags the cropbox.
+    // Clicking outside the cropbox drags the image underneath.
+
+    // ── Cropbox resize (corner handles) ────────────────────────────────────
+    // Each corner handle fires mousedown; move/up handled in the shared listeners.
+
+    document.querySelectorAll('.ae-cropbox-corner').forEach(function(corner) {
+      corner.addEventListener('mousedown', onCornerMouseDown);
+      corner.addEventListener('touchstart', onCornerMouseDown, { passive: false });
+    });
+
+    function onCornerMouseDown(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      var corner = e.target.classList.contains('tl') ? 'tl'
+                 : e.target.classList.contains('tr') ? 'tr'
+                 : e.target.classList.contains('bl') ? 'bl' : 'br';
+      var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      var cb = state.cropbox;
+      state.isResizing = true;
+      state.resizeCorner = corner;
+      state.resizeDragStart = {
+        x: clientX, y: clientY,
+        cb: { x: cb.x, y: cb.y, w: cb.w, h: cb.h },
+        // Anchor = the OPPOSITE corner (stays fixed during resize)
+        ax: (corner === 'tl' || corner === 'bl') ? cb.x + cb.w : cb.x,
+        ay: (corner === 'tl' || corner === 'tr') ? cb.y + cb.h : cb.y,
+        aspect: cb.w / cb.h,
+      };
+      cropbox.style.cursor = 'nwse-resize';
+    }
+
+    function applyResizeMove(clientX, clientY) {
+      var ds = state.resizeDragStart;
+      var dx = clientX - ds.x;
+      var dy = clientY - ds.y;
+      var corner = state.resizeCorner;
+      var sw = state.stageSize.w;
+      var sh = state.stageSize.h;
+      var origCb = ds.cb;
+
+      // New position of the MOVING corner
+      var mx = (corner === 'tl' || corner === 'bl')
+               ? origCb.x + dx
+               : origCb.x + origCb.w + dx;
+      var my = (corner === 'tl' || corner === 'tr')
+               ? origCb.y + dy
+               : origCb.y + origCb.h + dy;
+
+      // Raw box from anchor to moving corner
+      var rawX = Math.min(mx, ds.ax);
+      var rawY = Math.min(my, ds.ay);
+      var rawW = Math.abs(mx - ds.ax);
+      var rawH = Math.abs(my - ds.ay);
+
+      // Enforce minimum size
+      rawW = Math.max(40, rawW);
+      rawH = Math.max(40, rawH);
+
+      // Enforce aspect ratio if not free mode
+      if (state.ratio !== 'free') {
+        var aspect = ds.aspect;
+        // Choose which dimension to follow (use whichever is larger relative to ratio)
+        if (rawW / rawH > aspect) {
+          rawH = rawW / aspect;
+        } else {
+          rawW = rawH * aspect;
+        }
+        // Recompute position so the anchor stays fixed
+        if (corner === 'tl') { rawX = ds.ax - rawW; rawY = ds.ay - rawH; }
+        else if (corner === 'tr') { rawX = ds.ax;        rawY = ds.ay - rawH; }
+        else if (corner === 'bl') { rawX = ds.ax - rawW; rawY = ds.ay; }
+        else                      { rawX = ds.ax;        rawY = ds.ay; }
+      }
+
+      // Clamp within stage
+      rawX = Math.max(0, rawX);
+      rawY = Math.max(0, rawY);
+      if (rawX + rawW > sw) { rawW = sw - rawX; }
+      if (rawY + rawH > sh) { rawH = sh - rawY; }
+
+      state.cropbox.x = Math.round(rawX);
+      state.cropbox.y = Math.round(rawY);
+      state.cropbox.w = Math.round(rawW);
+      state.cropbox.h = Math.round(rawH);
+      applyCropbox();
+    }
+
+    cropbox.style.cursor = 'move';
+
+    cropbox.addEventListener('mousedown', onCropboxDragStart);
+    cropbox.addEventListener('touchstart', onCropboxDragStart, { passive: true });
+
+    function onCropboxDragStart(e) {
+      // Corners are reserved for future resize
+      if (e.target.classList.contains('ae-cropbox-corner') ||
+          e.target.classList.contains('ae-cropbox-grid')) {
+        e.stopPropagation();
+        return;
+      }
+      e.stopPropagation();
+      state.isCropDragging = true;
+      var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      state.cropDragStart = {
+        x: clientX, y: clientY,
+        cx: state.cropbox.x, cy: state.cropbox.y,
+      };
+      cropbox.style.cursor = 'grabbing';
+    }
+
+    // ── Image drag ─────────────────────────────────────────────────────────
+    stage.addEventListener('mousedown', onStageDragStart);
+    stage.addEventListener('touchstart', onStageDragStart, { passive: true });
+
+    function onStageDragStart(e) {
+      if (e.target === cropbox ||
+          e.target.closest && e.target.closest('#ae-cropbox')) return;
+      state.isDragging = true;
+      state.dragStart = {
+        x: e.touches ? e.touches[0].clientX : e.clientX,
+        y: e.touches ? e.touches[0].clientY : e.clientY,
+        ox: state.imgOffset.x,
+        oy: state.imgOffset.y,
+      };
+      stage.classList.add('is-dragging');
+    }
+
+    document.addEventListener('mousemove', onStageDragMove);
+    document.addEventListener('touchmove', onStageDragMove, { passive: false });
+
+    function onStageDragMove(e) {
+      var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      var sw = state.stageSize.w;
+      var sh = state.stageSize.h;
+
+      if (state.isResizing) {
+        e.preventDefault && e.preventDefault();
+        applyResizeMove(clientX, clientY);
+        return;
+      }
+
+      if (state.isCropDragging) {
+        e.preventDefault && e.preventDefault();
+        var dx = clientX - state.cropDragStart.x;
+        var dy = clientY - state.cropDragStart.y;
+        var nx = state.cropDragStart.cx + dx;
+        var ny = state.cropDragStart.cy + dy;
+        // Clamp inside stage
+        nx = Math.max(0, Math.min(nx, sw - state.cropbox.w));
+        ny = Math.max(0, Math.min(ny, sh - state.cropbox.h));
+        state.cropbox.x = Math.round(nx);
+        state.cropbox.y = Math.round(ny);
+        applyCropbox();
+        return;
+      }
+
+      if (!state.isDragging) return;
+      state.imgOffset.x = state.dragStart.ox + (clientX - state.dragStart.x);
+      state.imgOffset.y = state.dragStart.oy + (clientY - state.dragStart.y);
+      applyImageTransform();
+    }
+
+    document.addEventListener('mouseup', function() {
+      state.isDragging = false;
+      state.isCropDragging = false;
+      state.isResizing = false;
+      state.resizeCorner = null;
+      stage.classList.remove('is-dragging');
+      cropbox.style.cursor = 'move';
+    });
+
+    document.addEventListener('touchend', function() {
+      state.isDragging = false;
+      state.isCropDragging = false;
+      state.isResizing = false;
+      state.resizeCorner = null;
+      stage.classList.remove('is-dragging');
+      cropbox.style.cursor = 'move';
+    });
+
+    // ── Tabs ───────────────────────────────────────────────────────────────
+    document.querySelectorAll('.ae-panel-tab').forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        var target = tab.dataset.tab;
+        document.querySelectorAll('.ae-panel-tab').forEach(function(t) {
+          t.classList.remove('is-active');
+          t.setAttribute('aria-selected', 'false');
+        });
+        tab.classList.add('is-active');
+        tab.setAttribute('aria-selected', 'true');
+
+        document.querySelectorAll('.ae-panel-section').forEach(function(s) {
+          s.classList.remove('is-active');
+        });
+        var section = document.getElementById('section-' + target);
+        if (section) section.classList.add('is-active');
+      });
+    });
+
+    // ── Close / Cancel ─────────────────────────────────────────────────────
+    closeBtn.addEventListener('click', function() {
+      sessionStorage.removeItem('ae_pending_image');
+      history.back();
+    });
+
+    // ── Confirm / Save ─────────────────────────────────────────────────────
+    confirmBtn.addEventListener('click', function() {
+      cropAndSubmit();
+    });
+
+    function getCsrfToken() {
+      var match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+
+    function cropAndSubmit() {
+      confirmBtn.classList.add('is-loading');
+      confirmBtn.innerHTML = '<i data-lucide="loader-2"></i>';
+      lucide.createIcons();
+
+      var cb = state.cropbox;
+      var sw = state.stageSize.w;
+      var sh = state.stageSize.h;
+
+      var canvas = document.createElement('canvas');
+      var outputSize = 512;
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      var ctx = canvas.getContext('2d');
+
+      var scaleX = outputSize / cb.w;
+      var scaleY = outputSize / cb.h;
+
+      ctx.save();
+
+      if (state.isCircle) {
+        ctx.beginPath();
+        ctx.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
+        ctx.clip();
+      }
+
+      var nat = state.naturalSize;
+      var displayW = nat.w * state.scale;
+      var displayH = nat.h * state.scale;
+      var imgLeft = (sw - displayW) / 2 + state.imgOffset.x;
+      var imgTop  = (sh - displayH) / 2 + state.imgOffset.y;
+
+      ctx.translate(-cb.x * scaleX, -cb.y * scaleY);
+
+      var imgCx = imgLeft + displayW / 2;
+      var imgCy = imgTop + displayH / 2;
+
+      ctx.translate(imgCx * scaleX, imgCy * scaleY);
+      var totalRot = (state.rotation + state.snapRotation) * Math.PI / 180;
+      ctx.rotate(totalRot);
+      ctx.scale(state.flipH ? -1 : 1, state.flipV ? -1 : 1);
+      ctx.translate(-imgCx * scaleX, -imgCy * scaleY);
+
+      ctx.drawImage(img, imgLeft * scaleX, imgTop * scaleY, displayW * scaleX, displayH * scaleY);
+      ctx.restore();
+
+      var dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+      var formData = new FormData();
+      formData.append('cropped_data', dataUrl);
+      formData.append('is_circle', state.isCircle ? '1' : '0');
+
+      fetch('/api/profile/avatar/crop/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+        body: formData,
+      })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.ok && data.avatar) {
+          sessionStorage.setItem('ae_updated_avatar', data.avatar);
+          sessionStorage.removeItem('ae_pending_image');
+        }
+        if (history.length > 1) {
+          history.back();
+        } else {
+          window.location.href = '/';
+        }
+      })
+      .catch(function() {
+        confirmBtn.classList.remove('is-loading');
+        confirmBtn.innerHTML = '<i data-lucide="check"></i>';
+        lucide.createIcons();
+        alert('头像保存失败，请重试。');
+      });
+    }
+
+    // ── Keyboard ───────────────────────────────────────────────────────────
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { closeBtn.click(); }
+      if (e.key === 'Enter') { confirmBtn.click(); }
+    });
+
+    // ── Window resize ──────────────────────────────────────────────────────
+    var resizeTimer;
+    window.addEventListener('resize', function() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(initLayout, 120);
+    });
+
+    // ── Init ───────────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function() {
+      // Apply saved theme
+      var savedTheme = localStorage.getItem('ichat-theme') || 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+
+      lucide.createIcons();
+      loadImage();
+    });
+
+  })();
+  </script>
+
+</body>
+</html>

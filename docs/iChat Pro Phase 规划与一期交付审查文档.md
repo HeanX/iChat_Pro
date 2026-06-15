@@ -9,14 +9,16 @@
 
 本文档用于明确 iChat Pro 的阶段边界，并审查 Phase 1 是否覆盖基础即时通讯软件的完整交付范围。
 
-项目采用两阶段路线：
+项目当前采用四阶段路线：
 
 | 阶段 | 定位 | 核心目标 |
 | --- | --- | --- |
 | Phase 1 | 基础软件功能 | 完成可运行、可演示、可验证的 E2EE 轻量即时通讯桌面软件 |
-| Phase 2 | 扩展生态 | 增加 Channel、Bot、LLM Bot、Agent 和 OpenClaw Adapter |
+| Phase 2 | 基础通信产品可用性补全 | 补齐设置、会话管理、消息操作、搜索、群聊管理、安全指纹和资料入口 |
+| Phase 3 | 产品化收口与最小 LLM 展示 | 完成联调、测试、验收、文档和演示收口，并接入低风险 AI Assistant |
+| Phase 4 | 扩展生态 | 增加 Channel、完整 Bot、LLM Bot、Agent 和 OpenClaw Adapter |
 
-Phase 2 不应阻塞 Phase 1，也不应在 Phase 1 尚未形成真实聊天闭环时提前进入实现。
+Phase 2 不应阻塞 Phase 1；Phase 3 的 LLM 接入只做展示级 AI Assistant；Phase 4 不应在 Phase 2/Phase 3 尚未形成稳定通信产品闭环时提前进入实现。
 
 ------
 

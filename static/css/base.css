@@ -164,6 +164,13 @@ a:hover {
 /* ==========================================================================
    Transitions and Animations Helper Classes
    ========================================================================== */
+/* Prevent transition flash on page load */
+.preload,
+.preload * {
+  transition: none !important;
+  animation: none !important;
+}
+
 .transition-all {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }

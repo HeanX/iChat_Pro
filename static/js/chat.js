@@ -1941,58 +1941,276 @@ async function handleAddContact(username) {
 }
 
 // ============================================================================
-// Create group
+// Create group (Sidebar Redesign)
 // ============================================================================
 
-async function handleCreateGroup(groupName) {
-  try {
-    const checkedBoxes = document.querySelectorAll(".group-member-checkbox:checked");
-    const memberIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
-    const data = await apiFetch("/api/groups/", {
-      method: "POST",
-      body: JSON.stringify({ name: groupName })
-    });
-    logToCryptoConsole("[Group] Created: " + data.id);
-    for (const uid of memberIds) {
-      try {
-        await apiFetch("/api/groups/" + data.id + "/invite/", {
-          method: "POST",
-          body: JSON.stringify({ user_id: uid })
-        });
-      } catch (e) { console.warn("Failed to invite", uid, e); }
+let selectedGroupAvatarBase64 = "";
+let selectedMemberIds = new Set();
+
+function resetGroupCreationFlow() {
+  selectedGroupAvatarBase64 = "";
+  selectedMemberIds.clear();
+  
+  const searchInput = document.getElementById("group-add-search-input");
+  if (searchInput) searchInput.value = "";
+  
+  const checkboxes = document.querySelectorAll(".group-member-checkbox-custom");
+  checkboxes.forEach(cb => {
+    cb.checked = false;
+    const row = cb.closest(".group-add-member-item");
+    if (row) row.classList.remove("bg-bgSearch/40");
+  });
+  
+  const listCard = document.getElementById("group-add-members-list-card");
+  if (listCard) listCard.classList.remove("hidden");
+  const emptyState = document.getElementById("group-add-empty-state");
+  if (emptyState) emptyState.classList.add("hidden");
+  
+  const nameInput = document.getElementById("group-create-name-input");
+  if (nameInput) nameInput.value = "";
+  
+  const avatarPreview = document.getElementById("group-avatar-preview");
+  if (avatarPreview) {
+    avatarPreview.src = "";
+    avatarPreview.classList.add("hidden");
+  }
+  
+  const avatarPlaceholder = document.getElementById("group-avatar-placeholder");
+  if (avatarPlaceholder) avatarPlaceholder.classList.remove("hidden");
+  
+  const fileInput = document.getElementById("group-avatar-file-input");
+  if (fileInput) fileInput.value = "";
+  
+  filterGroupAddMembers("");
+  updateGroupMemberCount();
+}
+
+function filterGroupAddMembers(query) {
+  const trimmed = (query || "").toLowerCase().trim();
+  const items = document.querySelectorAll(".group-add-member-item");
+  let visibleCount = 0;
+  
+  items.forEach(item => {
+    const username = (item.getAttribute("data-username") || "").toLowerCase();
+    const nickname = (item.getAttribute("data-nickname") || "").toLowerCase();
+    if (!trimmed || username.includes(trimmed) || nickname.includes(trimmed)) {
+      item.classList.remove("hidden");
+      visibleCount++;
+    } else {
+      item.classList.add("hidden");
     }
-    await fetchConversations();
-    if (data.id) selectChat(data.id.toString());
-    window.showToast(currentLanguage === "zh" ? "群组已创建" : "Group created");
-  } catch (err) {
-    console.error("Create group failed:", err);
-    logToCryptoConsole("[Group Error] " + err.message);
+  });
+  
+  const listCard = document.getElementById("group-add-members-list-card");
+  const emptyState = document.getElementById("group-add-empty-state");
+  
+  if (visibleCount === 0 && trimmed.length >= 2) {
+    fetch('/contacts/search/?q=' + encodeURIComponent(trimmed))
+      .then(r => r.json())
+      .then(data => {
+        if (data.results && data.results.length > 0) {
+          if (emptyState) emptyState.classList.add("hidden");
+          if (listCard) listCard.classList.remove("hidden");
+          
+          data.results.forEach(user => {
+            let existing = document.querySelector(`.group-add-member-item[data-user-id="${user.id}"]`);
+            if (!existing) {
+              const row = document.createElement("div");
+              row.className = "settings-template-row group-add-member-item cursor-pointer";
+              row.setAttribute("data-user-id", user.id);
+              row.setAttribute("data-username", user.username);
+              row.setAttribute("data-nickname", user.nickname || "");
+              
+              const isChecked = selectedMemberIds.has(String(user.id)) ? "checked" : "";
+              const initials = user.username.slice(0, 1).toUpperCase();
+              
+              row.innerHTML = `
+                <div class="flex items-center justify-center" onclick="event.stopPropagation();">
+                  <input type="checkbox" class="group-member-checkbox-custom w-5 h-5 rounded border-borderColor text-brand-light focus:ring-brand-light bg-transparent" value="${user.id}" ${isChecked} onclick="updateGroupMemberCount()">
+                </div>
+                <div class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm bg-brand-light flex-shrink-0 overflow-hidden">
+                  <span>${initials}</span>
+                </div>
+                <div class="settings-template-row-main">
+                  <span class="settings-template-row-title">${user.nickname || user.username}</span>
+                  <span class="settings-template-row-subtitle">${user.username.toLowerCase().endsWith('bot') ? '机器人' : '未添加联系人'}</span>
+                </div>
+              `;
+              row.onclick = () => toggleGroupMemberSelection(row, user.id);
+              if (listCard) listCard.appendChild(row);
+            }
+          });
+        } else {
+          if (listCard && listCard.children.length === 0) listCard.classList.add("hidden");
+          if (emptyState) emptyState.classList.remove("hidden");
+        }
+      });
+  } else {
+    if (visibleCount === 0) {
+      if (listCard) listCard.classList.add("hidden");
+      if (emptyState) emptyState.classList.remove("hidden");
+    } else {
+      if (listCard) listCard.classList.remove("hidden");
+      if (emptyState) emptyState.classList.add("hidden");
+    }
   }
 }
 
-// ============================================================================
-// Populate group member selection list
-// ============================================================================
+function toggleGroupMemberSelection(rowEl, userId) {
+  const cb = rowEl.querySelector(".group-member-checkbox-custom");
+  if (cb) {
+    cb.checked = !cb.checked;
+    if (cb.checked) {
+      rowEl.classList.add("bg-bgSearch/40");
+      selectedMemberIds.add(String(userId));
+    } else {
+      rowEl.classList.remove("bg-bgSearch/40");
+      selectedMemberIds.delete(String(userId));
+    }
+    updateGroupMemberCount();
+  }
+}
 
-function populateGroupMembersList() {
-  const listEl = document.getElementById("group-members-list");
-  if (!listEl) return;
-  listEl.innerHTML = "";
-  conversations.forEach(conv => {
-    if (conv.type === "single" && conv.peer_id) {
-      const item = document.createElement("div");
-      const peerId = Number(conv.peer_id);
-      const safePeerId = Number.isFinite(peerId) ? String(peerId) : "";
-      const safeAvatarColor = /^#[0-9a-fA-F]{6}$/.test(conv.avatar_color || '') ? conv.avatar_color : '#5c6bc0';
-      item.className = "flex items-center space-x-3 py-1.5 px-2 hover:bg-bgSearch/40 rounded cursor-pointer";
-      item.innerHTML = '<input type="checkbox" class="group-member-checkbox rounded border-borderColor text-brand-light focus:ring-brand-light w-4 h-4" value="' + safePeerId + '" id="member-chk-' + safePeerId + '">'
-        + '<div class="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs" style="background-color: ' + safeAvatarColor + '">'
-        + escapeHtml(conv.initials || "??") + '</div>'
-        + '<label class="text-sm font-medium text-textMain cursor-pointer flex-1" for="member-chk-' + safePeerId + '">'
-        + escapeHtml(conv.name || conv.peer_username || "Unknown") + '</label>';
-      listEl.appendChild(item);
+function updateGroupMemberCount() {
+  const checkboxes = document.querySelectorAll(".group-member-checkbox-custom");
+  checkboxes.forEach(cb => {
+    const row = cb.closest(".group-add-member-item");
+    if (cb.checked) {
+      selectedMemberIds.add(String(cb.value));
+      if (row) row.classList.add("bg-bgSearch/40");
+    } else {
+      selectedMemberIds.delete(String(cb.value));
+      if (row) row.classList.remove("bg-bgSearch/40");
     }
   });
+
+  const nextBtn = document.getElementById("group-add-next-btn");
+  if (nextBtn) {
+    if (selectedMemberIds.size > 0) {
+      nextBtn.classList.remove("opacity-50", "pointer-events-none");
+    } else {
+      nextBtn.classList.add("opacity-50", "pointer-events-none");
+    }
+  }
+}
+
+function goToGroupCreateFinalStep() {
+  if (selectedMemberIds.size === 0) {
+    window.showToast("请选择至少一位成员");
+    return;
+  }
+  
+  navigateSidebar('group-create-final');
+  
+  const countEl = document.getElementById("group-create-members-count");
+  if (countEl) countEl.textContent = `${selectedMemberIds.size} 人`;
+  
+  const listEl = document.getElementById("group-create-selected-list");
+  if (listEl) {
+    listEl.innerHTML = "";
+    selectedMemberIds.forEach(uid => {
+      const row = document.querySelector(`.group-add-member-item[data-user-id="${uid}"]`);
+      if (row) {
+        const title = row.querySelector(".settings-template-row-title").textContent.trim();
+        const avatarHtml = row.querySelector(".w-10").innerHTML;
+        
+        const item = document.createElement("div");
+        item.className = "settings-template-row py-2";
+        item.innerHTML = `
+          <div class="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs flex-shrink-0 overflow-hidden bg-brand-light">
+            ${avatarHtml}
+          </div>
+          <div class="settings-template-row-main">
+            <span class="settings-template-row-title text-sm">${title}</span>
+          </div>
+          <button class="p-1 rounded-full text-textSecondary hover:text-red-500 transition-colors" onclick="removeSelectedMemberStep2('${uid}')">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        `;
+        listEl.appendChild(item);
+      }
+    });
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      window.lucide.createIcons();
+    }
+  }
+}
+
+function removeSelectedMemberStep2(uid) {
+  selectedMemberIds.delete(String(uid));
+  
+  const cb = document.querySelector(`.group-member-checkbox-custom[value="${uid}"]`);
+  if (cb) cb.checked = false;
+  
+  const row = document.querySelector(`.group-add-member-item[data-user-id="${uid}"]`);
+  if (row) row.classList.remove("bg-bgSearch/40");
+  
+  goToGroupCreateFinalStep();
+  if (selectedMemberIds.size === 0) {
+    navigateSidebar('group-add-members');
+  }
+}
+
+function previewGroupAvatar(input) {
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      selectedGroupAvatarBase64 = e.target.result;
+      const preview = document.getElementById("group-avatar-preview");
+      if (preview) {
+        preview.src = e.target.result;
+        preview.classList.remove("hidden");
+      }
+      const placeholder = document.getElementById("group-avatar-placeholder");
+      if (placeholder) placeholder.classList.add("hidden");
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+async function submitCreateGroupForm() {
+  const nameInput = document.getElementById("group-create-name-input");
+  const name = nameInput ? nameInput.value.trim() : "";
+  if (!name) {
+    window.showToast("请输入群聊名称");
+    return;
+  }
+  
+  const submitBtn = document.getElementById("group-create-submit-btn");
+  if (submitBtn) submitBtn.disabled = true;
+  
+  try {
+    const data = await apiFetch("/api/groups/", {
+      method: "POST",
+      body: JSON.stringify({
+        name: name,
+        avatar: selectedGroupAvatarBase64 || ""
+      })
+    });
+    
+    for (const uid of selectedMemberIds) {
+      try {
+        await apiFetch("/api/groups/" + data.id + "/invite/", {
+          method: "POST",
+          body: JSON.stringify({ user_id: parseInt(uid) })
+        });
+      } catch (e) {
+        console.warn("Failed to invite", uid, e);
+      }
+    }
+    
+    await fetchConversations();
+    if (data.id) selectChat(data.id.toString());
+    
+    navigateSidebar('chat');
+    window.showToast("群组已创建");
+    resetGroupCreationFlow();
+  } catch (err) {
+    console.error("Create group failed:", err);
+    window.showToast("创建群组失败，请重试");
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
 // ============================================================================
@@ -2550,43 +2768,26 @@ function setupEventListeners() {
     });
   }
 
-  // Group Modal Listeners
-  const groupModal = document.getElementById("group-modal");
-  const menuNewGroupBtn = document.getElementById("menu-new-group-btn");
-  const closeGroupModalBtn = document.getElementById("close-group-modal-btn");
-  const submitGroupModalBtn = document.getElementById("submit-group-modal-btn");
-  const groupNameInput = document.getElementById("group-name");
-
-  if (menuNewGroupBtn) {
-    menuNewGroupBtn.addEventListener("click", () => {
-      toggleDrawer();
-      populateGroupMembersList();
-      if (groupModal) {
-        groupModal.classList.remove("hidden");
-        groupModal.classList.add("flex");
+  // Group Modal / Sidebar Listeners
+  const newGroupButtons = document.querySelectorAll("#menu-new-group-btn, [data-action='new-group']");
+  newGroupButtons.forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Close drawer if open
+      const overlay = document.getElementById("drawer-menu-overlay");
+      const content = document.getElementById("drawer-menu-content");
+      if (overlay && content) {
+        overlay.classList.add("hidden");
+        content.classList.add("-translate-x-full");
       }
+      // Close hamburger menu dropdown if open
+      const dropdown = document.getElementById("main-menu-dropdown");
+      if (dropdown) dropdown.classList.add("hidden");
+      
+      resetGroupCreationFlow();
+      navigateSidebar('group-add-members');
     });
-  }
-  if (closeGroupModalBtn) {
-    closeGroupModalBtn.addEventListener("click", () => {
-      if (groupModal) {
-        groupModal.classList.add("hidden");
-        groupModal.classList.remove("flex");
-      }
-    });
-  }
-  if (submitGroupModalBtn) {
-    submitGroupModalBtn.addEventListener("click", () => {
-      const groupName = groupNameInput.value.trim();
-      if (!groupName) return alert("Please enter group name.");
-      handleCreateGroup(groupName);
-      groupNameInput.value = "";
-      if (groupModal) {
-        groupModal.classList.add("hidden");
-        groupModal.classList.remove("flex");
-      }
-    });
-  }
+  });
 
   // Contacts Modal Listeners
   const contactsModal = document.getElementById("contacts-modal");
@@ -2719,7 +2920,9 @@ function navigateSidebar(viewName) {
     'language',
     'sessions-shortcuts',
     'accounts-switcher',
-    'settings-birthday'
+    'settings-birthday',
+    'group-add-members',
+    'group-create-final'
   ];
   views.forEach(function(name) {
     var el = name === 'chat'
@@ -2934,13 +3137,8 @@ function fabNewPrivateChat(event) {
 function fabNewGroup(event) {
   event.stopPropagation();
   closeContactsFab();
-  // Open the existing group creation modal
-  const groupModal = document.getElementById('group-modal');
-  if (groupModal) {
-    populateGroupMembersList();
-    groupModal.classList.remove('hidden');
-    groupModal.classList.add('flex');
-  }
+  resetGroupCreationFlow();
+  navigateSidebar('group-add-members');
 }
 
 function fabNewChannel(event) {

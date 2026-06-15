@@ -4,11 +4,11 @@
 
 <!-- User Profile Hero -->
 <div class="flex flex-col items-center py-6 px-4 text-center bg-search-op-10">
-  <div class="relative group cursor-pointer">
+  <div class="settings-panel-avatar-wrap relative group cursor-pointer">
     {% if settings_avatar_url %}
     <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="w-20 h-20 rounded-full object-cover shadow-md transition-all group-hover:opacity-90">
     {% else %}
-    <div class="w-20 h-20 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90">
+    <div class="settings-template-avatar-fallback w-20 h-20 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90">
       {{ settings_initials }}
     </div>
     {% endif %}

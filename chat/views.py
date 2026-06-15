@@ -62,6 +62,16 @@ def _display_name(user):
     return nickname or user.get_full_name() or user.username
 
 
+def _avatar_url(request, user):
+    """Return absolute avatar image URL for a user, or empty string if none set."""
+    try:
+        if user.profile and user.profile.avatar:
+            return request.build_absolute_uri(user.profile.avatar.url)
+    except Exception:
+        pass
+    return ''
+
+
 def _are_contacts(user, peer):
     return Contact.objects.filter(
         (Q(user=user) & Q(contact=peer))
@@ -161,7 +171,7 @@ def _sidebar_contacts_context(user):
     return {
         'contacts': Contact.objects.filter(
             Q(user=user) | Q(contact=user),
-        ).select_related('user', 'contact'),
+        ).select_related('user__profile', 'contact__profile'),
         'incoming_requests': FriendRequest.objects.filter(
             receiver=user,
             status=FriendRequest.Status.PENDING,
@@ -309,6 +319,7 @@ def conversations_list_view(request):
                     'name': name,
                     'initials': _initials(name),
                     'avatar_color': _avatar_color(name),
+                    'avatar_url': _avatar_url(request, peer),
                     'is_secure': peer.public_keys.filter(is_active=True).exists(),
                 })
         else:
@@ -948,11 +959,34 @@ def create_group_view(request):
     if not name:
         return JsonResponse({"error": "Group name is required."}, status=400)
 
+    import re
+    import base64
+    import uuid
+    from django.core.files.base import ContentFile
+    from django.core.files.storage import default_storage
+
+    avatar_data = data.get("avatar", "").strip()
+    avatar_url = ""
+    if avatar_data.startswith("data:image/"):
+        match = re.match(r'^data:image/(?P<fmt>\w+);base64,(?P<data>.+)$', avatar_data)
+        if match:
+            fmt = match.group('fmt').lower()
+            ext = 'jpg' if fmt in ('jpeg', 'jpg') else fmt
+            try:
+                raw = base64.b64decode(match.group('data'))
+                filename = f'group_avatars/group_{uuid.uuid4().hex}.{ext}'
+                saved_path = default_storage.save(filename, ContentFile(raw))
+                avatar_url = default_storage.url(saved_path)
+            except Exception:
+                pass
+    else:
+        avatar_url = avatar_data
+
     with transaction.atomic():
         conversation = Conversation.objects.create(
             type=Conversation.Type.GROUP,
             name=name,
-            avatar=data.get("avatar", "").strip(),
+            avatar=avatar_url,
             created_by=request.user,
         )
         ConversationMember.objects.create(
@@ -1273,6 +1307,7 @@ def group_members_view(request, conversation_id):
                 "display_name": _display_name(m.user),
                 "initials": _initials(_display_name(m.user)),
                 "avatar_color": _avatar_color(_display_name(m.user)),
+                "avatar_url": _avatar_url(request, m.user),
                 "role": m.role,
                 "is_secure": m.user.public_keys.filter(is_active=True).exists(),
             }
@@ -1346,6 +1381,7 @@ def group_messages_view(request, conversation_id):
             "sender_name": _display_name(r.group_message.sender),
             "sender_initials": _initials(_display_name(r.group_message.sender)),
             "sender_avatar_color": _avatar_color(_display_name(r.group_message.sender)),
+            "sender_avatar_url": _avatar_url(request, r.group_message.sender),
             "message_type": r.group_message.message_type,
             "ciphertext": r.ciphertext,
             "nonce": r.nonce,
@@ -1427,6 +1463,7 @@ def conversation_messages_view(request, conversation_id):
     queryset = (
         EncryptedMessage.objects
         .filter(conversation_id=conversation_id)
+        .select_related('sender', 'sender__profile')
         .order_by("-created_at")
     )
 
@@ -1445,6 +1482,9 @@ def conversation_messages_view(request, conversation_id):
         {
             "id": msg.id,
             "sender_id": msg.sender_id,
+            "sender_initials": _initials(_display_name(msg.sender)),
+            "sender_avatar_color": _avatar_color(_display_name(msg.sender)),
+            "sender_avatar_url": _avatar_url(request, msg.sender),
             "receiver_id": msg.receiver_id,
             "message_type": msg.message_type,
             "ciphertext": msg.ciphertext,
@@ -2636,6 +2676,7 @@ def group_members_advanced_view(request, conversation_id):
                 'joined_at': m.joined_at.isoformat(),
                 'initials': _initials(_display_name(m.user)),
                 'avatar_color': _avatar_color(_display_name(m.user)),
+                'avatar_url': _avatar_url(request, m.user),
             }
             for m in members
         ],

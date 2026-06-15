@@ -1,7 +1,9 @@
 import base64
 import binascii
 import hashlib
+import io
 import json
+import re
 
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
@@ -9,6 +11,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import User
 from django.db import models, transaction
+from django.core.files.base import ContentFile
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -504,6 +507,53 @@ def contact_chat_view(request, contact_id):
 
 
 # ── Profile views ──────────────────────────────────────────────────
+
+
+@login_required(login_url='login')
+def avatar_editor_view(request):
+    """Render the avatar crop/edit page."""
+    return render(request, 'pages/avatar_editor.html')
+
+
+@login_required(login_url='login')
+@require_POST
+def avatar_crop_save_view(request):
+    """Accept a base64 cropped image, save it to the user's profile."""
+    cropped_data = request.POST.get('cropped_data', '').strip()
+    if not cropped_data:
+        return JsonResponse({'error': 'no_data'}, status=400)
+
+    # Strip the data URL prefix (data:image/jpeg;base64,...)
+    match = re.match(r'^data:image/(?P<fmt>\w+);base64,(?P<data>.+)$', cropped_data)
+    if not match:
+        return JsonResponse({'error': 'invalid_data'}, status=400)
+
+    fmt = match.group('fmt').lower()
+    if fmt not in ('jpeg', 'jpg', 'png', 'webp'):
+        fmt = 'jpeg'
+    ext = 'jpg' if fmt in ('jpeg', 'jpg') else fmt
+
+    try:
+        raw = base64.b64decode(match.group('data'))
+    except Exception:
+        return JsonResponse({'error': 'decode_error'}, status=400)
+
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    filename = f'avatar_{request.user.id}.{ext}'
+    profile.avatar.save(filename, ContentFile(raw), save=True)
+
+    avatar_url = ''
+    try:
+        avatar_url = request.build_absolute_uri(profile.avatar.url)
+    except Exception:
+        pass
+
+    return JsonResponse({
+        'ok': True,
+        'avatar': avatar_url,
+        'profile': _profile_payload(request, profile),
+    })
 
 
 @login_required(login_url='login')

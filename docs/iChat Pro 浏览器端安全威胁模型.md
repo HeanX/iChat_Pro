@@ -147,7 +147,7 @@
    - 探索 `Web Crypto` 不可提取密钥（`extractable: false`）用于私钥（需重新设计密钥备份流程）
    - 添加 Trusted Types 支持
 
-3. **长期（Phase 3+）：**
+3. **长期（Phase 4+）：**
    - 集成 WebAuthn 用于密钥访问授权
    - 支持硬件安全模块（HSM）或 secure enclave
    - 实现双棘轮（Double Ratchet）协议以支持前向安全性

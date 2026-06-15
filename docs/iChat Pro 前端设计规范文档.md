@@ -1,7 +1,7 @@
 # iChat Pro 前端 GUI 设计规范
 
 > 更新日期：2026-06-08  
-> Phase 说明：Phase 1 已完成基础账号、联系人、文本私聊、文本群聊、端到端加密通信、安全提示和 Electron 基础外壳。Phase 2 当前优先补齐通信软件可用性，Bot、LLM Agent、Channel 正式能力顺延至 Phase 3。  
+> Phase 说明：Phase 1 已完成基础账号、联系人、文本私聊、文本群聊、端到端加密通信、安全提示和 Electron 基础外壳。Phase 2 已完成基础通信产品可用性补全。Phase 3 用于产品化收口、展示稳定化和最小 LLM Assistant 接入；完整 Bot、Agent、Channel 生态顺延至 Phase 4。  
 > 当前实现状态：`main` 已合并 P2 T01-T04，包括左侧栏子视图布局、设置首页、编辑资料/二维码弹层、通知设置页前端版本。后续设计规范仍覆盖 P2 T05-T18 的待实现页面和交互。
 
 ### 1. 设计目标

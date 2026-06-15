@@ -1,6 +1,6 @@
 # iChat Pro 端到端加密通信设计文档
 
-> Phase 说明：Phase 1 必须完成文本私聊和文本群聊的基础 E2EE。本文档中的多媒体、文件分块、Sender Key、Double Ratchet 和多设备能力属于 Phase 2 扩展设计，不作为 Phase 1 验收要求。
+> Phase 说明：Phase 1 必须完成文本私聊和文本群聊的基础 E2EE。Phase 2 补齐基础通信产品可用性，Phase 3 用于产品化收口与稳定化。本文档中的 Sender Key、Double Ratchet、正式多设备同步和高级加密能力统一顺延至 Phase 4；多媒体和文件分块仅保留为后续扩展设计，不作为 Phase 1 验收要求。
 
 ## 1. 设计目标
 

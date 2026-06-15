@@ -98,16 +98,16 @@ class ProfileForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
     def clean_username(self):
-        username = self.cleaned_data.get('username', '').strip().lower()
+        username = self.cleaned_data.get('username', '').strip()
 
         if len(username) < 5:
             raise forms.ValidationError(
                 'Username must be at least 5 characters long.',
             )
 
-        if not re.match(r'^[a-z0-9_]+$', username):
+        if not re.match(r'^[a-zA-Z0-9_]+$', username):
             raise forms.ValidationError(
-                'Username may only contain lowercase letters, digits, and underscores.',
+                'Username may only contain letters, digits, and underscores.',
             )
 
         # Check uniqueness excluding the current user

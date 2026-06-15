@@ -32,7 +32,7 @@
           <i data-lucide="plus" aria-hidden="true"></i>
         </span>
       </button>
-      <input type="file" id="profile-avatar-input" name="avatar" accept="image/*" class="hidden" onchange="submitProfileAvatar(this.form)">
+      <input type="file" id="profile-avatar-input" name="avatar" accept="image/*" class="hidden" onchange="openAvatarEditor(this)">
     </section>
 
     <section class="profile-edit-card">
@@ -73,7 +73,7 @@
         <input type="text" name="username" id="profile-username-input"
           value="{{ form.username.value|default:request.user.username }}"
           placeholder="用户名（可选）"
-          pattern="^[a-z0-9_]{5,}$"
+          pattern="^[a-zA-Z0-9_]{5,}$"
           oninput="validateUsername()">
       </label>
       <p id="username-error" class="profile-edit-error hidden"></p>
@@ -84,21 +84,9 @@
       您可以在 Telegram 上设置一个用户名。设置后，别人可以通过此用户名找到您并与您联系，而不需要您的手机号。
     </p>
     <p class="profile-edit-help">
-      您可以使用 a-z、0-9 和下划线。最小长度为 5 个字符。
+      您可以使用 a-z、A-Z、0-9 和下划线。最小长度为 5 个字符。
     </p>
 
-    <section class="profile-edit-card">
-      <button type="button" class="profile-edit-row has-chevron" onclick="showToast('Personal Channel coming in Phase 3')">
-        <i data-lucide="radio" aria-hidden="true"></i>
-        <span>Personal Channel</span>
-        <i data-lucide="chevron-right" aria-hidden="true"></i>
-      </button>
-      <button type="button" class="profile-edit-row has-chevron" onclick="showQRCodeModal()">
-        <i data-lucide="qr-code" aria-hidden="true"></i>
-        <span>QR Code</span>
-        <i data-lucide="chevron-right" aria-hidden="true"></i>
-      </button>
-    </section>
 
     <div class="profile-edit-save-wrap">
       <button type="submit" class="profile-edit-save">
@@ -110,12 +98,53 @@
 </div>
 
 <script>
+  // ── Avatar Editor Integration ──────────────────────────────────────────
+  function openAvatarEditor(input) {
+    if (!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      sessionStorage.setItem('ae_pending_image', e.target.result);
+      window.location.href = '/profile/avatar/edit/';
+    };
+    reader.readAsDataURL(file);
+    // Reset input so same file can be re-selected
+    input.value = '';
+  }
+
+  // After editor redirects back, check for updated avatar
+  window.addEventListener('pageshow', function checkAvatarEditorReturn() {
+    var updatedAvatar = sessionStorage.getItem('ae_updated_avatar');
+    if (!updatedAvatar) return;
+    sessionStorage.removeItem('ae_updated_avatar');
+    
+    // Add cache buster to the image URL to prevent browser caching of the avatar
+    var cleanUrl = updatedAvatar.split('?')[0];
+    var cacheBustUrl = cleanUrl + '?t=' + Date.now();
+    var fakeProfile = { avatar: cacheBustUrl };
+    
+    // Switch sidebar to settings-profile view
+    if (typeof navigateSidebar === 'function') {
+      navigateSidebar('settings-profile');
+    }
+    
+    // Sync UI with the new avatar
+    if (typeof syncProfileUi === 'function') {
+      syncProfileUi(fakeProfile);
+    }
+    
+    // Show toast message
+    if (typeof profileToast === 'function') {
+      profileToast('头像已更新');
+    }
+  });
+
   function validateUsername() {
     var input = document.getElementById('profile-username-input');
     var error = document.getElementById('username-error');
     var val = input.value;
-    if (val.length > 0 && (val.length < 5 || !/^[a-z0-9_]+$/.test(val))) {
-      error.textContent = 'Username must be at least 5 characters using only a-z, 0-9 and underscores.';
+    if (val.length > 0 && (val.length < 5 || !/^[a-zA-Z0-9_]+$/.test(val))) {
+      error.textContent = 'Username must be at least 5 characters using only letters, digits and underscores.';
       error.classList.remove('hidden');
     } else {
       error.classList.add('hidden');
@@ -239,9 +268,9 @@
     var usernameInput = document.getElementById('profile-username-input');
     if (usernameInput) usernameInput.value = profile.username || '';
 
-    var avatarButtons = document.querySelectorAll('.settings-template-avatar-wrap, .profile-edit-avatar');
+    var avatarButtons = document.querySelectorAll('.settings-template-avatar-wrap, .profile-edit-avatar, .settings-panel-avatar-wrap');
     avatarButtons.forEach(function(el) {
-      var overlay = el.querySelector('.settings-template-avatar-overlay, .profile-edit-avatar-icon');
+      var overlay = el.querySelector('.settings-template-avatar-overlay, .profile-edit-avatar-icon, .absolute.inset-0');
       if (profile.avatar) {
         el.querySelectorAll('img, .settings-template-avatar-fallback, .profile-edit-avatar > span:first-child').forEach(function(child) {
           child.remove();
@@ -251,11 +280,25 @@
         img.alt = displayName;
         if (el.classList.contains('settings-template-avatar-wrap')) {
           img.className = 'settings-template-avatar-image';
+        } else if (el.classList.contains('settings-panel-avatar-wrap')) {
+          img.className = 'w-20 h-20 rounded-full object-cover shadow-md transition-all group-hover:opacity-90';
         }
         el.insertBefore(img, overlay || null);
       } else {
-        var fallback = el.querySelector('.settings-template-avatar-fallback') || el.querySelector('.profile-edit-avatar > span:first-child');
-        if (fallback) fallback.textContent = initials;
+        if (el.classList.contains('settings-panel-avatar-wrap')) {
+          var fallback = el.querySelector('.settings-template-avatar-fallback');
+          if (fallback) {
+            fallback.textContent = initials;
+          } else {
+            fallback = document.createElement('div');
+            fallback.className = 'settings-template-avatar-fallback w-20 h-20 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90';
+            fallback.textContent = initials;
+            el.insertBefore(fallback, overlay || null);
+          }
+        } else {
+          var fallback = el.querySelector('.settings-template-avatar-fallback') || el.querySelector('.profile-edit-avatar > span:first-child');
+          if (fallback) fallback.textContent = initials;
+        }
       }
     });
   }

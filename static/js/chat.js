@@ -6,13 +6,18 @@
 let conversations = [];          // Array of conversation objects from GET /api/conversations/
 let conversationsById = {};      // ID → conversation lookup map
 let activeChatId = null;
-let currentLanguage = localStorage.getItem('ichat_lang') || 'en';
+let currentLanguage = localStorage.getItem('ichat_lang') || (function() {
+  try { return JSON.parse(localStorage.getItem('ichat_sessions') || '{}').uiLang; } catch(e) { return null; }
+})() || 'en';
+// 4-language inline helper: _t4(en, zh, zhTW, ja)
+function _t4(en, zh, zhTW, ja) { return {en, zh, 'zh-TW': zhTW, ja}[currentLanguage] || en; }
 let isSelectingMessages = false;
 let selectedMessageIds = [];
 let messages = [];               // Decrypted messages for the currently active conversation
 let messagePage = 1;
 let hasMoreMessages = false;
 let isLoadingMessages = false;
+let currentUserProfile = { username: "", initials: "", avatarUrl: "", avatarColor: "" };
 let sessionKeys = {};            // Cache: conversationId → derived CryptoKey
 let myUserId = null;             // Current authenticated user PK
 let wsClient = null;             // v1 /ws/chat/ client
@@ -25,9 +30,14 @@ let keyTrustListCache = null;
 let detailsPanelRequestId = 0;
 let currentSearchTab = 'chats';     // Active search type tab
 let searchDebounceTimer = null;    // Debounce timer for search input
+let chatSearchResults = [];
+let chatSearchIndex = -1;
 let replyToMessage = null;          // { id, sender_name, text_preview } for reply quoting
 let typingUsers = {};              // Map: conversationId → { userId, timeoutId }
 let connectionStatus = 'connecting'; // 'connected' | 'connecting' | 'disconnected'
+const AUTO_IMAGE_PREVIEW_LIMIT_BYTES = 10 * 1024 * 1024;
+const filePreviewCache = new Map();
+let activeImageViewer = null;
 
 // Expose state to window for cross-module access (T12/T13/T14 modules)
 // — readable via getters that always return the current value
@@ -113,6 +123,53 @@ function normalizeChatData(chat) {
   if (!chat) return chat;
   chat.unread = Number.isFinite(Number(chat.unread)) ? Number(chat.unread) : 0;
   return chat;
+}
+
+const CHAT_DRAFTS_STORAGE_KEY = "ichat_drafts";
+
+function readChatDrafts() {
+  try {
+    const raw = localStorage.getItem(CHAT_DRAFTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function writeChatDrafts(drafts) {
+  try {
+    localStorage.setItem(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(drafts || {}));
+  } catch (_) {}
+}
+
+function getConversationDraft(conversationId) {
+  const drafts = readChatDrafts();
+  return drafts[String(conversationId)] || "";
+}
+
+function setConversationDraft(conversationId, text) {
+  if (!conversationId) return;
+  const drafts = readChatDrafts();
+  const key = String(conversationId);
+  const value = String(text || "");
+  if (value.trim()) {
+    drafts[key] = value;
+  } else {
+    delete drafts[key];
+  }
+  writeChatDrafts(drafts);
+}
+
+function clearConversationDraft(conversationId) {
+  if (!conversationId) return;
+  const drafts = readChatDrafts();
+  delete drafts[String(conversationId)];
+  writeChatDrafts(drafts);
+}
+
+function formatDraftPreview(text) {
+  return String(text || "").replace(/\s*\r?\n\s*/g, " ").trim();
 }
 
 // Helper: Convert ArrayBuffer to Hex String
@@ -304,6 +361,28 @@ function decryptFailureLabel(error) {
     : '[Cannot decrypt: unknown error. Check key status]';
 }
 
+function isPositiveIntegerValue(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0;
+}
+
+function canDecryptMessagePayload(payload, conversationType) {
+  if (!payload || payload.message_type === 'system') return true;
+  if (!payload.algorithm || !payload.ciphertext || !payload.nonce || !payload.auth_tag) {
+    return false;
+  }
+  const required = [
+    payload.sender_id,
+    payload.receiver_id,
+    payload.sender_key_version,
+    payload.receiver_key_version,
+  ];
+  if (conversationType === 'group') {
+    required.push(payload.membership_version);
+  }
+  return required.every(isPositiveIntegerValue);
+}
+
 async function encryptPrivateMessageWithTrustRetry({ text, conv }) {
   try {
     return await window.iChatPrivateE2EE.encryptPrivateMessage({
@@ -379,6 +458,48 @@ function renderChatList() {
   });
 }
 
+function renderDraftPreview(text) {
+  const markdownPayload = getMarkdownPayload(text);
+  const draftText = markdownPayload === null
+    ? escapeHtml(formatDraftPreview(text))
+    : renderInlineMarkdown(formatDraftPreview(markdownPayload));
+  return `<span class="telegram-chat-draft-label">草稿:</span> ${draftText}`;
+}
+
+function renderConversationListPreview(conv) {
+  const draft = getConversationDraft(conv.id);
+  if (draft.trim()) {
+    return renderDraftPreview(draft);
+  }
+  return renderSidebarPreview(conv, conv.last_message_preview || "", conv.last_message_sender_id);
+}
+
+function refreshConversationDraftPreview(conversationId) {
+  const conv = conversationsById[conversationId];
+  if (!conv) return;
+  const lastMsgEl = document.getElementById(`last-msg-${conversationId}`);
+  if (lastMsgEl) {
+    lastMsgEl.innerHTML = renderConversationListPreview(conv);
+  }
+}
+
+function saveActiveConversationDraftFromInput() {
+  if (!activeChatId) return;
+  const textarea = document.getElementById("chat-input-textarea");
+  if (!textarea || textarea.disabled) return;
+  setConversationDraft(activeChatId, textarea.value);
+  refreshConversationDraftPreview(activeChatId);
+}
+
+function restoreDraftForActiveConversation() {
+  if (!activeChatId) return;
+  const textarea = document.getElementById("chat-input-textarea");
+  if (!textarea || textarea.disabled) return;
+  textarea.value = getConversationDraft(activeChatId);
+  adjustTextareaHeight(textarea);
+  updateMarkdownPreview();
+}
+
 function appendChatItemToSidebar(conv) {
   const chatListContainer = document.getElementById("sidebar-chat-list");
   if (!chatListContainer) return;
@@ -393,18 +514,22 @@ function appendChatItemToSidebar(conv) {
   const safeId = encodeURIComponent(String(conv.id));
   const safeName = escapeHtml(conv.name || 'Unknown');
   const safeInitials = escapeHtml(conv.initials || '??');
-  const safeLastMsg = renderSidebarPreviewMarkdown(lastMsgText);
+  const safeLastMsg = renderConversationListPreview(conv);
   const safeLastTime = escapeHtml(lastMsgTime);
   const safeUnread = escapeHtml(unreadCount);
   const safeAvatarColor = /^#[0-9a-fA-F]{6}$/.test(conv.avatar_color || '') ? conv.avatar_color : '#5c6bc0';
+  var avatarInner = conv.avatar_url
+    ? `<img src="${escapeHtml(conv.avatar_url)}" class="w-full h-full object-cover rounded-full">`
+    : safeInitials;
+  var avatarBgStyle = conv.avatar_url ? 'background-color: transparent' : `background-color: ${safeAvatarColor}`;
 
   wrapper.innerHTML = `
     <button id="chat-item-${safeId}" onclick="selectChat('${safeId}')"
       class="chat-item-btn telegram-chat-item w-full text-left focus:outline-none relative group select-none">
 
       <div class="telegram-chat-avatar-wrap">
-        <div class="telegram-chat-avatar" style="background-color: ${safeAvatarColor}">
-          ${safeInitials}
+        <div class="telegram-chat-avatar" style="${avatarBgStyle}; overflow: hidden;">
+          ${avatarInner}
         </div>
       </div>
 
@@ -412,6 +537,8 @@ function appendChatItemToSidebar(conv) {
         <div class="telegram-chat-topline">
           <h3 class="telegram-chat-title">
             <span>${safeName}</span>
+            ${conv.peer_user_type === 'agent' ? `<span class="user-role-badge badge-agent">${currentLanguage === 'zh' ? '智能代理' : 'Agent'}</span>` : ''}
+            ${conv.peer_user_type === 'bot' ? `<span class="user-role-badge badge-bot">${currentLanguage === 'zh' ? '机器人' : 'Bot'}</span>` : ''}
             ${conv.is_secure ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark inline-block flex-shrink-0" title="End-to-End Encrypted" data-i18n-title="e2ee_badge"></i>' : ''}
           </h3>
           <span id="chat-time-${safeId}" class="chat-item-time telegram-chat-time">${safeLastTime}</span>
@@ -472,7 +599,11 @@ function formatSidebarPreviewText(conv, text, senderId) {
 
 function renderSidebarPreviewMarkdown(text) {
   const singleLine = String(text || '').replace(/\s*\r?\n\s*/g, ' ').trim();
-  return renderInlineMarkdown(singleLine);
+  const markdownPayload = getMarkdownPayload(singleLine);
+  if (markdownPayload !== null) {
+    return renderInlineMarkdown(markdownPayload);
+  }
+  return escapeHtml(singleLine);
 }
 
 function formatSidebarPreviewText(conv, text, senderId) {
@@ -484,11 +615,34 @@ function formatSidebarPreviewText(conv, text, senderId) {
   return `${numericSenderId}: ${previewText}`;
 }
 
+function renderSidebarPreview(conv, text, senderId) {
+  const previewText = text || '';
+  const numericSenderId = senderId == null ? null : Number(senderId);
+  const previewHtml = renderSidebarPreviewMarkdown(previewText);
+  if (!previewText || !numericSenderId || numericSenderId === Number(myUserId)) {
+    return previewHtml;
+  }
+
+  let senderLabel = null;
+  if (conv) {
+    if (conv.type === 'single') {
+      senderLabel = conv.name || null;
+    } else {
+      const member = getGroupMemberInfo(conv.id, numericSenderId);
+      senderLabel = member ? (member.display_name || member.username) : null;
+    }
+  }
+  const prefix = senderLabel || String(numericSenderId);
+  return escapeHtml(`${prefix}: `) + previewHtml;
+}
+
 function updateSidebarPreview(conv, text, time, senderId) {
   if (!conv) return;
+  conv.last_message_preview = text || "";
+  conv.last_message_sender_id = senderId;
   const lastMsgEl = document.getElementById(`last-msg-${conv.id}`);
   const timeEl = document.getElementById(`chat-time-${conv.id}`);
-  if (lastMsgEl) lastMsgEl.innerHTML = renderSidebarPreviewMarkdown(formatSidebarPreviewText(conv, text, senderId));
+  if (lastMsgEl) lastMsgEl.innerHTML = renderConversationListPreview(conv);
   if (timeEl) timeEl.textContent = time;
 }
 
@@ -508,8 +662,13 @@ async function fetchConversations() {
         try {
           let plaintext = '';
           const msg = conv.last_message_data;
+          const isFileMsg = msg.file_id || (msg.file && msg.file.file_id);
           if (msg.message_type === 'system') {
             plaintext = msg.ciphertext;
+          } else if (isFileMsg && !msg.ciphertext) {
+            plaintext = '[' + (msg.message_type || 'file') + ']';
+          } else if (!canDecryptMessagePayload(msg, conv.type)) {
+            plaintext = 'Encrypted message';
           } else if (conv.type === 'group') {
             plaintext = await window.iChatGroupE2EE.decryptGroupMessage({
               algorithm: msg.algorithm,
@@ -536,7 +695,8 @@ async function fetchConversations() {
               receiver_key_version: msg.receiver_key_version,
             });
           }
-          conv.last_message_preview = formatSidebarPreviewText(conv, plaintext, msg.sender_id);
+          conv.last_message_preview = plaintext;
+          conv.last_message_sender_id = msg.sender_id;
         } catch (decryptErr) {
           console.warn(`Failed to decrypt last message preview for conversation ${conv.id}:`, decryptErr);
           conv.last_message_preview = decryptFailureLabel(decryptErr);
@@ -581,7 +741,14 @@ async function fetchMessages(conversationId, page = 1) {
     for (const msg of data.messages) {
       try {
         let plaintext;
-        if (conv.type === 'group') {
+        const isFileMsg = msg.file_id || (msg.file && msg.file.file_id);
+        if (msg.message_type === 'system') {
+          plaintext = msg.ciphertext || '';
+        } else if (isFileMsg && !msg.ciphertext) {
+          plaintext = '[' + (msg.message_type || 'file') + ']';
+        } else if (!canDecryptMessagePayload(msg, conv.type)) {
+          plaintext = decryptFailureLabel({ code: 'invalid_metadata' });
+        } else if (conv.type === 'group') {
           plaintext = await window.iChatGroupE2EE.decryptGroupMessage({
             algorithm: msg.algorithm,
             ciphertext: msg.ciphertext,
@@ -617,8 +784,14 @@ async function fetchMessages(conversationId, page = 1) {
           sender_name: conv.type === 'group' ? msg.sender_name : conv.name,
           sender_initials: msg.sender_initials,
           sender_avatar_color: msg.sender_avatar_color,
+          sender_avatar_url: msg.sender_avatar_url,
           status: msg.status,
           isSystem: msg.message_type === 'system',
+          isFile: isFileMsg,
+          file: msg.file || null,
+          message_type: msg.message_type || 'text',
+          file_id: msg.file_id || (msg.file ? msg.file.file_id : null),
+          reply_to_message_id: msg.reply_to_message_id,
         });
       } catch (decryptErr) {
         console.warn(`Failed to decrypt message ${msg.id}:`, decryptErr);
@@ -632,8 +805,14 @@ async function fetchMessages(conversationId, page = 1) {
           sender_name: conv.type === 'group' ? msg.sender_name : conv.name,
           sender_initials: msg.sender_initials,
           sender_avatar_color: msg.sender_avatar_color,
+          sender_avatar_url: msg.sender_avatar_url,
           status: msg.status,
           decryptError: true,
+          isFile: msg.file_id || (msg.file && msg.file.file_id),
+          file: msg.file || null,
+          message_type: msg.message_type || 'text',
+          file_id: msg.file_id || (msg.file ? msg.file.file_id : null),
+          reply_to_message_id: msg.reply_to_message_id,
         });
       }
     }
@@ -659,6 +838,7 @@ async function fetchGroupMemberIds(conversationId) {
   });
   return (data.members || []).map(member => member.user_id);
 }
+window.fetchGroupMemberIds = fetchGroupMemberIds;
 
 async function fetchPeerFingerprint(userId) {
   if (!userId) return null;
@@ -746,8 +926,8 @@ function trustStatusMeta(status, keyChanged = false) {
 function setVerificationStatus(el, status, keyChanged = false) {
   if (!el) return;
   const meta = trustStatusMeta(status, keyChanged);
-  el.className = meta.className;
-  el.innerHTML = `<i data-lucide="${meta.icon}" class="w-3.5 h-3.5 mr-0.5 inline-block ${meta.iconClass}"></i><span>${escapeHtml(meta.label)}</span>`;
+  el.className = `chat-details-verification ${meta.iconClass || ""}`;
+  el.innerHTML = `<i data-lucide="${meta.icon}"></i><span>${escapeHtml(meta.label)}</span>`;
 }
 
 async function setContactKeyTrust(userId, trustStatus = 'verified') {
@@ -797,6 +977,72 @@ function getMessageSenderName(msg, conv) {
   return member ? (member.display_name || member.username) : "Unknown";
 }
 
+function getConversationKind(conv) {
+  if (!conv) return "user";
+  if (conv.type === "group") return "group";
+  if (conv.peer_user_type === "agent") return "agent";
+  if (conv.peer_user_type === "bot") return "bot";
+  if (conv.peer_user_type === "user") return "user";
+  const source = [
+    conv.kind,
+    conv.category,
+    conv.peer_type,
+    conv.name,
+    conv.username,
+    conv.peer_username,
+    conv.display_name
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (/\b(ai|agent|gpt|assistant)\b/.test(source) || source.includes("智能体")) return "agent";
+  if (source.includes("bot") || source.includes("机器人")) return "bot";
+  return "user";
+}
+
+function getConversationUsername(conv) {
+  return conv.peer_username || conv.username || conv.handle || "";
+}
+
+function getConversationBio(conv, kind) {
+  if (conv.peer_bio) return conv.peer_bio;
+  if (conv.description || conv.bio || conv.about) return conv.description || conv.bio || conv.about;
+  if (kind === "group") return "群聊公告、频道入口和成员动态会显示在这里。";
+  if (kind === "bot") return "机器人会根据指令自动响应消息。发送 /help 可以查看可用命令。";
+  if (kind === "agent") return "AI Agent 可以协助总结、检索和处理聊天任务。";
+  return "这个联系人还没有填写个人简介。";
+}
+
+function getConversationLink(conv, kind) {
+  if (conv.invite_link || conv.link || conv.url) return conv.invite_link || conv.link || conv.url;
+  return "";
+}
+
+function getConversationDetailTitle(kind) {
+  if (kind === "group") return "群组信息";
+  if (kind === "bot") return "机器人信息";
+  if (kind === "agent") return "AI Agent 信息";
+  return "聊天信息";
+}
+
+function getConversationStatusText(conv, kind) {
+  if (kind === "group") {
+    const count = Number(conv.member_count || 0);
+    const online = Number(conv.online_count || 0);
+    return online > 0 ? `${count} 位成员，${online} 人在线` : `${count} 位成员`;
+  }
+  if (kind === "bot") return conv.subscriber_count ? `${conv.subscriber_count} users` : "机器人";
+  if (kind === "agent") return "AI Agent";
+  return conv.is_online ? "在线" : "联系人";
+}
+
+function setDetailsText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value || "--";
+}
+
+function setDetailsHidden(id, hidden) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle("hidden", !!hidden);
+}
+
 function renderRightPanelMembers(conv) {
   const list = document.getElementById("right-panel-members-list");
   if (!list || !conv) return;
@@ -804,19 +1050,25 @@ function renderRightPanelMembers(conv) {
   list.innerHTML = "";
   members.forEach(member => {
     const row = document.createElement("div");
-    row.className = "flex items-center justify-between pt-3 first:pt-0";
+    row.className = "chat-details-member-row";
     const safeColor = /^#[0-9a-fA-F]{6}$/.test(member.avatar_color || '') ? member.avatar_color : '#5c6bc0';
+    const avatarInner = member.avatar_url
+      ? `<img src="${escapeHtml(member.avatar_url)}" class="w-full h-full object-cover rounded-full">`
+      : escapeHtml(member.initials || "??");
+    const avatarBgStyle = member.avatar_url
+      ? 'background-color: transparent; overflow: hidden;'
+      : `background-color: ${safeColor}`;
     row.innerHTML = `
-      <div class="flex items-center min-w-0 space-x-2.5">
-        <div class="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs flex-shrink-0" style="background-color: ${safeColor}">
-          ${escapeHtml(member.initials || "??")}
+      <div class="chat-details-member-main">
+        <div class="chat-details-member-avatar" style="${avatarBgStyle}">
+          ${avatarInner}
         </div>
-        <div class="min-w-0">
-          <div class="text-xs font-semibold text-textMain truncate">${escapeHtml(member.display_name || member.username || "Unknown")}</div>
-          <div class="text-[10px] text-textSecondary truncate">@${escapeHtml(member.username || String(member.user_id))}</div>
+        <div class="chat-details-member-copy">
+          <div class="chat-details-member-name">${escapeHtml(member.display_name || member.username || "Unknown")}</div>
+          <div class="chat-details-member-status">${escapeHtml(member.status || member.last_seen || (String(member.username || "").toLowerCase().includes("bot") ? "机器人" : "最近曾上线"))}</div>
         </div>
       </div>
-      <span class="text-[10px] text-textSecondary flex-shrink-0">${escapeHtml(getRoleTranslation(member.role))}</span>
+      <span class="chat-details-member-role">${escapeHtml(getRoleTranslation(member.role))}</span>
     `;
     list.appendChild(row);
   });
@@ -891,10 +1143,19 @@ function handleIncomingMessage(data) {
     handleTypingEvent(data);
   } else if (event === 'presence.updated') {
     handlePresenceEvent(data);
+  } else if (event === 'profile.updated') {
+    handleProfileUpdatedEvent(data);
   } else if (event === 'message.recalled') {
     handleMessageRecalled(data);
   } else if (event === 'message.deleted') {
     handleMessageDeleted(data);
+  } else if (event === 'file.upload.completed') {
+    const payload = data.data || {};
+    console.log('[file-transfer] Upload completed:', payload.file_id);
+    // If there's a progress bar, hide it
+    if (window.iChatFileTransfer && window.iChatFileTransfer._onUploadCompleted) {
+      window.iChatFileTransfer._onUploadCompleted(payload);
+    }
   } else if (event === 'error') {
     logToCryptoConsole(`[WebSocket Error] ${data.data?.message || 'Unknown error'}`);
   } else {
@@ -906,11 +1167,15 @@ async function handlePrivateMessageReceived(data) {
   const payload = data.data || data;
   const convId = parseInt(payload.conversation_id);
   const conv = conversationsById[convId];
+  const isFileMsg = payload.file_id || (payload.file && payload.file.file_id);
+  const fileData = payload.file || null;
   let plaintext;
   let decryptError = null;
 
   try {
-    if (window.iChatPrivateE2EE) {
+    if (isFileMsg && !payload.ciphertext) {
+      plaintext = '[' + (payload.message_type || 'file') + ']';
+    } else if (window.iChatPrivateE2EE) {
       plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
         algorithm: payload.algorithm,
         ciphertext: payload.ciphertext,
@@ -939,8 +1204,14 @@ async function handlePrivateMessageReceived(data) {
     isSelf: payload.sender_id === myUserId,
     sender: payload.sender_id,
     sender_name: conv ? conv.name : undefined,
+    sender_avatar_url: payload.sender_avatar_url || '',
     status: 'received',
     decryptError: !!decryptError,
+    reply_to_message_id: payload.reply_to_message_id,
+    isFile: isFileMsg,
+    file: fileData,
+    message_type: payload.message_type || 'text',
+    file_id: payload.file_id || (fileData ? fileData.file_id : null),
   };
 
   if (messages.some(msg => msg.id === payload.message_id)) return;
@@ -948,7 +1219,7 @@ async function handlePrivateMessageReceived(data) {
   if (conv) {
     updateSidebarPreview(
       conv,
-      decryptError ? 'Encrypted message' : plaintext,
+      decryptError ? 'Encrypted message' : (isFileMsg ? ('[' + (payload.message_type || 'file') + ']') : plaintext),
       newMsg.time,
       payload.sender_id
     );
@@ -988,10 +1259,14 @@ async function handleGroupMessageReceived(data) {
   const payload = data.data || data;
   const convId = payload.group_id;
   const conv = conversationsById[convId];
+  const isFileMsg = payload.file_id || (payload.file && payload.file.file_id);
+  const fileData = payload.file || null;
 
   try {
     let plaintext;
-    if (window.iChatGroupE2EE) {
+    if (isFileMsg && !payload.ciphertext) {
+      plaintext = '[' + (payload.message_type || 'file') + ']';
+    } else if (window.iChatGroupE2EE) {
       plaintext = await window.iChatGroupE2EE.decryptGroupMessage({
         algorithm: payload.algorithm,
         ciphertext: payload.ciphertext,
@@ -1016,7 +1291,13 @@ async function handleGroupMessageReceived(data) {
       isSelf: payload.sender_id === myUserId,
       sender: payload.sender_id,
       sender_name: payload.sender_name || (getGroupMemberInfo(convId, payload.sender_id) || {}).display_name,
+      sender_avatar_url: payload.sender_avatar_url || '',
       status: 'received',
+      reply_to_message_id: payload.reply_to_message_id,
+      isFile: isFileMsg,
+      file: fileData,
+      message_type: payload.message_type || 'text',
+      file_id: payload.file_id || (fileData ? fileData.file_id : null),
     };
 
     if (messages.some(msg => msg.id === payload.message_id)) return;
@@ -1036,7 +1317,7 @@ async function handleGroupMessageReceived(data) {
       }
     }
     if (conv) {
-      updateSidebarPreview(conv, plaintext, newMsg.time, payload.sender_id);
+      updateSidebarPreview(conv, isFileMsg ? ('[' + (payload.message_type || 'file') + ']') : plaintext, newMsg.time, payload.sender_id);
     }
   } catch (err) {
     console.error('Failed to decrypt incoming group message:', err);
@@ -1113,18 +1394,10 @@ async function deriveActiveSessionKey(convId) {
         await window.iChatGroupE2EE.fetchGroupMemberKeys(convId);
       }
     } else {
-      // For private chats, derive session key via the private E2EE module
-      if (window.iChatPrivateE2EE && window.iChatPrivateE2EE.derivePrivateSessionKey) {
-        const keyRecord = window.iChatKeyManager ? window.iChatKeyManager.loadCurrentRecord() : null;
-        if (keyRecord && conv.peer_id) {
-          const key = await window.iChatPrivateE2EE.derivePrivateSessionKey(
-            keyRecord.privateKey,
-            null, // peer public key will be fetched internally by the module
-            { conversation_id: convId, sender_id: myUserId, receiver_id: conv.peer_id }
-          );
-          sessionKeys[convId] = key;
-        }
-      }
+      // Private chat keys are derived per message because the HKDF context
+      // includes sender/receiver key versions.  A conversation-level preflight
+      // cannot build a valid context until an encrypted payload exists.
+      sessionKeys[convId] = true;
     }
 
     logToCryptoConsole(`[ECDH] Handshake completed for conversation ${convId}.`);
@@ -1167,7 +1440,7 @@ function updateHeaderPresence(conv) {
     var typingUserIds = typingUsers[conv.id];
     if (Object.keys(typingUserIds).length > 0) {
       var typingHtml = '<span class="text-brand-light dark:text-brand-dark font-medium">' +
-        (currentLanguage === 'zh' ? '正在输入' : 'Typing') +
+        _t4('Typing', '正在输入', '正在輸入', '入力中') +
         '</span><span class="typing-indicator-dots">' +
         '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span>';
       statusEl.innerHTML = typingHtml;
@@ -1176,16 +1449,19 @@ function updateHeaderPresence(conv) {
   }
 
   if (conv.type === 'group') {
-    statusEl.textContent = currentLanguage === 'zh'
-      ? (conv.member_count || 0) + ' 位成员'
-      : (conv.member_count || 0) + ' members';
+    statusEl.textContent = _t4(
+      (conv.member_count || 0) + ' members',
+      (conv.member_count || 0) + ' 位成员',
+      (conv.member_count || 0) + ' 位成員',
+      (conv.member_count || 0) + ' メンバー'
+    );
     return;
   }
 
   // Private chat: check presence
   if (conv.is_online) {
     statusEl.innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle"></span>' +
-      (currentLanguage === 'zh' ? '在线' : 'Online');
+      _t4('Online', '在线', '線上', 'オンライン');
   } else if (conv.last_seen) {
     var lastSeen = new Date(conv.last_seen);
     var now = new Date();
@@ -1197,22 +1473,22 @@ function updateHeaderPresence(conv) {
     var timeStr = formatClockTime(lastSeen);
     var text;
     if (diffMin < 1) {
-      text = currentLanguage === 'zh' ? '刚刚在线' : 'Last seen just now';
+      text = _t4('Last seen just now', '刚刚在线', '剛剛上線', 'たった今オンライン');
     } else if (diffMin < 60) {
-      text = (currentLanguage === 'zh' ? '最后上线 ' : 'Last seen ') + diffMin + (currentLanguage === 'zh' ? ' 分钟前' : ' min ago');
+      text = _t4('Last seen ', '最后上线 ', '最後上線 ', '最終オンライン ') + diffMin + _t4(' min ago', ' 分钟前', ' 分鐘前', ' 分前');
     } else if (diffHours < 6) {
-      text = (currentLanguage === 'zh' ? '最后上线 ' : 'Last seen ') + diffHours + (currentLanguage === 'zh' ? ' 小时前' : ' hours ago');
+      text = _t4('Last seen ', '最后上线 ', '最後上線 ', '最終オンライン ') + diffHours + _t4(' hours ago', ' 小时前', ' 小時前', ' 時間前');
     } else if (diffDays === 0) {
-      text = (currentLanguage === 'zh' ? '最后上线今天 ' : 'Last seen today at ') + timeStr;
+      text = _t4('Last seen today at ', '最后上线今天 ', '最後上線今天 ', '本日最終オンライン ') + timeStr;
     } else if (diffDays === 1) {
-      text = (currentLanguage === 'zh' ? '最后上线昨天 ' : 'Last seen yesterday at ') + timeStr;
+      text = _t4('Last seen yesterday at ', '最后上线昨天 ', '最後上線昨天 ', '昨日最終オンライン ') + timeStr;
     } else {
       var dateStr = lastSeen.toLocaleDateString([], { month: 'short', day: 'numeric' });
-      text = (currentLanguage === 'zh' ? '最后上线 ' : 'Last seen ') + dateStr;
+      text = _t4('Last seen ', '最后上线 ', '最後上線 ', '最終オンライン ') + dateStr;
     }
     statusEl.textContent = text;
   } else {
-    statusEl.textContent = currentLanguage === 'zh' ? '联系人' : 'Contact';
+    statusEl.textContent = _t4('Contact', '联系人', '聯絡人', '連絡先');
   }
 }
 
@@ -1234,7 +1510,7 @@ function updateConnectionBadge(status) {
   var icon, text, className;
   if (status === 'connected') {
     icon = 'wifi';
-    text = currentLanguage === 'zh' ? '已连接' : 'Connected';
+    text = _t4('Connected', '已连接', '已連線', '接続済み');
     className = 'connection-badge connected visible';
     // Auto-hide connected badge after 3s
     setTimeout(function() {
@@ -1244,11 +1520,11 @@ function updateConnectionBadge(status) {
     }, 3000);
   } else if (status === 'connecting') {
     icon = 'wifi';
-    text = currentLanguage === 'zh' ? '重连中...' : 'Reconnecting...';
+    text = _t4('Reconnecting...', '重连中...', '重新連線中...', '再接続中...');
     className = 'connection-badge reconnecting visible';
   } else {
     icon = 'wifi-off';
-    text = currentLanguage === 'zh' ? '已断开' : 'Disconnected';
+    text = _t4('Disconnected', '已断开', '已中斷連線', '切断されました');
     className = 'connection-badge disconnected visible';
   }
 
@@ -1335,8 +1611,117 @@ function handlePresenceEvent(data) {
   }
 }
 
+// T14/T15 Helper: handle profile update from WebSocket
+function handleProfileUpdatedEvent(data) {
+  var payload = data.data || data;
+  var userId = parseInt(payload.user_id);
+  var username = payload.username;
+  var displayName = payload.display_name;
+  var avatarUrl = payload.avatar_url;
+
+  if (!userId) return;
+
+  // 1. Update conversations cache and sidebar chat item list
+  for (var convId in conversationsById) {
+    var conv = conversationsById[convId];
+    if (conv.type === 'single' && parseInt(conv.peer_id) === userId) {
+      conv.avatar_url = avatarUrl;
+      if (displayName) {
+        conv.name = displayName;
+      }
+      
+      // Update sidebar chat item avatar & name
+      var chatItem = document.getElementById('chat-item-' + conv.id);
+      if (chatItem) {
+        var avatarDiv = chatItem.querySelector('.telegram-chat-avatar');
+        if (avatarDiv) {
+          if (avatarUrl) {
+            avatarDiv.innerHTML = `<img src="${escapeHtml(avatarUrl)}" class="w-full h-full object-cover rounded-full">`;
+            avatarDiv.style.backgroundColor = 'transparent';
+            avatarDiv.style.overflow = 'hidden';
+          } else {
+            var initials = (displayName || username || '?')[0].toUpperCase();
+            avatarDiv.innerHTML = escapeHtml(initials);
+            var safeColor = /^#[0-9a-fA-F]{6}$/.test(conv.avatar_color || '') ? conv.avatar_color : '#5c6bc0';
+            avatarDiv.style.backgroundColor = safeColor;
+          }
+        }
+        var nameSpan = chatItem.querySelector('.telegram-chat-name');
+        if (nameSpan && displayName) {
+          nameSpan.textContent = displayName;
+        }
+      }
+
+      // If this is the active chat, update Header and Details Panel
+      if (activeChatId === conv.id) {
+        var headerAvatar = document.getElementById("chat-header-avatar");
+        if (headerAvatar) {
+          if (avatarUrl) {
+            headerAvatar.innerHTML = `<img src="${escapeHtml(avatarUrl)}" class="w-full h-full object-cover rounded-full">`;
+            headerAvatar.style.backgroundColor = 'transparent';
+          } else {
+            headerAvatar.textContent = (displayName || username || '?')[0].toUpperCase();
+            headerAvatar.style.backgroundColor = conv.avatar_color || '#5c6bc0';
+          }
+        }
+        var headerName = document.getElementById("chat-header-name");
+        if (headerName && displayName) {
+          headerName.textContent = displayName;
+        }
+
+        var detailsAvatar = document.getElementById("right-panel-avatar");
+        if (detailsAvatar) {
+          if (avatarUrl) {
+            detailsAvatar.innerHTML = `<img src="${escapeHtml(avatarUrl)}" class="w-full h-full object-cover rounded-full">`;
+            detailsAvatar.style.backgroundColor = 'transparent';
+          } else {
+            detailsAvatar.textContent = (displayName || username || '?')[0].toUpperCase();
+            detailsAvatar.style.backgroundColor = conv.avatar_color || '#5c6bc0';
+          }
+        }
+        var detailsName = document.getElementById("right-panel-name");
+        if (detailsName && displayName) {
+          detailsName.textContent = displayName;
+        }
+      }
+    }
+  }
+
+  // 2. Update group member cache and render if active
+  for (var gid in groupMembersByConversation) {
+    var members = groupMembersByConversation[gid];
+    if (members && members[userId]) {
+      var member = members[userId];
+      member.avatar_url = avatarUrl;
+      if (displayName) {
+        member.display_name = displayName;
+      }
+      // If the current active chat is this group, re-render the right panel member list
+      if (activeChatId && activeChatId.toString() === gid.toString()) {
+        const conv = conversationsById[activeChatId];
+        if (conv) {
+          renderRightPanelMembers(conv);
+        }
+      }
+    }
+  }
+
+  // 3. Update any contact list view elements (sidebar contact page, contacts page)
+  var contactAvatars = document.querySelectorAll('.avatar-clickable[data-user-id="' + userId + '"]');
+  contactAvatars.forEach(function(el) {
+    if (avatarUrl) {
+      el.innerHTML = `<img src="${escapeHtml(avatarUrl)}" class="w-full h-full object-cover">`;
+    } else {
+      var initials = (displayName || username || '?')[0].toUpperCase();
+      el.textContent = initials;
+    }
+  });
+}
+
 // 6. Chat Selection & Rendering
 async function selectChat(chatId) {
+  saveActiveConversationDraftFromInput();
+  closeChatSearch();
   activeChatId = parseInt(chatId);
   const conv = conversationsById[activeChatId];
   if (!conv) return;
@@ -1361,10 +1746,22 @@ async function selectChat(chatId) {
   await deriveActiveSessionKey(activeChatId);
 
   // Populate header
-  document.getElementById("chat-header-avatar").textContent = conv.initials || '??';
-  document.getElementById("chat-header-avatar").className = `w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm shadow-sm`;
-  document.getElementById("chat-header-avatar").style.backgroundColor = conv.avatar_color || '#5c6bc0';
-  document.getElementById("chat-header-name").textContent = conv.name || 'Unknown';
+  var headerAvatar = document.getElementById("chat-header-avatar");
+  if (conv.avatar_url) {
+    headerAvatar.innerHTML = `<img src="${escapeHtml(conv.avatar_url)}" class="w-full h-full object-cover rounded-full">`;
+    headerAvatar.style.backgroundColor = 'transparent';
+  } else {
+    headerAvatar.textContent = conv.initials || '??';
+    headerAvatar.style.backgroundColor = conv.avatar_color || '#5c6bc0';
+  }
+  headerAvatar.className = `w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm shadow-sm overflow-hidden`;
+  const headerNameEl = document.getElementById("chat-header-name");
+  headerNameEl.innerHTML = `<span>${escapeHtml(conv.name || 'Unknown')}</span>`;
+  if (conv.peer_user_type === 'agent') {
+    headerNameEl.innerHTML += `<span class="user-role-badge badge-agent">${_t4('Agent', '智能代理', '智能代理', 'エージェント')}</span>`;
+  } else if (conv.peer_user_type === 'bot') {
+    headerNameEl.innerHTML += `<span class="user-role-badge badge-bot">${_t4('Bot', '机器人', '機器人', 'ボット')}</span>`;
+  }
 
   // Update delete/leave text
   const leaveTextEl = document.getElementById("menu-delete-chat-text");
@@ -1375,13 +1772,21 @@ async function selectChat(chatId) {
       ? (currentLanguage === 'zh' ? "退出群聊" : "Leave Group")
       : (currentLanguage === 'zh' ? "删除聊天" : "Delete Chat");
   }
+  const blockContactBtn = document.getElementById("menu-block-contact-btn");
+  if (blockContactBtn) {
+    blockContactBtn.classList.toggle("hidden", conv.type !== "single" || !conv.peer_id);
+  }
+  const blockContactText = document.getElementById("menu-block-contact-text");
+  if (blockContactText) {
+    blockContactText.textContent = currentLanguage === "zh" ? "拉黑" : "Block";
+  }
   
   // Header status
   const statusText = conv.type === 'group'
-    ? (currentLanguage === 'zh' ? `${conv.member_count || 0} 位成员` : `${conv.member_count || 0} members`)
-    : (currentLanguage === 'zh' ? '联系人' : 'Contact');
+    ? _t4(`${conv.member_count || 0} members`, `${conv.member_count || 0} 位成员`, `${conv.member_count || 0} 位成員`, `${conv.member_count || 0} メンバー`)
+    : _t4('Contact', '联系人', '聯絡人', '連絡先');
   if (conv.is_secure) {
-    const e2eeText = currentLanguage === 'zh' ? '🔒 端到端加密' : '🔒 End-to-end encrypted';
+    const e2eeText = _t4('🔒 End-to-end encrypted', '🔒 端到端加密', '🔒 端對端加密', '🔒 エンドツーエンド暗号化');
     document.getElementById("chat-header-status").innerHTML = `${statusText} &middot; <span class='text-brand-light dark:text-brand-dark font-semibold'>${e2eeText}</span>`;
   } else {
     document.getElementById("chat-header-status").textContent = statusText;
@@ -1413,7 +1818,8 @@ async function selectChat(chatId) {
   await fetchMessages(activeChatId);
   renderMessages();
   scrollToBottom();
-  updateDetailsPanel(conv);
+  restoreDraftForActiveConversation();
+  await updateDetailsPanelRich(conv);
 
   // Send read receipts for any undelivered messages
   sendReadReceipts(conv);
@@ -1444,9 +1850,14 @@ async function updateDetailsPanel(conv) {
   const verificationStatus = document.getElementById("right-panel-verification-status");
 
   if (avatar) {
-    avatar.className = 'w-20 h-20 rounded-full text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3';
-    avatar.style.backgroundColor = conv.avatar_color || '#5c6bc0';
-    avatar.textContent = conv.initials || '??';
+    if (conv.avatar_url) {
+      avatar.innerHTML = `<img src="${escapeHtml(conv.avatar_url)}" class="w-full h-full object-cover rounded-full">`;
+      avatar.style.backgroundColor = 'transparent';
+    } else {
+      avatar.textContent = conv.initials || '??';
+      avatar.style.backgroundColor = conv.avatar_color || '#5c6bc0';
+    }
+    avatar.className = 'w-20 h-20 rounded-full text-white flex items-center justify-center font-bold text-2xl shadow-sm mb-3 overflow-hidden';
   }
   if (name) name.textContent = conv.name || '';
   if (status) status.textContent = getStatusTranslation(conv.type === 'group' ? `${conv.member_count || 0} members` : 'Contact');
@@ -1457,10 +1868,10 @@ async function updateDetailsPanel(conv) {
     if (resetKeyBtn) resetKeyBtn.classList.toggle("hidden", conv.type === "group");
     if (verificationStatus) {
       verificationStatus.className = "font-semibold text-amber-500 flex items-center space-x-1";
-      verificationStatus.innerHTML = '<i data-lucide="shield-question" class="w-3.5 h-3.5 mr-0.5 inline-block text-amber-500"></i><span>' + (currentLanguage === 'zh' ? '待验证' : 'Unverified') + '</span>';
+      verificationStatus.innerHTML = '<i data-lucide="shield-question" class="w-3.5 h-3.5 mr-0.5 inline-block text-amber-500"></i><span>' + _t4('Unverified', '待验证', '待驗證', '未検証') + '</span>';
     }
     if (fp) {
-      fp.textContent = currentLanguage === 'zh' ? '正在加载真实指纹...' : 'Loading real fingerprint...';
+      fp.textContent = _t4('Loading real fingerprint...', '正在加载真实指纹...', '正在載入真實指紋...', '実際の指紋を読み込み中...');
     }
 
     if (conv.type === "single" && conv.peer_id) {
@@ -1475,9 +1886,12 @@ async function updateDetailsPanel(conv) {
       }
       setVerificationStatus(verificationStatus, activeKey ? activeKey.trust_status : 'missing', keyChanged);
     } else if (fp) {
-      fp.textContent = currentLanguage === 'zh'
-        ? '群聊使用每位成员的当前公钥加密。'
-        : 'Group messages are encrypted to each member public key.';
+      fp.textContent = _t4(
+        'Group messages are encrypted to each member public key.',
+        '群聊使用每位成员的当前公钥加密。',
+        '群組訊息使用每位成員的當前公鑰加密。',
+        'グループメッセージは各メンバーの公開鍵で暗号化されます。'
+      );
     }
     if (window.lucide) window.lucide.createIcons();
   } else {
@@ -1487,7 +1901,7 @@ async function updateDetailsPanel(conv) {
   if (conv.type === 'group') {
     if (groupSection) groupSection.classList.remove("hidden");
     const mc = document.getElementById("right-panel-members-count");
-    if (mc) mc.textContent = currentLanguage === 'zh' ? `群组成员 (${conv.member_count || 0})` : `Group Members (${conv.member_count || 0})`;
+    if (mc) mc.textContent = _t4(`Group Members (${conv.member_count || 0})`, `群组成员 (${conv.member_count || 0})`, `群組成員 (${conv.member_count || 0})`, `グループメンバー (${conv.member_count || 0})`);
     try {
       await fetchGroupMemberIds(conv.id);
       if (requestId !== detailsPanelRequestId) return;
@@ -1498,6 +1912,117 @@ async function updateDetailsPanel(conv) {
   } else {
     if (groupSection) groupSection.classList.add("hidden");
   }
+}
+
+async function updateDetailsPanelRich(conv) {
+  const requestId = ++detailsPanelRequestId;
+  const kind = getConversationKind(conv);
+  const avatar = document.getElementById("details-avatar");
+  const name = document.getElementById("details-name");
+  const status = document.getElementById("details-status");
+  const fp = document.getElementById("details-fingerprint");
+  const fpWrapper = document.getElementById("right-panel-fingerprint-wrapper");
+  const groupSection = document.getElementById("right-panel-group-section");
+  const protocol = document.getElementById("right-panel-protocol");
+  const resetKeyBtn = document.getElementById("right-panel-reset-key-btn");
+  const verificationStatus = document.getElementById("right-panel-verification-status");
+
+  setDetailsText("right-panel-title", getConversationDetailTitle(kind));
+
+  if (avatar) {
+    if (conv.avatar_url) {
+      avatar.innerHTML = `<img src="${escapeHtml(conv.avatar_url)}" class="w-full h-full object-cover rounded-full">`;
+      avatar.style.backgroundColor = "transparent";
+    } else {
+      avatar.innerHTML = escapeHtml(conv.initials || "??");
+      avatar.style.backgroundColor = conv.avatar_color || "#5c6bc0";
+    }
+    avatar.className = "chat-details-avatar";
+  }
+
+  if (name) {
+    name.innerHTML = `<span>${escapeHtml(conv.name || 'Unknown')}</span>`;
+    if (conv.peer_user_type === 'agent') {
+      name.innerHTML += `<span class="user-role-badge badge-agent">${currentLanguage === 'zh' ? '智能代理' : 'Agent'}</span>`;
+    } else if (conv.peer_user_type === 'bot') {
+      name.innerHTML += `<span class="user-role-badge badge-bot">${currentLanguage === 'zh' ? '机器人' : 'Bot'}</span>`;
+    }
+  }
+  if (status) status.textContent = getConversationStatusText(conv, kind);
+
+  const username = getConversationUsername(conv);
+  setDetailsText(
+    "right-panel-username",
+    username ? `@${username.replace(/^@/, "")}` : (kind === "group" ? `group-${conv.id}` : `user-${conv.peer_id || conv.id}`)
+  );
+  setDetailsText("right-panel-username-label", kind === "group" ? "群组标识" : "用户名");
+  setDetailsText("right-panel-bio", getConversationBio(conv, kind));
+  setDetailsText(
+    "right-panel-bio-label",
+    kind === "group" ? "群组简介" : (kind === "bot" ? "机器人简介" : (kind === "agent" ? "Agent 简介" : "个人简介"))
+  );
+
+  setDetailsHidden("right-panel-email-row", !conv.peer_email);
+  setDetailsText("right-panel-email", conv.peer_email || "");
+
+  setDetailsHidden("right-panel-phone-row", !conv.peer_phone_number);
+  setDetailsText("right-panel-phone", conv.peer_phone_number || "");
+
+  setDetailsHidden("right-panel-location-row", !conv.peer_location);
+  setDetailsText("right-panel-location", conv.peer_location || "");
+
+  const link = getConversationLink(conv, kind);
+  setDetailsHidden("right-panel-link-row", !link);
+  setDetailsText("right-panel-link", link);
+
+  const notifyToggle = document.getElementById("right-panel-notify-toggle");
+  if (notifyToggle) {
+    const isMuted = conv.muted_until && new Date(conv.muted_until) > new Date();
+    notifyToggle.classList.toggle("is-on", !isMuted);
+  }
+
+  if (protocol) protocol.textContent = conv.is_secure ? "ECDH + HKDF + AES-GCM" : "未启用";
+  if (resetKeyBtn) resetKeyBtn.classList.toggle("hidden", kind === "group");
+
+  if (conv.is_secure) {
+    if (fpWrapper) fpWrapper.classList.remove("hidden");
+    if (verificationStatus) setVerificationStatus(verificationStatus, "untrusted");
+    if (fp) fp.textContent = "正在加载真实指纹...";
+
+    if (conv.type === "single" && conv.peer_id) {
+      const contactStatus = await fetchContactKeyStatus(conv.peer_id);
+      if (requestId !== detailsPanelRequestId) return;
+      const activeKey = getActiveKeyStatus(contactStatus);
+      const keyChanged = contactKeyHasChanged(contactStatus);
+      if (fp) {
+        fp.textContent = activeKey
+          ? `v${activeKey.key_version}: ${formatFingerprint(activeKey.key_fingerprint)}`
+          : formatFingerprint(null);
+      }
+      setVerificationStatus(verificationStatus, activeKey ? activeKey.trust_status : "missing", keyChanged);
+    } else if (fp) {
+      fp.textContent = "群聊消息会使用每位成员的当前公钥分别加密。";
+      setVerificationStatus(verificationStatus, "verified");
+    }
+  } else if (fpWrapper) {
+    fpWrapper.classList.add("hidden");
+  }
+
+  if (kind === "group") {
+    if (groupSection) groupSection.classList.remove("hidden");
+    setDetailsText("right-panel-members-count", `成员 (${conv.member_count || 0})`);
+    try {
+      await fetchGroupMemberIds(conv.id);
+      if (requestId !== detailsPanelRequestId) return;
+      renderRightPanelMembers(conv);
+    } catch (err) {
+      logToCryptoConsole(`[API] Failed to load group members: ${err.message}`);
+    }
+  } else {
+    if (groupSection) groupSection.classList.add("hidden");
+  }
+
+  if (window.lucide) window.lucide.createIcons();
 }
 
 function renderMessages() {
@@ -1512,6 +2037,210 @@ function renderMessages() {
     const gm = getMessageGroupMetaNew(messages, index, conv);
     container.appendChild(createMessageBubbleElementNew(msg, gm, conv));
   });
+  if (isChatSearchOpen()) {
+    runChatSearch(false);
+  }
+}
+
+function getChatSearchEls() {
+  return {
+    overlay: document.getElementById("chat-search-overlay"),
+    input: document.getElementById("chat-search-input"),
+    results: document.getElementById("chat-search-results"),
+    prev: document.getElementById("chat-search-prev"),
+    next: document.getElementById("chat-search-next"),
+    close: document.getElementById("chat-search-close")
+  };
+}
+
+function isChatSearchOpen() {
+  const overlay = document.getElementById("chat-search-overlay");
+  return !!overlay && !overlay.classList.contains("hidden");
+}
+
+function openChatSearch() {
+  const els = getChatSearchEls();
+  if (!els.overlay || !els.input) return;
+  const header = document.getElementById("chat-header-normal");
+  if (header) header.classList.add("chat-search-active");
+  els.overlay.classList.remove("hidden");
+  els.input.focus();
+  els.input.select();
+  runChatSearch(false);
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function closeChatSearch() {
+  const els = getChatSearchEls();
+  const header = document.getElementById("chat-header-normal");
+  if (header) header.classList.remove("chat-search-active");
+  clearChatSearchHighlight();
+  chatSearchResults = [];
+  chatSearchIndex = -1;
+  if (els.input) els.input.value = "";
+  if (els.results) {
+    els.results.innerHTML = "";
+    els.results.classList.add("hidden");
+  }
+  if (els.prev) els.prev.classList.add("hidden");
+  if (els.next) els.next.classList.add("hidden");
+  if (els.overlay) els.overlay.classList.add("hidden");
+}
+
+function getSearchableMessageText(msg) {
+  const markdownPayload = getMarkdownPayload(msg && msg.text);
+  return String(markdownPayload === null ? (msg && msg.text) : markdownPayload || "");
+}
+
+function formatSearchResultDate(msg) {
+  if (!msg) return "";
+  const raw = msg.created_at || msg.timestamp || msg.time;
+  if (!raw) return "";
+  const date = raw instanceof Date ? raw : new Date(raw);
+  if (Number.isNaN(date.getTime())) return String(msg.time || raw || "");
+  const now = new Date();
+  if (date.getFullYear() !== now.getFullYear()) {
+    return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+  }
+  return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function getSearchResultAvatarHtml(msg, conv) {
+  if (msg && msg.isSelf) {
+    return `<div class="chat-search-result-avatar self">${escapeHtml((window.currentUserInitials || "我").slice(0, 2))}</div>`;
+  }
+  const senderName = getMessageSenderName(msg || {}, conv);
+  const avatarInfo = getSenderAvatarInfo(senderName, msg || {}, conv);
+  if (avatarInfo.avatarUrl) {
+    return `<div class="chat-search-result-avatar image"><img src="${escapeHtml(avatarInfo.avatarUrl)}" alt=""></div>`;
+  }
+  return `<div class="chat-search-result-avatar ${escapeHtml(avatarInfo.colorClass || "")}"${avatarInfo.safeStyle || ""}>${escapeHtml(avatarInfo.initials || "?")}</div>`;
+}
+
+function getSearchResultAvatarHtmlRich(msg, conv) {
+  if (msg && msg.isSelf) {
+    if (currentUserProfile.avatarUrl) {
+      return `<div class="chat-search-result-avatar image"><img src="${escapeHtml(currentUserProfile.avatarUrl)}" alt=""></div>`;
+    }
+    const initials = currentUserProfile.initials || (currentUserProfile.username || "我").slice(0, 2);
+    const color = /^#[0-9a-fA-F]{6}$/.test(currentUserProfile.avatarColor) ? currentUserProfile.avatarColor : "#3390ec";
+    return `<div class="chat-search-result-avatar self" style="background-color: ${color}">${escapeHtml(initials)}</div>`;
+  }
+  const senderName = getMessageSenderName(msg || {}, conv);
+  const avatarInfo = getSenderAvatarInfo(senderName, msg || {}, conv);
+  if (avatarInfo.avatarUrl) {
+    return `<div class="chat-search-result-avatar image"><img src="${escapeHtml(avatarInfo.avatarUrl)}" alt=""></div>`;
+  }
+  return `<div class="chat-search-result-avatar ${escapeHtml(avatarInfo.colorClass || "")}"${avatarInfo.safeStyle || ""}>${escapeHtml(avatarInfo.initials || "?")}</div>`;
+}
+
+function renderSearchResultSnippet(msg) {
+  const html = renderMessageContent(msg && msg.text);
+  return html.replace(/<p>/g, '<span>').replace(/<\/p>/g, '</span>');
+}
+
+function getSearchSnippet(text, query) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  const lower = normalized.toLowerCase();
+  const needle = String(query || "").toLowerCase();
+  const hit = needle ? lower.indexOf(needle) : -1;
+  const start = hit > 18 ? hit - 18 : 0;
+  const end = Math.min(normalized.length, (hit >= 0 ? hit + needle.length + 48 : 72));
+  return (start > 0 ? "..." : "") + normalized.slice(start, end) + (end < normalized.length ? "..." : "");
+}
+
+function renderChatSearchResults(query) {
+  const els = getChatSearchEls();
+  if (!els.results || !els.prev || !els.next) return;
+  const hasQuery = String(query || "").trim().length > 0;
+  els.prev.classList.toggle("hidden", !hasQuery || chatSearchResults.length < 2);
+  els.next.classList.toggle("hidden", !hasQuery || chatSearchResults.length < 2);
+
+  if (!hasQuery) {
+    els.results.innerHTML = "";
+    els.results.classList.add("hidden");
+    return;
+  }
+
+  els.results.classList.remove("hidden");
+  if (!chatSearchResults.length) {
+    els.results.innerHTML = `<div class="chat-search-empty">${_t4("No matching messages", "没有找到匹配消息", "沒有找到符合的訊息", "一致するメッセージはありません")}</div>`;
+    return;
+  }
+
+  const conv = conversationsById[activeChatId];
+  els.results.innerHTML = chatSearchResults.map(function(msg, index) {
+    const senderName = msg.isSelf
+      ? (currentLanguage === "zh" ? "我" : "You")
+      : getMessageSenderName(msg, conv);
+    const snippet = renderSearchResultSnippet(msg);
+    return `<button type="button" class="chat-search-result-item${index === chatSearchIndex ? " is-active" : ""}" data-search-index="${index}">
+      ${getSearchResultAvatarHtmlRich(msg, conv)}
+      <span class="chat-search-result-main">
+        <span class="chat-search-result-title">${escapeHtml(senderName)}</span>
+        <span class="chat-search-result-snippet">${snippet}</span>
+      </span>
+      <span class="chat-search-result-date">${escapeHtml(formatSearchResultDate(msg))}</span>
+    </button>`;
+  }).join("");
+}
+
+function clearChatSearchHighlight() {
+  document.querySelectorAll(".message-search-hit").forEach(function(el) {
+    el.classList.remove("message-search-hit");
+  });
+}
+
+function activateChatSearchResult(index) {
+  if (!chatSearchResults.length) return;
+  if (index < 0) index = chatSearchResults.length - 1;
+  if (index >= chatSearchResults.length) index = 0;
+  chatSearchIndex = index;
+  clearChatSearchHighlight();
+
+  const msg = chatSearchResults[chatSearchIndex];
+  const bubbles = Array.from(document.querySelectorAll(".message-bubble-custom[data-message-id]"));
+  const bubble = bubbles.find(function(el) {
+    return String(el.dataset.messageId) === String(msg.id);
+  });
+  const row = bubble ? bubble.closest(".message-row") : null;
+  if (row) row.classList.add("message-search-hit");
+  if (bubble) {
+    bubble.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  const els = getChatSearchEls();
+  if (els.results) {
+    els.results.querySelectorAll(".chat-search-result-item").forEach(function(item, itemIndex) {
+      item.classList.toggle("is-active", itemIndex === chatSearchIndex);
+    });
+  }
+}
+
+function runChatSearch(activateFirst) {
+  const els = getChatSearchEls();
+  if (!els.input) return;
+  const query = els.input.value.trim();
+  clearChatSearchHighlight();
+  chatSearchIndex = -1;
+
+  if (!query) {
+    chatSearchResults = [];
+    renderChatSearchResults(query);
+    return;
+  }
+
+  const lowerQuery = query.toLowerCase();
+  chatSearchResults = messages.filter(function(msg) {
+    if (!msg || msg.isSystem || msg.decryptError) return false;
+    return getSearchableMessageText(msg).toLowerCase().includes(lowerQuery);
+  });
+
+  renderChatSearchResults(query);
+  if (chatSearchResults.length && activateFirst) {
+    activateChatSearchResult(0);
+  }
 }
 
 // 6. Mobile Layout Back Button Handler
@@ -1556,7 +2285,17 @@ function getSenderAvatarInfo(senderName, msg, conv) {
   const safeStyle = /^#[0-9a-fA-F]{6}$/.test(avatarColor)
     ? ` style="background-color: ${avatarColor}"`
     : "";
-  return { initials, colorClass, safeStyle };
+
+  let avatarUrl = "";
+  if (msg && msg.sender_avatar_url) {
+    avatarUrl = msg.sender_avatar_url;
+  } else if (member && member.avatar_url) {
+    avatarUrl = member.avatar_url;
+  } else if (conv && conv.type === 'single' && msg && msg.sender !== myUserId) {
+    avatarUrl = conv.avatar_url;
+  }
+
+  return { initials, colorClass, safeStyle, avatarUrl };
 }
 
 // Helper to look up member role in a group chat
@@ -1576,6 +2315,27 @@ function escapeHtml(value) {
 function sanitizeMarkdownUrl(url) {
   var value = String(url || "").trim();
   return /^(https?:\/\/|mailto:)/i.test(value) ? value : "";
+}
+
+function getMarkdownPayload(text) {
+  var value = String(text || "");
+  var match = value.match(/^\/md(?:[ \t]+|\r?\n|$)/i);
+  if (!match) return null;
+  return value.slice(match[0].length);
+}
+
+function ensureMarkdownPrefix(textarea) {
+  if (!textarea) return 0;
+  if (getMarkdownPayload(textarea.value) !== null) return 0;
+  textarea.value = "/md " + textarea.value;
+  return 4;
+}
+
+function renderPlainMessageText(text) {
+  var lines = String(text || "").split(/\r?\n/).map(function(line) {
+    return escapeHtml(line);
+  });
+  return "<p>" + lines.join("<br>") + "</p>";
 }
 
 function renderInlineMarkdown(text) {
@@ -1635,6 +2395,46 @@ function renderMessageMarkdown(text) {
   return html || "<p></p>";
 }
 
+function renderMessageContent(text) {
+  var markdownPayload = getMarkdownPayload(text);
+  if (markdownPayload === null) {
+    return renderPlainMessageText(text);
+  }
+  return renderMessageMarkdown(markdownPayload);
+}
+
+function findLoadedMessageById(messageId) {
+  if (messageId === null || messageId === undefined || messageId === "") return null;
+  return messages.find(function(candidate) {
+    return String(candidate.id) === String(messageId);
+  }) || null;
+}
+
+function getReplySenderName(replyMsg, conv) {
+  if (!replyMsg) return "";
+  if (replyMsg.isSelf) {
+    return currentUserProfile.username || (currentLanguage === "zh" ? "我" : "You");
+  }
+  return getMessageSenderName(replyMsg, conv);
+}
+
+function getReplyPreviewHtml(replyMsg) {
+  if (!replyMsg) return "";
+  const text = getSearchableMessageText(replyMsg).replace(/\s+/g, " ").trim();
+  const preview = text.length > 120 ? text.slice(0, 120) + "..." : text;
+  return renderInlineMarkdown(preview || (currentLanguage === "zh" ? "消息" : "Message"));
+}
+
+function renderInlineReplyQuote(msg, conv) {
+  const replyId = msg && (msg.reply_to_message_id || msg.reply_to);
+  const replyMsg = findLoadedMessageById(replyId);
+  if (!replyMsg) return "";
+  return '<button type="button" class="message-reply-quote" data-reply-message-id="' + escapeHtml(replyMsg.id) + '">'
+    + '<span class="message-reply-sender">' + escapeHtml(getReplySenderName(replyMsg, conv)) + '</span>'
+    + '<span class="message-reply-preview">' + getReplyPreviewHtml(replyMsg) + '</span>'
+    + '</button>';
+}
+
 function getChatTextarea() {
   return document.getElementById("chat-input-textarea");
 }
@@ -1649,13 +2449,14 @@ function updateMarkdownPreview() {
   if (!textarea || !preview) return;
 
   var value = textarea.value || "";
-  if (!value.trim() || !textHasMarkdownSyntax(value)) {
+  var markdownPayload = getMarkdownPayload(value);
+  if (markdownPayload === null || !markdownPayload.trim()) {
     preview.classList.add("hidden");
     preview.innerHTML = "";
     return;
   }
 
-  preview.innerHTML = renderMessageMarkdown(value);
+  preview.innerHTML = renderMessageMarkdown(markdownPayload);
   preview.classList.remove("hidden");
 }
 
@@ -1663,8 +2464,14 @@ function wrapTextareaSelection(format) {
   var textarea = getChatTextarea();
   if (!textarea || textarea.disabled) return;
 
-  var start = textarea.selectionStart || 0;
-  var end = textarea.selectionEnd || 0;
+  var originalStart = textarea.selectionStart || 0;
+  var originalEnd = textarea.selectionEnd || 0;
+  var prefixOffset = ensureMarkdownPrefix(textarea);
+  var start = originalStart + prefixOffset;
+  var end = originalEnd + prefixOffset;
+  if (prefixOffset) {
+    textarea.setSelectionRange(start, end);
+  }
   var selected = textarea.value.slice(start, end);
   var hasSelection = end > start;
   var fallback = selected || (format === "link" ? "link text" : "text");
@@ -1814,6 +2621,7 @@ async function sendMessage() {
   messages.push(tempMsg);
   renderMessages();
   scrollToBottom();
+  clearConversationDraft(conv.id);
   updateSidebarPreview(conv, text, time);
 
   textarea.value = "";
@@ -2033,7 +2841,7 @@ function filterGroupAddMembers(query) {
                 </div>
                 <div class="settings-template-row-main">
                   <span class="settings-template-row-title">${user.nickname || user.username}</span>
-                  <span class="settings-template-row-subtitle">${user.username.toLowerCase().endsWith('bot') ? '机器人' : '未添加联系人'}</span>
+                  <span class="settings-template-row-subtitle">${user.user_type === 'agent' ? '智能代理' : (user.user_type === 'bot' ? '机器人' : (user.username.toLowerCase().endsWith('bot') ? '机器人' : '未添加联系人'))}</span>
                 </div>
               `;
               row.onclick = () => toggleGroupMemberSelection(row, user.id);
@@ -2411,6 +3219,459 @@ function getMessageGroupMetaNew(msgs, index, conv) {
   };
 }
 
+function applyImagePreviewToBubble(div, fileId, convType) {
+  var frame = div.querySelector('.file-image-frame');
+  if (!frame || !fileId) return;
+  var msgId = div.querySelector('.message-bubble-custom') && div.querySelector('.message-bubble-custom').getAttribute('data-message-id');
+  var msg = findLoadedMessageById(msgId);
+
+  function renderLoaded(item) {
+    var payload = typeof item === 'string' ? { url: item } : item;
+    frame.classList.remove('is-loading', 'is-error');
+    frame.classList.add('is-loaded');
+    frame.innerHTML = '<img class="file-image-preview-img" src="' + escapeHtml(payload.url) + '" alt="">';
+    frame.onclick = function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      openImagePreviewViewer({
+        fileId: fileId,
+        url: payload.url,
+        blob: payload.blob || null,
+        metadata: payload.metadata || {},
+        message: msg || null,
+      });
+    };
+  }
+
+  function renderError(message) {
+    frame.classList.remove('is-loading');
+    frame.classList.add('is-error');
+    frame.innerHTML =
+      '<button type="button" class="file-image-retry">' +
+        '<i data-lucide="download" class="w-4 h-4"></i>' +
+        '<span>' + escapeHtml(message || 'Download') + '</span>' +
+      '</button>';
+    var retry = frame.querySelector('.file-image-retry');
+    if (retry) {
+      retry.addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        filePreviewCache.delete(String(fileId));
+        applyImagePreviewToBubble(div, fileId, convType);
+      });
+    }
+    if (window.lucide && window.lucide.createIcons) lucide.createIcons({ nodes: frame.querySelectorAll('[data-lucide]') });
+  }
+
+  var cacheKey = String(fileId);
+  var cached = filePreviewCache.get(cacheKey);
+  if (cached && cached.status === 'loaded') {
+    renderLoaded(cached);
+    return;
+  }
+  if (cached && cached.status === 'pending') {
+    cached.promise.then(function (result) {
+      renderLoaded(result);
+    }).catch(function () {
+      renderError('Retry');
+    });
+    return;
+  }
+
+  frame.classList.add('is-loading');
+  frame.innerHTML =
+    '<div class="file-image-loading">' +
+      '<i data-lucide="loader-2" class="w-6 h-6 animate-spin"></i>' +
+    '</div>';
+  if (window.lucide && window.lucide.createIcons) lucide.createIcons({ nodes: frame.querySelectorAll('[data-lucide]') });
+
+  if (!window.iChatFileTransfer || !window.iChatFileTransfer.fetchAndDecryptFile) {
+    renderError('Download');
+    return;
+  }
+
+  var promise = window.iChatFileTransfer.fetchAndDecryptFile(parseInt(fileId), convType).then(function (result) {
+    if (!result || !result.blob || result.blob.type.indexOf('image/') !== 0) {
+      throw new Error('not_image');
+    }
+    var url = URL.createObjectURL(result.blob);
+    var payload = { status: 'loaded', url: url, blob: result.blob, metadata: result.metadata || {} };
+    filePreviewCache.set(cacheKey, payload);
+    return payload;
+  });
+
+  filePreviewCache.set(cacheKey, { status: 'pending', promise: promise });
+  promise.then(function (result) {
+    renderLoaded(result);
+  }).catch(function (err) {
+    console.error('Image preview failed:', err);
+    filePreviewCache.delete(cacheKey);
+    renderError('Retry');
+  });
+}
+
+function ensureImagePreviewViewer() {
+  var viewer = document.getElementById('image-preview-viewer');
+  if (viewer) return viewer;
+
+  viewer = document.createElement('div');
+  viewer.id = 'image-preview-viewer';
+  viewer.className = 'image-preview-viewer hidden';
+  viewer.innerHTML =
+    '<div class="image-preview-scrim" data-image-viewer-close></div>' +
+    '<div class="image-preview-toolbar" role="toolbar" aria-label="Image actions">' +
+      '<button type="button" class="image-preview-action" data-image-viewer-share title="Share"><i data-lucide="forward" class="w-5 h-5"></i></button>' +
+      '<button type="button" class="image-preview-action" data-image-viewer-download title="Download"><i data-lucide="download" class="w-5 h-5"></i></button>' +
+      '<button type="button" class="image-preview-action" data-image-viewer-rotate title="Rotate"><i data-lucide="rotate-ccw" class="w-5 h-5"></i></button>' +
+      '<button type="button" class="image-preview-action" data-image-viewer-zoom title="Zoom"><i data-lucide="zoom-in" class="w-5 h-5"></i></button>' +
+      '<button type="button" class="image-preview-action" data-image-viewer-close title="Close"><i data-lucide="x" class="w-5 h-5"></i></button>' +
+    '</div>' +
+    '<div class="image-preview-stage">' +
+      '<img class="image-preview-full" alt="">' +
+    '</div>' +
+    '<div class="image-preview-zoom-panel hidden">' +
+      '<i data-lucide="zoom-out" class="w-5 h-5"></i>' +
+      '<input type="range" min="1" max="3" step="0.01" value="1" class="image-preview-zoom-range" data-image-viewer-zoom-range>' +
+      '<i data-lucide="zoom-in" class="w-5 h-5"></i>' +
+    '</div>';
+  document.body.appendChild(viewer);
+
+  viewer.addEventListener('click', function (event) {
+    if (event.target.closest('[data-image-viewer-close]')) {
+      closeImagePreviewViewer();
+      return;
+    }
+    if (event.target.closest('[data-image-viewer-download]')) {
+      downloadActiveImageViewer();
+      return;
+    }
+    if (event.target.closest('[data-image-viewer-rotate]')) {
+      rotateActiveImageViewer();
+      return;
+    }
+    if (event.target.closest('[data-image-viewer-zoom]')) {
+      toggleImageViewerZoomPanel();
+      return;
+    }
+    if (event.target.closest('[data-image-viewer-share]')) {
+      shareActiveImageViewer();
+    }
+  });
+
+  var zoomRange = viewer.querySelector('[data-image-viewer-zoom-range]');
+  if (zoomRange) {
+    zoomRange.addEventListener('input', function () {
+      setActiveImageViewerScale(parseFloat(zoomRange.value) || 1);
+    });
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if (!activeImageViewer) return;
+    if (event.key === 'Escape') closeImagePreviewViewer();
+    if (event.key === '+' || event.key === '=') bumpActiveImageViewerScale(0.2);
+    if (event.key === '-' || event.key === '_') bumpActiveImageViewerScale(-0.2);
+    if (event.key === 'r' || event.key === 'R') rotateActiveImageViewer();
+  });
+
+  window.addEventListener('resize', function () {
+    if (activeImageViewer) updateImageViewerViewport(viewer);
+  });
+
+  return viewer;
+}
+
+function updateImageViewerTransform() {
+  if (!activeImageViewer) return;
+  var viewer = document.getElementById('image-preview-viewer');
+  var image = viewer && viewer.querySelector('.image-preview-full');
+  if (!image) return;
+  image.style.transform = 'rotate(' + activeImageViewer.rotation + 'deg) scale(' + activeImageViewer.scale + ')';
+  viewer.classList.toggle('is-zoomed', activeImageViewer.scale > 1);
+  var zoomRange = viewer.querySelector('[data-image-viewer-zoom-range]');
+  if (zoomRange && document.activeElement !== zoomRange) {
+    zoomRange.value = String(activeImageViewer.scale);
+  }
+}
+
+function updateImageViewerViewport(viewer) {
+  if (!viewer) return;
+  var chatWindow = document.getElementById('chat-window-container');
+  var rect = chatWindow && !chatWindow.classList.contains('hidden')
+    ? chatWindow.getBoundingClientRect()
+    : null;
+  if (rect && rect.width > 0) {
+    viewer.style.setProperty('--image-viewer-left', rect.left + 'px');
+    viewer.style.setProperty('--image-viewer-width', rect.width + 'px');
+    viewer.style.setProperty('--image-viewer-center-x', (rect.left + rect.width / 2) + 'px');
+  } else {
+    viewer.style.setProperty('--image-viewer-left', '0px');
+    viewer.style.setProperty('--image-viewer-width', '100vw');
+    viewer.style.setProperty('--image-viewer-center-x', '50vw');
+  }
+}
+
+function imageViewerFilename() {
+  if (!activeImageViewer) return 'image';
+  var name = activeImageViewer.metadata && activeImageViewer.metadata.original_name;
+  return name || ('image-' + activeImageViewer.fileId + '.png');
+}
+
+function openImagePreviewViewer(payload) {
+  var viewer = ensureImagePreviewViewer();
+  var image = viewer.querySelector('.image-preview-full');
+  var zoomPanel = viewer.querySelector('.image-preview-zoom-panel');
+  var zoomRange = viewer.querySelector('[data-image-viewer-zoom-range]');
+  activeImageViewer = {
+    fileId: payload.fileId,
+    url: payload.url,
+    blob: payload.blob,
+    metadata: payload.metadata || {},
+    message: payload.message || null,
+    rotation: 0,
+    scale: 1,
+  };
+  image.src = payload.url;
+  if (zoomPanel) zoomPanel.classList.add('hidden');
+  if (zoomRange) zoomRange.value = '1';
+  updateImageViewerViewport(viewer);
+  viewer.classList.remove('hidden');
+  document.body.classList.add('image-preview-open');
+  updateImageViewerTransform();
+  if (window.lucide && window.lucide.createIcons) {
+    window.lucide.createIcons({ nodes: viewer.querySelectorAll('[data-lucide]') });
+  }
+}
+
+function closeImagePreviewViewer() {
+  var viewer = document.getElementById('image-preview-viewer');
+  if (viewer) viewer.classList.add('hidden');
+  document.body.classList.remove('image-preview-open');
+  activeImageViewer = null;
+}
+
+function downloadActiveImageViewer() {
+  if (!activeImageViewer) return;
+  var a = document.createElement('a');
+  a.href = activeImageViewer.url;
+  a.download = imageViewerFilename();
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function rotateActiveImageViewer() {
+  if (!activeImageViewer) return;
+  activeImageViewer.rotation = (activeImageViewer.rotation - 90) % 360;
+  updateImageViewerTransform();
+}
+
+function toggleImageViewerZoomPanel() {
+  if (!activeImageViewer) return;
+  var viewer = document.getElementById('image-preview-viewer');
+  var panel = viewer && viewer.querySelector('.image-preview-zoom-panel');
+  var range = viewer && viewer.querySelector('[data-image-viewer-zoom-range]');
+  if (!panel) return;
+  panel.classList.toggle('hidden');
+  if (!panel.classList.contains('hidden') && range) {
+    range.value = String(activeImageViewer.scale);
+    range.focus();
+  }
+}
+
+function setActiveImageViewerScale(scale) {
+  if (!activeImageViewer) return;
+  activeImageViewer.scale = Math.min(3, Math.max(1, Number(scale) || 1));
+  updateImageViewerTransform();
+}
+
+function bumpActiveImageViewerScale(delta) {
+  if (!activeImageViewer) return;
+  setActiveImageViewerScale(activeImageViewer.scale + delta);
+}
+
+async function shareActiveImageViewer() {
+  if (!activeImageViewer) return;
+  try {
+    if (activeImageViewer.blob && navigator.share) {
+      var file = new File([activeImageViewer.blob], imageViewerFilename(), {
+        type: activeImageViewer.blob.type || 'image/png',
+      });
+      if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: imageViewerFilename() });
+        return;
+      }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(imageViewerFilename());
+      window.showToast && window.showToast('Image name copied. Download to share this file.');
+      return;
+    }
+    window.showToast && window.showToast('Sharing is not supported in this browser.');
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    console.error('Image share failed:', err);
+    window.showToast && window.showToast('Share failed.');
+  }
+}
+
+function renderFileMessageBubble(div, msg, conv, groupMeta) {
+  var _a = groupMeta || {}, isConsecutive = _a.isConsecutive, isFirstInGroup = _a.isFirstInGroup, isLastInGroup = _a.isLastInGroup;
+  var messageType = msg.message_type || 'file';
+  var fileData = msg.file || {};
+  var fileId = msg.file_id || fileData.file_id;
+  var kindLabel = messageType === 'image' ? 'Image' : messageType === 'sticker' ? 'Sticker' : 'File';
+
+  var bubbleClass = msg.isSelf ? 'bubble-self' : 'bubble-peer';
+  var messageTime = escapeHtml(msg.time || '');
+
+  var avatarHtml = '';
+  var senderName = msg.isSelf ? 'You' : getMessageSenderName(msg, conv);
+  var senderNameHtml = '';
+  if (!msg.isSelf && isFirstInGroup) {
+    senderNameHtml = '<div class="message-sender-line"><span class="message-sender-name">' + escapeHtml(senderName) + '</span></div>';
+  }
+  if (!msg.isSelf) {
+    if (isLastInGroup) {
+      var avatarInfo = getSenderAvatarInfo(senderName, msg, conv);
+      if (avatarInfo.avatarUrl) {
+        avatarHtml = '<div class="message-avatar" title="' + escapeHtml(senderName) + '" style="background: transparent; overflow: hidden;"><img src="' + escapeHtml(avatarInfo.avatarUrl) + '" class="w-full h-full object-cover rounded-full"></div>';
+      } else {
+        avatarHtml = '<div class="message-avatar ' + avatarInfo.colorClass + '" title="' + escapeHtml(senderName) + '"' + avatarInfo.safeStyle + '>' + escapeHtml(avatarInfo.initials) + '</div>';
+      }
+    } else {
+      avatarHtml = '<div class="message-avatar-spacer" aria-hidden="true"></div>';
+    }
+  }
+
+  var replyQuoteHtml = typeof renderInlineReplyQuote === 'function' ? renderInlineReplyQuote(msg, conv) : '';
+  var checkboxHtml = '<div class="message-select-checkbox select-none ' + (isSelectingMessages ? '' : 'hidden') + '" id="msg-select-check-' + msg.id + '"><i data-lucide="' + (selectedMessageIds.includes(msg.id) ? 'check-circle-2' : 'circle') + '" class="w-5 h-5 text-textSecondary"></i></div>';
+
+  var iconName = messageType === 'image' ? 'image' : messageType === 'sticker' ? 'sticker' : 'file-text';
+  var fileSizeText = fileData.total_size_bytes ? formatFileSize(fileData.total_size_bytes) : '';
+  var isAutoPreviewImage = messageType === 'image'
+    && fileId
+    && fileData.total_size_bytes
+    && Number(fileData.total_size_bytes) <= AUTO_IMAGE_PREVIEW_LIMIT_BYTES;
+  var captionText = String(msg.text || '').trim();
+  var placeholderTexts = ['[image]', '[file]', '[sticker]', '[Image]', '[File]', '[Sticker]'];
+  var captionHtml = captionText && placeholderTexts.indexOf(captionText) === -1 && captionText.indexOf('[无法解密') !== 0
+    ? '<div class="file-bubble-caption">' + renderMessageContent(captionText) + '</div>'
+    : '';
+
+  if (isAutoPreviewImage) {
+    div.innerHTML = checkboxHtml + avatarHtml +
+      '<div class="message-bubble-custom file-bubble file-image-bubble ' + bubbleClass + '" data-message-id="' + msg.id + '" data-file-id="' + (fileId || '') + '">' +
+      senderNameHtml +
+      replyQuoteHtml +
+      '<div class="file-image-frame is-loading" data-file-id="' + (fileId || '') + '">' +
+        '<div class="file-image-loading"><i data-lucide="loader-2" class="w-6 h-6 animate-spin"></i></div>' +
+      '</div>' +
+      captionHtml +
+      '<div class="file-image-meta">' +
+        '<span>' + escapeHtml(fileSizeText) + '</span>' +
+        '<span>' + messageTime + '</span>' +
+      '</div>' +
+      '</div>';
+    setTimeout(function () {
+      applyImagePreviewToBubble(div, fileId, conv ? conv.type : 'single');
+      if (div.querySelector('[data-lucide]')) lucide.createIcons();
+    }, 0);
+  } else {
+    div.innerHTML = checkboxHtml + avatarHtml +
+      '<div class="message-bubble-custom file-bubble ' + bubbleClass + '" data-message-id="' + msg.id + '" data-file-id="' + (fileId || '') + '">' +
+      senderNameHtml +
+      replyQuoteHtml +
+      '<div class="file-bubble-content">' +
+        '<div class="file-bubble-icon"><i data-lucide="' + iconName + '" class="w-8 h-8"></i></div>' +
+        '<div class="file-bubble-info">' +
+          '<div class="file-bubble-kind">' + escapeHtml(kindLabel) + '</div>' +
+          '<div class="file-bubble-size">' + escapeHtml(fileSizeText) + '</div>' +
+          '<button class="file-download-btn" data-file-id="' + (fileId || '') + '">' +
+            '<i data-lucide="download" class="w-4 h-4"></i> Download' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="file-bubble-preview hidden"></div>' +
+      captionHtml +
+      '<div class="message-meta-line"><span>' + messageTime + '</span></div>' +
+      '</div>';
+  }
+
+  // Attach download click handler
+  var downloadBtn = div.querySelector('.file-download-btn');
+  if (downloadBtn && fileId) {
+    downloadBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var btn = this;
+      var fid = btn.getAttribute('data-file-id');
+      var convType = conv ? conv.type : 'single';
+      if (!window.iChatFileTransfer || !window.iChatFileTransfer.fetchAndDecryptFile) {
+        window.showToast && window.showToast('File transfer module not loaded.');
+        return;
+      }
+      btn.classList.add('downloading');
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Downloading...';
+      lucide.createIcons();
+      window.iChatFileTransfer.fetchAndDecryptFile(parseInt(fid), convType).then(function (result) {
+        btn.classList.remove('downloading');
+        btn.classList.add('downloaded');
+        btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
+        lucide.createIcons();
+        if (result && result.blob) {
+          var url = URL.createObjectURL(result.blob);
+          var previewEl = div.querySelector('.file-bubble-preview');
+          if (previewEl) {
+            // Show image preview
+            if (result.blob.type.indexOf('image/') === 0) {
+              var img = document.createElement('img');
+              img.src = url;
+              previewEl.appendChild(img);
+              previewEl.classList.remove('hidden');
+            }
+          }
+          // Trigger download for non-image files
+          if (result.blob.type.indexOf('image/') !== 0) {
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = (result.metadata && result.metadata.original_name) || 'file';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+        }
+      }).catch(function (err) {
+        btn.classList.remove('downloading');
+        btn.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4"></i> Failed';
+        lucide.createIcons();
+        console.error('File download failed:', err);
+        window.showToast && window.showToast('Download failed: ' + (err.message || 'Unknown error'));
+      });
+    });
+  }
+
+  div.onclick = function(e) {
+    if (isSelectingMessages) { e.stopPropagation(); toggleMessageSelection(msg.id); }
+  };
+  div.oncontextmenu = function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof MessageActions !== 'undefined' && MessageActions.showMenu) {
+      MessageActions.showMenu(e, msg, conv || conversationsById[activeChatId]);
+    }
+  };
+
+  setTimeout(function() { if (div.querySelector('[data-lucide]')) lucide.createIcons(); }, 0);
+  return div;
+}
+
+function formatFileSize(bytes) {
+  if (!bytes || bytes === 0) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
 function createMessageBubbleElementNew(msg, groupMeta, conv) {
   if (typeof groupMeta === "boolean") {
     groupMeta = { isConsecutive: groupMeta, isFirstInGroup: !groupMeta, isLastInGroup: true };
@@ -2427,6 +3688,13 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     div.innerHTML = '<div class="system-capsule"><span>' + escapeHtml(text) + '</span></div>';
     setTimeout(function() { if (div.querySelector("[data-lucide]")) lucide.createIcons(); }, 0);
     return div;
+  }
+
+  // ── File / image / sticker message ───────────────────────────────
+  if (msg.isFile || msg.file || msg.message_type === 'image' || msg.message_type === 'file' || msg.message_type === 'sticker') {
+    div.className += msg.isSelf ? " message-row-self" : " message-row-peer";
+    if (isSelectingMessages) div.className += " message-row-selecting";
+    return renderFileMessageBubble(div, msg, conv, groupMeta);
   }
 
   if (!msg.isSystem) {
@@ -2446,7 +3714,8 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
 
   var isGroup = conv && conv.type === "group";
   var senderName = msg.isSelf ? "You" : getMessageSenderName(msg, conv);
-  var messageText = renderMessageMarkdown(msg.text);
+  var replyQuoteHtml = renderInlineReplyQuote(msg, conv);
+  var messageText = renderMessageContent(msg.text);
   var messageTime = escapeHtml(msg.time || "");
 
   if (msg.isSelf) {
@@ -2477,6 +3746,7 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     var statusClass = msg.status === "read" ? "text-brand-light dark:text-brand-dark" : "";
     div.innerHTML = checkboxHtml
       + '<div class="message-bubble-custom bubble-self" data-message-id="' + msg.id + '">'
+      + replyQuoteHtml
       + '<div class="message-text-content">' + messageText + '</div>'
       + '<div class="message-meta-line">'
       + '<span>' + messageTime + '</span>'
@@ -2488,7 +3758,11 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     var avatarHtml = "";
     if (isLastInGroup) {
       var avatarInfo = getSenderAvatarInfo(senderName, msg, conv);
-      avatarHtml = '<div class="message-avatar ' + avatarInfo.colorClass + '" title="' + escapeHtml(senderName) + '"' + avatarInfo.safeStyle + '>' + escapeHtml(avatarInfo.initials) + '</div>';
+      if (avatarInfo.avatarUrl) {
+        avatarHtml = '<div class="message-avatar" title="' + escapeHtml(senderName) + '" style="background: transparent; overflow: hidden;"><img src="' + escapeHtml(avatarInfo.avatarUrl) + '" class="w-full h-full object-cover rounded-full"></div>';
+      } else {
+        avatarHtml = '<div class="message-avatar ' + avatarInfo.colorClass + '" title="' + escapeHtml(senderName) + '"' + avatarInfo.safeStyle + '>' + escapeHtml(avatarInfo.initials) + '</div>';
+      }
     } else {
       avatarHtml = '<div class="message-avatar-spacer" aria-hidden="true"></div>';
     }
@@ -2499,10 +3773,28 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
     div.innerHTML = checkboxHtml + avatarHtml
       + '<div class="message-bubble-custom bubble-peer" data-message-id="' + msg.id + '">'
       + senderNameHtml
+      + replyQuoteHtml
       + '<div class="message-text-content">' + messageText + '</div>'
       + '<div class="message-meta-line"><span>' + messageTime + '</span></div>'
       + '</div>';
   }
+  div.querySelectorAll(".message-reply-quote").forEach(function(replyQuote) {
+    replyQuote.addEventListener("click", function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const targetId = replyQuote.dataset.replyMessageId;
+      const targetBubble = Array.from(document.querySelectorAll(".message-bubble-custom[data-message-id]")).find(function(el) {
+        return String(el.dataset.messageId) === String(targetId);
+      });
+      if (targetBubble) {
+        targetBubble.scrollIntoView({ behavior: "smooth", block: "center" });
+        targetBubble.classList.add("message-reply-jump-highlight");
+        setTimeout(function() {
+          targetBubble.classList.remove("message-reply-jump-highlight");
+        }, 1600);
+      }
+    });
+  });
   div.querySelectorAll(".message-spoiler").forEach(function(spoiler) {
     spoiler.addEventListener("click", function(event) {
       event.stopPropagation();
@@ -2529,10 +3821,72 @@ function setupEventListeners() {
     });
   }
 
+  const chatHeaderSearchBtn = document.getElementById("chat-header-search-btn");
+  const chatSearchInput = document.getElementById("chat-search-input");
+  const chatSearchClose = document.getElementById("chat-search-close");
+  const chatSearchPrev = document.getElementById("chat-search-prev");
+  const chatSearchNext = document.getElementById("chat-search-next");
+  const chatSearchResultsEl = document.getElementById("chat-search-results");
+  if (chatHeaderSearchBtn) {
+    chatHeaderSearchBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openChatSearch();
+    });
+  }
+  if (chatSearchInput) {
+    chatSearchInput.addEventListener("input", () => runChatSearch(false));
+    chatSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeChatSearch();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        activateChatSearchResult(chatSearchIndex < 0 ? 0 : chatSearchIndex + (e.shiftKey ? -1 : 1));
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        activateChatSearchResult(chatSearchIndex < 0 ? 0 : chatSearchIndex + 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        activateChatSearchResult(chatSearchIndex < 0 ? chatSearchResults.length - 1 : chatSearchIndex - 1);
+      }
+    });
+  }
+  if (chatSearchClose) {
+    chatSearchClose.addEventListener("click", (e) => {
+      e.preventDefault();
+      closeChatSearch();
+    });
+  }
+  if (chatSearchPrev) {
+    chatSearchPrev.addEventListener("click", (e) => {
+      e.preventDefault();
+      activateChatSearchResult(chatSearchIndex < 0 ? chatSearchResults.length - 1 : chatSearchIndex - 1);
+    });
+  }
+  if (chatSearchNext) {
+    chatSearchNext.addEventListener("click", (e) => {
+      e.preventDefault();
+      activateChatSearchResult(chatSearchIndex < 0 ? 0 : chatSearchIndex + 1);
+    });
+  }
+  if (chatSearchResultsEl) {
+    chatSearchResultsEl.addEventListener("click", (e) => {
+      const item = e.target.closest(".chat-search-result-item");
+      if (!item) return;
+      activateChatSearchResult(Number(item.dataset.searchIndex || 0));
+    });
+  }
+
   // Enter to send message
   const chatInput = document.getElementById("chat-input-textarea");
   if (chatInput) {
     setupFormatToolbar();
+    chatInput.addEventListener("input", () => {
+      if (!activeChatId) return;
+      setConversationDraft(activeChatId, chatInput.value);
+      refreshConversationDraftPreview(activeChatId);
+    });
     chatInput.addEventListener("keydown", (e) => {
       var key = e.key.toLowerCase();
       var handledFormat = null;
@@ -2619,7 +3973,6 @@ function setupEventListeners() {
   // Right Profile Details Panel Toggles
   const rightDetailsPanel = document.getElementById("right-panel");
   const chatHeaderDetails = document.getElementById("chat-header-details");
-  const chatHeaderLock = document.getElementById("chat-header-lock");
   const closeDetailsBtn = document.getElementById("close-details-btn");
 
   window.toggleRightPanel = function() {
@@ -2631,12 +3984,6 @@ function setupEventListeners() {
 
   if (chatHeaderDetails) {
     chatHeaderDetails.addEventListener("click", window.toggleRightPanel);
-  }
-  if (chatHeaderLock) {
-    chatHeaderLock.addEventListener("click", (e) => {
-      e.stopPropagation();
-      window.toggleRightPanel();
-    });
   }
   if (closeDetailsBtn) {
     closeDetailsBtn.addEventListener("click", () => {
@@ -3144,7 +4491,7 @@ function fabNewGroup(event) {
 function fabNewChannel(event) {
   event.stopPropagation();
   closeContactsFab();
-  window.showToast(currentLanguage === 'zh' ? '频道功能暂未开放' : 'Channels are not yet available');
+  window.showToast(_t4('Channels are not yet available', '频道功能暂未开放', '頻道功能暫未開放', 'チャンネル機能はまだ利用できません'));
 }
 
 function closeContactsFab() {
@@ -3277,7 +4624,7 @@ function performSearch() {
       if (loading) loading.classList.add('hidden');
       console.error('Search failed:', err);
       showSearchEmpty();
-      window.showToast(currentLanguage === 'zh' ? '搜索失败，请重试' : 'Search failed. Please retry.');
+      window.showToast(_t4('Search failed. Please retry.', '搜索失败，请重试', '搜尋失敗，請重試', '検索に失敗しました。再試行してください。'));
     });
 }
 
@@ -3298,8 +4645,20 @@ function renderSearchResults(data, query) {
       resultsContent.appendChild(createSearchResultItem({
         initials: (c.username || '?')[0].toUpperCase(),
         name: c.nickname || c.username || 'Unknown',
-        subtitle: c.is_contact ? (currentLanguage === 'zh' ? '已是联系人' : 'Already a contact') : ('@' + (c.username || '')),
+        subtitle: (function() {
+          let subText = '@' + (c.username || '');
+          if (c.user_type === 'agent') {
+            subText = (currentLanguage === 'zh' ? '智能代理' : 'Agent') + ' · ' + subText;
+          } else if (c.user_type === 'bot') {
+            subText = (currentLanguage === 'zh' ? '机器人' : 'Bot') + ' · ' + subText;
+          }
+          if (c.is_contact) {
+            subText = _t4('Already a contact', '已是联系人', '已是聯絡人', '既に連絡先です') + ' · ' + subText;
+          }
+          return subText;
+        })(),
         color: '#5c6bc0',
+        avatar_url: c.avatar_url,
         onclick: function() {
           if (c.is_contact) {
             // Navigate to chat with this contact
@@ -3337,7 +4696,7 @@ function renderSearchResults(data, query) {
       resultsContent.appendChild(createSearchResultItem({
         initials: (g.name || 'G')[0].toUpperCase(),
         name: g.name || 'Unnamed Group',
-        subtitle: (g.is_member ? '' : (currentLanguage === 'zh' ? '未加入 · ' : 'Not joined · ')) + (g.member_count || 0) + ' members',
+        subtitle: (g.is_member ? '' : _t4('Not joined · ', '未加入 · ', '未加入 · ', '未参加 · ')) + (g.member_count || 0) + ' members',
         color: '#6f42c1',
         onclick: function() {
           if (g.is_member) {
@@ -3352,7 +4711,7 @@ function renderSearchResults(data, query) {
               if (conv) selectChat(conv.id.toString());
             });
           } else {
-            window.showToast(currentLanguage === 'zh' ? '你尚未加入该群组' : 'You are not a member of this group');
+            window.showToast(_t4('You are not a member of this group', '你尚未加入该群组', '你尚未加入該群組', 'このグループのメンバーではありません'));
           }
         }
       }));
@@ -3370,6 +4729,7 @@ function renderSearchResults(data, query) {
         name: conv.peer_display_name || conv.peer_username || 'Unknown',
         subtitle: '@' + (conv.peer_username || ''),
         color: '#3390ec',
+        avatar_url: conv.avatar_url,
         onclick: function() {
           navigateSidebar('chat');
           if (conv.conversation_id) {
@@ -3384,9 +4744,12 @@ function renderSearchResults(data, query) {
     if (emptyState) emptyState.classList.remove('hidden');
     resultsContent.classList.add('hidden');
     var emptyP = emptyState ? emptyState.querySelector('p') : null;
-    if (emptyP) emptyP.textContent = currentLanguage === 'zh'
-      ? '未找到与 "' + query + '" 相关的结果'
-      : 'No results found for "' + query + '"';
+    if (emptyP) emptyP.textContent = _t4(
+      'No results found for "' + query + '"',
+      '未找到与 "' + query + '" 相关的结果',
+      '未找到與 "' + query + '" 相關的結果',
+      '"' + query + '" の検索結果はありません'
+    );
   } else {
     if (emptyState) emptyState.classList.add('hidden');
     resultsContent.classList.remove('hidden');
@@ -3405,8 +4768,14 @@ function createSearchResultItem(opts) {
   btn.className = 'search-result-item';
   btn.onclick = opts.onclick;
   var safeColor = /^#[0-9a-fA-F]{6}$/.test(opts.color || '') ? opts.color : '#5c6bc0';
-  btn.innerHTML = '<div class="result-avatar" style="background-color:' + safeColor + '">'
-    + escapeHtml(opts.initials || '?')
+  var avatarInner = opts.avatar_url
+    ? '<img src="' + escapeHtml(opts.avatar_url) + '" class="w-full h-full object-cover rounded-full">'
+    : escapeHtml(opts.initials || '?');
+  var avatarBgStyle = opts.avatar_url
+    ? 'background-color: transparent; overflow: hidden;'
+    : 'background-color:' + safeColor;
+  btn.innerHTML = '<div class="result-avatar" style="' + avatarBgStyle + '">'
+    + avatarInner
     + '</div>'
     + '<div class="result-info">'
     + '<div class="result-name">' + escapeHtml(opts.name || '') + '</div>'
@@ -3439,9 +4808,9 @@ function showSearchPlaceholder(tab) {
   if (emptyState) {
     emptyState.classList.remove('hidden');
     var labels = {
-      channels: currentLanguage === 'zh' ? '频道搜索暂未开放' : 'Channel search is not yet available',
-      apps: currentLanguage === 'zh' ? 'Apps 搜索暂未开放' : 'Apps search is not yet available',
-      posts: currentLanguage === 'zh' ? 'Posts 搜索暂未开放' : 'Posts search is not yet available'
+      channels: _t4('Channel search is not yet available', '频道搜索暂未开放', '頻道搜尋暫未開放', 'チャンネル検索はまだ利用できません'),
+      apps: _t4('Apps search is not yet available', 'Apps 搜索暂未开放', 'Apps 搜尋暫未開放', 'アプリ検索はまだ利用できません'),
+      posts: _t4('Posts search is not yet available', 'Posts 搜索暂未开放', 'Posts 搜尋暫未開放', '投稿検索はまだ利用できません')
     };
     var p = emptyState.querySelector('p');
     if (p) p.textContent = labels[tab] || labels.channels;
@@ -3840,6 +5209,26 @@ window.toggleTheme = function() {
   window.dispatchEvent(event);
 };
 
+  // ── File transfer: paperclip / attach button ─────────────────────
+  const attachBtn = document.querySelector('.telegram-composer-action[title="Attach Document"]');
+  if (attachBtn) {
+    attachBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (!activeChatId) {
+        window.showToast && window.showToast('Please select a conversation first.');
+        return;
+      }
+      if (!e2eeKeyReady) {
+        window.showToast && window.showToast('Encryption key not ready. Please import or create your key first.');
+        return;
+      }
+      if (window.iChatFileTransfer && window.iChatFileTransfer.showFilePicker) {
+        const conv = conversationsById[activeChatId];
+        const convType = conv ? conv.type : 'single';
+        window.iChatFileTransfer.showFilePicker(activeChatId, convType, 'file');
+      }
+    });
+  }
 function insertEmoji(emoji) {
   const textarea = document.getElementById("chat-input-textarea");
   if (textarea) {
@@ -3858,6 +5247,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   var keyScript = document.getElementById('ichat-key-manager-script');
   myUserId = keyScript ? parseInt(keyScript.dataset.currentUserId) : null;
+  if (keyScript) {
+    currentUserProfile = {
+      username: keyScript.dataset.username || "",
+      initials: keyScript.dataset.initials || "",
+      avatarUrl: keyScript.dataset.avatarUrl || "",
+      avatarColor: keyScript.dataset.avatarColor || ""
+    };
+  }
 
   // T11: Auto-save current account to multi-account list
   autoSaveCurrentAccount();
@@ -3947,6 +5344,7 @@ const translations = {
     view_info: "Chat Info",
     write_placeholder: "Write an encrypted message...",
     menu_boost_group: "Boost Group",
+    menu_block_contact: "Block",
     menu_mute_group: "Mute...",
     menu_select_messages: "Select messages",
     menu_report: "Report",
@@ -4022,7 +5420,135 @@ const translations = {
     lastSeenToday: "Last seen today at",
     lastSeenYesterday: "Last seen yesterday at",
     lastSeenDate: "Last seen",
-    typingIndicator: "Typing"
+    typingIndicator: "Typing",
+    // Settings categories
+    notifications_sounds: "Notifications and Sounds",
+    data_and_storage: "Data and Storage",
+    privacy_and_security: "Privacy and Security",
+    chat_folders: "Chat Folders",
+    stickers_and_emoji: "Stickers and Emoji",
+    speakers_and_camera: "Speakers and Camera",
+    devices: "Devices",
+    keyboard_shortcuts: "Keyboard Shortcuts",
+    manage_crypto_keys: "Manage Cryptographic Keys",
+    edit_profile: "Edit Profile",
+    language: "Language",
+    birthday: "Birthday",
+    // Notification settings
+    web_notifications: "Web Notifications",
+    display_notifications: "Show Notifications",
+    show_offline_notifications: "Show Offline Notifications",
+    all_accounts: "All Accounts",
+    enable_private_chats: "Enable Private Chats",
+    sound_effects: "Sound Effects",
+    notification_tone: "Notification Tone",
+    message_sent_sound_effect: "Message Sent",
+    private_chat_notifications: "Private Chat Notifications",
+    message_preview: "Message Preview",
+    group_notifications: "Group Notifications",
+    channel_notifications: "Channel Notifications",
+    other_notifications: "Other",
+    contact_joined_telegram: "Contact joined Telegram",
+    // Data & Storage
+    auto_download_media: "Auto-Download Media",
+    reset_auto_download_settings: "Reset Auto-Download Settings",
+    estimated_storage_quota: "Estimated Storage Quota",
+    cached_files: "Cached Files",
+    cached_video_stream_chunks: "Cached Video Stream Chunks",
+    clear_cache_older_than: "Clear Cache Older Than",
+    cache_size_limit: "Maximum Cache Size",
+    clear_all_cache: "Clear All Cache",
+    // Privacy
+    blocked_users: "Blocked Users",
+    auto_delete_messages: "Auto-Delete Messages",
+    passcode_lock: "Passcode Lock",
+    two_step_verification: "Two-Step Verification",
+    login_email: "Login Email",
+    passkey: "Passkey",
+    privacy: "Privacy",
+    who_can_see_my_phone_number: "Who can see my phone number?",
+    who_can_see_my_last_seen: "Who can see my last seen?",
+    who_can_see_my_profile_photo: "Who can see my profile photo?",
+    who_can_see_my_bio: "Who can see my bio?",
+    who_can_call_me: "Who can call me?",
+    who_can_forward_link: "Who can link to my account when forwarding?",
+    who_can_invite_me: "Who can invite me?",
+    who_can_send_messages: "Who can send me messages?",
+    who_can_see_my_birthday: "Who can see my birthday?",
+    who_can_send_me_gifts: "Who can send me gifts?",
+    who_can_see_my_saved_music: "Who can see my saved music?",
+    sensitive_content: "Sensitive Content",
+    disable_filtering: "Disable Filtering",
+    payments: "Payments",
+    clear_payment_shipping_info: "Clear Payment and Shipping Info",
+    delete_cloud_drafts: "Delete All Cloud Drafts",
+    // General settings
+    message_font_size: "Message Font Size",
+    chat_wallpaper: "Chat Wallpaper",
+    power_saving_mode: "Power Saving Mode",
+    theme_color: "Theme Color",
+    time_format: "Time Format",
+    light_theme: "Light",
+    dark_theme_night: "Dark / Night",
+    system_default: "System Default",
+    hour_12: "12-Hour",
+    hour_24: "24-Hour",
+    enabled: "Enabled",
+    disabled: "Disabled",
+    // Stickers & Emoji
+    quick_reactions: "Quick Reactions",
+    suggest_emoji: "Suggest Emoji",
+    loop_animated_stickers: "Loop Animated Stickers",
+    emoji: "Emoji",
+    suggested_emojis: "Suggested Emojis",
+    large_emoji: "Large Emoji",
+    sticker_packs_order: "Sticker Packs Order",
+    dynamic_sticker_order: "Dynamic Sticker Pack Order",
+    sticker_packs: "Sticker Packs",
+    // Folders
+    folders: "Folders",
+    create_folder: "Create Folder",
+    folders_view: "Folders View",
+    folders_sidebar: "Left Sidebar",
+    folders_above_chats: "Folders Above Chats",
+    no_folders: "No Folders",
+    // Sessions & Shortcuts
+    terminate: "Terminate",
+    terminate_all_other_sessions: "Terminate All Other Sessions",
+    current_session: "Current",
+    no_active_sessions: "No Active Sessions",
+    // Profile edit
+    first_name: "First Name",
+    last_name: "Last Name",
+    bio: "Bio (optional)",
+    username_optional: "Username (optional)",
+    save_changes: "Save Changes",
+    add_birthday: "Add Birthday",
+    change_avatar: "Change Avatar",
+    // Birthday
+    never_allow: "Never Allow",
+    always_allow: "Always Allow",
+    add_users: "Add Users",
+    exceptions: "Exceptions",
+    // Misc
+    search_contacts: "Search contacts...",
+    new_private_chat: "New Private Chat",
+    new_channel: "New Channel",
+    soon: "Soon",
+    add_another_account: "Add Another Account",
+    loading_accounts: "Loading accounts...",
+    groups: "Groups",
+    all_chats: "All Chats",
+    private_chats: "Private Chats",
+    group_chats: "Group Chats",
+    channels_label: "Channels",
+    search_for_chats: "Search for chats, contacts, and messages",
+    // Translate section
+    translate_messages: "Translate Messages",
+    show_translate_button: "Show Translate Button",
+    translate_all_chats: "Translate All Chats",
+    do_not_translate: "Do Not Translate",
+    ichat_premium_hint: "Subscribe to iChat Premium to translate entire chats."
   },
   zh: {
     general_settings: "通用设置",
@@ -4086,6 +5612,7 @@ const translations = {
     view_info: "查看信息",
     write_placeholder: "编写加密消息...",
     menu_boost_group: "助力群组",
+    menu_block_contact: "拉黑",
     menu_mute_group: "静音免打扰",
     menu_select_messages: "选择消息",
     menu_report: "举报",
@@ -4161,128 +5688,822 @@ const translations = {
     lastSeenToday: "最后上线今天",
     lastSeenYesterday: "最后上线昨天",
     lastSeenDate: "最后上线",
-    typingIndicator: "正在输入"
+    typingIndicator: "正在输入",
+    // Settings categories
+    notifications_sounds: "通知与声音",
+    data_and_storage: "数据和存储",
+    privacy_and_security: "隐私和安全",
+    chat_folders: "聊天文件夹",
+    stickers_and_emoji: "贴纸与表情",
+    speakers_and_camera: "扬声器和摄像头",
+    devices: "设备",
+    keyboard_shortcuts: "快捷键",
+    manage_crypto_keys: "管理加密密钥",
+    edit_profile: "编辑资料",
+    language: "语言",
+    birthday: "生日",
+    // Notification settings
+    web_notifications: "网页通知",
+    display_notifications: "显示通知",
+    show_offline_notifications: "显示线下通知",
+    all_accounts: "全部账号",
+    enable_private_chats: "启用私聊",
+    sound_effects: "声音特效",
+    notification_tone: "通知音",
+    message_sent_sound_effect: "消息已发送",
+    private_chat_notifications: "私聊通知",
+    message_preview: "消息预览",
+    group_notifications: "群组通知",
+    channel_notifications: "频道通知",
+    other_notifications: "其它",
+    contact_joined_telegram: "联系人已加入 Telegram",
+    // Data & Storage
+    auto_download_media: "自动下载媒体文件",
+    reset_auto_download_settings: "重置自动下载设置",
+    estimated_storage_quota: "预估存储空间",
+    cached_files: "缓存文件",
+    cached_video_stream_chunks: "缓存的视频流片段",
+    clear_cache_older_than: "清除早于以下时间的缓存",
+    cache_size_limit: "最大缓存大小",
+    clear_all_cache: "清除所有缓存",
+    // Privacy
+    blocked_users: "已拉黑用户",
+    auto_delete_messages: "自动删除消息",
+    passcode_lock: "密码锁",
+    two_step_verification: "两步验证",
+    login_email: "登录邮箱",
+    passkey: "通行密钥",
+    privacy: "隐私",
+    who_can_see_my_phone_number: "谁可以看见我的手机号码？",
+    who_can_see_my_last_seen: "谁可以看到我最后上线的时间？",
+    who_can_see_my_profile_photo: "谁能看见我的头像？",
+    who_can_see_my_bio: "谁可以看到我的个人简介？",
+    who_can_call_me: "谁可以给我打电话？",
+    who_can_forward_link: "转发我的消息时，谁可以链接至我的账号？",
+    who_can_invite_me: "谁可以邀请我？",
+    who_can_send_messages: "谁可以给我发消息？",
+    who_can_see_my_birthday: "谁可以看到我的生日？",
+    who_can_send_me_gifts: "谁可以给我送礼物？",
+    who_can_see_my_saved_music: "谁可以看到我的已收藏音乐？",
+    sensitive_content: "敏感内容",
+    disable_filtering: "停用过滤",
+    payments: "付款",
+    clear_payment_shipping_info: "清除付款和配送信息",
+    delete_cloud_drafts: "删除所有的云草稿",
+    // General settings
+    message_font_size: "消息字号",
+    chat_wallpaper: "聊天壁纸",
+    power_saving_mode: "省电模式",
+    theme_color: "主题颜色",
+    time_format: "时间格式",
+    light_theme: "日光白",
+    dark_theme_night: "夜间",
+    system_default: "系统默认",
+    hour_12: "12小时制",
+    hour_24: "24小时制",
+    enabled: "已启用",
+    disabled: "已停用",
+    // Stickers & Emoji
+    quick_reactions: "快速回应",
+    suggest_emoji: "根据 Emoji 联想表情",
+    loop_animated_stickers: "循环播放动态贴纸",
+    emoji: "Emoji",
+    suggested_emojis: "推荐的表情",
+    large_emoji: "大号表情",
+    sticker_packs_order: "贴纸包动态顺序",
+    dynamic_sticker_order: "贴纸包动态顺序",
+    sticker_packs: "表情",
+    // Folders
+    folders: "文件夹",
+    create_folder: "创建文件夹",
+    folders_view: "文件夹视图",
+    folders_sidebar: "左侧文件夹",
+    folders_above_chats: "聊天上方显示文件夹",
+    no_folders: "暂无文件夹",
+    // Sessions & Shortcuts
+    terminate: "终止",
+    terminate_all_other_sessions: "终止其他所有会话",
+    current_session: "当前",
+    no_active_sessions: "未找到活跃会话",
+    // Profile edit
+    first_name: "名字",
+    last_name: "姓氏",
+    bio: "个人简介（可选）",
+    username_optional: "用户名（可选）",
+    save_changes: "保存修改",
+    add_birthday: "添加生日",
+    change_avatar: "更换头像",
+    // Birthday
+    never_allow: "永不允许",
+    always_allow: "总是允许",
+    add_users: "添加用户",
+    exceptions: "例外",
+    // Misc
+    search_contacts: "搜索联系人...",
+    new_private_chat: "新建私聊",
+    new_channel: "新建频道",
+    soon: "即将推出",
+    add_another_account: "添加其他账号",
+    loading_accounts: "正在加载账号...",
+    groups: "群组",
+    all_chats: "全部聊天",
+    private_chats: "私聊",
+    group_chats: "群聊",
+    channels_label: "频道",
+    search_for_chats: "搜索聊天、联系人和消息",
+    // Translate section
+    translate_messages: "翻译消息",
+    show_translate_button: "显示“翻译”按钮",
+    translate_all_chats: "翻译全部聊天记录",
+    do_not_translate: "无需翻译",
+    ichat_premium_hint: "订阅 iChat 高级版 以翻译所有聊天。"
+  },
+  'zh-TW': {
+    general_settings: "一般設定",
+    logout_confirm_title: "登出",
+    logout_confirm_desc: "確定要登出嗎？",
+    logout_confirm_btn: "確認",
+    account_details: "帳號詳情",
+    active_sessions: "活躍工作階段 (3)",
+    active_sessions_desc: "管理所有已登入此帳號的裝置",
+    attach_document: "附加檔案",
+    back_to_sidebar: "返回聊天列表",
+    blocked_contacts: "已封鎖聯絡人",
+    blocked_contacts_desc: "目前沒有被封鎖的使用者",
+    chat_info_title: "聊天資訊",
+    close_panel: "關閉面板",
+    cryptographic_fingerprint: "加密指紋",
+    dark_theme_mode: "深色主題模式",
+    e2ee_banner: "🔒 訊息已透過端對端加密保護。",
+    email_address: "電子郵件地址",
+    empty_desc: "從側邊欄列表中選擇一個聯絡人，或搜尋新聯絡人以啟動端對端加密工作階段。",
+    empty_item1: "訊息使用 ECDH P-256 金鑰協商在本地進行加密。",
+    empty_item2: "伺服器目錄中絕不儲存任何明文訊息。",
+    empty_item3: "透過檢查目前的安全指紋來驗證加密狀態。",
+    empty_title: "未選擇聊天",
+    encryption_details: "加密詳情",
+    fp_match_btn: "指紋相符",
+    group_members_title: "群組成員",
+    insert_emoji: "插入表情符號",
+    lang_display: "繁體中文",
+    language_mode: "語言 / Language",
+    main_menu: "主選單",
+    manage_keys: "管理加密金鑰",
+    manage_keys_desc: "檢視並驗證橢圓曲線金鑰對",
+    menu_contacts: "聯絡人",
+    menu_help: "iChat Pro 說明與常見問題",
+    menu_logout: "登出",
+    menu_new_group: "新增群組",
+    menu_profile: "個人檔案",
+    menu_saved_messages: "收藏",
+    menu_settings: "設定",
+    menu_theme: "切換主題",
+    more_operations: "更多操作",
+    off: "關閉",
+    online: "線上",
+    phone_number: "手機號碼",
+    privacy_security: "隱私與安全",
+    protocol: "加密協定",
+    search_chat: "搜尋聊天記錄",
+    search_placeholder: "搜尋聊天或訊息...",
+    self_destruct_timer: "閱後即焚計時器",
+    settings: "設定",
+    system_preferences: "系統偏好設定",
+    timer_1h: "1 小時",
+    username: "使用者名稱",
+    verification: "驗證狀態",
+    verified: "已驗證",
+    verify_fingerprint_btn: "驗證指紋",
+    verify_fp_desc: "端對端加密。點選以驗證安全指紋。",
+    verify_fp_title: "驗證安全指紋",
+    reset_key_btn: "重設金鑰",
+    view_info: "檢視資訊",
+    write_placeholder: "撰寫加密訊息...",
+    menu_boost_group: "強化群組",
+    menu_block_contact: "封鎖",
+    menu_mute_group: "靜音免打擾",
+    menu_select_messages: "選取訊息",
+    menu_report: "檢舉",
+    menu_leave_group: "離開群組",
+    menu_delete_chat: "刪除聊天",
+    menu_add_account: "新增帳號",
+    menu_more: "更多",
+    menu_about: "關於 iChat Pro",
+    menu_updates: "檢查更新",
+    // T12: Conversation actions
+    convPin: "置頂",
+    convUnpin: "取消置頂",
+    convPinned: "已置頂",
+    convUnpinned: "已取消置頂",
+    convMute: "靜音",
+    convUnmute: "取消靜音",
+    convMuted: "已靜音",
+    convUnmuted: "已取消靜音",
+    convMute1h: "靜音 1 小時",
+    convMute8h: "靜音 8 小時",
+    convMute24h: "靜音 24 小時",
+    convMuteForever: "永久靜音",
+    convArchive: "封存",
+    convUnarchive: "取消封存",
+    convArchived: "已封存",
+    convUnarchived: "已取消封存",
+    convClear: "清除聊天記錄",
+    convDelete: "刪除會話",
+    convMarkRead: "標示為已讀",
+    convMarkUnread: "標示為未讀",
+    convMarkedRead: "已標示為已讀",
+    convMarkedUnread: "已標示為未讀",
+    convCleared: "聊天記錄已清除",
+    convDeleted: "會話已刪除",
+    convClearConfirm: "確定清除此會話的所有訊息？",
+    convDeleteConfirm: "確定刪除此會話？",
+    convActionFailed: "操作失敗",
+    // T13: Message actions
+    msgCopy: "複製",
+    msgCopied: "已複製",
+    msgCopyFailed: "複製失敗",
+    msgNothingToCopy: "無可複製內容",
+    msgReply: "回覆",
+    msgForward: "轉寄",
+    msgForwardTitle: "轉寄到...",
+    msgForwarded: "已轉寄",
+    msgForwardFailed: "轉寄失敗",
+    msgNoForwardTargets: "沒有可轉寄的會話",
+    msgSelect: "選取",
+    msgDelete: "刪除",
+    msgDeleted: "訊息已刪除",
+    msgDeletedToast: "訊息已刪除",
+    msgRecall: "收回",
+    msgRecalled: "訊息已收回",
+    msgYouRecalled: "你收回了一條訊息",
+    msgRecalledToast: "訊息已收回",
+    msgRecallFailed: "收回失敗",
+    msgResend: "重發",
+    msgCancelReply: "取消回覆",
+    msgActionFailed: "操作失敗",
+    // T14: Status & presence
+    statusSending: "傳送中...",
+    statusSent: "已傳送",
+    statusDelivered: "已送達",
+    statusRead: "已讀",
+    statusFailed: "傳送失敗",
+    connectionConnected: "已連線",
+    connectionReconnecting: "重新連線中...",
+    connectionDisconnected: "已中斷連線",
+    lastSeenJustNow: "剛剛上線",
+    lastSeenMinAgo: "最後上線 %d 分鐘前",
+    lastSeenHoursAgo: "最後上線 %d 小時前",
+    lastSeenToday: "最後上線今天",
+    lastSeenYesterday: "最後上線昨天",
+    lastSeenDate: "最後上線",
+    typingIndicator: "正在輸入",
+    // Settings categories
+    notifications_sounds: "通知與音效",
+    data_and_storage: "資料與儲存",
+    privacy_and_security: "隱私與安全",
+    chat_folders: "聊天資料夾",
+    stickers_and_emoji: "貼圖與表情",
+    speakers_and_camera: "喇叭與相機",
+    devices: "裝置",
+    keyboard_shortcuts: "鍵盤快速鍵",
+    manage_crypto_keys: "管理加密金鑰",
+    edit_profile: "編輯個人檔案",
+    language: "語言",
+    birthday: "生日",
+    // Notification settings
+    web_notifications: "網頁通知",
+    display_notifications: "顯示通知",
+    show_offline_notifications: "顯示離線通知",
+    all_accounts: "全部帳號",
+    enable_private_chats: "啟用私聊",
+    sound_effects: "音效",
+    notification_tone: "通知音",
+    message_sent_sound_effect: "訊息已傳送",
+    private_chat_notifications: "私聊通知",
+    message_preview: "訊息預覽",
+    group_notifications: "群組通知",
+    channel_notifications: "頻道通知",
+    other_notifications: "其他",
+    contact_joined_telegram: "聯絡人已加入 Telegram",
+    // Data & Storage
+    auto_download_media: "自動下載媒體檔案",
+    reset_auto_download_settings: "重設自動下載設定",
+    estimated_storage_quota: "預估儲存空間",
+    cached_files: "快取檔案",
+    cached_video_stream_chunks: "快取的視訊串流片段",
+    clear_cache_older_than: "清除早於以下時間的快取",
+    cache_size_limit: "最大快取大小",
+    clear_all_cache: "清除所有快取",
+    // Privacy
+    blocked_users: "已封鎖使用者",
+    auto_delete_messages: "自動刪除訊息",
+    passcode_lock: "密碼鎖定",
+    two_step_verification: "雙步驟驗證",
+    login_email: "登入電子郵件",
+    passkey: "通行金鑰",
+    privacy: "隱私",
+    who_can_see_my_phone_number: "誰可以看到我的電話號碼？",
+    who_can_see_my_last_seen: "誰可以看到我最後上線的時間？",
+    who_can_see_my_profile_photo: "誰可以看到我的大頭貼？",
+    who_can_see_my_bio: "誰可以看到我的個人簡介？",
+    who_can_call_me: "誰可以打電話給我？",
+    who_can_forward_link: "轉寄我的訊息時，誰可以連結至我的帳號？",
+    who_can_invite_me: "誰可以邀請我？",
+    who_can_send_messages: "誰可以傳訊息給我？",
+    who_can_see_my_birthday: "誰可以看到我的生日？",
+    who_can_send_me_gifts: "誰可以送禮物給我？",
+    who_can_see_my_saved_music: "誰可以看到我收藏的音樂？",
+    sensitive_content: "敏感內容",
+    disable_filtering: "停用過濾",
+    payments: "付款",
+    clear_payment_shipping_info: "清除付款與配送資訊",
+    delete_cloud_drafts: "刪除所有雲端草稿",
+    // General settings
+    message_font_size: "訊息字型大小",
+    chat_wallpaper: "聊天背景",
+    power_saving_mode: "省電模式",
+    theme_color: "主題色彩",
+    time_format: "時間格式",
+    light_theme: "日間模式",
+    dark_theme_night: "夜間模式",
+    system_default: "跟隨系統",
+    hour_12: "12 小時制",
+    hour_24: "24 小時制",
+    enabled: "已啟用",
+    disabled: "已停用",
+    // Stickers & Emoji
+    quick_reactions: "快速回應",
+    suggest_emoji: "根據 Emoji 聯想表情",
+    loop_animated_stickers: "循環播放動態貼圖",
+    emoji: "Emoji",
+    suggested_emojis: "推薦的表情",
+    large_emoji: "大型表情",
+    sticker_packs_order: "貼圖包順序",
+    dynamic_sticker_order: "動態貼圖包順序",
+    sticker_packs: "貼圖",
+    // Folders
+    folders: "資料夾",
+    create_folder: "建立資料夾",
+    folders_view: "資料夾檢視",
+    folders_sidebar: "左側資料夾",
+    folders_above_chats: "聊天上方顯示資料夾",
+    no_folders: "尚無資料夾",
+    // Sessions & Shortcuts
+    terminate: "終止",
+    terminate_all_other_sessions: "終止其他所有工作階段",
+    current_session: "目前",
+    no_active_sessions: "找不到活躍工作階段",
+    // Profile edit
+    first_name: "名字",
+    last_name: "姓氏",
+    bio: "個人簡介（選填）",
+    username_optional: "使用者名稱（選填）",
+    save_changes: "儲存變更",
+    add_birthday: "新增生日",
+    change_avatar: "更換大頭貼",
+    // Birthday
+    never_allow: "永不允許",
+    always_allow: "總是允許",
+    add_users: "新增使用者",
+    exceptions: "例外",
+    // Misc
+    search_contacts: "搜尋聯絡人...",
+    new_private_chat: "新增私聊",
+    new_channel: "新增頻道",
+    soon: "即將推出",
+    add_another_account: "新增其他帳號",
+    loading_accounts: "正在載入帳號...",
+    groups: "群組",
+    all_chats: "所有聊天",
+    private_chats: "私聊",
+    group_chats: "群組聊天",
+    channels_label: "頻道",
+    search_for_chats: "搜尋聊天、聯絡人和訊息",
+    // Translate section
+    translate_messages: "翻譯訊息",
+    show_translate_button: "顯示「翻譯」按鈕",
+    translate_all_chats: "翻譯所有聊天記錄",
+    do_not_translate: "無需翻譯",
+    ichat_premium_hint: "訂閱 iChat 進階版 以翻譯所有聊天。"
+  },
+  ja: {
+    general_settings: "一般設定",
+    logout_confirm_title: "ログアウト",
+    logout_confirm_desc: "ログアウトしてもよろしいですか？",
+    logout_confirm_btn: "確認",
+    account_details: "アカウント詳細",
+    active_sessions: "アクティブセッション (3)",
+    active_sessions_desc: "アカウントにログインしているすべてのデバイスを管理",
+    attach_document: "ファイルを添付",
+    back_to_sidebar: "チャット一覧に戻る",
+    blocked_contacts: "ブロックした連絡先",
+    blocked_contacts_desc: "現在ブロックしているユーザーはいません",
+    chat_info_title: "チャット情報",
+    close_panel: "パネルを閉じる",
+    cryptographic_fingerprint: "暗号指紋",
+    dark_theme_mode: "ダークテーマモード",
+    e2ee_banner: "🔒 メッセージはエンドツーエンド暗号化で保護されています。",
+    email_address: "メールアドレス",
+    empty_desc: "サイドバーリストから連絡先を選択するか、新しい相手を検索してエンドツーエンド暗号化セッションを開始します。",
+    empty_item1: "メッセージは ECDH P-256 鍵共有でローカルに暗号化されます。",
+    empty_item2: "平文がサーバーディレクトリに保存されることはありません。",
+    empty_item3: "アクティブな指紋を確認して暗号化状態を検証します。",
+    empty_title: "チャットが選択されていません",
+    encryption_details: "暗号化の詳細",
+    fp_match_btn: "指紋が一致",
+    group_members_title: "グループメンバー",
+    insert_emoji: "絵文字を挿入",
+    lang_display: "日本語",
+    language_mode: "言語 / Language",
+    main_menu: "メインメニュー",
+    manage_keys: "暗号鍵の管理",
+    manage_keys_desc: "楕円曲線鍵ペアの表示と検証",
+    menu_contacts: "連絡先",
+    menu_help: "iChat Pro ヘルプ & FAQ",
+    menu_logout: "ログアウト",
+    menu_new_group: "新規グループ",
+    menu_profile: "マイプロフィール",
+    menu_saved_messages: "保存済みメッセージ",
+    menu_settings: "設定",
+    menu_theme: "テーマ切り替え",
+    more_operations: "その他の操作",
+    off: "オフ",
+    online: "オンライン",
+    phone_number: "電話番号",
+    privacy_security: "プライバシーとセキュリティ",
+    protocol: "プロトコル",
+    search_chat: "チャットを検索",
+    search_placeholder: "チャットまたはメッセージを検索...",
+    self_destruct_timer: "自動消滅タイマー",
+    settings: "設定",
+    system_preferences: "システム設定",
+    timer_1h: "1 時間",
+    username: "ユーザー名",
+    verification: "検証",
+    verified: "検証済み",
+    verify_fingerprint_btn: "指紋を検証",
+    verify_fp_desc: "E2EE 暗号化。クリックして指紋を検証。",
+    verify_fp_title: "セキュリティ指紋の検証",
+    reset_key_btn: "鍵をリセット",
+    view_info: "情報を見る",
+    write_placeholder: "暗号化メッセージを入力...",
+    menu_boost_group: "グループをブースト",
+    menu_block_contact: "ブロック",
+    menu_mute_group: "ミュート...",
+    menu_select_messages: "メッセージを選択",
+    menu_report: "報告",
+    menu_leave_group: "グループを退出",
+    menu_delete_chat: "チャットを削除",
+    menu_add_account: "アカウントを追加",
+    menu_more: "もっと見る",
+    menu_about: "iChat Pro について",
+    menu_updates: "アップデートを確認",
+    // T12: Conversation actions
+    convPin: "ピン留め",
+    convUnpin: "ピン留め解除",
+    convPinned: "ピン留め済み",
+    convUnpinned: "ピン留め解除済み",
+    convMute: "ミュート",
+    convUnmute: "ミュート解除",
+    convMuted: "ミュート済み",
+    convUnmuted: "ミュート解除済み",
+    convMute1h: "1 時間ミュート",
+    convMute8h: "8 時間ミュート",
+    convMute24h: "24 時間ミュート",
+    convMuteForever: "永久にミュート",
+    convArchive: "アーカイブ",
+    convUnarchive: "アーカイブ解除",
+    convArchived: "アーカイブ済み",
+    convUnarchived: "アーカイブ解除済み",
+    convClear: "履歴を消去",
+    convDelete: "会話を削除",
+    convMarkRead: "既読にする",
+    convMarkUnread: "未読にする",
+    convMarkedRead: "既読にしました",
+    convMarkedUnread: "未読にしました",
+    convCleared: "履歴を消去しました",
+    convDeleted: "会話を削除しました",
+    convClearConfirm: "このチャットのすべてのメッセージを消去しますか？",
+    convDeleteConfirm: "この会話を削除しますか？",
+    convActionFailed: "操作に失敗しました",
+    // T13: Message actions
+    msgCopy: "コピー",
+    msgCopied: "コピーしました",
+    msgCopyFailed: "コピーに失敗しました",
+    msgNothingToCopy: "コピーする内容がありません",
+    msgReply: "返信",
+    msgForward: "転送",
+    msgForwardTitle: "転送先...",
+    msgForwarded: "転送しました",
+    msgForwardFailed: "転送に失敗しました",
+    msgNoForwardTargets: "転送先の会話がありません",
+    msgSelect: "選択",
+    msgDelete: "削除",
+    msgDeleted: "メッセージが削除されました",
+    msgDeletedToast: "メッセージを削除しました",
+    msgRecall: "取り消し",
+    msgRecalled: "メッセージが取り消されました",
+    msgYouRecalled: "メッセージを取り消しました",
+    msgRecalledToast: "メッセージを取り消しました",
+    msgRecallFailed: "取り消しに失敗しました",
+    msgResend: "再送",
+    msgCancelReply: "返信をキャンセル",
+    msgActionFailed: "操作に失敗しました",
+    // T14: Status & presence
+    statusSending: "送信中...",
+    statusSent: "送信済み",
+    statusDelivered: "配信済み",
+    statusRead: "既読",
+    statusFailed: "送信失敗",
+    connectionConnected: "接続済み",
+    connectionReconnecting: "再接続中...",
+    connectionDisconnected: "切断されました",
+    lastSeenJustNow: "たった今オンライン",
+    lastSeenMinAgo: "最終オンライン %d 分前",
+    lastSeenHoursAgo: "最終オンライン %d 時間前",
+    lastSeenToday: "本日最終オンライン",
+    lastSeenYesterday: "昨日最終オンライン",
+    lastSeenDate: "最終オンライン",
+    typingIndicator: "入力中",
+    // Settings categories
+    notifications_sounds: "通知とサウンド",
+    data_and_storage: "データとストレージ",
+    privacy_and_security: "プライバシーとセキュリティ",
+    chat_folders: "チャットフォルダー",
+    stickers_and_emoji: "スタンプと絵文字",
+    speakers_and_camera: "スピーカーとカメラ",
+    devices: "デバイス",
+    keyboard_shortcuts: "キーボードショートカット",
+    manage_crypto_keys: "暗号鍵の管理",
+    edit_profile: "プロフィール編集",
+    language: "言語",
+    birthday: "誕生日",
+    // Notification settings
+    web_notifications: "ウェブ通知",
+    display_notifications: "通知を表示",
+    show_offline_notifications: "オフライン通知を表示",
+    all_accounts: "すべてのアカウント",
+    enable_private_chats: "プライベートチャットを有効化",
+    sound_effects: "サウンドエフェクト",
+    notification_tone: "通知音",
+    message_sent_sound_effect: "メッセージ送信音",
+    private_chat_notifications: "プライベートチャット通知",
+    message_preview: "メッセージプレビュー",
+    group_notifications: "グループ通知",
+    channel_notifications: "チャンネル通知",
+    other_notifications: "その他",
+    contact_joined_telegram: "連絡先が Telegram に参加しました",
+    // Data & Storage
+    auto_download_media: "メディアの自動ダウンロード",
+    reset_auto_download_settings: "自動ダウンロード設定をリセット",
+    estimated_storage_quota: "推定ストレージ使用量",
+    cached_files: "キャッシュファイル",
+    cached_video_stream_chunks: "キャッシュされた動画ストリーム",
+    clear_cache_older_than: "指定期間より古いキャッシュを削除",
+    cache_size_limit: "最大キャッシュサイズ",
+    clear_all_cache: "すべてのキャッシュを削除",
+    // Privacy
+    blocked_users: "ブロックしたユーザー",
+    auto_delete_messages: "メッセージの自動削除",
+    passcode_lock: "パスコードロック",
+    two_step_verification: "2 段階認証",
+    login_email: "ログインメール",
+    passkey: "パスキー",
+    privacy: "プライバシー",
+    who_can_see_my_phone_number: "電話番号を表示できるユーザー",
+    who_can_see_my_last_seen: "最終オンラインを表示できるユーザー",
+    who_can_see_my_profile_photo: "プロフィール写真を表示できるユーザー",
+    who_can_see_my_bio: "自己紹介を表示できるユーザー",
+    who_can_call_me: "通話を許可するユーザー",
+    who_can_forward_link: "転送時にアカウントにリンクできるユーザー",
+    who_can_invite_me: "招待を許可するユーザー",
+    who_can_send_messages: "メッセージ送信を許可するユーザー",
+    who_can_see_my_birthday: "誕生日を表示できるユーザー",
+    who_can_send_me_gifts: "ギフトを送信できるユーザー",
+    who_can_see_my_saved_music: "保存した音楽を表示できるユーザー",
+    sensitive_content: "センシティブなコンテンツ",
+    disable_filtering: "フィルタリングを無効化",
+    payments: "支払い",
+    clear_payment_shipping_info: "支払い・配送情報を消去",
+    delete_cloud_drafts: "すべてのクラウド下書きを削除",
+    // General settings
+    message_font_size: "メッセージのフォントサイズ",
+    chat_wallpaper: "チャット壁紙",
+    power_saving_mode: "省電力モード",
+    theme_color: "テーマカラー",
+    time_format: "時刻形式",
+    light_theme: "ライト",
+    dark_theme_night: "ダーク",
+    system_default: "システムデフォルト",
+    hour_12: "12 時間表示",
+    hour_24: "24 時間表示",
+    enabled: "有効",
+    disabled: "無効",
+    // Stickers & Emoji
+    quick_reactions: "クイックリアクション",
+    suggest_emoji: "絵文字を提案",
+    loop_animated_stickers: "アニメーションスタンプをループ再生",
+    emoji: "絵文字",
+    suggested_emojis: "おすすめ絵文字",
+    large_emoji: "大きな絵文字",
+    sticker_packs_order: "スタンプパックの順序",
+    dynamic_sticker_order: "スタンプパックの動的順序",
+    sticker_packs: "スタンプ",
+    // Folders
+    folders: "フォルダー",
+    create_folder: "フォルダーを作成",
+    folders_view: "フォルダー表示",
+    folders_sidebar: "左サイドバー",
+    folders_above_chats: "チャット上部に表示",
+    no_folders: "フォルダーがありません",
+    // Sessions & Shortcuts
+    terminate: "終了",
+    terminate_all_other_sessions: "他のすべてのセッションを終了",
+    current_session: "現在",
+    no_active_sessions: "アクティブなセッションはありません",
+    // Profile edit
+    first_name: "名",
+    last_name: "姓",
+    bio: "自己紹介（任意）",
+    username_optional: "ユーザー名（任意）",
+    save_changes: "変更を保存",
+    add_birthday: "誕生日を追加",
+    change_avatar: "アバターを変更",
+    // Birthday
+    never_allow: "許可しない",
+    always_allow: "常に許可",
+    add_users: "ユーザーを追加",
+    exceptions: "例外",
+    // Misc
+    search_contacts: "連絡先を検索...",
+    new_private_chat: "新しいプライベートチャット",
+    new_channel: "新しいチャンネル",
+    soon: "近日公開",
+    add_another_account: "別のアカウントを追加",
+    loading_accounts: "アカウントを読み込み中...",
+    groups: "グループ",
+    all_chats: "すべてのチャット",
+    private_chats: "プライベートチャット",
+    group_chats: "グループチャット",
+    channels_label: "チャンネル",
+    search_for_chats: "チャット、連絡先、メッセージを検索",
+    // Translate section
+    translate_messages: "メッセージを翻訳",
+    show_translate_button: "「翻訳」ボタンを表示",
+    translate_all_chats: "すべてのチャットを翻訳",
+    do_not_translate: "翻訳しない",
+    ichat_premium_hint: "iChat プレミアム に登録して全チャットを翻訳。"
   }
 };
 
+// Expose translations globally so T12/T13 modules can use t()
+window.translations = translations;
+
+// Literal text translations: canonical_key → { en, zh, zh-TW, ja }
+// Used by TreeWalker to translate hardcoded text in templates
 const literalTextTranslations = {
-  zh: {
-    "Notifications and Sounds": "通知与声音",
-    "Data and Storage": "数据和存储",
-    "Privacy and Security": "隐私和安全",
-    "Chat Folders": "聊天文件夹",
-    "Customize folder appearance": "自定义文件夹显示",
-    "5 chats": "5 个聊天",
-    "Stickers and Emoji": "贴纸与表情",
-    "Speakers and Camera": "扬声器和摄像头",
-    "Devices": "设备",
-    "3 active": "3 个活跃",
-    "Language / 语言": "语言",
-    "Keyboard Shortcuts": "快捷键",
-    "Manage Cryptographic Keys": "管理加密密钥",
-    "Checking...": "检查中...",
-    "Key Fingerprint (SHA-256)": "密钥指纹 (SHA-256)",
-    "Generate Keys": "生成密钥",
-    "Upload to Server": "上传到服务器",
-    "Export Backup": "导出备份",
-    "Import Backup": "导入备份",
-    "Security Status": "安全状态",
-    "E2EE key setup and contact verification": "端到端加密密钥和联系人验证状态",
-    "Local Keys": "本地密钥",
-    "Server Synced": "服务器同步",
-    "Refresh Status": "刷新状态",
-    "Storage Usage": "存储用量",
-    "Images": "图片",
-    "Video files": "视频文件",
-    "Stickers and emojis": "贴纸和表情",
-    "Other": "其他",
-    "Cached video stream chunks": "缓存的视频流片段",
-    "Calculating…": "计算中…",
-    "Auto-Download": "自动下载",
-    "Reset Auto-Download Settings": "重置自动下载设置",
-    "On Mobile Data": "使用移动数据时",
-    "On Wi-Fi": "使用 Wi-Fi 时",
-    "On Roaming": "漫游时",
-    "Photos": "照片",
-    "Files": "文件",
-    "Files / Documents": "文件 / 文档",
-    "All on": "全部开启",
-    "All off": "全部关闭",
-    "Maximum File Size for Auto-Download": "自动下载文件大小限制",
-    "Cache Management": "缓存管理",
-    "Cache retention period": "缓存保留时间",
-    "1 week": "1 周",
-    "1 month": "1 个月",
-    "3 months": "3 个月",
-    "Forever": "永久",
-    "Maximum cache size": "最大缓存大小",
-    "Clear Images": "清除图片",
-    "Clear Video files": "清除视频文件",
-    "Clear Stickers & Emojis": "清除贴纸和表情",
-    "Clear Other Cached Data": "清除其他缓存数据",
-    "Clear Cached Video Stream Chunks": "清除缓存的视频流片段",
-    "Clear All Cache": "清除所有缓存",
-    "Clear Local Cache": "清理本地缓存",
-    "Clear All Cache Settings": "清除所有缓存设置",
-    "Privacy": "隐私",
-    "Last Seen & Online": "最后在线与在线状态",
-    "Everybody": "所有人",
-    "Profile Photo": "头像",
-    "Phone Number": "电话号码",
-    "My Contacts": "我的联系人",
-    "Security": "安全",
-    "Two-Step Verification": "两步验证",
-    "Off": "关闭",
-    "Active Sessions": "活跃会话",
-    "3 devices": "3 台设备",
-    "Blocked Users": "已屏蔽用户",
-    "Data": "数据",
-    "Delete Synced Contacts": "删除已同步联系人",
-    "Delete Account": "删除账号",
-    "Create folders for different groups of chats to easily access them.": "为不同类型的聊天创建文件夹，方便快速访问。",
-    "Create New Folder": "创建新文件夹",
-    "Team Chats": "团队聊天",
-    "Demo": "演示",
-    "Stickers & Emoji": "贴纸与表情",
-    "Sticker Sets": "贴纸包",
-    "0 installed": "已安装 0 个",
-    "Suggest Emoji": "表情建议",
-    "Replace text like :) with emoji": "将 :) 等文本替换为表情",
-    "Custom Emoji": "自定义表情",
-    "Devices currently logged into your account.": "当前登录此账号的设备。",
-    "Windows / Chrome": "Windows / Chrome",
-    "This browser / Active now / IP: not exposed": "此浏览器 / 当前活跃 / IP：前端不展示",
-    "Session management API not connected": "会话管理接口未接入",
-    "Only the current browser can be shown right now": "当前只能显示本浏览器",
-    "Terminate": "终止",
-    "Terminate All Other Sessions": "终止其它所有会话",
-    "Language": "语言",
-    "Search chats": "搜索聊天",
-    "New chat": "新建聊天",
-    "Toggle mute": "切换静音",
-    "Send message": "发送消息",
-    "New line": "换行",
-    "Settings": "设置",
-    "Edit Profile": "编辑资料",
-    "Search": "搜索",
-    "Data and Storage": "数据和存储",
-    "Privacy and Security": "隐私和安全",
-    "Devices and Shortcuts": "设备与快捷键"
-  }
+  notifications_sounds: { en: "Notifications and Sounds", zh: "通知与声音", 'zh-TW': "通知與音效", ja: "通知とサウンド" },
+  data_and_storage: { en: "Data and Storage", zh: "数据和存储", 'zh-TW': "資料與儲存", ja: "データとストレージ" },
+  privacy_and_security: { en: "Privacy and Security", zh: "隐私和安全", 'zh-TW': "隱私與安全", ja: "プライバシーとセキュリティ" },
+  chat_folders: { en: "Chat Folders", zh: "聊天文件夹", 'zh-TW': "聊天資料夾", ja: "チャットフォルダー" },
+  customize_folder_appearance: { en: "Customize folder appearance", zh: "自定义文件夹显示", 'zh-TW': "自訂資料夾顯示", ja: "フォルダーの外観をカスタマイズ" },
+  n_chats: { en: "5 chats", zh: "5 个聊天", 'zh-TW': "5 個聊天", ja: "5 チャット" },
+  stickers_and_emoji: { en: "Stickers and Emoji", zh: "贴纸与表情", 'zh-TW': "貼圖與表情", ja: "スタンプと絵文字" },
+  speakers_and_camera: { en: "Speakers and Camera", zh: "扬声器和摄像头", 'zh-TW': "喇叭與相機", ja: "スピーカーとカメラ" },
+  devices: { en: "Devices", zh: "设备", 'zh-TW': "裝置", ja: "デバイス" },
+  n_active: { en: "3 active", zh: "3 个活跃", 'zh-TW': "3 個活躍", ja: "3 アクティブ" },
+  language_slash: { en: "Language / 语言", zh: "语言", 'zh-TW': "語言", ja: "言語" },
+  keyboard_shortcuts: { en: "Keyboard Shortcuts", zh: "快捷键", 'zh-TW': "鍵盤快速鍵", ja: "キーボードショートカット" },
+  manage_crypto_keys: { en: "Manage Cryptographic Keys", zh: "管理加密密钥", 'zh-TW': "管理加密金鑰", ja: "暗号鍵の管理" },
+  checking: { en: "Checking...", zh: "检查中...", 'zh-TW': "檢查中...", ja: "確認中..." },
+  key_fingerprint: { en: "Key Fingerprint (SHA-256)", zh: "密钥指纹 (SHA-256)", 'zh-TW': "金鑰指紋 (SHA-256)", ja: "鍵指紋 (SHA-256)" },
+  generate_keys: { en: "Generate Keys", zh: "生成密钥", 'zh-TW': "產生金鑰", ja: "鍵を生成" },
+  upload_to_server: { en: "Upload to Server", zh: "上传到服务器", 'zh-TW': "上傳到伺服器", ja: "サーバーにアップロード" },
+  export_backup: { en: "Export Backup", zh: "导出备份", 'zh-TW': "匯出備份", ja: "バックアップをエクスポート" },
+  import_backup: { en: "Import Backup", zh: "导入备份", 'zh-TW': "匯入備份", ja: "バックアップをインポート" },
+  security_status: { en: "Security Status", zh: "安全状态", 'zh-TW': "安全狀態", ja: "セキュリティ状態" },
+  e2ee_key_setup: { en: "E2EE key setup and contact verification", zh: "端到端加密密钥和联系人验证状态", 'zh-TW': "端對端加密金鑰和聯絡人驗證狀態", ja: "E2EE 鍵設定と連絡先検証" },
+  local_keys: { en: "Local Keys", zh: "本地密钥", 'zh-TW': "本機金鑰", ja: "ローカル鍵" },
+  server_synced: { en: "Server Synced", zh: "服务器同步", 'zh-TW': "伺服器同步", ja: "サーバー同期済み" },
+  refresh_status: { en: "Refresh Status", zh: "刷新状态", 'zh-TW': "重新整理狀態", ja: "状態を更新" },
+  storage_usage: { en: "Storage Usage", zh: "存储用量", 'zh-TW': "儲存用量", ja: "ストレージ使用量" },
+  images: { en: "Images", zh: "图片", 'zh-TW': "圖片", ja: "画像" },
+  video_files: { en: "Video files", zh: "视频文件", 'zh-TW': "影片檔案", ja: "動画ファイル" },
+  stickers_and_emojis: { en: "Stickers and emojis", zh: "贴纸和表情", 'zh-TW': "貼圖和表情", ja: "スタンプと絵文字" },
+  other: { en: "Other", zh: "其他", 'zh-TW': "其他", ja: "その他" },
+  cached_video_stream_chunks: { en: "Cached video stream chunks", zh: "缓存的视频流片段", 'zh-TW': "快取的視訊串流片段", ja: "キャッシュされた動画ストリーム" },
+  calculating: { en: "Calculating…", zh: "计算中…", 'zh-TW': "計算中…", ja: "計算中…" },
+  auto_download: { en: "Auto-Download", zh: "自动下载", 'zh-TW': "自動下載", ja: "自動ダウンロード" },
+  reset_auto_download_settings: { en: "Reset Auto-Download Settings", zh: "重置自动下载设置", 'zh-TW': "重設自動下載設定", ja: "自動ダウンロード設定をリセット" },
+  on_mobile_data: { en: "On Mobile Data", zh: "使用移动数据时", 'zh-TW': "使用行動數據時", ja: "モバイルデータ使用時" },
+  on_wifi: { en: "On Wi-Fi", zh: "使用 Wi-Fi 时", 'zh-TW': "使用 Wi-Fi 時", ja: "Wi-Fi 使用時" },
+  on_roaming: { en: "On Roaming", zh: "漫游时", 'zh-TW': "漫遊時", ja: "ローミング時" },
+  photos: { en: "Photos", zh: "照片", 'zh-TW': "照片", ja: "写真" },
+  files: { en: "Files", zh: "文件", 'zh-TW': "檔案", ja: "ファイル" },
+  files_documents: { en: "Files / Documents", zh: "文件 / 文档", 'zh-TW': "檔案 / 文件", ja: "ファイル / ドキュメント" },
+  all_on: { en: "All on", zh: "全部开启", 'zh-TW': "全部開啟", ja: "すべてオン" },
+  all_off: { en: "All off", zh: "全部关闭", 'zh-TW': "全部關閉", ja: "すべてオフ" },
+  max_file_size_auto_download: { en: "Maximum File Size for Auto-Download", zh: "自动下载文件大小限制", 'zh-TW': "自動下載檔案大小限制", ja: "自動ダウンロードの最大ファイルサイズ" },
+  cache_management: { en: "Cache Management", zh: "缓存管理", 'zh-TW': "快取管理", ja: "キャッシュ管理" },
+  cache_retention_period: { en: "Cache retention period", zh: "缓存保留时间", 'zh-TW': "快取保留時間", ja: "キャッシュ保持期間" },
+  one_week: { en: "1 week", zh: "1 周", 'zh-TW': "1 週", ja: "1 週間" },
+  one_month: { en: "1 month", zh: "1 个月", 'zh-TW': "1 個月", ja: "1 ヶ月" },
+  three_months: { en: "3 months", zh: "3 个月", 'zh-TW': "3 個月", ja: "3 ヶ月" },
+  forever: { en: "Forever", zh: "永久", 'zh-TW': "永久", ja: "永久的" },
+  max_cache_size: { en: "Maximum cache size", zh: "最大缓存大小", 'zh-TW': "最大快取大小", ja: "最大キャッシュサイズ" },
+  clear_images: { en: "Clear Images", zh: "清除图片", 'zh-TW': "清除圖片", ja: "画像を消去" },
+  clear_video_files: { en: "Clear Video files", zh: "清除视频文件", 'zh-TW': "清除影片檔案", ja: "動画ファイルを消去" },
+  clear_stickers_emojis: { en: "Clear Stickers & Emojis", zh: "清除贴纸和表情", 'zh-TW': "清除貼圖和表情", ja: "スタンプと絵文字を消去" },
+  clear_other_cached: { en: "Clear Other Cached Data", zh: "清除其他缓存数据", 'zh-TW': "清除其他快取資料", ja: "その他のキャッシュデータを消去" },
+  clear_cached_video: { en: "Clear Cached Video Stream Chunks", zh: "清除缓存的视频流片段", 'zh-TW': "清除快取的視訊串流片段", ja: "キャッシュされた動画ストリームを消去" },
+  clear_all_cache: { en: "Clear All Cache", zh: "清除所有缓存", 'zh-TW': "清除所有快取", ja: "すべてのキャッシュを消去" },
+  clear_local_cache: { en: "Clear Local Cache", zh: "清理本地缓存", 'zh-TW': "清理本機快取", ja: "ローカルキャッシュを消去" },
+  clear_all_cache_settings: { en: "Clear All Cache Settings", zh: "清除所有缓存设置", 'zh-TW': "清除所有快取設定", ja: "すべてのキャッシュ設定を消去" },
+  privacy_label: { en: "Privacy", zh: "隐私", 'zh-TW': "隱私", ja: "プライバシー" },
+  last_seen_online: { en: "Last Seen & Online", zh: "最后在线与在线状态", 'zh-TW': "最後上線與線上狀態", ja: "最終オンラインとオンライン状態" },
+  everybody: { en: "Everybody", zh: "所有人", 'zh-TW': "所有人", ja: "全員" },
+  profile_photo: { en: "Profile Photo", zh: "头像", 'zh-TW': "大頭貼", ja: "プロフィール写真" },
+  phone_number_label: { en: "Phone Number", zh: "电话号码", 'zh-TW': "電話號碼", ja: "電話番号" },
+  my_contacts: { en: "My Contacts", zh: "我的联系人", 'zh-TW': "我的聯絡人", ja: "自分の連絡先" },
+  security: { en: "Security", zh: "安全", 'zh-TW': "安全", ja: "セキュリティ" },
+  two_step_verification: { en: "Two-Step Verification", zh: "两步验证", 'zh-TW': "雙步驟驗證", ja: "2 段階認証" },
+  off_label: { en: "Off", zh: "关闭", 'zh-TW': "關閉", ja: "オフ" },
+  active_sessions_label: { en: "Active Sessions", zh: "活跃会话", 'zh-TW': "活躍工作階段", ja: "アクティブセッション" },
+  n_devices: { en: "3 devices", zh: "3 台设备", 'zh-TW': "3 台裝置", ja: "3 台のデバイス" },
+  blocked_users_label: { en: "Blocked Users", zh: "已屏蔽用户", 'zh-TW': "已封鎖使用者", ja: "ブロックしたユーザー" },
+  data_label: { en: "Data", zh: "数据", 'zh-TW': "資料", ja: "データ" },
+  delete_synced_contacts: { en: "Delete Synced Contacts", zh: "删除已同步联系人", 'zh-TW': "刪除已同步聯絡人", ja: "同期した連絡先を削除" },
+  delete_account: { en: "Delete Account", zh: "删除账号", 'zh-TW': "刪除帳號", ja: "アカウントを削除" },
+  folders_description: { en: "Create folders for different groups of chats to easily access them.", zh: "为不同类型的聊天创建文件夹，方便快速访问。", 'zh-TW': "為不同類型的聊天建立資料夾，方便快速存取。", ja: "異なるグループのチャット用にフォルダーを作成して簡単にアクセス。" },
+  create_new_folder: { en: "Create New Folder", zh: "创建新文件夹", 'zh-TW': "建立新資料夾", ja: "新しいフォルダーを作成" },
+  team_chats: { en: "Team Chats", zh: "团队聊天", 'zh-TW': "團隊聊天", ja: "チームチャット" },
+  demo: { en: "Demo", zh: "演示", 'zh-TW': "示範", ja: "デモ" },
+  stickers_emoji_label: { en: "Stickers & Emoji", zh: "贴纸与表情", 'zh-TW': "貼圖與表情", ja: "スタンプと絵文字" },
+  sticker_sets: { en: "Sticker Sets", zh: "贴纸包", 'zh-TW': "貼圖包", ja: "スタンプセット" },
+  n_installed: { en: "0 installed", zh: "已安装 0 个", 'zh-TW': "已安裝 0 個", ja: "0 インストール済み" },
+  suggest_emoji_label: { en: "Suggest Emoji", zh: "表情建议", 'zh-TW': "表情建議", ja: "絵文字を提案" },
+  replace_text_emoji: { en: "Replace text like :) with emoji", zh: "将 :) 等文本替换为表情", 'zh-TW': "將 :) 等文字替換為表情", ja: ":) などのテキストを絵文字に置換" },
+  custom_emoji: { en: "Custom Emoji", zh: "自定义表情", 'zh-TW': "自訂表情", ja: "カスタム絵文字" },
+  devices_logged_in: { en: "Devices currently logged into your account.", zh: "当前登录此账号的设备。", 'zh-TW': "目前已登入此帳號的裝置。", ja: "現在このアカウントにログインしているデバイス。" },
+  windows_chrome: { en: "Windows / Chrome", zh: "Windows / Chrome", 'zh-TW': "Windows / Chrome", ja: "Windows / Chrome" },
+  this_browser_active: { en: "This browser / Active now / IP: not exposed", zh: "此浏览器 / 当前活跃 / IP：前端不展示", 'zh-TW': "此瀏覽器 / 目前活躍 / IP：前端不顯示", ja: "このブラウザ / 現在アクティブ / IP：非表示" },
+  session_api_not_connected: { en: "Session management API not connected", zh: "会话管理接口未接入", 'zh-TW': "工作階段管理介面未接入", ja: "セッション管理 API 未接続" },
+  only_current_browser: { en: "Only the current browser can be shown right now", zh: "当前只能显示本浏览器", 'zh-TW': "目前只能顯示本瀏覽器", ja: "現在は現在のブラウザのみ表示可能" },
+  terminate_label: { en: "Terminate", zh: "终止", 'zh-TW': "終止", ja: "終了" },
+  terminate_all_other: { en: "Terminate All Other Sessions", zh: "终止其它所有会话", 'zh-TW': "終止其他所有工作階段", ja: "他のすべてのセッションを終了" },
+  language_label: { en: "Language", zh: "语言", 'zh-TW': "語言", ja: "言語" },
+  search_chats: { en: "Search chats", zh: "搜索聊天", 'zh-TW': "搜尋聊天", ja: "チャットを検索" },
+  new_chat: { en: "New chat", zh: "新建聊天", 'zh-TW': "新增聊天", ja: "新しいチャット" },
+  toggle_mute: { en: "Toggle mute", zh: "切换静音", 'zh-TW': "切換靜音", ja: "ミュート切り替え" },
+  send_message: { en: "Send message", zh: "发送消息", 'zh-TW': "傳送訊息", ja: "メッセージを送信" },
+  new_line: { en: "New line", zh: "换行", 'zh-TW': "換行", ja: "改行" },
+  settings_label: { en: "Settings", zh: "设置", 'zh-TW': "設定", ja: "設定" },
+  edit_profile_label: { en: "Edit Profile", zh: "编辑资料", 'zh-TW': "編輯個人檔案", ja: "プロフィールを編集" },
+  search_label: { en: "Search", zh: "搜索", 'zh-TW': "搜尋", ja: "検索" },
+  devices_and_shortcuts: { en: "Devices and Shortcuts", zh: "设备与快捷键", 'zh-TW': "裝置與快速鍵", ja: "デバイスとショートカット" },
+  // Additional settings page literal text
+  chats: { en: "Chats", zh: "聊天", 'zh-TW': "聊天", ja: "チャット" },
+  channels: { en: "Channels", zh: "频道", 'zh-TW': "頻道", ja: "チャンネル" },
+  posts: { en: "Posts", zh: "动态", 'zh-TW': "動態", ja: "投稿" },
+  apps_label: { en: "Apps", zh: "应用", 'zh-TW': "應用", ja: "アプリ" },
+  private_chats: { en: "Private Chats", zh: "私聊", 'zh-TW': "私聊", ja: "プライベートチャット" },
+  group_chats: { en: "Group Chats", zh: "群聊", 'zh-TW': "群組聊天", ja: "グループチャット" },
+  all_chats: { en: "All Chats", zh: "全部聊天", 'zh-TW': "所有聊天", ja: "すべてのチャット" },
+  search_chats_contacts: { en: "Search for chats, contacts, and messages", zh: "搜索聊天、联系人和消息", 'zh-TW': "搜尋聊天、聯絡人和訊息", ja: "チャット、連絡先、メッセージを検索" },
+  new_private_chat: { en: "New Private Chat", zh: "新建私聊", 'zh-TW': "新增私聊", ja: "新しいプライベートチャット" },
+  new_group: { en: "New Group", zh: "新建群组", 'zh-TW': "新增群組", ja: "新しいグループ" },
+  new_channel: { en: "New Channel", zh: "新建频道", 'zh-TW': "新增頻道", ja: "新しいチャンネル" },
+  soon: { en: "Soon", zh: "即将推出", 'zh-TW': "即將推出", ja: "近日公開" },
+  add_another_account: { en: "Add Another Account", zh: "添加其他账号", 'zh-TW': "新增其他帳號", ja: "別のアカウントを追加" },
+  loading_accounts: { en: "Loading accounts...", zh: "正在加载账号...", 'zh-TW': "正在載入帳號...", ja: "アカウントを読み込み中..." },
+  groups_label: { en: "Groups", zh: "群组", 'zh-TW': "群組", ja: "グループ" },
+  accounts: { en: "Accounts", zh: "账号", 'zh-TW': "帳號", ja: "アカウント" },
+  add: { en: "Add", zh: "添加", 'zh-TW': "新增", ja: "追加" },
+  back_to_settings: { en: "Back to Settings", zh: "返回设置", 'zh-TW': "返回設定", ja: "設定に戻る" },
+  // Right panel labels
+  members_tab: { en: "Members", zh: "成员", 'zh-TW': "成員", ja: "メンバー" },
+  media: { en: "Media", zh: "媒体", 'zh-TW': "媒體", ja: "メディア" },
+  links_label: { en: "Links", zh: "链接", 'zh-TW': "連結", ja: "リンク" },
+  manage: { en: "Manage", zh: "管理", 'zh-TW': "管理", ja: "管理" },
+  location_label: { en: "Location", zh: "位置", 'zh-TW': "位置", ja: "場所" },
+  notifications_label: { en: "Notifications", zh: "通知", 'zh-TW': "通知", ja: "通知" },
+  bio_label: { en: "Bio", zh: "个人简介", 'zh-TW': "個人簡介", ja: "自己紹介" }
 };
 
-const literalTextTranslationsReverse = {
-  en: Object.fromEntries(
-    Object.entries(literalTextTranslations.zh).map(([en, zh]) => [zh, en])
-  )
-};
+// Build a reverse index: text → { key, lang }
+// This allows the TreeWalker to match text in ANY language and replace with the target language
+const literalTextReverseIndex = {};
+Object.entries(literalTextTranslations).forEach(([key, langs]) => {
+  Object.entries(langs).forEach(([lang, text]) => {
+    if (!literalTextReverseIndex[text]) {
+      literalTextReverseIndex[text] = { key, lang };
+    }
+  });
+});
 
 function applyLiteralTextTranslations() {
-  const map = currentLanguage === 'zh'
-    ? literalTextTranslations.zh
-    : literalTextTranslationsReverse.en;
   const root = document.getElementById('sidebar-container');
-  if (!root || !map) return;
+  if (!root) return;
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -4291,7 +6512,7 @@ function applyLiteralTextTranslations() {
         return NodeFilter.FILTER_REJECT;
       }
       const text = node.nodeValue.trim();
-      return text && map[text] ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      return text && literalTextReverseIndex[text] ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
     }
   });
 
@@ -4301,15 +6522,24 @@ function applyLiteralTextTranslations() {
     const original = node.nodeValue;
     const leading = original.match(/^\s*/)[0];
     const trailing = original.match(/\s*$/)[0];
-    const translated = map[original.trim()];
-    node.nodeValue = `${leading}${translated}${trailing}`;
+    const match = literalTextReverseIndex[original.trim()];
+    if (match && literalTextTranslations[match.key] && literalTextTranslations[match.key][currentLanguage]) {
+      node.nodeValue = `${leading}${literalTextTranslations[match.key][currentLanguage]}${trailing}`;
+    }
   });
 }
+
+const LANG_DISPLAY_NAMES = {
+  'en': 'English',
+  'zh': '简体中文',
+  'zh-TW': '繁體中文',
+  'ja': '日本語'
+};
 
 function applyLanguage() {
   const langDisplay = document.getElementById("lang-display-val");
   if (langDisplay) {
-    langDisplay.textContent = currentLanguage === 'zh' ? '简体中文' : 'English';
+    langDisplay.textContent = LANG_DISPLAY_NAMES[currentLanguage] || 'English';
   }
 
   // Translate all text content using data-i18n
@@ -4362,8 +6592,15 @@ function applyLanguage() {
   }
 }
 
-window.toggleLanguage = function() {
-  currentLanguage = currentLanguage === 'en' ? 'zh' : 'en';
+const LANG_CYCLE = ['en', 'zh', 'zh-TW', 'ja'];
+
+window.toggleLanguage = function(targetLang) {
+  if (targetLang && LANG_CYCLE.includes(targetLang)) {
+    currentLanguage = targetLang;
+  } else {
+    const idx = LANG_CYCLE.indexOf(currentLanguage);
+    currentLanguage = LANG_CYCLE[(idx + 1) % LANG_CYCLE.length];
+  }
   localStorage.setItem('ichat_lang', currentLanguage);
   applyLanguage();
 };
@@ -4371,13 +6608,20 @@ window.toggleLanguage = function() {
 function getStatusTranslation(status) {
   if (!status) return "";
   const statusStr = String(status).toLowerCase();
-  if (currentLanguage === 'zh') {
-    if (statusStr === 'online') return '在线';
-    if (statusStr === 'offline') return '离线';
+  if (currentLanguage === 'zh' || currentLanguage === 'zh-TW') {
+    if (statusStr === 'online') return currentLanguage === 'zh-TW' ? '線上' : '在线';
+    if (statusStr === 'offline') return currentLanguage === 'zh-TW' ? '離線' : '离线';
     const match = statusStr.match(/^(\d+)\s+members$/);
     if (match) {
-      return `${match[1]} 位成员`;
+      return currentLanguage === 'zh-TW' ? `${match[1]} 位成員` : `${match[1]} 位成员`;
     }
+    return status;
+  }
+  if (currentLanguage === 'ja') {
+    if (statusStr === 'online') return 'オンライン';
+    if (statusStr === 'offline') return 'オフライン';
+    const match = statusStr.match(/^(\d+)\s+members$/);
+    if (match) return `${match[1]} メンバー`;
     return status;
   }
   return status;
@@ -4392,53 +6636,104 @@ function getRoleTranslation(role) {
     if (roleStr === 'member') return '普通成员';
     return role;
   }
+  if (currentLanguage === 'zh-TW') {
+    if (roleStr === 'creator') return '擁有者';
+    if (roleStr === 'admin') return '管理員';
+    if (roleStr === 'member') return '一般成員';
+    return role;
+  }
+  if (currentLanguage === 'ja') {
+    if (roleStr === 'creator') return '作成者';
+    if (roleStr === 'admin') return '管理者';
+    if (roleStr === 'member') return 'メンバー';
+    return role;
+  }
   return role;
 }
 
 function getSystemMessageTranslation(text) {
   if (!text) return "";
   const trimmed = text.trim();
-  if (currentLanguage === 'zh') {
-    if (trimmed === 'Today') return '今天';
-    if (trimmed === 'Yesterday') return '昨天';
-    if (trimmed === 'Monday') return '星期一';
-    if (trimmed === 'Tuesday') return '星期二';
-    if (trimmed === 'Wednesday') return '星期三';
-    if (trimmed === 'Thursday') return '星期四';
-    if (trimmed === 'Friday') return '星期五';
-    if (trimmed === 'Saturday') return '星期六';
-    if (trimmed === 'Sunday') return '星期日';
+  const isZh = currentLanguage === 'zh' || currentLanguage === 'zh-TW';
+  const isTW = currentLanguage === 'zh-TW';
+  const isJa = currentLanguage === 'ja';
 
+  if (isZh || isJa) {
+    if (trimmed === 'Today') return isJa ? '今日' : (isTW ? '今天' : '今天');
+    if (trimmed === 'Yesterday') return isJa ? '昨日' : (isTW ? '昨天' : '昨天');
+    if (trimmed === 'Monday') return isJa ? '月曜日' : (isTW ? '星期一' : '星期一');
+    if (trimmed === 'Tuesday') return isJa ? '火曜日' : (isTW ? '星期二' : '星期二');
+    if (trimmed === 'Wednesday') return isJa ? '水曜日' : (isTW ? '星期三' : '星期三');
+    if (trimmed === 'Thursday') return isJa ? '木曜日' : (isTW ? '星期四' : '星期四');
+    if (trimmed === 'Friday') return isJa ? '金曜日' : (isTW ? '星期五' : '星期五');
+    if (trimmed === 'Saturday') return isJa ? '土曜日' : (isTW ? '星期六' : '星期六');
+    if (trimmed === 'Sunday') return isJa ? '日曜日' : (isTW ? '星期日' : '星期日');
+  }
+
+  if (isZh) {
     if (trimmed.includes("Channel secured with ECDH + HKDF")) {
-      return "🔒 通道已通过 ECDH + HKDF 加密。零知识保护已启用。";
+      return isTW ? "🔒 通道已通過 ECDH + HKDF 加密。零知識保護已啟用。" : "🔒 通道已通过 ECDH + HKDF 加密。零知识保护已启用。";
     }
 
     let match = trimmed.match(/^(.+?)\s+created group\s+\"(.+?)\"$/);
     if (match) {
-      const creator = match[1] === "You" ? "你" : match[1];
-      return `${creator} 创建了群组 "${match[2]}"`;
+      const creator = match[1] === "You" ? (isTW ? "你" : "你") : match[1];
+      return isTW ? `${creator} 建立了群組 "${match[2]}"` : `${creator} 创建了群组 "${match[2]}"`;
     }
 
     match = trimmed.match(/^(.+?)\s+added\s+(.+?)\s+to the group$/);
     if (match) {
-      const adder = match[1] === "You" ? "你" : match[1];
-      const addee = match[2] === "You" ? "你" : match[2];
-      return `${adder} 将 ${addee} 添加到群组`;
+      const adder = match[1] === "You" ? (isTW ? "你" : "你") : match[1];
+      const addee = match[2] === "You" ? (isTW ? "你" : "你") : match[2];
+      return isTW ? `${adder} 將 ${addee} 加入群組` : `${adder} 将 ${addee} 添加到群组`;
     }
 
     match = trimmed.match(/^(.+?)\s+removed\s+(.+?)\s+from the group$/);
     if (match) {
-      const remover = match[1] === "You" ? "你" : match[1];
-      const removee = match[2] === "You" ? "你" : match[2];
-      return `${remover} 将 ${removee} 移出了群组`;
+      const remover = match[1] === "You" ? (isTW ? "你" : "你") : match[1];
+      const removee = match[2] === "You" ? (isTW ? "你" : "你") : match[2];
+      return isTW ? `${remover} 將 ${removee} 移出了群組` : `${remover} 将 ${removee} 移出了群组`;
     }
 
     const timeMatch = trimmed.match(/^(\d{1,2}):(\d{2})\s*([AP]M)$/i);
     if (timeMatch) {
-      const period = timeMatch[3].toUpperCase() === 'AM' ? '上午' : '下午';
+      const period = timeMatch[3].toUpperCase() === 'AM' ? (isTW ? '上午' : '上午') : (isTW ? '下午' : '下午');
       return `${period} ${timeMatch[1]}:${timeMatch[2]}`;
     }
   }
+
+  if (isJa) {
+    if (trimmed.includes("Channel secured with ECDH + HKDF")) {
+      return "🔒 チャンネルは ECDH + HKDF で暗号化されました。ゼロ知識保護が有効です。";
+    }
+
+    let match = trimmed.match(/^(.+?)\s+created group\s+\"(.+?)\"$/);
+    if (match) {
+      const creator = match[1] === "You" ? "あなた" : match[1];
+      return `${creator} がグループ "${match[2]}" を作成しました`;
+    }
+
+    match = trimmed.match(/^(.+?)\s+added\s+(.+?)\s+to the group$/);
+    if (match) {
+      const adder = match[1] === "You" ? "あなた" : match[1];
+      const addee = match[2] === "You" ? "あなた" : match[2];
+      return `${adder} が ${addee} をグループに追加しました`;
+    }
+
+    match = trimmed.match(/^(.+?)\s+removed\s+(.+?)\s+from the group$/);
+    if (match) {
+      const remover = match[1] === "You" ? "あなた" : match[1];
+      const removee = match[2] === "You" ? "あなた" : match[2];
+      return `${remover} が ${removee} をグループから削除しました`;
+    }
+
+    const timeMatch = trimmed.match(/^(\d{1,2}):(\d{2})\s*([AP]M)$/i);
+    if (timeMatch) {
+      const period = timeMatch[3].toUpperCase() === 'AM' ? '午前' : '午後';
+      return `${period} ${timeMatch[1]}:${timeMatch[2]}`;
+    }
+  }
+
   return text;
 }
 
@@ -4572,8 +6867,52 @@ window.triggerBoostGroupAction = function(e) {
   const btn = document.getElementById("chat-header-more-btn");
   if (btn) btn.classList.remove("active");
   
-  const msg = currentLanguage === 'zh' ? "助力群组功能暂未开放" : "Boost Group feature is not yet available";
+  const msg = _t4("Boost Group feature is not yet available", "助力群组功能暂未开放", "強化群組功能暫未開放", "グループブースト機能はまだ利用できません");
   window.showToast(msg);
+};
+
+window.triggerBlockContactAction = async function(e) {
+  if (e) e.stopPropagation();
+  const dropdown = document.getElementById("chat-header-more-dropdown");
+  if (dropdown) dropdown.classList.add("hidden");
+  const btn = document.getElementById("chat-header-more-btn");
+  if (btn) btn.classList.remove("active");
+
+  const chat = conversationsById[activeChatId];
+  if (!chat || chat.type !== "single" || !chat.peer_id) {
+    window.showToast(currentLanguage === "zh" ? "当前会话不能拉黑" : "This conversation cannot be blocked.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/privacy/block/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCookie("csrftoken") || ""
+      },
+      body: JSON.stringify({ user_id: chat.peer_id })
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(function() { return {}; });
+      throw new Error(data.error || "block_failed");
+    }
+  } catch (err) {
+    window.showToast(currentLanguage === "zh" ? "拉黑失败" : "Failed to block user.");
+    return;
+  }
+
+  window.showToast(currentLanguage === "zh" ? "已拉黑该联系人" : "User blocked.");
+  conversations = conversations.filter(function(c) { return c.id !== activeChatId; });
+  conversationsById = {};
+  conversations.forEach(function(c) { conversationsById[c.id] = c; });
+  renderChatList();
+  const emptyState = document.getElementById("empty-state-window");
+  const activeChatWindow = document.getElementById("active-chat-window");
+  if (emptyState) emptyState.classList.remove("hidden");
+  if (activeChatWindow) activeChatWindow.classList.add("hidden");
+  activeChatId = null;
+  loadBlockedUsersCount();
 };
 
 window.triggerMuteAction = async function(e) {
@@ -4586,20 +6925,23 @@ window.triggerMuteAction = async function(e) {
   const chat = conversationsById[activeChatId];
   if (!chat) return;
   
-  const nextMuted = !chat.isMuted;
+  const isMuted = chat.muted_until && new Date(chat.muted_until) > new Date();
+  const nextMuted = !isMuted;
   try {
     const response = await fetch(`/api/conversations/${activeChatId}/mute/`, {
-      method: 'POST',
+      method: nextMuted ? 'POST' : 'DELETE',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRFToken': getCookie('csrftoken') || ''
       },
-      body: JSON.stringify({ mute: nextMuted })
+      body: nextMuted ? JSON.stringify({ duration_minutes: 10080 }) : undefined
     });
     if (!response.ok) {
       throw new Error('mute_endpoint_unavailable');
     }
-    chat.isMuted = nextMuted;
+    const data = await response.json();
+    chat.muted_until = data.muted_until || null;
+    chat.is_muted = !!chat.muted_until;
   } catch (err) {
     window.showToast(currentLanguage === 'zh'
       ? '静音接口尚未接入，未保存更改'
@@ -4611,15 +6953,15 @@ window.triggerMuteAction = async function(e) {
   const muteTextEl = document.getElementById("menu-mute-group-text");
   const muteIconEl = document.getElementById("menu-mute-group-icon");
   if (muteTextEl) {
-    if (chat.isMuted) {
+    if (chat.muted_until) {
       muteTextEl.setAttribute("data-i18n", "menu_unmute_group");
-      muteTextEl.textContent = currentLanguage === 'zh' ? "取消静音" : "Unmute";
+      muteTextEl.textContent = _t4("Unmute", "取消静音", "取消靜音", "ミュート解除");
       if (muteIconEl) {
         muteIconEl.setAttribute("data-lucide", "bell");
       }
     } else {
       muteTextEl.setAttribute("data-i18n", "menu_mute_group");
-      muteTextEl.textContent = currentLanguage === 'zh' ? "静音免打扰" : "Mute...";
+      muteTextEl.textContent = _t4("Mute...", "静音免打扰", "靜音免打擾", "ミュート...");
       if (muteIconEl) {
         muteIconEl.setAttribute("data-lucide", "bell-off");
       }
@@ -4627,9 +6969,9 @@ window.triggerMuteAction = async function(e) {
     if (window.lucide) window.lucide.createIcons();
   }
   
-  const toastMsg = chat.isMuted 
-    ? (currentLanguage === 'zh' ? "已开启群聊免打扰" : "Mute notifications enabled")
-    : (currentLanguage === 'zh' ? "已取消群聊免打扰" : "Mute notifications disabled");
+  const toastMsg = chat.muted_until 
+    ? _t4("Mute notifications enabled", "已开启群聊免打扰", "已開啟群組免打擾", "ミュート通知を有効にしました")
+    : _t4("Mute notifications disabled", "已取消群聊免打扰", "已取消群組免打擾", "ミュート通知を無効にしました");
   window.showToast(toastMsg);
 };
 
@@ -4770,7 +7112,7 @@ window.submitReport = async function() {
   }
   
   window.closeReportModal();
-  const toastMsg = currentLanguage === 'zh' ? "举报已提交" : "Report has been submitted";
+  const toastMsg = _t4("Report has been submitted", "举报已提交", "檢舉已提交", "報告が送信されました");
   window.showToast(toastMsg);
 };
 
@@ -4800,10 +7142,12 @@ window.confirmDeleteChat = async function() {
   if (!activeChatId) return;
   
   const chatIdToDelete = activeChatId;
+  const chat = conversationsById[chatIdToDelete];
+  const isGroup = chat && chat.type === "group";
   
   try {
-    const response = await fetch(`/api/conversations/${chatIdToDelete}/`, {
-      method: 'DELETE',
+    const response = await fetch(isGroup ? `/api/groups/${chatIdToDelete}/leave/` : `/api/conversations/${chatIdToDelete}/`, {
+      method: isGroup ? 'POST' : 'DELETE',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRFToken': getCookie('csrftoken') || ''
@@ -4841,8 +7185,10 @@ window.confirmDeleteChat = async function() {
   const rightDetailsPanel = document.getElementById("right-panel");
   if (rightDetailsPanel) rightDetailsPanel.classList.add("collapsed");
   
-  const toastMsg = currentLanguage === 'zh' ? "会话已删除" : "Conversation deleted";
-  window.showToast(toastMsg);
+  const toastMsg = _t4("Conversation deleted", "会话已删除", "會話已刪除", "会話を削除しました");
+  window.showToast(isGroup
+    ? (currentLanguage === "zh" ? "已退出群聊" : "Left group")
+    : (currentLanguage === "zh" ? "会话已删除" : "Conversation deleted"));
 };
 
 window.showLogoutConfirmModal = function(e) {
@@ -4911,7 +7257,7 @@ window.checkForUpdates = function(e) {
   if (mainDropdown) mainDropdown.classList.add("hidden");
   if (mainBtn) mainBtn.classList.remove("active");
   
-  const msg = currentLanguage === 'zh' ? "当前已是最新版本" : "Already the latest version";
+  const msg = _t4("Already the latest version", "当前已是最新版本", "目前已是最新版本", "既に最新バージョンです");
   window.showToast(msg);
 };
 

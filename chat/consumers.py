@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import binascii
 from datetime import UTC, datetime
 
@@ -11,6 +11,8 @@ from django.utils import timezone
 from .models import (
     Conversation,
     ConversationMember,
+    EncryptedFile,
+    EncryptedFileKey,
     EncryptedMessage,
     GroupMessage,
     GroupMessageRecipient,
@@ -101,11 +103,11 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         try:
             await super().receive(text_data=text_data, bytes_data=bytes_data, **kwargs)
         except ValueError:
-            await self.send_error(request_id=None, code='invalid_payload', message='消息格式错误')
+            await self.send_error(request_id=None, code='invalid_payload', message='娑堟伅鏍煎紡閿欒')
 
     async def receive_json(self, content, **kwargs):
         if not isinstance(content, dict):
-            await self.send_error(request_id=None, code='invalid_payload', message='消息格式错误')
+            await self.send_error(request_id=None, code='invalid_payload', message='娑堟伅鏍煎紡閿欒')
             return
 
         request_id = content.get('request_id')
@@ -148,7 +150,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                         self.scope['user'].pk, data,
                     )
                 else:
-                    raise ClientPayloadError('invalid_payload', 'conversation_type 必须为 single 或 group')
+                    raise ClientPayloadError('invalid_payload', 'conversation_type 蹇呴』涓?single 鎴?group')
                 await self.channel_layer.group_send(
                     self.user_group(update['sender_id']),
                     {'type': 'message.receipt.updated', 'data': update},
@@ -187,7 +189,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 data = content.get('data', {})
                 conversation_id = data.get('conversation_id')
                 if not conversation_id:
-                    raise ClientPayloadError('invalid_payload', 'conversation_id 缺失')
+                    raise ClientPayloadError('invalid_payload', 'conversation_id 缂哄け')
                 await self._verify_conversation_membership(self.scope['user'].pk, conversation_id)
                 member_ids = await self._get_active_member_ids(conversation_id)
                 typing_data = {
@@ -208,7 +210,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 data = content.get('data', {})
                 conversation_id = data.get('conversation_id')
                 if not conversation_id:
-                    raise ClientPayloadError('invalid_payload', 'conversation_id 缺失')
+                    raise ClientPayloadError('invalid_payload', 'conversation_id 缂哄け')
                 await self._verify_conversation_membership(self.scope['user'].pk, conversation_id)
                 member_ids = await self._get_active_member_ids(conversation_id)
                 typing_data = {
@@ -232,7 +234,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_error(
                     request_id=request_id,
                     code='database_busy',
-                    message='数据库正忙，请稍后重试',
+                    message='Database is busy. Please retry shortly.',
                 )
                 return
             raise
@@ -240,10 +242,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         await self.send_error(
             request_id=request_id,
             code='not_implemented',
-            message='该实时通信事件尚未实现',
+            message='璇ュ疄鏃堕€氫俊浜嬩欢灏氭湭瀹炵幇',
         )
 
-    # ── Channel-layer event handlers ────────────────────────────────
+    # 鈹€鈹€ Channel-layer event handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     async def message_single_new(self, event):
         await self.send_event('message.single.new', data=event['data'])
@@ -266,10 +268,16 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def presence_updated(self, event):
         await self.send_event('presence.updated', data=event['data'])
 
+    async def profile_updated(self, event):
+        await self.send_event('profile.updated', data=event['data'])
+
     async def message_deleted(self, event):
         await self.send_event('message.deleted', data=event['data'])
 
-    # ── Helpers ─────────────────────────────────────────────────────
+    async def file_upload_completed(self, event):
+        await self.send_event('file.upload.completed', data=event['data'])
+
+    # 鈹€鈹€ Helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     async def send_error(self, *, request_id, code, message):
         await self.send_event(
@@ -316,7 +324,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 },
             )
 
-    # ── T22: Presence helpers ────────────────────────────────────────
+    # 鈹€鈹€ T22: Presence helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     @database_sync_to_async
     def _set_presence_online(self, user_id):
@@ -351,9 +359,9 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             user_id=user_id,
             status=ConversationMember.Status.ACTIVE,
         ).exists():
-            raise ClientPayloadError('conversation_forbidden', '无权在该会话中操作')
+            raise ClientPayloadError('conversation_forbidden', 'Not a member of this conversation.')
 
-    # ── Private message creation ────────────────────────────────────
+    # 鈹€鈹€ Private message creation 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     @classmethod
     @database_sync_to_async
@@ -375,7 +383,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     status=Conversation.Status.ACTIVE,
                 )
             except Conversation.DoesNotExist as error:
-                raise ClientPayloadError('conversation_not_found', '私聊会话不存在或不可用') from error
+                raise ClientPayloadError('conversation_not_found', 'Private conversation not found or unavailable.') from error
 
             active_members = ConversationMember.objects.filter(
                 conversation=conversation,
@@ -387,23 +395,17 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 or not active_members.filter(user_id=sender_id).exists()
                 or not active_members.filter(user_id=data['receiver_id']).exists()
             ):
-                raise ClientPayloadError('conversation_forbidden', '无权在该私聊会话中发送消息')
+                raise ClientPayloadError('conversation_forbidden', 'Cannot send in this private conversation.')
 
-            # Block/contact enforcement (P1 fix — matches HTTP fallback).
-            from accounts.models import BlockedUser, Contact
+            # Block/contact enforcement (P1 fix 鈥?matches HTTP fallback).
+            from accounts.models import BlockedUser
             receiver_id = data['receiver_id']
             blocked = (
                 BlockedUser.objects.filter(blocker=receiver_id, blocked=sender_id).exists()
                 or BlockedUser.objects.filter(blocker=sender_id, blocked=receiver_id).exists()
             )
             if blocked:
-                raise ClientPayloadError('conversation_forbidden', '已拉黑或已被拉黑，无法发送消息')
-            is_contact = (
-                Contact.objects.filter(user=sender_id, contact=receiver_id).exists()
-                or Contact.objects.filter(user=receiver_id, contact=sender_id).exists()
-            )
-            if not is_contact:
-                raise ClientPayloadError('conversation_forbidden', '双方不是联系人，无法发送私聊')
+                raise ClientPayloadError('conversation_forbidden', 'Blocked users cannot send messages.')
 
             try:
                 with transaction.atomic():
@@ -420,6 +422,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                         receiver_key_version=data['receiver_key_version'],
                         client_message_id=client_message_id,
                         reply_to_message_id=data.get('reply_to_message_id'),
+                        file_id_id=data.get('file_id'),
                     )
             except IntegrityError:
                 if client_message_id:
@@ -438,19 +441,19 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             )
         return cls.serialize_private_message(message)
 
-    # ── Private message receipt updates ─────────────────────────────
+    # 鈹€鈹€ Private message receipt updates 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     @classmethod
     @database_sync_to_async
     def update_private_message_status(cls, receiver_id, data):
         if not isinstance(data, dict):
-            raise ClientPayloadError('invalid_payload', '消息数据格式错误')
+            raise ClientPayloadError('invalid_payload', 'Message payload must be an object.')
         conversation_type = data.get('conversation_type')
         if conversation_type != 'single':
-            raise ClientPayloadError('invalid_payload', 'conversation_type 必须为 single')
+            raise ClientPayloadError('invalid_payload', 'conversation_type 蹇呴』涓?single')
         status = data.get('status')
         if status not in {EncryptedMessage.Status.DELIVERED, EncryptedMessage.Status.READ}:
-            raise ClientPayloadError('invalid_payload', 'status 必须为 delivered 或 read')
+            raise ClientPayloadError('invalid_payload', 'status 蹇呴』涓?delivered 鎴?read')
         message_id = cls.require_positive_integer(data, 'message_id')
         with transaction.atomic():
             try:
@@ -459,7 +462,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     receiver_id=receiver_id,
                 )
             except EncryptedMessage.DoesNotExist as error:
-                raise ClientPayloadError('message_not_found', '私聊消息不存在或无权更新') from error
+                raise ClientPayloadError('message_not_found', '绉佽亰娑堟伅涓嶅瓨鍦ㄦ垨鏃犳潈鏇存柊') from error
 
             status_order = {
                 EncryptedMessage.Status.SENT: 0,
@@ -493,17 +496,17 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'status': message.status,
         }
 
-    # ── T21: Group message receipt updates ─────────────────────────
+    # 鈹€鈹€ T21: Group message receipt updates 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     @classmethod
     @database_sync_to_async
     def update_group_message_status(cls, receiver_id, data):
         if not isinstance(data, dict):
-            raise ClientPayloadError('invalid_payload', '消息数据格式错误')
+            raise ClientPayloadError('invalid_payload', '娑堟伅鏁版嵁鏍煎紡閿欒')
         status = data.get('status')
         if status not in {GroupMessageRecipient.Status.DELIVERED,
                           GroupMessageRecipient.Status.READ}:
-            raise ClientPayloadError('invalid_payload', 'status 必须为 delivered 或 read')
+            raise ClientPayloadError('invalid_payload', 'status 蹇呴』涓?delivered 鎴?read')
         message_id = cls.require_positive_integer(data, 'message_id')
         with transaction.atomic():
             try:
@@ -512,7 +515,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     receiver_id=receiver_id,
                 )
             except GroupMessageRecipient.DoesNotExist as error:
-                raise ClientPayloadError('message_not_found', '群聊消息不存在或无权更新') from error
+                raise ClientPayloadError('message_not_found', '缇よ亰娑堟伅涓嶅瓨鍦ㄦ垨鏃犳潈鏇存柊') from error
 
             status_order = {
                 GroupMessageRecipient.Status.SENT: 0,
@@ -548,7 +551,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'status': recipient.status,
         }
 
-    # ── T20: Message recall ────────────────────────────────────────
+    # 鈹€鈹€ T20: Message recall 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     recall_limit_minutes = 30
 
@@ -556,7 +559,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     @database_sync_to_async
     def recall_message(cls, user_id, data):
         if not isinstance(data, dict):
-            raise ClientPayloadError('invalid_payload', '消息数据格式错误')
+            raise ClientPayloadError('invalid_payload', '娑堟伅鏁版嵁鏍煎紡閿欒')
         conversation_type = data.get('conversation_type', 'single')
         message_id = cls.require_positive_integer(data, 'message_id')
 
@@ -565,7 +568,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         elif conversation_type == 'group':
             return cls._recall_group_message(user_id, message_id)
         else:
-            raise ClientPayloadError('invalid_payload', 'conversation_type 必须为 single 或 group')
+            raise ClientPayloadError('invalid_payload', 'conversation_type must be single or group')
 
     @classmethod
     def _recall_private_message(cls, user_id, message_id):
@@ -576,14 +579,14 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     sender_id=user_id,
                 )
             except EncryptedMessage.DoesNotExist as error:
-                raise ClientPayloadError('message_not_found', '消息不存在或无权撤回') from error
+                raise ClientPayloadError('message_not_found', 'Message not found or cannot be recalled.') from error
 
             if message.status == EncryptedMessage.Status.RECALLED:
-                raise ClientPayloadError('already_recalled', '消息已被撤回')
+                raise ClientPayloadError('already_recalled', 'Message has already been recalled.')
 
             elapsed = (timezone.now() - message.created_at).total_seconds()
             if elapsed > cls.recall_limit_minutes * 60:
-                raise ClientPayloadError('recall_timeout', f'消息发送已超过{cls.recall_limit_minutes}分钟，无法撤回')
+                raise ClientPayloadError('recall_timeout', f'Messages can only be recalled within {cls.recall_limit_minutes} minutes.')
 
             message.status = EncryptedMessage.Status.RECALLED
             message.recalled_at = timezone.now()
@@ -607,14 +610,14 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     sender_id=user_id,
                 )
             except GroupMessage.DoesNotExist as error:
-                raise ClientPayloadError('message_not_found', '消息不存在或无权撤回') from error
+                raise ClientPayloadError('message_not_found', 'Message not found or cannot be recalled.') from error
 
             if group_message.status == GroupMessage.Status.RECALLED:
-                raise ClientPayloadError('already_recalled', '消息已被撤回')
+                raise ClientPayloadError('already_recalled', 'Message has already been recalled.')
 
             elapsed = (timezone.now() - group_message.created_at).total_seconds()
             if elapsed > cls.recall_limit_minutes * 60:
-                raise ClientPayloadError('recall_timeout', f'消息发送已超过{cls.recall_limit_minutes}分钟，无法撤回')
+                raise ClientPayloadError('recall_timeout', f'Messages can only be recalled within {cls.recall_limit_minutes} minutes.')
 
             group_message.status = GroupMessage.Status.RECALLED
             group_message.recalled_at = timezone.now()
@@ -632,29 +635,29 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'recalled_at': group_message.recalled_at.isoformat(),
         }
 
-    # ── Validation helpers ─────────────────────────────────────────
+    # 鈹€鈹€ Validation helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     @classmethod
     def validate_private_message(cls, data):
         if not isinstance(data, dict):
-            raise ClientPayloadError('invalid_payload', '消息数据格式错误')
+            raise ClientPayloadError('invalid_payload', '娑堟伅鏁版嵁鏍煎紡閿欒')
         if data.get('algorithm') != cls.private_message_algorithm:
-            raise ClientPayloadError('unsupported_algorithm', '不支持的私聊加密算法')
+            raise ClientPayloadError('unsupported_algorithm', '涓嶆敮鎸佺殑绉佽亰鍔犲瘑绠楁硶')
 
         message_type = data.get('message_type', EncryptedMessage.MessageType.TEXT)
         if message_type not in EncryptedMessage.MessageType.values:
-            raise ClientPayloadError('invalid_payload', '消息类型无效')
+            raise ClientPayloadError('invalid_payload', 'Invalid message type.')
 
         cls.require_base64(data, 'ciphertext', max_decoded_length=65536)
         cls.require_base64(data, 'nonce', decoded_length=12)
         cls.require_base64(data, 'auth_tag', decoded_length=16)
         client_message_id = data.get('client_message_id')
         if not isinstance(client_message_id, str) or not client_message_id or len(client_message_id) > 64:
-            raise ClientPayloadError('invalid_payload', 'client_message_id 缺失或格式无效')
+            raise ClientPayloadError('invalid_payload', 'client_message_id is missing or invalid.')
 
         reply_to = data.get('reply_to_message_id')
         if reply_to is not None and not isinstance(reply_to, int):
-            raise ClientPayloadError('invalid_payload', 'reply_to_message_id 必须为整数')
+            raise ClientPayloadError('invalid_payload', 'reply_to_message_id must be an integer.')
 
         result = {
             'conversation_id': cls.require_positive_integer(data, 'conversation_id'),
@@ -670,36 +673,40 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         }
         if reply_to is not None:
             result['reply_to_message_id'] = reply_to
+        # Optional file_id for file messages
+        file_id = data.get('file_id')
+        if file_id is not None:
+            result['file_id'] = cls.require_positive_integer({'file_id': file_id}, 'file_id')
         return result
 
     @staticmethod
     def require_positive_integer(data, field):
         if not isinstance(data, dict):
-            raise ClientPayloadError('invalid_payload', '消息数据格式错误')
+            raise ClientPayloadError('invalid_payload', 'Message payload must be an object.')
         value = data.get(field)
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ClientPayloadError('invalid_payload', f'{field} 必须为正整数')
+            raise ClientPayloadError('invalid_payload', f'{field} must be a positive integer.')
         return value
 
     @staticmethod
     def require_base64(data, field, *, decoded_length=None, max_decoded_length=None):
         value = data.get(field)
         if not isinstance(value, str) or not value:
-            raise ClientPayloadError('invalid_payload', f'{field} 必须为 Base64 文本')
+            raise ClientPayloadError('invalid_payload', f'{field} must be Base64 text.')
         try:
             decoded = base64.b64decode(value, validate=True)
         except (ValueError, binascii.Error) as error:
-            raise ClientPayloadError('invalid_payload', f'{field} 必须为有效 Base64 文本') from error
+            raise ClientPayloadError('invalid_payload', f'{field} must be valid Base64 text.') from error
         if decoded_length is not None and len(decoded) != decoded_length:
-            raise ClientPayloadError('invalid_payload', f'{field} 长度无效')
+            raise ClientPayloadError('invalid_payload', f'{field} has invalid length.')
         if max_decoded_length is not None and len(decoded) > max_decoded_length:
-            raise ClientPayloadError('invalid_payload', f'{field} 超过最大长度限制')
+            raise ClientPayloadError('invalid_payload', f'{field} exceeds maximum length.')
 
-    # ── Serialization ──────────────────────────────────────────────
+    # 鈹€鈹€ Serialization 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     @staticmethod
     def serialize_private_message(message):
-        return {
+        result = {
             'client_message_id': message.client_message_id,
             'message_id': message.pk,
             'conversation_id': message.conversation_id,
@@ -716,9 +723,16 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'status': message.status,
             'recalled_at': message.recalled_at.isoformat() if message.recalled_at else None,
             'created_at': message.created_at.isoformat(),
+            'file_id': message.file_id_id,
         }
+        # Attach file sub-object for file messages
+        if message.file_id_id:
+            file_data = ChatConsumer._build_file_payload(message.file_id_id, message.receiver_id)
+            if file_data:
+                result['file'] = file_data
+        return result
 
-    # ── Group message creation ─────────────────────────────────────
+    # 鈹€鈹€ Group message creation 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     max_group_active_members = 50
 
@@ -734,7 +748,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     status=Conversation.Status.ACTIVE,
                 )
             except Conversation.DoesNotExist as error:
-                raise ClientPayloadError('conversation_not_found', '群聊会话不存在或不可用') from error
+                raise ClientPayloadError('conversation_not_found', 'Group conversation not found or unavailable.') from error
 
             active_members = ConversationMember.objects.filter(
                 conversation=conversation,
@@ -742,22 +756,22 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             )
             active_member_ids = set(active_members.values_list('user_id', flat=True))
             if len(active_member_ids) > cls.max_group_active_members:
-                raise ClientPayloadError('group_too_large', f'群聊活跃成员数超过上限 {cls.max_group_active_members}')
+                raise ClientPayloadError('group_too_large', f'Active group members exceed limit {cls.max_group_active_members}.')
             if sender_id not in active_member_ids:
-                raise ClientPayloadError('conversation_forbidden', '无权在该群聊中发送消息')
+                raise ClientPayloadError('conversation_forbidden', 'Cannot send in this group conversation.')
 
-            # Mute enforcement (P1 fix — match HTTP fallback in views.py).
+            # Mute enforcement (P1 fix 鈥?match HTTP fallback in views.py).
             if conversation.muted_until and conversation.muted_until > timezone.now():
                 sender_role = active_members.filter(user_id=sender_id).values_list('role', flat=True).first()
                 if sender_role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
-                    raise ClientPayloadError('group_muted', '该群已被禁言，仅群主和管理员可发送消息')
+                    raise ClientPayloadError('group_muted', 'This group is muted. Only owners and admins can send messages.')
 
             if data['membership_version'] != conversation.membership_version:
-                raise ClientPayloadError('membership_conflict', '群成员版本已变更，请重新拉取成员列表')
+                raise ClientPayloadError('membership_conflict', 'Group membership version changed. Refresh member list.')
 
             recipient_user_ids = {r['receiver_id'] for r in data['recipients']}
             if recipient_user_ids != active_member_ids:
-                raise ClientPayloadError('recipients_mismatch', '接收者列表与当前活跃成员不一致')
+                raise ClientPayloadError('recipients_mismatch', 'Recipient list does not match active members.')
 
             client_message_id = data.get('client_message_id')
             existing = GroupMessage.objects.filter(
@@ -775,6 +789,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                         message_type=data['message_type'],
                         client_message_id=client_message_id,
                         reply_to_message_id=data.get('reply_to_message_id'),
+                        file_id_id=data.get('file_id'),
                     )
             except IntegrityError:
                 existing = GroupMessage.objects.get(
@@ -849,24 +864,24 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     @classmethod
     def validate_group_message(cls, data):
         if not isinstance(data, dict):
-            raise ClientPayloadError('invalid_payload', '消息数据格式错误')
+            raise ClientPayloadError('invalid_payload', '娑堟伅鏁版嵁鏍煎紡閿欒')
         if data.get('algorithm') != cls.group_message_algorithm:
-            raise ClientPayloadError('unsupported_algorithm', '不支持的群聊加密算法')
+            raise ClientPayloadError('unsupported_algorithm', 'Unsupported group message algorithm.')
 
         message_type = data.get('message_type', GroupMessage.MessageType.TEXT)
         if message_type not in GroupMessage.MessageType.values:
-            raise ClientPayloadError('invalid_payload', '消息类型无效')
+            raise ClientPayloadError('invalid_payload', 'Invalid message type.')
 
         recipients = data.get('recipients')
         if not isinstance(recipients, list) or not recipients:
-            raise ClientPayloadError('invalid_payload', 'recipients 必须为非空数组')
+            raise ClientPayloadError('invalid_payload', 'recipients must be a non-empty array.')
         seen_receivers = set()
         for r in recipients:
             if not isinstance(r, dict):
-                raise ClientPayloadError('invalid_payload', 'recipients 元素必须为对象')
+                raise ClientPayloadError('invalid_payload', 'recipient entries must be objects.')
             receiver_id = cls.require_positive_integer(r, 'receiver_id')
             if receiver_id in seen_receivers:
-                raise ClientPayloadError('invalid_payload', f'receiver_id {receiver_id} 重复')
+                raise ClientPayloadError('invalid_payload', f'receiver_id {receiver_id} is duplicated.')
             seen_receivers.add(receiver_id)
             cls.require_base64(r, 'ciphertext', max_decoded_length=65536)
             cls.require_base64(r, 'nonce', decoded_length=12)
@@ -875,11 +890,11 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
         client_message_id = data.get('client_message_id')
         if not isinstance(client_message_id, str) or not client_message_id or len(client_message_id) > 64:
-            raise ClientPayloadError('invalid_payload', 'client_message_id 缺失或格式无效')
+            raise ClientPayloadError('invalid_payload', 'client_message_id is missing or invalid.')
 
         reply_to = data.get('reply_to_message_id')
         if reply_to is not None and not isinstance(reply_to, int):
-            raise ClientPayloadError('invalid_payload', 'reply_to_message_id 必须为整数')
+            raise ClientPayloadError('invalid_payload', 'reply_to_message_id must be an integer.')
 
         result = {
             'group_id': cls.require_positive_integer(data, 'group_id'),
@@ -901,43 +916,94 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         }
         if reply_to is not None:
             result['reply_to_message_id'] = reply_to
+        # Optional file_id for file messages
+        file_id = data.get('file_id')
+        if file_id is not None:
+            result['file_id'] = cls.require_positive_integer({'file_id': file_id}, 'file_id')
         return result
 
     @staticmethod
     def serialize_group_recipient(recipient, membership_version=None):
-        mv = membership_version if membership_version is not None else recipient.membership_version
+        mv = membership_version if membership_version is not None else (recipient.membership_version or 0)
         sender_name = ChatConsumer.display_name(recipient.group_message.sender)
-        return {
-            'message_id': recipient.group_message_id,
-            'group_id': recipient.group_message.conversation_id,
-            'membership_version': mv,
-            'sender_id': recipient.group_message.sender_id,
-            'sender_username': recipient.group_message.sender.username,
+        group_msg = recipient.group_message
+        result = {
+            'message_id': group_msg.id,
+            'group_id': group_msg.conversation_id,
+            'membership_version': mv or 0,
+            'sender_id': group_msg.sender_id,
+            'sender_username': group_msg.sender.username,
             'sender_name': sender_name,
             'sender_initials': ChatConsumer.initials(sender_name),
             'sender_avatar_color': ChatConsumer.avatar_color(sender_name),
-            'sender_avatar_url': ChatConsumer.avatar_url(recipient.group_message.sender),
+            'sender_avatar_url': ChatConsumer.avatar_url(group_msg.sender),
             'receiver_id': recipient.receiver_id,
-            'message_type': recipient.group_message.message_type,
+            'message_type': group_msg.message_type,
             'ciphertext': recipient.ciphertext,
             'nonce': recipient.nonce,
             'auth_tag': recipient.auth_tag,
             'algorithm': recipient.algorithm,
-            'sender_key_version': recipient.sender_key_version,
-            'receiver_key_version': recipient.receiver_key_version,
-            'reply_to_message_id': recipient.group_message.reply_to_message_id,
+            'sender_key_version': recipient.sender_key_version or 0,
+            'receiver_key_version': recipient.receiver_key_version or 0,
+            'reply_to_message_id': group_msg.reply_to_message_id,
             'status': recipient.status,
-            'recalled_at': recipient.group_message.recalled_at.isoformat() if recipient.group_message.recalled_at else None,
-            'created_at': recipient.group_message.created_at.isoformat(),
+            'recalled_at': group_msg.recalled_at.isoformat() if group_msg.recalled_at else None,
+            'created_at': group_msg.created_at.isoformat(),
+            'file_id': group_msg.file_id_id,
         }
+        # Attach file sub-object for file messages
+        if group_msg.file_id_id:
+            file_data = ChatConsumer._build_file_payload(group_msg.file_id_id, recipient.receiver_id)
+            if file_data:
+                result['file'] = file_data
+        return result
+
+    @staticmethod
+    def _build_file_payload(file_id, holder_id):
+        """Build the ``file`` sub-object for a serialized message.
+
+        Called inside ``database_sync_to_async`` so ORM access is safe.
+        Returns None if the file or its key cannot be found.
+        """
+        try:
+            ef = EncryptedFile.objects.get(pk=file_id)
+        except EncryptedFile.DoesNotExist:
+            return None
+        file_obj = {
+            'file_id': ef.id,
+            'message_kind': ef.message_kind,
+            'chunk_count': ef.chunk_count,
+            'total_size_bytes': ef.total_size_bytes,
+            'algorithm': ef.algorithm,
+            'encrypted_metadata': ef.encrypted_metadata,
+            'metadata_nonce': ef.metadata_nonce,
+            'metadata_auth_tag': ef.metadata_auth_tag,
+            'ciphertext_sha256': ef.ciphertext_sha256,
+        }
+        fk = EncryptedFileKey.objects.filter(file=ef, holder_id=holder_id).first()
+        if fk:
+            file_obj['file_key'] = {
+                'encrypted_file_key': fk.encrypted_file_key,
+                'nonce': fk.nonce,
+                'auth_tag': fk.auth_tag,
+                'algorithm': fk.algorithm,
+                'sender_key_version': fk.sender_key_version,
+                'receiver_key_version': fk.receiver_key_version,
+            }
+        return file_obj
 
     @staticmethod
     def avatar_url(user):
         try:
             if user.profile and user.profile.avatar:
-                return user.profile.avatar.url
+                timestamp = int(user.profile.updated_at.timestamp())
+                return f"{user.profile.avatar.url}?t={timestamp}"
         except Exception:
-            pass
+            try:
+                if user.profile and user.profile.avatar:
+                    return user.profile.avatar.url
+            except Exception:
+                pass
         return ''
 
     @staticmethod

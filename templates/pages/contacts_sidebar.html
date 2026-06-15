@@ -96,8 +96,12 @@
         {% if entry.user == request.user %}
           {% with peer=entry.contact %}
         <div class="flex items-center space-x-3 flex-1 min-w-0">
-          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0 avatar-clickable"{% if peer %} data-user-id="{{ peer.id }}"{% endif %} style="cursor:pointer">
-            {{ peer.username|slice:":1"|upper }}
+          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0 avatar-clickable overflow-hidden"{% if peer %} data-user-id="{{ peer.id }}"{% endif %} style="cursor:pointer">
+            {% if peer.profile.avatar %}
+              <img src="{{ peer.profile.avatar.url }}?t={{ peer.profile.updated_at.timestamp|floatformat:0 }}" alt="{{ peer.username }}" class="w-full h-full object-cover">
+            {% else %}
+              {{ peer.username|slice:":1"|upper }}
+            {% endif %}
           </div>
           <div class="min-w-0">
             <p class="text-sm font-semibold text-textMain">{{ peer.username }}</p>
@@ -108,8 +112,12 @@
         {% else %}
           {% with peer=entry.user %}
         <div class="flex items-center space-x-3 flex-1 min-w-0">
-          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0 avatar-clickable"{% if peer %} data-user-id="{{ peer.id }}"{% endif %} style="cursor:pointer">
-            {{ peer.username|slice:":1"|upper }}
+          <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm flex-shrink-0 avatar-clickable overflow-hidden"{% if peer %} data-user-id="{{ peer.id }}"{% endif %} style="cursor:pointer">
+            {% if peer.profile.avatar %}
+              <img src="{{ peer.profile.avatar.url }}?t={{ peer.profile.updated_at.timestamp|floatformat:0 }}" alt="{{ peer.username }}" class="w-full h-full object-cover">
+            {% else %}
+              {{ peer.username|slice:":1"|upper }}
+            {% endif %}
           </div>
           <div class="min-w-0">
             <p class="text-sm font-semibold text-textMain">{{ peer.username }}</p>

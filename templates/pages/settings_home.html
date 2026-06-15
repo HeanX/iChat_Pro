@@ -2,7 +2,7 @@
 <div class="settings-template-body">
 
   <section class="settings-template-profile" aria-label="Profile summary">
-    <button type="button" class="settings-template-avatar-wrap" onclick="navigateSidebar('settings-profile')" title="Edit Profile">
+    <button type="button" class="settings-template-avatar-wrap" onclick="navigateSidebar('settings-profile')" title="Edit Profile" style="background: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
       {% if settings_avatar_url %}
       <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="settings-template-avatar-image">
       {% else %}
@@ -32,7 +32,7 @@
     <button type="button" onclick="navigateSidebar('notifications')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="bell"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Notifications and Sounds</span>
+        <span class="settings-template-row-title" data-i18n="notifications_sounds">Notifications and Sounds</span>
       </span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
@@ -40,7 +40,7 @@
     <button type="button" onclick="navigateSidebar('data-storage')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="database"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Data and Storage</span>
+        <span class="settings-template-row-title" data-i18n="data_and_storage">Data and Storage</span>
       </span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
@@ -48,7 +48,7 @@
     <button type="button" onclick="navigateSidebar('privacy-security')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="lock"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Privacy and Security</span>
+        <span class="settings-template-row-title" data-i18n="privacy_and_security">Privacy and Security</span>
       </span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
@@ -64,7 +64,7 @@
     <button type="button" onclick="navigateSidebar('chat-folders')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="folder"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Chat Folders</span>
+        <span class="settings-template-row-title" data-i18n="chat_folders">Chat Folders</span>
       </span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
@@ -72,7 +72,7 @@
     <button type="button" onclick="navigateSidebar('stickers-emoji')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="sticker"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Stickers and Emoji</span>
+        <span class="settings-template-row-title" data-i18n="stickers_and_emoji">Stickers and Emoji</span>
       </span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
@@ -80,7 +80,7 @@
     <button type="button" onclick="showToast('Speakers and camera settings coming in Phase 2')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="video"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Speakers and Camera</span>
+        <span class="settings-template-row-title" data-i18n="speakers_and_camera">Speakers and Camera</span>
       </span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
@@ -88,7 +88,7 @@
     <button type="button" onclick="navigateSidebar('sessions-shortcuts')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="monitor-smartphone"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Devices</span>
+        <span class="settings-template-row-title" data-i18n="devices">Devices</span>
       </span>
       <span class="settings-template-row-value">{{ settings_active_sessions_count }}</span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
@@ -97,7 +97,7 @@
     <button type="button" onclick="navigateSidebar('language')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="languages"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Language / &#35821;&#35328;</span>
+        <span class="settings-template-row-title" data-i18n="language">Language / &#35821;&#35328;</span>
       </span>
       <span id="lang-display-val" class="settings-template-row-value" data-i18n="lang_display">English</span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
@@ -106,7 +106,7 @@
     <button type="button" onclick="navigateSidebar('sessions-shortcuts')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="keyboard"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Keyboard Shortcuts</span>
+        <span class="settings-template-row-title" data-i18n="keyboard_shortcuts">Keyboard Shortcuts</span>
       </span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
@@ -116,7 +116,7 @@
     <button type="button" onclick="navigateSidebar('settings')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="key-round"></i></span>
       <span class="settings-template-row-main">
-        <span class="settings-template-row-title">Manage Cryptographic Keys</span>
+        <span class="settings-template-row-title" data-i18n="manage_crypto_keys">Manage Cryptographic Keys</span>
       </span>
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>

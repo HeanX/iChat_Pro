@@ -72,7 +72,7 @@
       display: block;
       overflow: hidden;
       color: #111827;
-      font-size: 17px;
+      font-size: 16px;
       font-weight: 400;
       line-height: 1.2;
       text-overflow: ellipsis;
@@ -82,7 +82,7 @@
     .telegram-privacy .privacy-subtitle {
       margin-top: 3px;
       color: var(--tg-muted);
-      font-size: 13px;
+      font-size: 12px;
       line-height: 1.22;
     }
 
@@ -287,48 +287,48 @@
       <button type="button" class="privacy-row" data-action="blocked">
         <span class="privacy-icon"><i data-lucide="user-round-x"></i></span>
         <span>
-          <span class="privacy-title">已拉黑用户</span>
-          <span id="privacy-blocked-count" class="privacy-subtitle">无</span>
+          <span class="privacy-title" data-i18n="blocked_users">Blocked Users</span>
+          <span id="privacy-blocked-count" class="privacy-subtitle">None</span>
         </span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-action="auto-delete">
         <span class="privacy-icon"><i data-lucide="timer-reset"></i></span>
         <span>
-          <span class="privacy-title">自动删除消息</span>
-          <span id="privacy-summary-auto_delete_messages_days" class="privacy-subtitle">关闭</span>
+          <span class="privacy-title" data-i18n="auto_delete_messages">Auto-Delete Messages</span>
+          <span id="privacy-summary-auto_delete_messages_days" class="privacy-subtitle">Off</span>
         </span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-toggle="passcode_lock_enabled">
         <span class="privacy-icon"><i data-lucide="key-round"></i></span>
         <span>
-          <span class="privacy-title">密码锁</span>
-          <span id="privacy-summary-passcode_lock_enabled" class="privacy-subtitle">关闭</span>
+          <span class="privacy-title" data-i18n="passcode_lock">Passcode Lock</span>
+          <span id="privacy-summary-passcode_lock_enabled" class="privacy-subtitle">Off</span>
         </span>
         <span id="privacy-switch-passcode_lock_enabled" class="privacy-switch"></span>
       </button>
       <button type="button" class="privacy-row" data-toggle="two_step_verification_enabled">
         <span class="privacy-icon"><i data-lucide="lock-keyhole"></i></span>
         <span>
-          <span class="privacy-title">两步验证</span>
-          <span id="privacy-summary-two_step_verification_enabled" class="privacy-subtitle">关闭</span>
+          <span class="privacy-title" data-i18n="two_step_verification">Two-Step Verification</span>
+          <span id="privacy-summary-two_step_verification_enabled" class="privacy-subtitle">Off</span>
         </span>
         <span id="privacy-switch-two_step_verification_enabled" class="privacy-switch"></span>
       </button>
       <button type="button" class="privacy-row" data-action="login-email">
         <span class="privacy-icon"><i data-lucide="mail"></i></span>
         <span>
-          <span class="privacy-title">Login Email</span>
-          <span id="privacy-summary-login_email" class="privacy-subtitle">未设置</span>
+          <span class="privacy-title" data-i18n="login_email">Login Email</span>
+          <span id="privacy-summary-login_email" class="privacy-subtitle">Not set</span>
         </span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-toggle="passkey_enabled">
         <span class="privacy-icon"><i data-lucide="scan-face"></i></span>
         <span>
-          <span class="privacy-title">通行密钥</span>
-          <span id="privacy-summary-passkey_enabled" class="privacy-subtitle">0 个通行密钥</span>
+          <span class="privacy-title" data-i18n="passkey">Passkey</span>
+          <span id="privacy-summary-passkey_enabled" class="privacy-subtitle">0 passkeys</span>
         </span>
         <span id="privacy-switch-passkey_enabled" class="privacy-switch"></span>
       </button>
@@ -337,49 +337,49 @@
     <p class="privacy-note">控制您在其它设备上的会话。</p>
 
     <div class="privacy-card">
-      <h3 class="privacy-section-title">隐私</h3>
+      <h3 class="privacy-section-title" data-i18n="privacy">Privacy</h3>
       <button type="button" class="privacy-row" data-detail="phone_number_visibility">
-        <span><span class="privacy-title">谁可以看见我的手机号码?</span><span id="privacy-summary-phone_number_visibility" class="privacy-subtitle">我的联系人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_see_my_phone_number">Who can see my phone number?</span><span id="privacy-summary-phone_number_visibility" class="privacy-subtitle">My Contacts</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="last_seen_visibility">
-        <span><span class="privacy-title">谁可以看到您最后上线的时间?</span><span id="privacy-summary-last_seen_visibility" class="privacy-subtitle">所有人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_see_my_last_seen">Who can see my last seen?</span><span id="privacy-summary-last_seen_visibility" class="privacy-subtitle">Everybody</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="profile_photo_visibility">
-        <span><span class="privacy-title">谁能看见我的头像?</span><span id="privacy-summary-profile_photo_visibility" class="privacy-subtitle">所有人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_see_my_profile_photo">Who can see my profile photo?</span><span id="privacy-summary-profile_photo_visibility" class="privacy-subtitle">Everybody</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="bio_visibility">
-        <span><span class="privacy-title">谁可以看到我的个人简介?</span><span id="privacy-summary-bio_visibility" class="privacy-subtitle">所有人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_see_my_bio">Who can see my bio?</span><span id="privacy-summary-bio_visibility" class="privacy-subtitle">Everybody</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="who_can_voice_video_call">
-        <span><span class="privacy-title">谁可以给我打电话?</span><span id="privacy-summary-who_can_voice_video_call" class="privacy-subtitle">我的联系人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_call_me">Who can call me?</span><span id="privacy-summary-who_can_voice_video_call" class="privacy-subtitle">My Contacts</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="forward_link_visibility">
-        <span><span class="privacy-title">转发我的消息时，谁可以链接至我的账号?</span><span id="privacy-summary-forward_link_visibility" class="privacy-subtitle">所有人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_forward_link">Who can link to my account when forwarding?</span><span id="privacy-summary-forward_link_visibility" class="privacy-subtitle">Everybody</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="who_can_add_me_to_groups">
-        <span><span class="privacy-title">谁可以邀请我?</span><span id="privacy-summary-who_can_add_me_to_groups" class="privacy-subtitle">所有人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_invite_me">Who can invite me?</span><span id="privacy-summary-who_can_add_me_to_groups" class="privacy-subtitle">Everybody</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="who_can_send_messages">
-        <span><span class="privacy-title">谁可以给我发消息?</span><span id="privacy-summary-who_can_send_messages" class="privacy-subtitle">我的联系人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_send_messages">Who can send me messages?</span><span id="privacy-summary-who_can_send_messages" class="privacy-subtitle">My Contacts</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="birthday_visibility">
-        <span><span class="privacy-title">Who can see my birthday?</span><span id="privacy-summary-birthday_visibility" class="privacy-subtitle">我的联系人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_see_my_birthday">Who can see my birthday?</span><span id="privacy-summary-birthday_visibility" class="privacy-subtitle">My Contacts</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="gifts_visibility">
-        <span><span class="privacy-title">Who can send me gifts?</span><span id="privacy-summary-gifts_visibility" class="privacy-subtitle">所有人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_send_me_gifts">Who can send me gifts?</span><span id="privacy-summary-gifts_visibility" class="privacy-subtitle">Everybody</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
       <button type="button" class="privacy-row" data-detail="saved_music_visibility">
-        <span><span class="privacy-title">Who can see my saved music?</span><span id="privacy-summary-saved_music_visibility" class="privacy-subtitle">所有人</span></span>
+        <span><span class="privacy-title" data-i18n="who_can_see_my_saved_music">Who can see my saved music?</span><span id="privacy-summary-saved_music_visibility" class="privacy-subtitle">Everybody</span></span>
         <i data-lucide="chevron-right" class="privacy-chevron"></i>
       </button>
     </div>
@@ -387,10 +387,10 @@
     <p class="privacy-note">修改谁向您可以发送消息。</p>
 
     <div class="privacy-card">
-      <h3 class="privacy-section-title">敏感内容</h3>
+      <h3 class="privacy-section-title" data-i18n="sensitive_content">Sensitive Content</h3>
       <button type="button" class="privacy-row" data-toggle="sensitive_content_filter">
         <span class="privacy-icon"><i data-lucide="square"></i></span>
-        <span><span class="privacy-title">停用过滤</span></span>
+        <span><span class="privacy-title" data-i18n="disable_filtering">Disable Filtering</span></span>
         <span id="privacy-switch-sensitive_content_filter" class="privacy-switch"></span>
       </button>
     </div>
@@ -398,20 +398,20 @@
     <p class="privacy-note">不隐藏包含仅适合成人观看的媒体。</p>
 
     <div class="privacy-card">
-      <h3 class="privacy-section-title">付款</h3>
+      <h3 class="privacy-section-title" data-i18n="payments">Payments</h3>
       <button type="button" class="privacy-row privacy-danger" data-action="clear-payment-info">
         <span class="privacy-icon"><i data-lucide="trash-2"></i></span>
-        <span><span class="privacy-title">清除付款和配送信息</span></span>
+        <span><span class="privacy-title" data-i18n="clear_payment_shipping_info">Clear Payment and Shipping Info</span></span>
       </button>
     </div>
 
     <p class="privacy-note">您可以删除您的配送信息并通知所有的支付服务提供商清除您已保存的信用卡信息。请注意：Telegram 从来不会存储您的信用卡数据。</p>
 
     <div class="privacy-card">
-      <h3 class="privacy-section-title">聊天</h3>
+      <h3 class="privacy-section-title">Chats</h3>
       <button type="button" class="privacy-row privacy-danger" data-action="delete-cloud-drafts">
         <span class="privacy-icon"><i data-lucide="trash-2"></i></span>
-        <span><span class="privacy-title">删除所有的云草稿</span></span>
+        <span><span class="privacy-title" data-i18n="delete_cloud_drafts">Delete All Cloud Drafts</span></span>
       </button>
     </div>
   </section>

@@ -79,6 +79,48 @@
     </div>
   </div>
 
+  <!-- Identity Type Selection (User / Agent / Bot) -->
+  <div class="auth-field">
+    <label class="auth-label">注册身份</label>
+    <div class="identity-selector">
+      <!-- User Choice -->
+      <label class="identity-card" for="id_type_user">
+        <input type="radio" name="user_type" id="id_type_user" value="user" checked>
+        <div class="identity-card-icon">
+          <i data-lucide="user"></i>
+        </div>
+        <div class="identity-card-info">
+          <span class="identity-card-title">用户 (User)</span>
+          <span class="identity-card-desc">普通人类用户，进行日常沟通与社交</span>
+        </div>
+      </label>
+
+      <!-- Agent Choice -->
+      <label class="identity-card" for="id_type_agent">
+        <input type="radio" name="user_type" id="id_type_agent" value="agent">
+        <div class="identity-card-icon">
+          <i data-lucide="sparkles"></i>
+        </div>
+        <div class="identity-card-info">
+          <span class="identity-card-title">Agent (智能代理)</span>
+          <span class="identity-card-desc">由大型语言模型驱动的自动化智能体</span>
+        </div>
+      </label>
+
+      <!-- Bot Choice -->
+      <label class="identity-card" for="id_type_bot">
+        <input type="radio" name="user_type" id="id_type_bot" value="bot">
+        <div class="identity-card-icon">
+          <i data-lucide="cpu"></i>
+        </div>
+        <div class="identity-card-info">
+          <span class="identity-card-title">Bot (机器人)</span>
+          <span class="identity-card-desc">基于规则或API响应的自动服务程序</span>
+        </div>
+      </label>
+    </div>
+  </div>
+
   <!-- Password -->
   <div class="auth-field">
     <label class="auth-label" for="password1">密码</label>

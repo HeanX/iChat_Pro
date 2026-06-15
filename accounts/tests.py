@@ -214,6 +214,22 @@ class RegistrationViewTests(TestCase):
         response = self.client.post(self.REGISTER_URL, self.VALID_DATA)
         self.assertRedirects(response, self.INDEX_URL)
         self.assertTrue(User.objects.filter(username='newuser').exists())
+        user = User.objects.get(username='newuser')
+        self.assertEqual(user.profile.user_type, 'user')
+
+    def test_register_as_agent(self):
+        data = {**self.VALID_DATA, 'username': 'agentuser', 'user_type': 'agent'}
+        response = self.client.post(self.REGISTER_URL, data)
+        self.assertRedirects(response, self.INDEX_URL)
+        user = User.objects.get(username='agentuser')
+        self.assertEqual(user.profile.user_type, 'agent')
+
+    def test_register_as_bot(self):
+        data = {**self.VALID_DATA, 'username': 'botuser', 'user_type': 'bot'}
+        response = self.client.post(self.REGISTER_URL, data)
+        self.assertRedirects(response, self.INDEX_URL)
+        user = User.objects.get(username='botuser')
+        self.assertEqual(user.profile.user_type, 'bot')
 
     def test_register_creates_user(self):
         self.client.post(self.REGISTER_URL, self.VALID_DATA)

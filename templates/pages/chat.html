@@ -4,7 +4,7 @@
 {% block title %}Workspace - iChat Pro{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260614-general-folders">
+<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260615-image-bubble-type">
 {% endblock %}
 
 {% block content %}
@@ -299,13 +299,14 @@
 
 {% block extra_js %}
 <!-- Main Chat Interaction JavaScript -->
-<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}?v=20260609-explicit-key-reset" data-current-user-id="{{ request.user.pk }}" data-username="{{ request.user.username }}" data-email="{{ request.user.email|default:'' }}"></script>
-<script src="{% static 'js/private-chat-e2ee.js' %}?v=20260609-peer-trust-reset"></script>
-<script src="{% static 'js/group-chat-e2ee.js' %}"></script>
+<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}?v=20260609-explicit-key-reset" data-current-user-id="{{ request.user.pk }}" data-username="{{ request.user.username }}" data-email="{{ request.user.email|default:'' }}" data-avatar-url="{{ settings_avatar_url|default:'' }}" data-initials="{{ settings_initials|default:'' }}" data-avatar-color="{{ settings_avatar_color|default:'#5c6bc0' }}"></script>
+<script src="{% static 'js/private-chat-e2ee.js' %}?v=20260615-file-transfer-fix2"></script>
+<script src="{% static 'js/group-chat-e2ee.js' %}?v=20260615-file-transfer-fix2"></script>
+<script src="{% static 'js/file-transfer.js' %}?v=20260615-file-forward"></script>
 <script src="{% static 'js/context-menu.js' %}?v=20260610-t12t14-chat-ux"></script>
 <script src="{% static 'js/chat-conversation-actions.js' %}?v=20260610-t12t14-chat-ux"></script>
-<script src="{% static 'js/chat-message-actions.js' %}?v=20260610-t12t14-chat-ux"></script>
-<script src="{% static 'js/chat.js' %}?v=20260614-general-folders"></script>
+<script src="{% static 'js/chat-message-actions.js' %}?v=20260615-file-forward"></script>
+<script src="{% static 'js/chat.js' %}?v=20260615-image-viewer-center"></script>
 <script>
   function exportLocalKeyBackup() {
     try {

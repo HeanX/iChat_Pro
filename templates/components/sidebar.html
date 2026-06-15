@@ -16,12 +16,16 @@
         <div id="main-menu-dropdown" class="main-menu-dropdown hidden absolute left-0 mt-1.5 bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[22px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
           <!-- User Account info section -->
           <div onclick="triggerMyProfileFromInfo(event)" class="main-menu-account-area">
-            <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-base shadow-sm">
-              {{ request.user.username|slice:":1"|upper }}
+            <div class="main-menu-avatar-wrap w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-base shadow-sm overflow-hidden flex-shrink-0" style="background-color: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
+              {% if settings_avatar_url %}
+                <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="w-full h-full object-cover">
+              {% else %}
+                <span class="settings-template-avatar-fallback">{{ settings_initials }}</span>
+              {% endif %}
             </div>
             <div class="leading-tight min-w-0 flex-1">
-              <div class="text-sm font-bold text-textMain truncate">{{ request.user.username }}</div>
-              <div class="text-[10px] text-textSecondary truncate">{{ request.user.email|default:"user@ichat.pro" }}</div>
+              <div class="text-sm font-bold text-textMain truncate settings-display-name-sync">{{ settings_display_name }}</div>
+              <div class="text-[10px] text-textSecondary truncate">{{ settings_email|default:"user@ichat.pro" }}</div>
             </div>
           </div>
           
@@ -46,7 +50,7 @@
             <!-- Groups -->
             <a href="{% url 'groups' %}" class="main-menu-item-custom" onclick="toggleMainMenu(event);">
               <i data-lucide="users-round"></i>
-              <span>群聊</span>
+              <span data-i18n="groups">Groups</span>
             </a>
             <!-- Settings -->
             <button id="menu-settings-btn" onclick="navigateSidebar('settings-home'); toggleMainMenu(event);" class="main-menu-item-custom">
@@ -219,7 +223,7 @@
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Settings">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
-      <h2 class="text-lg font-bold text-textMain flex-1">Edit Profile</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="edit_profile">Edit Profile</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">
       {% include 'pages/profile_edit_sidebar.html' %}
@@ -309,7 +313,7 @@
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
-      <h2 class="text-lg font-bold text-textMain flex-1">Notifications and Sounds</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="notifications_sounds">Notifications and Sounds</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/notifications.html' %}</div>
   </div>
@@ -318,7 +322,7 @@
   <div id="sidebar-view-data-storage" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-      <h2 class="text-lg font-bold text-textMain flex-1">Data and Storage</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="data_and_storage">Data and Storage</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/data_storage.html' %}</div>
   </div>
@@ -327,7 +331,7 @@
   <div id="sidebar-view-privacy-security" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-      <h2 class="text-lg font-bold text-textMain flex-1">Privacy and Security</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="privacy_and_security">Privacy and Security</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/privacy_security.html' %}</div>
   </div>
@@ -345,7 +349,7 @@
   <div id="sidebar-view-chat-folders" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-      <h2 class="text-lg font-bold text-textMain flex-1">Chat Folders</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="chat_folders">Chat Folders</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/chat_folders.html' %}</div>
   </div>
@@ -354,7 +358,7 @@
   <div id="sidebar-view-stickers-emoji" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-      <h2 class="text-lg font-bold text-textMain flex-1">贴纸与表情</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="stickers_and_emoji">Stickers and Emoji</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/stickers_emoji.html' %}</div>
   </div>
@@ -363,7 +367,7 @@
   <div id="sidebar-view-language" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="language">语言</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="language">Language</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/language_settings.html' %}</div>
   </div>
@@ -372,7 +376,7 @@
   <div id="sidebar-view-sessions-shortcuts" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
       <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-      <h2 class="text-lg font-bold text-textMain flex-1">Devices and Shortcuts</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="devices_and_shortcuts">Devices and Shortcuts</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/sessions_shortcuts.html' %}</div>
   </div>
@@ -383,7 +387,7 @@
       <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Edit Profile">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
-      <h2 class="text-lg font-bold text-textMain flex-1">Birthday</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="birthday">Birthday</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">
       {% include 'pages/birthday_settings.html' %}
@@ -428,7 +432,7 @@
                   <!-- Avatar -->
                   <div class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm bg-brand-light flex-shrink-0 overflow-hidden">
                     {% if peer.profile.avatar %}
-                      <img src="{{ peer.profile.avatar.url }}" alt="{{ peer.username }}" class="w-full h-full object-cover">
+                      <img src="{{ peer.profile.avatar.url }}?t={{ peer.profile.updated_at.timestamp|floatformat:0 }}" alt="{{ peer.username }}" class="w-full h-full object-cover">
                     {% else %}
                       <span>{{ peer.username|slice:":1"|upper }}</span>
                     {% endif %}
@@ -453,7 +457,7 @@
                   <!-- Avatar -->
                   <div class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm bg-brand-light flex-shrink-0 overflow-hidden">
                     {% if peer.profile.avatar %}
-                      <img src="{{ peer.profile.avatar.url }}" alt="{{ peer.username }}" class="w-full h-full object-cover">
+                      <img src="{{ peer.profile.avatar.url }}?t={{ peer.profile.updated_at.timestamp|floatformat:0 }}" alt="{{ peer.username }}" class="w-full h-full object-cover">
                     {% else %}
                       <span>{{ peer.username|slice:":1"|upper }}</span>
                     {% endif %}

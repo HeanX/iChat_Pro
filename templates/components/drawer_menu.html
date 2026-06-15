@@ -9,8 +9,12 @@
     <!-- Drawer Header: User Avatar & Contact details -->
     <div class="p-5 bg-brand-light/95 dark:bg-brand-dark/95 text-white flex flex-col justify-end space-y-4">
       <div class="flex justify-between items-start">
-        <div class="w-14 h-14 rounded-full bg-white text-brand-light dark:text-brand-dark flex items-center justify-center font-bold text-xl shadow">
-          {{ request.user.username|slice:":1"|upper }}
+        <div class="drawer-avatar-wrap w-14 h-14 rounded-full text-white flex items-center justify-center font-bold text-xl shadow overflow-hidden flex-shrink-0" style="background-color: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
+          {% if settings_avatar_url %}
+          <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="w-full h-full object-cover">
+          {% else %}
+          <span class="settings-template-avatar-fallback">{{ settings_initials }}</span>
+          {% endif %}
         </div>
         <!-- Quick Theme Toggle inside Drawer -->
         <button onclick="toggleTheme()" class="p-2 rounded-full hover:bg-white/10 text-white transition-colors" title="Toggle Theme" data-i18n-title="menu_theme">
@@ -19,7 +23,7 @@
         </button>
       </div>
       <div>
-        <h3 class="font-bold text-base leading-tight">{{ request.user.username }}</h3>
+        <h3 class="font-bold text-base leading-tight settings-display-name-sync">{{ settings_display_name }}</h3>
         <p class="text-xs text-white/80 mt-0.5">{{ settings_email_display }}</p>
       </div>
     </div>

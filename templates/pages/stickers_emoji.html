@@ -4,18 +4,18 @@
   <!-- Section 1: Quick Reactions & Playback -->
   <section class="stickers-card">
     <!-- Quick Reactions row -->
-    <button type="button" class="stickers-row stickers-row--link" onclick="showToast('快速回应设置即将推出')">
+    <button type="button" class="stickers-row stickers-row--link" onclick="showToast('Quick reactions coming soon')">
       <span class="stickers-row-icon stickers-row-icon--heart">❤️</span>
-      <span class="stickers-row-label">快速回应</span>
+      <span class="stickers-row-label" data-i18n="quick_reactions">Quick Reactions</span>
       <i data-lucide="chevron-right" class="stickers-chevron"></i>
     </button>
     <div class="stickers-divider"></div>
 
     <!-- Suggest Emoji row -->
-    <button type="button" class="stickers-row stickers-row--link" onclick="showToast('推荐表情设置即将推出')">
+    <button type="button" class="stickers-row stickers-row--link" onclick="showToast('Suggested emoji settings coming soon')">
       <span class="stickers-row-icon"><i data-lucide="lightbulb"></i></span>
-      <span class="stickers-row-label">根据 Emoji 联想表情</span>
-      <span class="stickers-row-value">全部</span>
+      <span class="stickers-row-label" data-i18n="suggest_emoji">Suggest Emoji</span>
+      <span class="stickers-row-value">All</span>
       <i data-lucide="chevron-right" class="stickers-chevron"></i>
     </button>
     <div class="stickers-divider"></div>
@@ -23,21 +23,21 @@
     <!-- Loop animated stickers toggle -->
     <label class="stickers-row">
       <span class="stickers-row-icon"><i data-lucide="repeat-2"></i></span>
-      <span class="stickers-row-label">循环播放动态贴纸</span>
+      <span class="stickers-row-label" data-i18n="loop_animated_stickers">Loop Animated Stickers</span>
       <input type="checkbox" id="sticker-loop" checked>
       <span class="stickers-switch"></span>
     </label>
   </section>
 
-  <p class="stickers-hint">动态贴纸将在聊天中重复循环。</p>
+  <p class="stickers-hint">Animated stickers will loop in chats.</p>
 
   <!-- Section 2: Emoji -->
   <section class="stickers-card">
-    <h3 class="stickers-section-header">emoji</h3>
+    <h3 class="stickers-section-header" data-i18n="emoji">Emoji</h3>
 
     <label class="stickers-row">
       <span class="stickers-row-icon"><i data-lucide="lightbulb"></i></span>
-      <span class="stickers-row-label">推荐的表情</span>
+      <span class="stickers-row-label" data-i18n="suggested_emojis">Suggested Emojis</span>
       <input type="checkbox" id="sticker-suggest-emoji" checked>
       <span class="stickers-switch"></span>
     </label>
@@ -45,7 +45,7 @@
 
     <label class="stickers-row">
       <span class="stickers-row-icon"><i data-lucide="smile"></i></span>
-      <span class="stickers-row-label">大号表情</span>
+      <span class="stickers-row-label" data-i18n="large_emoji">Large Emoji</span>
       <input type="checkbox" id="sticker-large-emoji" checked>
       <span class="stickers-switch"></span>
     </label>
@@ -53,21 +53,21 @@
 
   <!-- Section 3: Sticker pack order -->
   <section class="stickers-card">
-    <h3 class="stickers-section-header">贴纸包动态顺序</h3>
+    <h3 class="stickers-section-header" data-i18n="sticker_packs_order">Sticker Packs Order</h3>
 
     <label class="stickers-row">
       <span class="stickers-row-icon"><i data-lucide="layout-grid"></i></span>
-      <span class="stickers-row-label">贴纸包动态顺序</span>
+      <span class="stickers-row-label" data-i18n="dynamic_sticker_order">Dynamic Sticker Pack Order</span>
       <input type="checkbox" id="sticker-dynamic-order" checked>
       <span class="stickers-switch"></span>
     </label>
   </section>
 
-  <p class="stickers-hint">将最近使用的贴纸包自动置于前列。</p>
+  <p class="stickers-hint">Automatically place recently used sticker packs at the top.</p>
 
   <!-- Section 4: Sticker Packs -->
   <section class="stickers-card">
-    <h3 class="stickers-section-header">表情</h3>
+    <h3 class="stickers-section-header" data-i18n="sticker_packs">Sticker Packs</h3>
 
     <button type="button" class="stickers-row stickers-row--pack" onclick="showToast('贴纸包管理即将推出')">
       <span class="stickers-pack-icon">🍒</span>

@@ -2,7 +2,7 @@
 <div class="sessions-settings-view" id="sessions-shortcuts-root">
   
   <section class="sessions-card">
-    <h3>活跃会话</h3>
+    <h3 data-i18n="active_sessions">Active Sessions</h3>
     <div class="session-list">
       {% for session in settings_active_sessions %}
       <div class="session-item sessions-row">
@@ -14,7 +14,7 @@
             <div style="font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; color: inherit;">
               <span>Session {{ session.short_key }}</span>
               {% if session.is_current %}
-              <span class="current-badge">当前</span>
+              <span class="current-badge" data-i18n="current_session">Current</span>
               {% endif %}
             </div>
             <div style="font-size: 13px; color: #707579; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">过期时间 {{ session.expires_at|date:"Y-m-d H:i" }}</div>
@@ -22,25 +22,25 @@
         </div>
         <div>
           {% if session.is_current %}
-          <button type="button" onclick="showToast(currentLanguage === 'zh' ? '无法终止当前会话' : 'Cannot terminate current session')" class="session-btn-terminate">
-            终止
+          <button type="button" onclick="showToast(currentLanguage === 'zh' ? '无法终止当前会话' : 'Cannot terminate current session')" class="session-btn-terminate" data-i18n="terminate">
+            Terminate
           </button>
           {% else %}
-          <button type="button" data-session-id="{{ session.session_index }}" onclick="terminateSession(this.dataset.sessionId)" class="session-btn-terminate">
-            终止
+          <button type="button" data-session-id="{{ session.session_index }}" onclick="terminateSession(this.dataset.sessionId)" class="session-btn-terminate" data-i18n="terminate">
+            Terminate
           </button>
           {% endif %}
         </div>
       </div>
       {% empty %}
       <div class="sessions-row" style="color: #707579; font-size: 16px; justify-content: center; width: 100%;">
-        未找到活跃会话
+        No active sessions
       </div>
       {% endfor %}
     </div>
 
     <button type="button" onclick="terminateOtherSessions()" class="terminate-all-btn">
-      终止其他所有会话
+      Terminate All Other Sessions
     </button>
   </section>
 
@@ -429,7 +429,7 @@
 {# ── Sessions & Shortcuts JavaScript ── #}
 <script>
   var SESSION_DEFAULTS = {
-    language: currentLanguage || 'en',
+    language: (window.currentLanguage || localStorage.getItem('ichat_lang') || 'en'),
     show_translate: true
   };
 

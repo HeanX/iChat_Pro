@@ -9,10 +9,20 @@ class UserProfile(models.Model):
     Extended profile for Django's built-in User model.
     Supports nickname, avatar, and bio.
     """
+    class UserType(models.TextChoices):
+        USER = 'user', 'User'
+        AGENT = 'agent', 'Agent'
+        BOT = 'bot', 'Bot'
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='profile',
+    )
+    user_type = models.CharField(
+        max_length=10,
+        choices=UserType.choices,
+        default=UserType.USER,
     )
     nickname = models.CharField(max_length=100, blank=True)
     avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)

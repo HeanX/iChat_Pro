@@ -270,3 +270,40 @@ a:hover {
 .border-t-main { border-top: 1px solid var(--color-border); }
 .border-r-main { border-right: 1px solid var(--color-border); }
 .border-l-main { border-left: 1px solid var(--color-border); }
+
+/* User role badges */
+.user-role-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.2;
+  margin-left: 6px;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+
+.badge-agent {
+  background-color: var(--color-primary-light);
+  color: var(--color-primary);
+  border: 1px solid rgba(51, 144, 236, 0.18);
+}
+
+[data-theme="dark"] .badge-agent {
+  border-color: rgba(135, 116, 225, 0.2);
+}
+
+.badge-bot {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+[data-theme="dark"] .badge-bot {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.25);
+}

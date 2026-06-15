@@ -1,25 +1,25 @@
 {# notifications.html - Telegram-style notification settings backed by API #}
 <div class="notification-settings-view">
   <section class="notification-card">
-    <h3>网页通知</h3>
+    <h3 data-i18n="web_notifications">Web Notifications</h3>
     <label class="notification-row">
-      <span>显示通知</span>
+      <span data-i18n="display_notifications">Show Notifications</span>
       <input type="checkbox" id="notif-display" data-field="display_notifications">
       <span class="telegram-switch"></span>
     </label>
     <label class="notification-row">
-      <span>显示线下通知</span>
+      <span data-i18n="show_offline_notifications">Show Offline Notifications</span>
       <input type="checkbox" id="notif-offline" data-field="offline_notifications">
       <span class="telegram-switch"></span>
     </label>
     <label class="notification-row">
-      <span>全部账号</span>
+      <span data-i18n="all_accounts">All Accounts</span>
       <input type="checkbox" id="notif-all-accounts" data-field="all_accounts_notifications">
       <span class="telegram-switch"></span>
     </label>
     <button type="button" class="notification-link-row" onclick="enablePrivateNotifications()">
       <i data-lucide="bell"></i>
-      <span>启用私聊</span>
+      <span data-i18n="enable_private_chats">Enable Private Chats</span>
     </button>
   </section>
 
@@ -29,15 +29,15 @@
   </p>
 
   <section class="notification-card">
-    <h3>音效</h3>
+    <h3 data-i18n="sound_effects">Sound Effects</h3>
     <label class="notification-row">
-      <span>通知音</span>
+      <span data-i18n="notification_tone">Notification Tone</span>
       <input type="checkbox" id="notif-sound" data-sound-field="notification_sound">
       <span class="telegram-switch"></span>
     </label>
     <div class="notification-volume-row">
       <div class="notification-volume-label">
-        <span>音量</span>
+        <span>Volume</span>
         <button type="button" id="notif-volume-val" onclick="testNotificationVolume()">80%</button>
       </div>
       <input type="range" min="0" max="100" value="80" id="notif-volume" data-field="volume">
@@ -47,60 +47,60 @@
   <p class="notification-hint">Drag and release or click to test the volume.</p>
 
   <section class="notification-card compact">
-    <h3>声音特效</h3>
+    <h3 data-i18n="sound_effects">Sound Effects</h3>
     <label class="notification-row is-highlighted">
-      <span>消息已发送</span>
+      <span data-i18n="message_sent_sound_effect">Message Sent</span>
       <input type="checkbox" id="notif-sent-sound" data-sound-field="message_sent_sound">
       <span class="telegram-switch"></span>
     </label>
   </section>
 
   <section class="notification-card compact">
-    <h3>私聊</h3>
+    <h3 data-i18n="private_chats">Private Chats</h3>
     <label class="notification-row">
-      <span>私聊通知</span>
+      <span data-i18n="private_chat_notifications">Private Chat Notifications</span>
       <input type="checkbox" id="notif-private" data-field="private_chat_notifications">
       <span class="telegram-switch"></span>
     </label>
     <label class="notification-row">
-      <span>消息预览</span>
+      <span data-i18n="message_preview">Message Preview</span>
       <input type="checkbox" id="notif-private-preview" data-field="message_preview_private">
       <span class="telegram-switch"></span>
     </label>
   </section>
 
   <section class="notification-card compact">
-    <h3>群组</h3>
+    <h3 data-i18n="groups">Groups</h3>
     <label class="notification-row">
-      <span>群组通知</span>
+      <span data-i18n="group_notifications">Group Notifications</span>
       <input type="checkbox" id="notif-groups" data-field="group_chat_notifications">
       <span class="telegram-switch"></span>
     </label>
     <label class="notification-row">
-      <span>消息预览</span>
+      <span data-i18n="message_preview">Message Preview</span>
       <input type="checkbox" id="notif-groups-preview" data-field="message_preview_group">
       <span class="telegram-switch"></span>
     </label>
   </section>
 
   <section class="notification-card compact">
-    <h3>频道</h3>
+    <h3 data-i18n="channels_label">Channels</h3>
     <label class="notification-row">
-      <span>频道通知</span>
+      <span data-i18n="channel_notifications">Channel Notifications</span>
       <input type="checkbox" id="notif-channel" data-field="channel_notifications">
       <span class="telegram-switch"></span>
     </label>
     <label class="notification-row">
-      <span>消息预览</span>
+      <span data-i18n="message_preview">Message Preview</span>
       <input type="checkbox" id="notif-channel-preview" data-field="message_preview_channel">
       <span class="telegram-switch"></span>
     </label>
   </section>
 
   <section class="notification-card compact">
-    <h3>其它</h3>
+    <h3 data-i18n="other_notifications">Other</h3>
     <label class="notification-row">
-      <span>联系人已加入 Telegram</span>
+      <span data-i18n="contact_joined_telegram">Contact joined Telegram</span>
       <input type="checkbox" id="notif-contact-joined" data-field="contact_join_notifications">
       <span class="telegram-switch"></span>
     </label>

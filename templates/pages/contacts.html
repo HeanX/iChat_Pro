@@ -72,8 +72,12 @@
         {% for req in incoming_requests %}
         <div class="flex items-center justify-between p-4 bg-bgSidebar border border-borderColor rounded-custom-md">
           <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
-              {{ req.sender.username|slice:":1"|upper }}
+            <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm overflow-hidden avatar-clickable" data-user-id="{{ req.sender.id }}">
+              {% if req.sender.profile.avatar %}
+                <img src="{{ req.sender.profile.avatar.url }}?t={{ req.sender.profile.updated_at.timestamp|floatformat:0 }}" alt="{{ req.sender.username }}" class="w-full h-full object-cover">
+              {% else %}
+                {{ req.sender.username|slice:":1"|upper }}
+              {% endif %}
             </div>
             <div>
               <p class="text-sm font-semibold">{{ req.sender.username }}</p>
@@ -104,8 +108,12 @@
       <div class="space-y-2">
         {% for req in outgoing_requests %}
         <div class="flex items-center space-x-3 p-4 bg-bgSidebar border border-borderColor rounded-custom-md opacity-70">
-          <div class="w-10 h-10 rounded-full bg-zinc-400 dark:bg-zinc-500 text-white flex items-center justify-center font-bold text-sm">
-            {{ req.receiver.username|slice:":1"|upper }}
+          <div class="w-10 h-10 rounded-full bg-zinc-400 dark:bg-zinc-500 text-white flex items-center justify-center font-bold text-sm overflow-hidden avatar-clickable" data-user-id="{{ req.receiver.id }}">
+            {% if req.receiver.profile.avatar %}
+              <img src="{{ req.receiver.profile.avatar.url }}?t={{ req.receiver.profile.updated_at.timestamp|floatformat:0 }}" alt="{{ req.receiver.username }}" class="w-full h-full object-cover">
+            {% else %}
+              {{ req.receiver.username|slice:":1"|upper }}
+            {% endif %}
           </div>
           <div>
             <p class="text-sm font-semibold">{{ req.receiver.username }}</p>
@@ -128,8 +136,12 @@
           {% if entry.user == request.user %}
             {% with other=entry.contact %}
             <div class="flex items-center space-x-3">
-              <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
-                {{ other.username|slice:":1"|upper }}
+              <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm overflow-hidden avatar-clickable" data-user-id="{{ other.id }}">
+                {% if other.profile.avatar %}
+                  <img src="{{ other.profile.avatar.url }}?t={{ other.profile.updated_at.timestamp|floatformat:0 }}" alt="{{ other.username }}" class="w-full h-full object-cover">
+                {% else %}
+                  {{ other.username|slice:":1"|upper }}
+                {% endif %}
               </div>
               <div>
                 <p class="text-sm font-semibold">{{ other.username }}</p>
@@ -140,8 +152,12 @@
           {% else %}
             {% with other=entry.user %}
             <div class="flex items-center space-x-3">
-              <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm">
-                {{ other.username|slice:":1"|upper }}
+              <div class="w-10 h-10 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-sm overflow-hidden avatar-clickable" data-user-id="{{ other.id }}">
+                {% if other.profile.avatar %}
+                  <img src="{{ other.profile.avatar.url }}?t={{ other.profile.updated_at.timestamp|floatformat:0 }}" alt="{{ other.username }}" class="w-full h-full object-cover">
+                {% else %}
+                  {{ other.username|slice:":1"|upper }}
+                {% endif %}
               </div>
               <div>
                 <p class="text-sm font-semibold">{{ other.username }}</p>
@@ -240,13 +256,18 @@
       const displayName = nickname ? `${nickname} (@${username})` : username;
       const userId = escapeHtml(result.id);
       const initial = username.charAt(0).toUpperCase();
+      const avatarUrl = result.avatar_url;
+      const avatarInner = avatarUrl
+        ? `<img src="${escapeHtml(avatarUrl)}" class="w-full h-full object-cover rounded-full">`
+        : initial;
+      const avatarBgStyle = avatarUrl ? 'style="background-color: transparent; overflow: hidden;"' : '';
 
       return `
         <button type="button" class="w-full flex items-center justify-between px-4 py-3 hover:bg-bgSearch transition-colors text-left"
           data-user-id="${userId}" data-username="${username}" onclick="selectContactSearchResult(this)">
           <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-xs">
-              ${initial}
+            <div class="w-8 h-8 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-xs" ${avatarBgStyle}>
+              ${avatarInner}
             </div>
             <div class="flex flex-col">
               <span class="text-sm font-medium text-textMain">${displayName}</span>

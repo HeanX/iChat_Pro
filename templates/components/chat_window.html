@@ -24,27 +24,29 @@
             <i data-lucide="arrow-left" class="w-5.5 h-5.5"></i>
           </button>
 
-          <!-- Active Chat Avatar -->
-          <div id="chat-header-avatar" class="chat-header-avatar">
-            --
-          </div>
-
-          <!-- Identity Name, Presence, and Encryption Status -->
-          <div class="chat-header-identity leading-tight cursor-pointer" id="chat-header-details">
-            <span id="chat-header-name" class="text-sm font-bold text-textMain hover:underline">Select a chat</span>
-            <div class="chat-header-subline">
-              <span id="chat-header-status" class="text-xs text-textSecondary">Waiting for conversation</span>
-              <button id="chat-header-lock" class="chat-header-encryption-chip hidden" title="E2E Encrypted. Click to verify fingerprint." data-i18n-title="verify_fp_desc">
-                <i data-lucide="lock" class="w-3.5 h-3.5"></i>
-                <span data-i18n="verified">Verified</span>
-              </button>
+          <button id="chat-header-details" type="button" class="chat-header-profile" title="Chat Info" data-i18n-title="view_info">
+            <!-- Active Chat Avatar -->
+            <div id="chat-header-avatar" class="chat-header-avatar">
+              --
             </div>
-          </div>
+
+            <!-- Identity Name, Presence, and Encryption Status -->
+            <div class="chat-header-identity leading-tight">
+              <span id="chat-header-name" class="text-sm text-textMain">Select a chat</span>
+              <div class="chat-header-subline">
+                <span id="chat-header-status" class="text-xs text-textSecondary">Waiting for conversation</span>
+                <span id="chat-header-lock" class="chat-header-encryption-chip hidden" title="E2E Encrypted. Click to verify fingerprint." data-i18n-title="verify_fp_desc">
+                  <i data-lucide="lock" class="w-3.5 h-3.5"></i>
+                  <span data-i18n="verified">Verified</span>
+                </span>
+              </div>
+            </div>
+          </button>
         </div>
 
         <!-- Extra Action Icons -->
         <div class="chat-header-actions">
-          <button class="chat-header-icon-btn" title="Search Chat" data-i18n-title="search_chat">
+          <button id="chat-header-search-btn" class="chat-header-icon-btn" title="Search Chat" data-i18n-title="search_chat">
             <i data-lucide="search" class="w-5 h-5"></i>
           </button>
           <button onclick="window.toggleRightPanel()" class="chat-header-icon-btn" title="Chat Info" data-i18n-title="view_info">
@@ -62,10 +64,10 @@
                 <i data-lucide="users"></i>
                 <span data-i18n="menu_group_info">Group Info</span>
               </button>
-              <!-- Boost Group -->
-              <button onclick="triggerBoostGroupAction(event)" class="menu-item-custom">
-                <i data-lucide="zap"></i>
-                <span data-i18n="menu_boost_group">Boost Group</span>
+              <!-- Block Contact -->
+              <button id="menu-block-contact-btn" onclick="triggerBlockContactAction(event)" class="menu-item-custom">
+                <i data-lucide="ban"></i>
+                <span id="menu-block-contact-text" data-i18n="menu_block_contact">拉黑</span>
               </button>
               <!-- Mute -->
               <button onclick="triggerMuteAction(event)" class="menu-item-custom">
@@ -95,6 +97,23 @@
       </div>
     </header>
 
+    <div id="chat-search-overlay" class="chat-search-overlay hidden">
+      <div class="chat-search-bar">
+        <i data-lucide="search"></i>
+        <input id="chat-search-input" type="text" placeholder="搜索" autocomplete="off">
+        <button id="chat-search-prev" type="button" class="chat-search-nav hidden" title="上一个">
+          <i data-lucide="chevron-up"></i>
+        </button>
+        <button id="chat-search-next" type="button" class="chat-search-nav hidden" title="下一个">
+          <i data-lucide="chevron-down"></i>
+        </button>
+        <button id="chat-search-close" type="button" class="chat-search-close" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div id="chat-search-results" class="chat-search-results hidden"></div>
+    </div>
+
     <!-- 2. Message History Area -->
     <main id="message-history-container" class="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar chat-bg-pattern flex flex-col">
       <!-- Messages are dynamically populated by chat.js -->
@@ -116,6 +135,9 @@
         <button onclick="insertEmoji('🛡️')" class="hover:scale-125 transition-transform p-1">🛡️</button>
       </div>
     </div>
+
+    <!-- Hidden file input for file transfer -->
+    <input type="file" id="chat-file-input" style="display:none" accept="*/*" />
 
     <!-- 4. Message Input & Composition Area -->
     <footer class="chat-footer select-none flex-shrink-0 z-10 w-full">

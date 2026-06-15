@@ -25,7 +25,7 @@ from chat.models import (
 from chat.consumers import ChatConsumer
 from ichat_pro.asgi import application
 from chat.views import RECALL_LIMIT_MINUTES
-from accounts.models import Contact
+from accounts.models import Contact, UserPrivacySettings
 
 User = get_user_model()
 
@@ -241,10 +241,12 @@ class MessageOperationsAPITests(TestCase):
         self.u1 = _create_user('alice')
         self.u2 = _create_user('bob')
         self.conv = _create_private_conversation(self.u1, self.u2)
+        Contact.objects.create(user=self.u1, contact=self.u2)
         self.client = Client()
         self.client.force_login(self.u1)
         self.msg = EncryptedMessage.objects.create(
             conversation=self.conv, sender=self.u1, receiver=self.u2,
+            ciphertext='source-ciphertext', nonce='source-nonce', auth_tag='source-tag',
             algorithm='AES-256-GCM', client_message_id='test-ops-1',
         )
 
@@ -298,6 +300,88 @@ class MessageOperationsAPITests(TestCase):
         )
         # Non-member gets 404 (membership check before permission)
         self.assertEqual(resp.status_code, 404)
+
+    def test_forward_private_message_creates_target_message(self):
+        u3 = _create_user('carol')
+        Contact.objects.create(user=self.u1, contact=u3)
+        target = _create_private_conversation(self.u1, u3)
+
+        resp = self.client.post(
+            f'/api/conversations/{target.id}/messages/forward/',
+            data=json.dumps({
+                'original_message_id': self.msg.pk,
+                'original_conversation_id': self.conv.pk,
+                'peer_id': u3.pk,
+                'client_message_id': 'forward-private-1',
+                'message_type': 'text',
+                'ciphertext': 'forward-ciphertext',
+                'nonce': 'forward-nonce',
+                'auth_tag': 'forward-tag',
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertIn('message_id', payload)
+        forwarded = EncryptedMessage.objects.get(pk=payload['message_id'])
+        self.assertEqual(forwarded.conversation, target)
+        self.assertEqual(forwarded.sender, self.u1)
+        self.assertEqual(forwarded.receiver, u3)
+        self.assertEqual(forwarded.reply_to_message_id, self.msg.pk)
+        self.assertEqual(forwarded.ciphertext, 'forward-ciphertext')
+
+    def test_forward_group_message_creates_recipient_copies(self):
+        u3 = _create_user('carol')
+        group = _create_group(self.u1, name='Forward Target')
+        ConversationMember.objects.create(
+            conversation=group,
+            user=self.u2,
+            role=ConversationMember.Role.MEMBER,
+        )
+        ConversationMember.objects.create(
+            conversation=group,
+            user=u3,
+            role=ConversationMember.Role.MEMBER,
+        )
+
+        recipients = [
+            {
+                'receiver_id': user.pk,
+                'ciphertext': f'cipher-{user.pk}',
+                'nonce': f'nonce-{user.pk}',
+                'auth_tag': f'tag-{user.pk}',
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+            }
+            for user in (self.u1, self.u2, u3)
+        ]
+        resp = self.client.post(
+            f'/api/conversations/{group.id}/messages/forward/',
+            data=json.dumps({
+                'original_message_id': self.msg.pk,
+                'original_conversation_id': self.conv.pk,
+                'client_message_id': 'forward-group-1',
+                'message_type': 'text',
+                'membership_version': group.membership_version,
+                'recipients': recipients,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        group_message = GroupMessage.objects.get(pk=resp.json()['message_id'])
+        self.assertEqual(group_message.conversation, group)
+        self.assertEqual(group_message.sender, self.u1)
+        self.assertEqual(group_message.reply_to_message_id, self.msg.pk)
+        self.assertEqual(
+            set(group_message.recipients.values_list('receiver_id', flat=True)),
+            {self.u1.pk, self.u2.pk, u3.pk},
+        )
 
 
 # ── T22: Presence API Tests ────────────────────────────────────────────
@@ -470,6 +554,94 @@ class PrivacySecurityAPITests(TestCase):
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 201)
+
+    def test_private_profile_payload_respects_visibility_settings(self):
+        _create_private_conversation(self.alice, self.bob)
+        self.bob.profile.bio = 'hidden bio'
+        self.bob.profile.phone_number = '+10086'
+        self.bob.profile.birthday = '2000-01-02'
+        self.bob.profile.save()
+        UserPrivacySettings.objects.update_or_create(
+            user=self.bob,
+            defaults={
+                'bio_visibility': 'nobody',
+                'phone_number_visibility': 'nobody',
+                'birthday_visibility': 'nobody',
+            },
+        )
+
+        response = self.client.get('/api/conversations/')
+        self.assertEqual(response.status_code, 200)
+        conversation = response.json()['conversations'][0]
+        self.assertEqual(conversation['peer_bio'], '')
+        self.assertEqual(conversation['peer_phone_number'], '')
+        self.assertEqual(conversation['peer_birthday'], '')
+
+    def test_private_send_respects_receiver_message_privacy(self):
+        conv = _create_private_conversation(self.alice, self.bob)
+        payload = {
+            'receiver_id': self.bob.id,
+            'message_type': EncryptedMessage.MessageType.TEXT,
+            'ciphertext': 'aGVsbG8=',
+            'nonce': 'AAAAAAAAAAAAAAAA',
+            'auth_tag': 'AAAAAAAAAAAAAAAAAAAAAA==',
+            'algorithm': 'AES-256-GCM',
+            'sender_key_version': 1,
+            'receiver_key_version': 1,
+            'client_message_id': 'privacy-send-1',
+        }
+
+        response = self.client.post(
+            f'/api/conversations/{conv.id}/messages/send/',
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+        UserPrivacySettings.objects.update_or_create(
+            user=self.bob,
+            defaults={'who_can_send_messages': 'everyone'},
+        )
+        payload['client_message_id'] = 'privacy-send-2'
+        response = self.client.post(
+            f'/api/conversations/{conv.id}/messages/send/',
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+
+    def test_auto_delete_privacy_setting_hides_expired_private_messages(self):
+        conv = _create_private_conversation(self.alice, self.bob)
+        old_message = EncryptedMessage.objects.create(
+            conversation=conv,
+            sender=self.bob,
+            receiver=self.alice,
+            ciphertext='aGVsbG8=',
+            nonce='AAAAAAAAAAAAAAAA',
+            auth_tag='AAAAAAAAAAAAAAAAAAAAAA==',
+            algorithm='AES-256-GCM',
+            sender_key_version=1,
+            receiver_key_version=1,
+        )
+        EncryptedMessage.objects.filter(pk=old_message.pk).update(
+            created_at=timezone.now() - timezone.timedelta(days=2),
+        )
+        UserPrivacySettings.objects.update_or_create(
+            user=self.alice,
+            defaults={'auto_delete_messages_days': 1},
+        )
+
+        response = self.client.get(f'/api/conversations/{conv.id}/messages/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['messages'], [])
+        self.assertTrue(
+            UserMessageDeletion.objects.filter(
+                user=self.alice,
+                conversation=conv,
+                message_type=UserMessageDeletion.MessageType.PRIVATE,
+                message_id=old_message.id,
+            ).exists()
+        )
 
 
 class WebSocketPresenceTests(TransactionTestCase):

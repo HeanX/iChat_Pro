@@ -160,6 +160,13 @@ class EncryptedMessage(models.Model):
     recalled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    file_id = models.ForeignKey(
+        "EncryptedFile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="private_messages",
+    )
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -216,6 +223,13 @@ class GroupMessage(models.Model):
     recalled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    file_id = models.ForeignKey(
+        "EncryptedFile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="group_messages",
+    )
 
     class Meta:
         indexes = [
@@ -327,6 +341,44 @@ class UserMessageDeletion(models.Model):
 # ── T22: User presence / online status ──────────────────────────────
 
 
+class ChatReport(models.Model):
+    """A user-submitted report for a conversation."""
+
+    class Reason(models.TextChoices):
+        SPAM = "spam", "Spam"
+        HARASSMENT = "harassment", "Harassment"
+        ATTACK = "attack", "Personal Attack"
+        ILLEGAL = "illegal", "Illegal Content"
+        OTHER = "other", "Other"
+
+    reporter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_reports",
+    )
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        related_name="reports",
+    )
+    reason = models.CharField(
+        max_length=32,
+        choices=Reason.choices,
+        default=Reason.OTHER,
+    )
+    details = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["conversation", "created_at"]),
+            models.Index(fields=["reporter", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Report #{self.id} by #{self.reporter_id} on conversation #{self.conversation_id}"
+
+
 class UserPresence(models.Model):
     """Tracks user online status and last-seen timestamp (T22)."""
 
@@ -422,6 +474,166 @@ class GroupAnnouncement(models.Model):
 
     def __str__(self):
         return f"Announcement #{self.id} in Conversation #{self.conversation_id}"
+
+
+# ── Encrypted File Transfer ───────────────────────────────────────
+
+
+class EncryptedFile(models.Model):
+    """Encrypted file uploaded by a user. Server never sees plaintext."""
+
+    class MessageKind(models.TextChoices):
+        IMAGE = "image", "Image"
+        FILE = "file", "File"
+        STICKER = "sticker", "Sticker"
+
+    class Status(models.TextChoices):
+        UPLOADING = "uploading", "Uploading"
+        AVAILABLE = "available", "Available"
+        FAILED = "failed", "Failed"
+        DELETED = "deleted", "Deleted"
+
+    class DerivativeRole(models.TextChoices):
+        ORIGINAL = "original", "Original"
+        THUMBNAIL = "thumbnail", "Thumbnail"
+        PREVIEW = "preview", "Preview"
+
+    upload_id = models.CharField(
+        max_length=36, unique=True,
+        help_text="UUID for the upload session, used in API URLs.",
+    )
+    client_file_id = models.CharField(
+        max_length=64,
+        help_text="Client-generated UUID, idempotency key.",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="uploaded_files",
+    )
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        related_name="files",
+    )
+    message_kind = models.CharField(
+        max_length=20, choices=MessageKind.choices,
+    )
+    parent_file_id = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="derivatives",
+    )
+    derivative_role = models.CharField(
+        max_length=20, null=True, blank=True, choices=DerivativeRole.choices,
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.UPLOADING,
+    )
+    storage_path = models.CharField(
+        max_length=512, blank=True,
+        help_text="Relative path to merged ciphertext file under MEDIA_ROOT.",
+    )
+    total_size_bytes = models.PositiveBigIntegerField()
+    chunk_size_bytes = models.PositiveIntegerField(default=1048576)
+    chunk_count = models.PositiveIntegerField()
+    ciphertext_sha256 = models.CharField(
+        max_length=64, blank=True,
+        help_text="SHA-256 hex digest of the complete merged ciphertext.",
+    )
+    encrypted_metadata = models.TextField(blank=True)
+    metadata_nonce = models.CharField(max_length=64, blank=True)
+    metadata_auth_tag = models.CharField(max_length=64, blank=True)
+    algorithm = models.CharField(max_length=50, default="AES-256-GCM")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner", "client_file_id"],
+                name="unique_client_file_per_owner",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["conversation", "status"]),
+            models.Index(fields=["owner", "-created_at"]),
+            models.Index(fields=["upload_id"]),
+        ]
+
+    def __str__(self):
+        return f"EncryptedFile #{self.id} ({self.message_kind}) by #{self.owner_id}"
+
+
+class EncryptedFileChunk(models.Model):
+    """Metadata for one chunk of an encrypted file upload."""
+
+    file = models.ForeignKey(
+        EncryptedFile, on_delete=models.CASCADE, related_name="chunks",
+    )
+    chunk_index = models.PositiveIntegerField()
+    size_bytes = models.PositiveIntegerField()
+    offset_bytes = models.PositiveBigIntegerField()
+    nonce = models.CharField(max_length=64)
+    auth_tag = models.CharField(max_length=64)
+    ciphertext_sha256 = models.CharField(max_length=64, blank=True)
+    storage_path = models.CharField(
+        max_length=512, null=True, blank=True,
+        help_text="Temp chunk file path; null after merge into complete file.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["file", "chunk_index"],
+                name="unique_file_chunk_index",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Chunk #{self.chunk_index} of EncryptedFile #{self.file_id}"
+
+
+class EncryptedFileKey(models.Model):
+    """Per-recipient wrapped file key. Each holder can decrypt the file."""
+
+    file = models.ForeignKey(
+        EncryptedFile, on_delete=models.CASCADE, related_name="keys",
+    )
+    holder = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="file_keys",
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="wrapped_file_keys",
+        help_text="User whose identity key wrapped this file key. Null falls back to file owner for legacy rows.",
+    )
+    encrypted_file_key = models.TextField()
+    nonce = models.CharField(max_length=64)
+    auth_tag = models.CharField(max_length=64)
+    algorithm = models.CharField(max_length=50, default="AES-256-GCM")
+    sender_key_version = models.PositiveIntegerField(null=True, blank=True)
+    receiver_key_version = models.PositiveIntegerField(null=True, blank=True)
+    membership_version = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["file", "holder"],
+                name="unique_file_key_per_holder",
+            ),
+        ]
+
+    def __str__(self):
+        return f"FileKey for EncryptedFile #{self.file_id} holder #{self.holder_id}"
 
 
 # ── Soft-delete policy (documented — T31) ─────────────────────────

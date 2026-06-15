@@ -1,14 +1,21 @@
 import copy
+import hashlib
 import json
+import os
+import shutil
+import uuid as uuid_lib
+from datetime import timedelta
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import F, Q
-from django.http import JsonResponse
+from django.http import FileResponse, HttpResponse, JsonResponse
+from django.http.multipartparser import MultiPartParser, MultiPartParserError
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET
@@ -18,6 +25,10 @@ from .consumers import ChatConsumer
 from .models import (
     Conversation,
     ConversationMember,
+    ChatReport,
+    EncryptedFile,
+    EncryptedFileChunk,
+    EncryptedFileKey,
     EncryptedMessage,
     GroupAnnouncement,
     GroupMessage,
@@ -62,13 +73,35 @@ def _display_name(user):
     return nickname or user.get_full_name() or user.username
 
 
+def _privacy_settings_for(user):
+    settings_obj, _ = UserPrivacySettings.objects.get_or_create(user=user)
+    return settings_obj
+
+
+def _can_view_privacy_field(viewer, target, field_name):
+    if viewer == target:
+        return True
+    privacy = _privacy_settings_for(target)
+    visibility = getattr(privacy, field_name, 'everyone')
+    return _visibility_allows(viewer, target, visibility)
+
+
 def _avatar_url(request, user):
-    """Return absolute avatar image URL for a user, or empty string if none set."""
+    """Return absolute avatar image URL for a user, respecting profile-photo privacy."""
+    viewer = getattr(request, 'user', None)
+    if viewer and getattr(viewer, 'is_authenticated', False):
+        if not _can_view_privacy_field(viewer, user, 'profile_photo_visibility'):
+            return ''
     try:
         if user.profile and user.profile.avatar:
-            return request.build_absolute_uri(user.profile.avatar.url)
+            timestamp = int(user.profile.updated_at.timestamp())
+            return request.build_absolute_uri(f"{user.profile.avatar.url}?t={timestamp}")
     except Exception:
-        pass
+        try:
+            if user.profile and user.profile.avatar:
+                return request.build_absolute_uri(user.profile.avatar.url)
+        except Exception:
+            pass
     return ''
 
 
@@ -77,6 +110,45 @@ def _are_contacts(user, peer):
         (Q(user=user) & Q(contact=peer))
         | (Q(user=peer) & Q(contact=user)),
     ).exists()
+
+
+def _visibility_allows(viewer, target, visibility):
+    if viewer == target:
+        return True
+    if visibility == 'everyone':
+        return True
+    if visibility == 'contacts':
+        return _are_contacts(viewer, target)
+    return False
+
+
+def _visible_peer_profile_payload(request, peer):
+    """Return profile fields for chat details, respecting per-field privacy."""
+    try:
+        profile = peer.profile
+    except Exception:
+        profile = None
+
+    can_view_bio = _can_view_privacy_field(request.user, peer, 'bio_visibility')
+    can_view_phone = _can_view_privacy_field(request.user, peer, 'phone_number_visibility')
+    can_view_birthday = _can_view_privacy_field(request.user, peer, 'birthday_visibility')
+    can_view_photo = _can_view_privacy_field(request.user, peer, 'profile_photo_visibility')
+    is_contact = _are_contacts(request.user, peer)
+
+    return {
+        'peer_email': peer.email if (request.user == peer or is_contact) else '',
+        'peer_first_name': peer.first_name,
+        'peer_last_name': peer.last_name,
+        'peer_bio': (profile.bio if profile and can_view_bio else ''),
+        'peer_phone_number': (profile.phone_number if profile and can_view_phone else ''),
+        'peer_location': (profile.location if profile else ''),
+        'peer_birthday': profile.birthday.isoformat() if profile and profile.birthday and can_view_birthday else '',
+        'peer_can_view_bio': can_view_bio,
+        'peer_can_view_phone_number': can_view_phone,
+        'peer_can_view_birthday': can_view_birthday,
+        'peer_can_view_profile_photo': can_view_photo,
+        'peer_is_contact': is_contact,
+    }
 
 
 def _is_blocked_by(blocker, target):
@@ -112,6 +184,22 @@ def _can_initiate_conversation(sender, receiver):
         return True, None
 
     return False, 'Private chats are limited to contacts.'
+
+
+def _can_send_private_message(sender, receiver):
+    """Return whether sender may send a private message to receiver right now."""
+    if sender == receiver:
+        return False, 'Cannot send messages to yourself.'
+    if _is_blocked_by(receiver, sender):
+        return False, 'You have been blocked by this user.'
+    if _is_blocked_by(sender, receiver):
+        return False, 'You have blocked this user. Unblock them first.'
+    if _are_contacts(sender, receiver):
+        return True, None
+    privacy = _privacy_settings_for(receiver)
+    if privacy.who_can_send_messages == 'everyone':
+        return True, None
+    return False, 'This user only accepts messages from contacts.'
 
 
 def _json_body(request):
@@ -151,6 +239,113 @@ def _get_active_member(conversation_id, user):
         return None
 
 
+def _effective_auto_delete_seconds(member):
+    if not member:
+        return None
+    if member.auto_delete_seconds is not None:
+        return member.auto_delete_seconds or None
+    if member.conversation.auto_delete_seconds is not None:
+        return member.conversation.auto_delete_seconds or None
+    days = _privacy_settings_for(member.user).auto_delete_messages_days
+    return days * 86400 if days else None
+
+
+def _auto_delete_cutoff(member):
+    seconds = _effective_auto_delete_seconds(member)
+    if not seconds:
+        return None
+    return timezone.now() - timezone.timedelta(seconds=seconds)
+
+
+def _deleted_message_ids(user, conversation_id, message_type):
+    return set(
+        UserMessageDeletion.objects.filter(
+            user=user,
+            conversation_id=conversation_id,
+            message_type=message_type,
+        ).values_list('message_id', flat=True)
+    )
+
+
+def _apply_auto_delete_for_member(member):
+    """Hide messages older than the member's effective auto-delete window."""
+    cutoff = _auto_delete_cutoff(member)
+    if not cutoff:
+        return
+
+    if member.conversation.type == Conversation.Type.SINGLE:
+        message_ids = list(
+            EncryptedMessage.objects.filter(
+                conversation=member.conversation,
+                created_at__lt=cutoff,
+            ).values_list('id', flat=True)[:1000]
+        )
+        message_type = UserMessageDeletion.MessageType.PRIVATE
+    else:
+        message_ids = list(
+            GroupMessageRecipient.objects.filter(
+                receiver=member.user,
+                group_message__conversation=member.conversation,
+                group_message__created_at__lt=cutoff,
+            ).values_list('group_message_id', flat=True)[:1000]
+        )
+        message_type = UserMessageDeletion.MessageType.GROUP
+
+    if not message_ids:
+        return
+
+    UserMessageDeletion.objects.bulk_create(
+        [
+            UserMessageDeletion(
+                user=member.user,
+                conversation=member.conversation,
+                message_type=message_type,
+                message_id=message_id,
+            )
+            for message_id in message_ids
+        ],
+        ignore_conflicts=True,
+    )
+
+
+def _visible_private_messages_queryset(member):
+    queryset = EncryptedMessage.objects.filter(conversation=member.conversation)
+    if member.cleared_at:
+        queryset = queryset.filter(created_at__gte=member.cleared_at)
+    cutoff = _auto_delete_cutoff(member)
+    if cutoff:
+        queryset = queryset.filter(created_at__gte=cutoff)
+    deleted_ids = _deleted_message_ids(
+        member.user,
+        member.conversation_id,
+        UserMessageDeletion.MessageType.PRIVATE,
+    )
+    if deleted_ids:
+        queryset = queryset.exclude(id__in=deleted_ids)
+    return queryset
+
+
+def _visible_group_recipients_queryset(member):
+    queryset = GroupMessageRecipient.objects.filter(
+        receiver=member.user,
+        group_message__conversation=member.conversation,
+        group_message__created_at__gte=member.joined_at,
+    )
+    if member.cleared_at:
+        queryset = queryset.filter(group_message__created_at__gte=member.cleared_at)
+    cutoff = _auto_delete_cutoff(member)
+    if cutoff:
+        queryset = queryset.filter(group_message__created_at__gte=cutoff)
+    deleted_ids = _deleted_message_ids(
+        member.user,
+        member.conversation_id,
+        UserMessageDeletion.MessageType.GROUP,
+    )
+    if deleted_ids:
+        queryset = queryset.exclude(group_message_id__in=deleted_ids)
+    return queryset
+
+
 @login_required(login_url='login')
 def index_view(request):
     return render(request, 'pages/chat.html', {
@@ -175,11 +370,11 @@ def _sidebar_contacts_context(user):
         'incoming_requests': FriendRequest.objects.filter(
             receiver=user,
             status=FriendRequest.Status.PENDING,
-        ).select_related('sender'),
+        ).select_related('sender__profile'),
         'outgoing_requests': FriendRequest.objects.filter(
             sender=user,
             status=FriendRequest.Status.PENDING,
-        ).select_related('receiver'),
+        ).select_related('receiver__profile'),
     }
 
 
@@ -228,6 +423,7 @@ def conversations_list_view(request):
 
     conversations = []
     for membership in memberships:
+        _apply_auto_delete_for_member(membership)
         conversation = membership.conversation
         is_muted = (
             membership.muted_until is not None
@@ -235,54 +431,60 @@ def conversations_list_view(request):
         )
 
         last_message_data = None
-        if conversation.last_message_id:
-            if conversation.type == Conversation.Type.SINGLE:
-                last_msg = EncryptedMessage.objects.filter(pk=conversation.last_message_id).first()
-                if last_msg:
-                    last_message_data = {
-                        'id': last_msg.id,
-                        'ciphertext': last_msg.ciphertext,
-                        'nonce': last_msg.nonce,
-                        'auth_tag': last_msg.auth_tag,
-                        'algorithm': last_msg.algorithm,
-                        'sender_id': last_msg.sender_id,
-                        'receiver_id': last_msg.receiver_id,
-                        'message_type': last_msg.message_type,
-                        'sender_key_version': last_msg.sender_key_version,
-                        'receiver_key_version': last_msg.receiver_key_version,
-                    }
-            else:
-                last_msg = GroupMessageRecipient.objects.filter(
-                    group_message_id=conversation.last_message_id,
-                    receiver=request.user,
-                ).select_related('group_message').first()
-                if last_msg:
-                    last_message_data = {
-                        'id': last_msg.group_message.id,
-                        'ciphertext': last_msg.ciphertext,
-                        'nonce': last_msg.nonce,
-                        'auth_tag': last_msg.auth_tag,
-                        'algorithm': last_msg.algorithm,
-                        'sender_id': last_msg.group_message.sender_id,
-                        'receiver_id': request.user.id,
-                        'message_type': last_msg.group_message.message_type,
-                        'sender_key_version': last_msg.sender_key_version,
-                        'receiver_key_version': last_msg.receiver_key_version,
-                        'membership_version': last_msg.membership_version,
-                    }
+        if conversation.type == Conversation.Type.SINGLE:
+            last_msg = _visible_private_messages_queryset(membership).order_by('-created_at').first()
+            if last_msg:
+                last_message_data = {
+                    'id': last_msg.id,
+                    'ciphertext': last_msg.ciphertext,
+                    'nonce': last_msg.nonce,
+                    'auth_tag': last_msg.auth_tag,
+                    'algorithm': last_msg.algorithm,
+                    'sender_id': last_msg.sender_id,
+                    'receiver_id': last_msg.receiver_id,
+                    'message_type': last_msg.message_type,
+                    'file_id': last_msg.file_id_id,
+                    'sender_key_version': last_msg.sender_key_version,
+                    'receiver_key_version': last_msg.receiver_key_version,
+                }
+        else:
+            last_msg = (
+                _visible_group_recipients_queryset(membership)
+                .select_related('group_message')
+                .order_by('-group_message__created_at')
+                .first()
+            )
+            if last_msg:
+                last_message_data = {
+                    'id': last_msg.group_message.id,
+                    'group_id': conversation.id,
+                    'ciphertext': last_msg.ciphertext,
+                    'nonce': last_msg.nonce,
+                    'auth_tag': last_msg.auth_tag,
+                    'algorithm': last_msg.algorithm,
+                    'sender_id': last_msg.group_message.sender_id,
+                    'receiver_id': request.user.id,
+                    'message_type': last_msg.group_message.message_type,
+                    'file_id': last_msg.group_message.file_id_id,
+                    'sender_key_version': last_msg.sender_key_version or 0,
+                    'receiver_key_version': last_msg.receiver_key_version or 0,
+                    'membership_version': last_msg.membership_version or 0,
+                }
 
         item = {
             'id': conversation.id,
             'type': conversation.type,
             'unread': membership.unread_count,
             'last_message_at': (
-                conversation.last_message_at.isoformat()
-                if conversation.last_message_at
+                last_msg.group_message.created_at.isoformat()
+                if conversation.type != Conversation.Type.SINGLE and last_message_data
+                else last_msg.created_at.isoformat()
+                if conversation.type == Conversation.Type.SINGLE and last_message_data
                 else None
             ),
-            'last_message_preview': 'Encrypted message' if conversation.last_message_at else '',
+            'last_message_preview': 'Encrypted message' if last_message_data else '',
             'last_message_data': last_message_data,
-            'last_message_id': conversation.last_message_id,
+            'last_message_id': last_message_data['id'] if last_message_data else None,
             'is_pinned': membership.is_pinned,
             'is_muted': is_muted,
             'muted_until': membership.muted_until.isoformat() if membership.muted_until else None,
@@ -313,15 +515,21 @@ def conversations_list_view(request):
             else:
                 peer = peer_member.user
                 name = _display_name(peer)
+                try:
+                    peer_user_type = peer.profile.user_type
+                except Exception:
+                    peer_user_type = 'user'
                 item.update({
                     'peer_id': peer.id,
                     'peer_username': peer.username,
+                    'peer_user_type': peer_user_type,
                     'name': name,
                     'initials': _initials(name),
                     'avatar_color': _avatar_color(name),
                     'avatar_url': _avatar_url(request, peer),
                     'is_secure': peer.public_keys.filter(is_active=True).exists(),
                 })
+                item.update(_visible_peer_profile_payload(request, peer))
         else:
             name = conversation.name or f'Group #{conversation.id}'
             item.update({
@@ -565,6 +773,35 @@ def forward_message_view(request, conversation_id):
     data = _json_body(request)
     original_message_id = data.get('original_message_id')
     original_conversation_id = data.get('original_conversation_id')
+    forward_file = None
+    file_id = data.get('file_id')
+    if file_id:
+        try:
+            forward_file, file_error = _get_encrypted_file_or_error(int(file_id), request.user)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'file_id must be an integer.'}, status=400)
+        if file_error:
+            return file_error
+        if forward_file.status != EncryptedFile.Status.AVAILABLE:
+            return JsonResponse({'error': 'file_unavailable'}, status=410)
+
+    if original_message_id and original_conversation_id:
+        source_member = _get_active_member(original_conversation_id, request.user)
+        if not source_member:
+            return JsonResponse({'error': 'Original conversation not found or not a member.'}, status=403)
+        if source_member.conversation.type == Conversation.Type.SINGLE:
+            source_exists = EncryptedMessage.objects.filter(
+                pk=original_message_id,
+                conversation_id=original_conversation_id,
+            ).exists()
+        else:
+            source_exists = GroupMessageRecipient.objects.filter(
+                group_message_id=original_message_id,
+                group_message__conversation_id=original_conversation_id,
+                receiver=request.user,
+            ).exists()
+        if not source_exists:
+            return JsonResponse({'error': 'Original message not found or not accessible.'}, status=404)
 
     # Validate sender is an active member of the target conversation
     member = _get_active_member(conversation_id, request.user)
@@ -576,6 +813,35 @@ def forward_message_view(request, conversation_id):
     # Ensure the conversation itself is active
     if conversation.status != Conversation.Status.ACTIVE:
         return JsonResponse({'error': 'Target conversation is not active.'}, status=400)
+
+    file_keys_data = data.get('file_keys', [])
+    if forward_file:
+        if not isinstance(file_keys_data, list) or not file_keys_data:
+            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'file_keys is required for file forwarding.'}, status=400)
+
+        holder_ids = set()
+        for fk in file_keys_data:
+            try:
+                holder_id = int(fk.get('holder_id', 0))
+            except (TypeError, ValueError):
+                return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'Each file_key must have a valid holder_id.'}, status=400)
+            if holder_id in holder_ids:
+                continue
+            holder_ids.add(holder_id)
+            EncryptedFileKey.objects.update_or_create(
+                file=forward_file,
+                holder_id=holder_id,
+                defaults={
+                    'sender': request.user,
+                    'encrypted_file_key': str(fk.get('encrypted_file_key', '')),
+                    'nonce': str(fk.get('nonce', '')),
+                    'auth_tag': str(fk.get('auth_tag', '')),
+                    'algorithm': str(fk.get('algorithm', 'AES-256-GCM')),
+                    'sender_key_version': int(fk.get('sender_key_version', 0)) or None,
+                    'receiver_key_version': int(fk.get('receiver_key_version', 0)) or None,
+                    'membership_version': int(fk.get('membership_version', 0)) or None,
+                },
+            )
 
     # 鈹€鈹€ Private chat forwarding 鈹€鈹€
     if conversation.type == Conversation.Type.SINGLE:
@@ -595,20 +861,13 @@ def forward_message_view(request, conversation_id):
         ):
             return JsonResponse({'error': 'Peer is not a member of this conversation.'}, status=403)
 
-        # Block/contact enforcement (mirrors WebSocket consumers.py:383-419)
-        from accounts.models import BlockedUser, Contact
-        blocked = (
-            BlockedUser.objects.filter(blocker=peer_id, blocked=request.user.id).exists()
-            or BlockedUser.objects.filter(blocker=request.user.id, blocked=peer_id).exists()
-        )
-        if blocked:
-            return JsonResponse({'error': 'Cannot send messages due to block relationship.'}, status=403)
-        is_contact = (
-            Contact.objects.filter(user=request.user.id, contact=peer_id).exists()
-            or Contact.objects.filter(user=peer_id, contact=request.user.id).exists()
-        )
-        if not is_contact:
-            return JsonResponse({'error': 'Cannot send messages to non-contacts.'}, status=403)
+        peer = User.objects.filter(id=peer_id, is_active=True).first()
+        if not peer:
+            return JsonResponse({'error': 'Peer not found.'}, status=404)
+        if _is_blocked_by(peer, request.user):
+            return JsonResponse({'error': 'You have been blocked by this user.'}, status=403)
+        if _is_blocked_by(request.user, peer):
+            return JsonResponse({'error': 'You have blocked this user. Unblock them first.'}, status=403)
 
         # Validate required ciphertext fields
         ciphertext = data.get('ciphertext', '')
@@ -620,7 +879,7 @@ def forward_message_view(request, conversation_id):
             return JsonResponse({'error': f'Unsupported algorithm: {algorithm}.'}, status=400)
 
         try:
-            EncryptedMessage.objects.create(
+            message = EncryptedMessage.objects.create(
                 conversation=conversation,
                 sender=request.user,
                 receiver_id=peer_id,
@@ -633,6 +892,7 @@ def forward_message_view(request, conversation_id):
                 receiver_key_version=data.get('receiver_key_version'),
                 client_message_id=data.get('client_message_id', ''),
                 reply_to_message_id=original_message_id,
+                file_id=forward_file,
             )
             conversation.last_message_id = EncryptedMessage.objects.filter(
                 conversation=conversation,
@@ -647,7 +907,33 @@ def forward_message_view(request, conversation_id):
                 status=ConversationMember.Status.ACTIVE,
             ).update(unread_count=F('unread_count') + 1)
 
-            return JsonResponse({'status': 'ok', 'conversation_id': conversation.id}, status=201)
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'user_{peer_id}',
+                {
+                    'type': 'message.single.new',
+                    'data': (
+                        _serialize_file_private_message(message, _build_file_sub_object(forward_file, peer_id))
+                        if forward_file else ChatConsumer.serialize_private_message(message)
+                    ),
+                },
+            )
+            async_to_sync(channel_layer.group_send)(
+                f'user_{request.user.pk}',
+                {
+                    'type': 'message.single.new',
+                    'data': (
+                        _serialize_file_private_message(message, _build_file_sub_object(forward_file, request.user.pk))
+                        if forward_file else ChatConsumer.serialize_private_message(message)
+                    ),
+                },
+            )
+
+            return JsonResponse({
+                'status': 'ok',
+                'conversation_id': conversation.id,
+                'message_id': message.pk,
+            }, status=201)
         except (ValueError, KeyError) as e:
             return JsonResponse({'error': f'Invalid payload: {e}'}, status=400)
 
@@ -684,6 +970,7 @@ def forward_message_view(request, conversation_id):
             message_type=data.get('message_type', GroupMessage.MessageType.TEXT),
             client_message_id=data.get('client_message_id', ''),
             reply_to_message_id=original_message_id,
+            file_id=forward_file,
         )
         recipient_objs = [
             GroupMessageRecipient(
@@ -713,7 +1000,29 @@ def forward_message_view(request, conversation_id):
         conversation.last_message_at = group_message.created_at
         conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
 
-        return JsonResponse({'status': 'ok', 'conversation_id': conversation.id}, status=201)
+        channel_layer = get_channel_layer()
+        for recipient_data in ChatConsumer._build_recipients_payload(group_message, conversation):
+            if forward_file:
+                recipient_data = _serialize_file_group_recipient(
+                    group_message,
+                    GroupMessageRecipient.objects.get(
+                        group_message=group_message,
+                        receiver_id=recipient_data['receiver_id'],
+                    ),
+                    _build_file_sub_object(forward_file, recipient_data['receiver_id']),
+                )
+            if recipient_data['receiver_id'] == request.user.pk:
+                continue
+            async_to_sync(channel_layer.group_send)(
+                f"user_{recipient_data['receiver_id']}",
+                {'type': 'message.group.new', 'data': recipient_data},
+            )
+
+        return JsonResponse({
+            'status': 'ok',
+            'conversation_id': conversation.id,
+            'message_id': group_message.pk,
+        }, status=201)
 
     return JsonResponse({'error': 'Invalid conversation type.'}, status=400)
 
@@ -1003,9 +1312,15 @@ def create_group_view(request):
                 uid for uid in initial_ids
                 if isinstance(uid, int) and uid != request.user.pk
             ))
-            valid_users = User.objects.filter(
-                id__in=unique_ids, is_active=True,
-            ).values_list('id', flat=True)
+            valid_users = []
+            for target in User.objects.filter(id__in=unique_ids, is_active=True):
+                privacy = _privacy_settings_for(target)
+                invite_policy = privacy.who_can_add_me_to_groups
+                if invite_policy == 'nobody':
+                    continue
+                if invite_policy == 'contacts' and not _are_contacts(target, request.user):
+                    continue
+                valid_users.append(target.id)
             members_to_create = [
                 ConversationMember(
                     conversation=conversation,
@@ -1284,7 +1599,6 @@ def group_members_view(request, conversation_id):
             {"error": "You are not a member of this group."},
             status=403,
         )
-
     try:
         conversation = Conversation.objects.get(
             id=conversation_id, type=Conversation.Type.GROUP
@@ -1334,41 +1648,16 @@ def group_messages_view(request, conversation_id):
             {"error": "You are not a member of this group."},
             status=403,
         )
+    _apply_auto_delete_for_member(member)
 
     page_number = request.GET.get("page", 1)
     per_page = _parse_int(request.GET.get("per_page"), 30, min_value=1, max_value=100)
 
-    # Filter out deleted messages for this user
-    deleted_ids = set(
-        UserMessageDeletion.objects.filter(
-            user=request.user,
-            conversation_id=conversation_id,
-            message_type=UserMessageDeletion.MessageType.GROUP,
-        ).values_list('message_id', flat=True)
-    )
-
-    joined_at = member.joined_at
     recipient_queryset = (
-        GroupMessageRecipient.objects.filter(
-            receiver=request.user,
-            group_message__conversation_id=conversation_id,
-            group_message__created_at__gte=joined_at,
-        )
+        _visible_group_recipients_queryset(member)
         .select_related("group_message", "group_message__sender__profile")
         .order_by("-group_message__created_at")
     )
-
-    # Apply cleared_at filter
-    if member.cleared_at:
-        recipient_queryset = recipient_queryset.filter(
-            group_message__created_at__gte=member.cleared_at,
-        )
-
-    # Apply user message deletion filter
-    if deleted_ids:
-        recipient_queryset = recipient_queryset.exclude(
-            group_message_id__in=deleted_ids,
-        )
 
     paginator = Paginator(recipient_queryset, per_page)
     page_obj = paginator.get_page(page_number)
@@ -1376,7 +1665,9 @@ def group_messages_view(request, conversation_id):
     messages_data = [
         {
             "id": r.group_message.id,
+            "group_id": conversation_id,
             "sender_id": r.group_message.sender_id,
+            "receiver_id": r.receiver_id,
             "sender_username": r.group_message.sender.username,
             "sender_name": _display_name(r.group_message.sender),
             "sender_initials": _initials(_display_name(r.group_message.sender)),
@@ -1387,10 +1678,15 @@ def group_messages_view(request, conversation_id):
             "nonce": r.nonce,
             "auth_tag": r.auth_tag,
             "algorithm": r.algorithm,
-            "sender_key_version": r.sender_key_version,
-            "receiver_key_version": r.receiver_key_version,
+            "sender_key_version": r.sender_key_version or 0,
+            "receiver_key_version": r.receiver_key_version or 0,
             "reply_to_message_id": r.group_message.reply_to_message_id,
-            "membership_version": r.membership_version,
+            "membership_version": r.membership_version or 0,
+            "file_id": r.group_message.file_id_id,
+            "file": (
+                _build_file_sub_object(r.group_message.file_id, request.user.pk)
+                if r.group_message.file_id_id else None
+            ),
             "status": r.status,
             "recalled_at": r.group_message.recalled_at.isoformat() if r.group_message.recalled_at else None,
             "created_at": r.group_message.created_at.isoformat(),
@@ -1431,49 +1727,31 @@ def conversation_messages_view(request, conversation_id):
             status=403,
         )
 
-    # For private chats, enforce contact relationship (T29).
-    conversation = Conversation.objects.only("type").get(id=conversation_id)
     member = _get_active_member(conversation_id, request.user)
+    _apply_auto_delete_for_member(member)
+    conversation = member.conversation
     if conversation.type == Conversation.Type.SINGLE:
-        peer_id = (
+        peer = (
             ConversationMember.objects
             .filter(conversation_id=conversation_id, status=ConversationMember.Status.ACTIVE)
             .exclude(user=request.user)
-            .values_list("user_id", flat=True)
+            .select_related("user")
             .first()
         )
-        if peer_id and not _are_contacts(request.user, peer_id):
+        if peer and (_is_blocked_by(request.user, peer.user) or _is_blocked_by(peer.user, request.user)):
             return JsonResponse(
-                {"error": "Private chats are limited to contacts."},
+                {"error": "This conversation is blocked."},
                 status=403,
             )
 
     page_number = request.GET.get("page", 1)
     per_page = _parse_int(request.GET.get("per_page"), 30, min_value=1, max_value=100)
 
-    # Filter out deleted messages for this user
-    deleted_ids = set(
-        UserMessageDeletion.objects.filter(
-            user=request.user,
-            conversation_id=conversation_id,
-            message_type=UserMessageDeletion.MessageType.PRIVATE,
-        ).values_list('message_id', flat=True)
-    )
-
     queryset = (
-        EncryptedMessage.objects
-        .filter(conversation_id=conversation_id)
-        .select_related('sender', 'sender__profile')
+        _visible_private_messages_queryset(member)
+        .select_related('sender', 'sender__profile', 'file_id')
         .order_by("-created_at")
     )
-
-    # Apply cleared_at filter
-    if member and member.cleared_at:
-        queryset = queryset.filter(created_at__gte=member.cleared_at)
-
-    # Apply user message deletion filter
-    if deleted_ids:
-        queryset = queryset.exclude(id__in=deleted_ids)
 
     paginator = Paginator(queryset, per_page)
     page_obj = paginator.get_page(page_number)
@@ -1494,6 +1772,11 @@ def conversation_messages_view(request, conversation_id):
             "sender_key_version": msg.sender_key_version,
             "receiver_key_version": msg.receiver_key_version,
             "reply_to_message_id": msg.reply_to_message_id,
+            "file_id": msg.file_id_id,
+            "file": (
+                _build_file_sub_object(msg.file_id, request.user.pk)
+                if msg.file_id_id else None
+            ),
             "status": msg.status,
             "recalled_at": msg.recalled_at.isoformat() if msg.recalled_at else None,
             "created_at": msg.created_at.isoformat(),
@@ -1545,8 +1828,10 @@ def user_presence_view(request, user_id):
             'presence_visibility': presence.presence_visibility,
         })
 
-    # Apply visibility rules
-    if presence.presence_visibility == UserPresence.Visibility.NOBODY:
+    # Apply the Privacy & Security setting first; fall back to the older
+    # presence-specific visibility for clients that still use it.
+    last_seen_visibility = _privacy_settings_for(target).last_seen_visibility
+    if last_seen_visibility == 'nobody' or presence.presence_visibility == UserPresence.Visibility.NOBODY:
         return JsonResponse({
             'user_id': target.pk,
             'is_online': False,
@@ -1554,14 +1839,16 @@ def user_presence_view(request, user_id):
             'status': 'offline',
         })
 
-    if presence.presence_visibility == UserPresence.Visibility.CONTACTS:
-        if not _are_contacts(request.user, target):
-            return JsonResponse({
-                'user_id': target.pk,
-                'is_online': False,
-                'last_seen': None,
-                'status': 'offline',
-            })
+    if (
+        last_seen_visibility == 'contacts'
+        or presence.presence_visibility == UserPresence.Visibility.CONTACTS
+    ) and not _are_contacts(request.user, target):
+        return JsonResponse({
+            'user_id': target.pk,
+            'is_online': False,
+            'last_seen': None,
+            'status': 'offline',
+        })
 
     # Everyone or contact: return full data
     return JsonResponse({
@@ -1640,7 +1927,9 @@ def send_private_message_view(request, conversation_id):
     data = _json_body(request)
     data['conversation_id'] = conversation_id
 
-    # Check block status before attempting to send
+    # Check block status before attempting to send. If a private conversation
+    # already exists and both users are active members, contact/privacy rules
+    # should not block normal in-conversation sends.
     receiver_id = data.get('receiver_id')
     if receiver_id:
         try:
@@ -1648,10 +1937,12 @@ def send_private_message_view(request, conversation_id):
         except User.DoesNotExist:
             return JsonResponse({'error': 'receiver_not_found', 'detail': 'Receiver not found.'}, status=404)
 
+        if receiver == request.user:
+            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Cannot send messages to yourself.'}, status=403)
         if _is_blocked_by(receiver, request.user):
             return JsonResponse({'error': 'conversation_forbidden', 'detail': 'You have been blocked by this user.'}, status=403)
         if _is_blocked_by(request.user, receiver):
-            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'You have blocked this user.'}, status=403)
+            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'You have blocked this user. Unblock them first.'}, status=403)
 
     try:
         message = async_to_sync(ChatConsumer.create_private_message)(request.user.pk, data)
@@ -1809,92 +2100,6 @@ def storage_stats_view(request):
     """
     return JsonResponse(_storage_stats_payload(request.user))
 
-    user = request.user
-
-    # --- Private messages by type ---
-    private_qs = EncryptedMessage.objects.filter(
-        Q(sender=user) | Q(receiver=user),
-    )
-    private_images = private_qs.filter(message_type=EncryptedMessage.MessageType.IMAGE).count()
-    private_files = private_qs.filter(message_type=EncryptedMessage.MessageType.FILE).count()
-    private_stickers = private_qs.filter(message_type=EncryptedMessage.MessageType.STICKER).count()
-    private_other = private_qs.filter(
-        message_type__in=[
-            EncryptedMessage.MessageType.TEXT,
-            EncryptedMessage.MessageType.SYSTEM,
-        ],
-    ).count()
-
-    # --- Group messages received by this user ---
-    group_images = GroupMessageRecipient.objects.filter(
-        receiver=user,
-        group_message__message_type=GroupMessage.MessageType.IMAGE,
-    ).count()
-    group_files = GroupMessageRecipient.objects.filter(
-        receiver=user,
-        group_message__message_type=GroupMessage.MessageType.FILE,
-    ).count()
-    group_stickers = GroupMessageRecipient.objects.filter(
-        receiver=user,
-        group_message__message_type=GroupMessage.MessageType.STICKER,
-    ).count()
-    group_other = GroupMessageRecipient.objects.filter(
-        receiver=user,
-        group_message__message_type__in=[
-            GroupMessage.MessageType.TEXT,
-            GroupMessage.MessageType.SYSTEM,
-        ],
-    ).count()
-
-    # Rough size estimates (bytes per item, conservative)
-    EST_IMAGE = 200 * 1024       # 200 KB per image
-    EST_FILE = 500 * 1024        # 500 KB per file
-    EST_STICKER = 30 * 1024      # 30 KB per sticker
-    EST_OTHER = 2 * 1024         # 2 KB per text/system message (ciphertext overhead)
-
-    images_bytes = (private_images + group_images) * EST_IMAGE
-    videos_bytes = 0  # No video message type yet - placeholder for T24
-    stickers_bytes = (private_stickers + group_stickers) * EST_STICKER
-    other_bytes = (private_other + group_other) * EST_OTHER
-    # Video stream chunks are not persisted yet (T24)
-    video_stream_bytes = 0
-
-    total_bytes = images_bytes + videos_bytes + stickers_bytes + other_bytes + video_stream_bytes
-    quota_bytes = 50 * 1024 * 1024  # 50 MB default quota
-
-    return JsonResponse({
-        'categories': {
-            'images': {
-                'size_bytes': images_bytes,
-                'count': private_images + group_images,
-                'label': 'Images',
-            },
-            'videos': {
-                'size_bytes': videos_bytes,
-                'count': 0,
-                'label': 'Video files',
-            },
-            'stickers': {
-                'size_bytes': stickers_bytes,
-                'count': private_stickers + group_stickers,
-                'label': 'Stickers and emojis',
-            },
-            'other': {
-                'size_bytes': other_bytes,
-                'count': private_other + group_other,
-                'label': 'Other',
-            },
-            'video_stream_chunks': {
-                'size_bytes': video_stream_bytes,
-                'count': 0,
-                'label': 'Cached video stream chunks',
-            },
-        },
-        'total_bytes': total_bytes,
-        'quota_bytes': quota_bytes,
-        'usage_percent': round((total_bytes / quota_bytes) * 100, 1) if quota_bytes else 0,
-    })
-
 
 @login_required(login_url='login')
 def storage_clear_view(request):
@@ -1944,24 +2149,6 @@ def storage_clear_view(request):
         'stats': _storage_stats_payload(request.user),
     })
 
-    cleared = []
-    skipped = []
-
-    for cat in categories:
-        if cat in ('images', 'videos', 'stickers', 'other', 'video_stream_chunks', 'all'):
-            cleared.append(cat)
-        else:
-            skipped.append(cat)
-
-    # TODO (T24): perform real file-system / blob cleanup for each category.
-
-    return JsonResponse({
-        'status': 'ok',
-        'cleared': cleared,
-        'skipped': skipped,
-        'message': 'Server-side cache cleanup is not yet implemented (T24). Local browser cache should be cleared client-side.',
-    })
-
 
 @login_required(login_url='login')
 def storage_settings_view(request):
@@ -1993,38 +2180,6 @@ def storage_settings_view(request):
             'videos': _parse_int(file_limits.get('videos'), 50, min_value=0, max_value=2048),
             'files': _parse_int(file_limits.get('files'), 3, min_value=0, max_value=2048),
         }
-        ss.settings_json = updated
-        ss.save(update_fields=['settings_json', 'updated_at'])
-        return JsonResponse({'status': 'ok', 'settings': updated})
-
-    return JsonResponse({'error': 'Method not allowed.'}, status=405)
-
-    ss, _ = UserStorageSettings.objects.get_or_create(user=request.user)
-
-    if request.method == 'GET':
-        defaults = {
-            'auto_download': {
-                'mobile_data': {'photos': False, 'videos': False, 'files': False},
-                'wifi': {'photos': True, 'videos': True, 'files': True},
-                'roaming': {'photos': False, 'videos': False, 'files': False},
-            },
-            'file_size_limit_mb': {
-                'photos': 10,
-                'videos': 50,
-                'files': 25,
-            },
-            'cache_retention_days': 30,
-            'cache_max_size_mb': 500,
-        }
-        stored = ss.settings_json or {}
-        # Deep-merge stored into defaults
-        merged = _deep_merge(defaults, stored)
-        return JsonResponse({'settings': merged})
-
-    if request.method == 'POST':
-        data = _json_body(request)
-        current = ss.settings_json or {}
-        updated = _deep_merge(current, data)
         ss.settings_json = updated
         ss.save(update_fields=['settings_json', 'updated_at'])
         return JsonResponse({'status': 'ok', 'settings': updated})
@@ -2319,6 +2474,37 @@ def unblock_user_view(request):
 
 
 @login_required(login_url='login')
+@require_POST
+def report_conversation_view(request):
+    """Create a report for a conversation the current user belongs to."""
+    data = _json_body(request)
+    conversation_id = data.get('conversation_id')
+    if not conversation_id:
+        return JsonResponse({'error': 'conversation_id is required.'}, status=400)
+
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'Conversation not found or not a member.'}, status=404)
+
+    reason = data.get('reason') or ChatReport.Reason.OTHER
+    valid_reasons = {choice[0] for choice in ChatReport.Reason.choices}
+    if reason not in valid_reasons:
+        reason = ChatReport.Reason.OTHER
+
+    report = ChatReport.objects.create(
+        reporter=request.user,
+        conversation=member.conversation,
+        reason=reason,
+        details=(data.get('details') or '')[:2000],
+    )
+    return JsonResponse({
+        'status': 'ok',
+        'report_id': report.id,
+        'reason': report.reason,
+    }, status=201)
+
+
+@login_required(login_url='login')
 def delete_synced_contacts_view(request):
     """Delete all synced contacts for the current user."""
     if request.method != 'POST':
@@ -2383,8 +2569,8 @@ def conversation_auto_delete_view(request, conversation_id):
         })
     if request.method == 'PUT':
         data = _json_body(request)
-        seconds = None if data.get('disabled') else _parse_int(data.get('seconds', 0) or 0, 0, min_value=0)
-        seconds = seconds if seconds and seconds > 0 else None
+        seconds = 0 if data.get('disabled') else _parse_int(data.get('seconds', 0) or 0, 0, min_value=0)
+        seconds = seconds if seconds and seconds >= 0 else None
         member.auto_delete_seconds = seconds
         member.save(update_fields=['auto_delete_seconds'])
         return JsonResponse({'status': 'ok', 'auto_delete_seconds': seconds})
@@ -2414,12 +2600,16 @@ def search_unified_view(request):
         for u in name_matches:
             try:
                 nickname = u.profile.nickname or ''
+                user_type = u.profile.user_type
             except Exception:
                 nickname = ''
+                user_type = 'user'
             results['contacts'].append({
                 'id': u.id, 'username': u.username,
                 'nickname': nickname,
+                'user_type': user_type,
                 'is_contact': _are_contacts(user, u),
+                'avatar_url': _avatar_url(request, u),
             })
 
     # Group search
@@ -2460,6 +2650,7 @@ def search_unified_view(request):
                         'peer_id': peer.user_id,
                         'peer_username': peer.user.username,
                         'peer_display_name': pname,
+                        'avatar_url': _avatar_url(request, peer.user),
                     })
         results['conversations'] = peer_convs[:10]
 
@@ -2680,4 +2871,954 @@ def group_members_advanced_view(request, conversation_id):
             }
             for m in members
         ],
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Encrypted File Transfer API
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Limits ────────────────────────────────────────────────────────────────
+
+_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024       # 100 MiB
+_MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024        # 20 MiB
+_MAX_STICKER_SIZE_BYTES = 2 * 1024 * 1024       # 2 MiB
+_MAX_CHUNK_SIZE_BYTES = 1 * 1024 * 1024         # 1 MiB
+_UPLOAD_EXPIRY_HOURS = 24
+_MAX_CONCURRENT_UPLOADS = 5
+
+_SIZE_LIMITS = {
+    'image': _MAX_IMAGE_SIZE_BYTES,
+    'file': _MAX_FILE_SIZE_BYTES,
+    'sticker': _MAX_STICKER_SIZE_BYTES,
+}
+
+
+def _file_chunk_dir(upload_id):
+    """Absolute path to temporary chunk directory for an upload session."""
+    p = django_settings.MEDIA_ROOT / 'uploads' / 'chunks' / str(upload_id)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _file_storage_dir():
+    """Absolute path to merged encrypted file storage."""
+    p = django_settings.MEDIA_ROOT / 'uploads' / 'files'
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _multipart_payload(request):
+    """Return (post, files) for POST and multipart PUT/PATCH requests."""
+    if request.method == 'POST':
+        return request.POST, request.FILES
+    try:
+        parser = MultiPartParser(
+            request.META,
+            request,
+            request.upload_handlers,
+            request.encoding,
+        )
+        return parser.parse()
+    except MultiPartParserError:
+        return None, None
+
+
+def _get_encrypted_file_or_error(file_id, user):
+    """Fetch EncryptedFile and verify *user* has an EncryptedFileKey for it.
+
+    Returns (file, error_response).  Exactly one is not None.
+    """
+    try:
+        ef = EncryptedFile.objects.select_related('conversation').get(pk=file_id)
+    except EncryptedFile.DoesNotExist:
+        return None, JsonResponse({'error': 'file_not_found'}, status=404)
+
+    if ef.status == EncryptedFile.Status.DELETED:
+        return None, JsonResponse({'error': 'file_unavailable', 'detail': 'File has been deleted.'}, status=410)
+
+    # Owner always has access
+    if ef.owner_id == user.pk:
+        return ef, None
+
+    # Others must have a file-key record
+    has_key = EncryptedFileKey.objects.filter(file=ef, holder=user).exists()
+    if has_key:
+        # Also verify they are still an active conversation member
+        if ConversationMember.objects.filter(
+            conversation=ef.conversation, user=user,
+            status=ConversationMember.Status.ACTIVE,
+        ).exists():
+            return ef, None
+
+    return None, JsonResponse({'error': 'file_forbidden'}, status=403)
+
+
+# ── 5.1  Create upload session ────────────────────────────────────────────
+
+@login_required(login_url='login')
+def create_upload_session_view(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    data = _json_body(request)
+    if not data:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    # ── Required fields ──
+    client_file_id = str(data.get('client_file_id', '')).strip()
+    if not client_file_id or len(client_file_id) > 64:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'client_file_id is required (max 64 chars).'}, status=400)
+
+    try:
+        conversation_id = int(data.get('conversation_id', 0))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'conversation_id is required.'}, status=400)
+
+    conversation_type = str(data.get('conversation_type', '')).strip()
+    if conversation_type not in ('single', 'group'):
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'conversation_type must be single or group.'}, status=400)
+
+    message_kind = str(data.get('message_kind', '')).strip()
+    if message_kind not in ('image', 'file', 'sticker'):
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'message_kind must be image, file, or sticker.'}, status=400)
+
+    try:
+        total_size_bytes = int(data.get('total_size_bytes', 0))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'total_size_bytes is required.'}, status=400)
+
+    try:
+        chunk_count = int(data.get('chunk_count', 0))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'chunk_count is required.'}, status=400)
+
+    try:
+        chunk_size_bytes = int(data.get('chunk_size_bytes', _MAX_CHUNK_SIZE_BYTES))
+    except (TypeError, ValueError):
+        chunk_size_bytes = _MAX_CHUNK_SIZE_BYTES
+
+    algorithm = str(data.get('algorithm', 'AES-256-GCM')).strip()
+
+    # ── Validate size limits ──
+    size_limit = _SIZE_LIMITS.get(message_kind, _MAX_FILE_SIZE_BYTES)
+    if total_size_bytes <= 0 or total_size_bytes > size_limit:
+        return JsonResponse({
+            'error': 'file_too_large',
+            'detail': f'File size must be between 1 and {size_limit} bytes for {message_kind}.',
+        }, status=400)
+
+    if chunk_count < 1:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'chunk_count must be at least 1.'}, status=400)
+
+    if chunk_size_bytes < 1 or chunk_size_bytes > _MAX_CHUNK_SIZE_BYTES:
+        return JsonResponse({
+            'error': 'invalid_file_metadata',
+            'detail': f'chunk_size_bytes must be between 1 and {_MAX_CHUNK_SIZE_BYTES}.',
+        }, status=400)
+
+    # ── Verify conversation membership ──
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'conversation_forbidden'}, status=403)
+
+    try:
+        conversation = Conversation.objects.get(pk=conversation_id)
+    except Conversation.DoesNotExist:
+        return JsonResponse({'error': 'conversation_forbidden'}, status=403)
+
+    if conversation.type != conversation_type:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'conversation_type does not match conversation.'}, status=400)
+
+    # Private chat: check block / contact permissions
+    if conversation_type == 'single':
+        other_member = ConversationMember.objects.filter(
+            conversation=conversation, status=ConversationMember.Status.ACTIVE,
+        ).exclude(user=request.user).first()
+        if other_member:
+            if other_member.user == request.user:
+                return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Cannot send to yourself.'}, status=403)
+            if _is_blocked_by(other_member.user, request.user):
+                return JsonResponse({'error': 'conversation_forbidden', 'detail': 'You have been blocked by this user.'}, status=403)
+            if _is_blocked_by(request.user, other_member.user):
+                return JsonResponse({'error': 'conversation_forbidden', 'detail': 'You have blocked this user. Unblock them first.'}, status=403)
+
+    # ── Check concurrent upload limit ──
+    active_uploads = EncryptedFile.objects.filter(
+        owner=request.user, status=EncryptedFile.Status.UPLOADING,
+    ).count()
+    if active_uploads >= _MAX_CONCURRENT_UPLOADS:
+        return JsonResponse({
+            'error': 'upload_rate_limited',
+            'detail': f'Too many active upload sessions. Limit: {_MAX_CONCURRENT_UPLOADS}.',
+        }, status=429)
+
+    # ── Idempotency check ──
+    existing = EncryptedFile.objects.filter(
+        owner=request.user, client_file_id=client_file_id,
+    ).first()
+    if existing:
+        if existing.status == EncryptedFile.Status.UPLOADING:
+            uploaded_chunks = list(
+                EncryptedFileChunk.objects.filter(file=existing)
+                .values_list('chunk_index', flat=True)
+                .order_by('chunk_index')
+            )
+            return JsonResponse({
+                'upload_id': existing.upload_id,
+                'file_id': existing.id,
+                'client_file_id': existing.client_file_id,
+                'status': 'uploading',
+                'chunk_size_bytes': existing.chunk_size_bytes,
+                'expires_at': existing.expires_at.isoformat() if existing.expires_at else None,
+                'uploaded_chunks': uploaded_chunks,
+            }, status=200)
+        elif existing.status == EncryptedFile.Status.AVAILABLE:
+            return JsonResponse({
+                'upload_id': existing.upload_id,
+                'file_id': existing.id,
+                'client_file_id': existing.client_file_id,
+                'status': 'available',
+            }, status=200)
+        else:
+            # failed or deleted
+            return JsonResponse({
+                'error': 'client_file_id_conflict',
+                'detail': 'This client_file_id was already used and cannot be reused.',
+            }, status=409)
+
+    # ── Create the file record ──
+    upload_id = str(uuid_lib.uuid4())
+    expires_at = timezone.now() + timedelta(hours=_UPLOAD_EXPIRY_HOURS)
+
+    ef = EncryptedFile.objects.create(
+        upload_id=upload_id,
+        client_file_id=client_file_id,
+        owner=request.user,
+        conversation=conversation,
+        message_kind=message_kind,
+        total_size_bytes=total_size_bytes,
+        chunk_size_bytes=chunk_size_bytes,
+        chunk_count=chunk_count,
+        algorithm=algorithm,
+        encrypted_metadata=str(data.get('encrypted_metadata', '')),
+        metadata_nonce=str(data.get('metadata_nonce', '')),
+        metadata_auth_tag=str(data.get('metadata_auth_tag', '')),
+        expires_at=expires_at,
+    )
+
+    # Ensure chunk directory exists
+    _file_chunk_dir(upload_id)
+
+    return JsonResponse({
+        'upload_id': ef.upload_id,
+        'file_id': ef.id,
+        'client_file_id': ef.client_file_id,
+        'status': ef.status,
+        'chunk_size_bytes': ef.chunk_size_bytes,
+        'expires_at': ef.expires_at.isoformat() if ef.expires_at else None,
+        'uploaded_chunks': [],
+    }, status=201)
+
+
+# ── 5.2  Upload chunk ─────────────────────────────────────────────────────
+
+@login_required(login_url='login')
+def upload_chunk_view(request, upload_id, chunk_index):
+    if request.method != 'PUT':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    # ── Fetch and validate upload session ──
+    try:
+        ef = EncryptedFile.objects.select_related('conversation').get(upload_id=upload_id)
+    except EncryptedFile.DoesNotExist:
+        return JsonResponse({'error': 'upload_forbidden'}, status=403)
+
+    if ef.owner_id != request.user.pk:
+        return JsonResponse({'error': 'upload_forbidden'}, status=403)
+
+    if ef.status != EncryptedFile.Status.UPLOADING:
+        return JsonResponse({'error': 'upload_forbidden', 'detail': 'Upload session is not in uploading state.'}, status=403)
+
+    if ef.expires_at and ef.expires_at < timezone.now():
+        return JsonResponse({'error': 'upload_expired'}, status=410)
+
+    if chunk_index < 0 or chunk_index >= ef.chunk_count:
+        return JsonResponse({
+            'error': 'invalid_chunk_index',
+            'detail': f'chunk_index must be between 0 and {ef.chunk_count - 1}.',
+        }, status=400)
+
+    # ── Read multipart form data. Django does not populate request.FILES
+    # for PUT automatically, so parse multipart payloads explicitly.
+    post_data, files_data = _multipart_payload(request)
+    if post_data is None or files_data is None:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'Invalid multipart upload.'}, status=400)
+
+    chunk_file = files_data.get('chunk')
+    if not chunk_file:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'Missing chunk file.'}, status=400)
+
+    nonce = post_data.get('nonce', '')
+    auth_tag = post_data.get('auth_tag', '')
+    ciphertext_sha256 = post_data.get('ciphertext_sha256', '').strip().lower()
+    try:
+        size_bytes = int(post_data.get('size_bytes', 0))
+    except (TypeError, ValueError):
+        size_bytes = chunk_file.size
+
+    if not nonce or not auth_tag:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'nonce and auth_tag are required.'}, status=400)
+
+    if size_bytes > ef.chunk_size_bytes:
+        return JsonResponse({'error': 'invalid_chunk_index', 'detail': 'Chunk exceeds chunk_size_bytes.'}, status=400)
+
+    # ── Idempotency: check for existing chunk ──
+    existing_chunk = EncryptedFileChunk.objects.filter(
+        file=ef, chunk_index=chunk_index,
+    ).first()
+    if existing_chunk:
+        if existing_chunk.ciphertext_sha256 and ciphertext_sha256 and existing_chunk.ciphertext_sha256 != ciphertext_sha256:
+            return JsonResponse({'error': 'chunk_conflict', 'detail': 'Chunk already uploaded with different hash.'}, status=409)
+        return JsonResponse({
+            'upload_id': ef.upload_id,
+            'file_id': ef.id,
+            'chunk_index': chunk_index,
+            'status': 'stored',
+        })
+
+    # ── Save chunk to disk ──
+    chunk_dir = _file_chunk_dir(upload_id)
+    chunk_path = chunk_dir / str(chunk_index)
+    sha256 = hashlib.sha256()
+    actual_size = 0
+    with open(chunk_path, 'wb') as dst:
+        for part in chunk_file.chunks():
+            dst.write(part)
+            sha256.update(part)
+            actual_size += len(part)
+
+    if actual_size > ef.chunk_size_bytes:
+        if chunk_path.exists():
+            chunk_path.unlink()
+        return JsonResponse({'error': 'invalid_chunk_index', 'detail': 'Chunk exceeds chunk_size_bytes.'}, status=400)
+
+    actual_hash = sha256.hexdigest()
+    if ciphertext_sha256 and ciphertext_sha256 != actual_hash:
+        if chunk_path.exists():
+            chunk_path.unlink()
+        return JsonResponse({'error': 'invalid_chunk_hash', 'detail': 'Chunk SHA-256 does not match.'}, status=400)
+
+    # ── Compute offset ──
+    offset_bytes = chunk_index * ef.chunk_size_bytes
+
+    EncryptedFileChunk.objects.create(
+        file=ef,
+        chunk_index=chunk_index,
+        size_bytes=actual_size,
+        offset_bytes=offset_bytes,
+        nonce=nonce,
+        auth_tag=auth_tag,
+        ciphertext_sha256=actual_hash,
+        storage_path=str(chunk_path.relative_to(django_settings.MEDIA_ROOT)),
+    )
+
+    uploaded_count = EncryptedFileChunk.objects.filter(file=ef).count()
+
+    return JsonResponse({
+        'upload_id': ef.upload_id,
+        'file_id': ef.id,
+        'chunk_index': chunk_index,
+        'status': 'stored',
+        'uploaded_count': uploaded_count,
+        'total_chunks': ef.chunk_count,
+    })
+
+
+# ── 5.3  Query upload status ──────────────────────────────────────────────
+
+@login_required(login_url='login')
+def query_upload_view(request, upload_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    try:
+        ef = EncryptedFile.objects.get(upload_id=upload_id)
+    except EncryptedFile.DoesNotExist:
+        return JsonResponse({'error': 'upload_forbidden'}, status=403)
+
+    if ef.owner_id != request.user.pk:
+        return JsonResponse({'error': 'upload_forbidden'}, status=403)
+
+    uploaded = list(
+        EncryptedFileChunk.objects.filter(file=ef)
+        .values_list('chunk_index', flat=True)
+        .order_by('chunk_index')
+    )
+    missing = [i for i in range(ef.chunk_count) if i not in uploaded]
+
+    return JsonResponse({
+        'upload_id': ef.upload_id,
+        'file_id': ef.id,
+        'client_file_id': ef.client_file_id,
+        'status': ef.status,
+        'chunk_count': ef.chunk_count,
+        'uploaded_chunks': uploaded,
+        'missing_chunks': missing,
+        'expires_at': ef.expires_at.isoformat() if ef.expires_at else None,
+    })
+
+
+# ── 5.4  Complete upload ──────────────────────────────────────────────────
+
+@login_required(login_url='login')
+def complete_upload_view(request, upload_id):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    try:
+        ef = EncryptedFile.objects.select_related('conversation').get(upload_id=upload_id)
+    except EncryptedFile.DoesNotExist:
+        return JsonResponse({'error': 'upload_forbidden'}, status=403)
+
+    if ef.owner_id != request.user.pk:
+        return JsonResponse({'error': 'upload_forbidden'}, status=403)
+
+    if ef.status != EncryptedFile.Status.UPLOADING:
+        return JsonResponse({'error': 'upload_forbidden', 'detail': 'Not in uploading state.'}, status=403)
+
+    # ── Check all chunks present ──
+    uploaded_indices = set(
+        EncryptedFileChunk.objects.filter(file=ef)
+        .values_list('chunk_index', flat=True)
+    )
+    missing = [i for i in range(ef.chunk_count) if i not in uploaded_indices]
+    if missing:
+        return JsonResponse({
+            'error': 'upload_incomplete',
+            'detail': f'Missing chunks: {",".join(str(i) for i in missing[:10])}',
+        }, status=409)
+
+    # ── Merge chunks in order ──
+    _file_storage_dir()
+    merged_path = django_settings.MEDIA_ROOT / 'uploads' / 'files' / f'{ef.id}.enc'
+    sha256 = hashlib.sha256()
+    chunks_qs = EncryptedFileChunk.objects.filter(file=ef).order_by('chunk_index')
+
+    with open(merged_path, 'wb') as dst:
+        for chunk in chunks_qs:
+            if chunk.storage_path:
+                chunk_path = django_settings.MEDIA_ROOT / chunk.storage_path
+                if chunk_path.exists():
+                    with open(chunk_path, 'rb') as src:
+                        data = src.read()
+                        dst.write(data)
+                        sha256.update(data)
+                else:
+                    return JsonResponse({
+                        'error': 'upload_incomplete',
+                        'detail': f'Chunk file missing for index {chunk.chunk_index}.',
+                    }, status=409)
+
+    computed_hash = sha256.hexdigest()
+
+    # ── Optional: verify full ciphertext hash ──
+    data = _json_body(request)
+    client_hash = str(data.get('ciphertext_sha256', '')).strip()
+    if client_hash and client_hash != computed_hash:
+        # Clean up the merged file on hash mismatch
+        if merged_path.exists():
+            merged_path.unlink()
+        return JsonResponse({
+            'error': 'invalid_chunk_hash',
+            'detail': 'Complete ciphertext SHA-256 does not match.',
+        }, status=400)
+
+    # ── Clean up temp chunks ──
+    chunk_dir = _file_chunk_dir(upload_id)
+    for chunk in chunks_qs:
+        if chunk.storage_path:
+            cp = django_settings.MEDIA_ROOT / chunk.storage_path
+            if cp.exists():
+                cp.unlink()
+        chunk.storage_path = None
+        chunk.save(update_fields=['storage_path'])
+
+    # Remove the (now empty) chunk directory
+    try:
+        shutil.rmtree(chunk_dir)
+    except OSError:
+        pass
+
+    # ── Update file record ──
+    ef.storage_path = f'uploads/files/{ef.id}.enc'
+    ef.ciphertext_sha256 = computed_hash
+    ef.status = EncryptedFile.Status.AVAILABLE
+    ef.expires_at = timezone.now() + timedelta(hours=_UPLOAD_EXPIRY_HOURS)
+    ef.save(update_fields=['storage_path', 'ciphertext_sha256', 'status', 'expires_at'])
+
+    # ── Broadcast to uploader via WebSocket ──
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        ChatConsumer.user_group(request.user.pk),
+        {
+            'type': 'file.upload.completed',
+            'data': {
+                'file_id': ef.id,
+                'conversation_id': ef.conversation_id,
+                'message_kind': ef.message_kind,
+                'status': 'available',
+            },
+        },
+    )
+
+    return JsonResponse({
+        'file_id': ef.id,
+        'client_file_id': ef.client_file_id,
+        'status': 'available',
+        'created_at': ef.created_at.isoformat(),
+    })
+
+
+# ── 5.5  Send file message ────────────────────────────────────────────────
+
+@login_required(login_url='login')
+def send_file_message_view(request, file_id):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    data = _json_body(request)
+    if not data:
+        return JsonResponse({'error': 'invalid_json'}, status=400)
+
+    # ── Fetch and validate file ──
+    try:
+        ef = EncryptedFile.objects.select_related('conversation').get(pk=file_id)
+    except EncryptedFile.DoesNotExist:
+        return JsonResponse({'error': 'file_not_found'}, status=404)
+
+    if ef.owner_id != request.user.pk:
+        return JsonResponse({'error': 'file_forbidden'}, status=403)
+
+    if ef.status != EncryptedFile.Status.AVAILABLE:
+        return JsonResponse({'error': 'file_unavailable', 'detail': 'File is not available for sending.'}, status=410)
+
+    # ── Validate message_type matches message_kind ──
+    message_type = str(data.get('message_type', '')).strip()
+    if message_type != ef.message_kind:
+        return JsonResponse({
+            'error': 'message_type_mismatch',
+            'detail': f'message_type {message_type} does not match upload message_kind {ef.message_kind}.',
+        }, status=400)
+
+    conversation_type = str(data.get('conversation_type', '')).strip()
+    if conversation_type not in ('single', 'group'):
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'conversation_type is required.'}, status=400)
+
+    try:
+        conversation_id = int(data.get('conversation_id', 0))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'conversation_id is required.'}, status=400)
+
+    if conversation_id != ef.conversation_id:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'conversation_id does not match file conversation.'}, status=400)
+
+    client_message_id = str(data.get('client_message_id', '')).strip()
+    reply_to_message_id = data.get('reply_to_message_id')
+    if reply_to_message_id in ('', None):
+        reply_to_message_id = None
+    else:
+        try:
+            reply_to_message_id = int(reply_to_message_id)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'reply_to_message_id must be an integer.'}, status=400)
+
+    # ── Save EncryptedFileKey records ──
+    file_keys_data = data.get('file_keys', [])
+    if not isinstance(file_keys_data, list) or not file_keys_data:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'file_keys is required.'}, status=400)
+
+    holder_ids = set()
+    for fk in file_keys_data:
+        try:
+            holder_id = int(fk.get('holder_id', 0))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'Each file_key must have a valid holder_id.'}, status=400)
+
+        if holder_id in holder_ids:
+            continue
+        holder_ids.add(holder_id)
+
+        EncryptedFileKey.objects.update_or_create(
+            file=ef,
+            holder_id=holder_id,
+            defaults={
+                'sender': request.user,
+                'encrypted_file_key': str(fk.get('encrypted_file_key', '')),
+                'nonce': str(fk.get('nonce', '')),
+                'auth_tag': str(fk.get('auth_tag', '')),
+                'algorithm': str(fk.get('algorithm', 'AES-256-GCM')),
+                'sender_key_version': int(fk.get('sender_key_version', 0)) or None,
+                'receiver_key_version': int(fk.get('receiver_key_version', 0)) or None,
+                'membership_version': int(fk.get('membership_version', 0)) or None,
+            },
+        )
+
+    # ── Create message ──
+    if conversation_type == 'single':
+        ciphertext = str(data.get('ciphertext', ''))
+        nonce = str(data.get('nonce', ''))
+        auth_tag = str(data.get('auth_tag', ''))
+        algorithm = str(data.get('algorithm', 'AES-256-GCM'))
+        sender_key_version = int(data.get('sender_key_version', 0)) or None
+        receiver_key_version = int(data.get('receiver_key_version', 0)) or None
+
+        try:
+            receiver_id = int(data.get('receiver_id', 0))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'receiver_id is required for single chat.'}, status=400)
+
+        message = EncryptedMessage.objects.create(
+            conversation=ef.conversation,
+            sender=request.user,
+            receiver_id=receiver_id,
+            message_type=message_type,
+            ciphertext=ciphertext,
+            nonce=nonce,
+            auth_tag=auth_tag,
+            algorithm=algorithm,
+            sender_key_version=sender_key_version,
+            receiver_key_version=receiver_key_version,
+            client_message_id=client_message_id or None,
+            reply_to_message_id=reply_to_message_id,
+            file_id=ef,
+        )
+        ef.conversation.last_message_at = message.created_at
+        ef.conversation.last_message_id = message.id
+        ef.conversation.save(update_fields=['last_message_at', 'last_message_id'])
+
+        receiver_serialized = _serialize_file_private_message(
+            message,
+            _build_file_sub_object(ef, receiver_id),
+        )
+        sender_serialized = _serialize_file_private_message(
+            message,
+            _build_file_sub_object(ef, request.user.pk),
+        )
+
+        # Broadcast to receiver
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            ChatConsumer.user_group(receiver_id),
+            {'type': 'message.single.new', 'data': receiver_serialized},
+        )
+        # Also notify sender (for multi-device sync)
+        async_to_sync(channel_layer.group_send)(
+            ChatConsumer.user_group(request.user.pk),
+            {'type': 'message.single.new', 'data': sender_serialized},
+        )
+
+        return JsonResponse({
+            'file_id': ef.id,
+            'message_id': message.id,
+            'status': 'sent',
+            'created_at': message.created_at.isoformat(),
+        }, status=201)
+
+    else:
+        # ── Group chat ──
+        membership_version = int(data.get('membership_version', 0)) or None
+
+        # Check membership version
+        if membership_version and membership_version != ef.conversation.membership_version:
+            return JsonResponse({
+                'error': 'membership_version_conflict',
+                'detail': f'Current membership version is {ef.conversation.membership_version}.',
+                'membership_version': ef.conversation.membership_version,
+            }, status=409)
+
+        recipients_data = data.get('recipients', [])
+        if not isinstance(recipients_data, list) or not recipients_data:
+            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'recipients is required for group chat.'}, status=400)
+
+        group_msg = GroupMessage.objects.create(
+            conversation=ef.conversation,
+            sender=request.user,
+            message_type=message_type,
+            client_message_id=client_message_id or None,
+            reply_to_message_id=reply_to_message_id,
+            file_id=ef,
+        )
+        ef.conversation.last_message_at = group_msg.created_at
+        ef.conversation.last_message_id = group_msg.id
+        ef.conversation.save(update_fields=['last_message_at', 'last_message_id'])
+
+        channel_layer = get_channel_layer()
+        for r in recipients_data:
+            try:
+                recv_id = int(r.get('receiver_id', 0))
+            except (TypeError, ValueError):
+                continue
+
+            recipient = GroupMessageRecipient.objects.create(
+                group_message=group_msg,
+                receiver_id=recv_id,
+                ciphertext=str(r.get('ciphertext', '')),
+                nonce=str(r.get('nonce', '')),
+                auth_tag=str(r.get('auth_tag', '')),
+                algorithm=str(r.get('algorithm', 'AES-256-GCM')),
+                sender_key_version=int(r.get('sender_key_version', 0)) or None,
+                receiver_key_version=int(r.get('receiver_key_version', 0)) or None,
+                membership_version=membership_version,
+            )
+
+            file_obj = _build_file_sub_object(ef, recv_id)
+            recipient_data = _serialize_file_group_recipient(group_msg, recipient, file_obj)
+
+            async_to_sync(channel_layer.group_send)(
+                ChatConsumer.user_group(recv_id),
+                {'type': 'message.group.new', 'data': recipient_data},
+            )
+
+        return JsonResponse({
+            'file_id': ef.id,
+            'message_id': group_msg.id,
+            'status': 'sent',
+            'created_at': group_msg.created_at.isoformat(),
+        }, status=201)
+
+
+def _build_file_sub_object(ef, holder_id):
+    """Build the ``file`` sub-object for WebSocket / API responses."""
+    file_obj = {
+        'file_id': ef.id,
+        'message_kind': ef.message_kind,
+        'chunk_count': ef.chunk_count,
+        'total_size_bytes': ef.total_size_bytes,
+        'algorithm': ef.algorithm,
+        'encrypted_metadata': ef.encrypted_metadata,
+        'metadata_nonce': ef.metadata_nonce,
+        'metadata_auth_tag': ef.metadata_auth_tag,
+        'ciphertext_sha256': ef.ciphertext_sha256,
+    }
+    fk = EncryptedFileKey.objects.filter(file=ef, holder_id=holder_id).first()
+    if fk:
+        file_obj['file_key'] = {
+            'encrypted_file_key': fk.encrypted_file_key,
+            'nonce': fk.nonce,
+            'auth_tag': fk.auth_tag,
+            'algorithm': fk.algorithm,
+            'sender_id': fk.sender_id or ef.owner_id,
+            'sender_key_version': fk.sender_key_version,
+            'receiver_key_version': fk.receiver_key_version,
+            'membership_version': fk.membership_version,
+        }
+    return file_obj
+
+
+def _serialize_file_private_message(message, file_obj):
+    """Serialize a private file message for WebSocket broadcast."""
+    return {
+        'message_id': message.id,
+        'conversation_id': message.conversation_id,
+        'sender_id': message.sender_id,
+        'receiver_id': message.receiver_id,
+        'message_type': message.message_type,
+        'ciphertext': message.ciphertext or '',
+        'nonce': message.nonce or '',
+        'auth_tag': message.auth_tag or '',
+        'algorithm': message.algorithm,
+        'sender_key_version': message.sender_key_version,
+        'receiver_key_version': message.receiver_key_version,
+        'client_message_id': message.client_message_id or '',
+        'reply_to_message_id': message.reply_to_message_id,
+        'file': file_obj if message.file_id else None,
+        'status': message.status,
+        'recalled_at': message.recalled_at.isoformat() if message.recalled_at else None,
+        'created_at': message.created_at.isoformat(),
+    }
+
+
+def _serialize_file_group_recipient(group_msg, recipient, file_obj):
+    """Serialize a group file message recipient for WebSocket broadcast."""
+    sender = group_msg.sender
+    return {
+        'message_id': group_msg.id,
+        'group_id': group_msg.conversation_id,
+        'conversation_id': group_msg.conversation_id,
+        'sender_id': sender.pk,
+        'sender_username': sender.username,
+        'sender_name': _display_name(sender),
+        'sender_initials': _initials(_display_name(sender)),
+        'sender_avatar_color': _avatar_color(_display_name(sender)),
+        'sender_avatar_url': '',  # populated by consumer
+        'receiver_id': recipient.receiver_id,
+        'message_type': group_msg.message_type,
+        'ciphertext': recipient.ciphertext or '',
+        'nonce': recipient.nonce or '',
+        'auth_tag': recipient.auth_tag or '',
+        'algorithm': recipient.algorithm,
+        'sender_key_version': recipient.sender_key_version,
+        'receiver_key_version': recipient.receiver_key_version,
+        'membership_version': recipient.membership_version,
+        'reply_to_message_id': group_msg.reply_to_message_id,
+        'file': file_obj if group_msg.file_id else None,
+        'status': recipient.status,
+        'created_at': recipient.created_at.isoformat(),
+    }
+
+
+# ── 5.6  Get file metadata ────────────────────────────────────────────────
+
+@login_required(login_url='login')
+def get_file_metadata_view(request, file_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    ef, error = _get_encrypted_file_or_error(file_id, request.user)
+    if error:
+        return error
+
+    if ef.status != EncryptedFile.Status.AVAILABLE:
+        return JsonResponse({'error': 'file_unavailable'}, status=410)
+
+    chunks = EncryptedFileChunk.objects.filter(file=ef).order_by('chunk_index')
+    file_key = EncryptedFileKey.objects.filter(file=ef, holder=request.user).first()
+    if not file_key:
+        return JsonResponse({'error': 'file_forbidden', 'detail': 'No file key for this user.'}, status=403)
+
+    return JsonResponse({
+        'file_id': ef.id,
+        'client_file_id': ef.client_file_id,
+        'conversation_id': ef.conversation_id,
+        'message_kind': ef.message_kind,
+        'status': ef.status,
+        'total_size_bytes': ef.total_size_bytes,
+        'chunk_size_bytes': ef.chunk_size_bytes,
+        'chunk_count': ef.chunk_count,
+        'algorithm': ef.algorithm,
+        'encrypted_metadata': ef.encrypted_metadata,
+        'metadata_nonce': ef.metadata_nonce,
+        'metadata_auth_tag': ef.metadata_auth_tag,
+        'encrypted_file_key': {
+            'encrypted_file_key': file_key.encrypted_file_key,
+            'nonce': file_key.nonce,
+            'auth_tag': file_key.auth_tag,
+            'algorithm': file_key.algorithm,
+            'sender_id': file_key.sender_id or ef.owner_id,
+            'sender_key_version': file_key.sender_key_version,
+            'receiver_key_version': file_key.receiver_key_version,
+            'membership_version': file_key.membership_version,
+        },
+        'chunks': [
+            {
+                'chunk_index': c.chunk_index,
+                'size_bytes': c.size_bytes,
+                'offset_bytes': c.offset_bytes,
+                'nonce': c.nonce,
+                'auth_tag': c.auth_tag,
+                'ciphertext_sha256': c.ciphertext_sha256,
+            }
+            for c in chunks
+        ],
+        'download_url': f'/api/files/{ef.id}/download/',
+    })
+
+
+# ── 5.7  Download complete ciphertext file ────────────────────────────────
+
+@login_required(login_url='login')
+def download_file_view(request, file_id):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    ef, error = _get_encrypted_file_or_error(file_id, request.user)
+    if error:
+        return error
+
+    if ef.status != EncryptedFile.Status.AVAILABLE:
+        return JsonResponse({'error': 'file_unavailable'}, status=410)
+
+    file_path = django_settings.MEDIA_ROOT / ef.storage_path
+    if not file_path.exists():
+        return JsonResponse({'error': 'file_not_found', 'detail': 'File missing from storage.'}, status=404)
+
+    response = FileResponse(
+        open(file_path, 'rb'),
+        content_type='application/octet-stream',
+        as_attachment=False,
+    )
+    response['Content-Length'] = file_path.stat().st_size
+    response['Accept-Ranges'] = 'bytes'
+    response['X-iChat-File-SHA256'] = ef.ciphertext_sha256 or ''
+    return response
+
+
+# ── 5.8  Download single chunk (compatibility path) ───────────────────────
+
+@login_required(login_url='login')
+def download_chunk_view(request, file_id, chunk_index):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    ef, error = _get_encrypted_file_or_error(file_id, request.user)
+    if error:
+        return error
+
+    if ef.status != EncryptedFile.Status.AVAILABLE:
+        return JsonResponse({'error': 'file_unavailable'}, status=410)
+
+    chunk = EncryptedFileChunk.objects.filter(file=ef, chunk_index=chunk_index).first()
+    if not chunk:
+        return JsonResponse({'error': 'invalid_chunk_index', 'detail': 'Chunk not found.'}, status=400)
+
+    file_path = django_settings.MEDIA_ROOT / ef.storage_path
+    if not file_path.exists():
+        return JsonResponse({'error': 'file_not_found', 'detail': 'File missing from storage.'}, status=404)
+
+    with open(file_path, 'rb') as f:
+        f.seek(chunk.offset_bytes)
+        data = f.read(chunk.size_bytes)
+
+    response = HttpResponse(data, content_type='application/octet-stream')
+    response['Content-Length'] = len(data)
+    response['X-iChat-Chunk-SHA256'] = chunk.ciphertext_sha256 or ''
+    return response
+
+
+# ── 5.9  Cancel upload ────────────────────────────────────────────────────
+
+@login_required(login_url='login')
+def cancel_upload_view(request, upload_id):
+    if request.method != 'DELETE':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    try:
+        ef = EncryptedFile.objects.get(upload_id=upload_id)
+    except EncryptedFile.DoesNotExist:
+        return JsonResponse({'error': 'upload_forbidden'}, status=403)
+
+    if ef.owner_id != request.user.pk:
+        return JsonResponse({'error': 'upload_forbidden'}, status=403)
+
+    if ef.status != EncryptedFile.Status.UPLOADING:
+        return JsonResponse({'error': 'upload_forbidden', 'detail': 'Not in uploading state.'}, status=403)
+
+    # Clean up chunk files
+    chunk_dir = _file_chunk_dir(upload_id)
+    try:
+        shutil.rmtree(chunk_dir)
+    except OSError:
+        pass
+
+    # Delete chunk records
+    EncryptedFileChunk.objects.filter(file=ef).delete()
+
+    ef.status = EncryptedFile.Status.DELETED
+    ef.deleted_at = timezone.now()
+    ef.save(update_fields=['status', 'deleted_at'])
+
+    return JsonResponse({
+        'upload_id': ef.upload_id,
+        'status': 'cancelled',
     })

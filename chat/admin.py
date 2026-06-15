@@ -7,6 +7,9 @@ from .models import (
     AdminOperationLog,
     Conversation,
     ConversationMember,
+    EncryptedFile,
+    EncryptedFileChunk,
+    EncryptedFileKey,
     EncryptedMessage,
     GroupMessage,
     GroupMessageRecipient,
@@ -178,3 +181,54 @@ class AdminOperationLogAdmin(admin.ModelAdmin):
     search_fields = ["admin__username", "action", "details"]
     readonly_fields = ["created_at"]
     ordering = ["-created_at"]
+
+
+# ── Encrypted File Transfer admin ──────────────────────────────────
+
+
+@admin.register(EncryptedFile)
+class EncryptedFileAdmin(admin.ModelAdmin):
+    list_display = [
+        "id", "upload_id", "owner", "conversation", "message_kind",
+        "status", "total_size_bytes", "chunk_count", "created_at",
+    ]
+    list_filter = ["message_kind", "status", "algorithm"]
+    search_fields = ["upload_id", "client_file_id", "owner__username"]
+    readonly_fields = ["created_at", "updated_at"]
+    # Never expose encrypted_metadata, nonce, or auth_tag in admin
+    fields = [
+        "upload_id", "client_file_id", "owner", "conversation",
+        "message_kind", "parent_file_id", "derivative_role", "status",
+        "storage_path", "total_size_bytes", "chunk_size_bytes", "chunk_count",
+        "ciphertext_sha256", "algorithm", "expires_at",
+        "created_at", "updated_at", "deleted_at",
+    ]
+
+
+@admin.register(EncryptedFileChunk)
+class EncryptedFileChunkAdmin(admin.ModelAdmin):
+    list_display = [
+        "id", "file", "chunk_index", "size_bytes", "offset_bytes", "created_at",
+    ]
+    search_fields = ["file__upload_id"]
+    readonly_fields = ["created_at"]
+    fields = [
+        "file", "chunk_index", "size_bytes", "offset_bytes",
+        "ciphertext_sha256", "storage_path", "created_at",
+    ]
+
+
+@admin.register(EncryptedFileKey)
+class EncryptedFileKeyAdmin(admin.ModelAdmin):
+    list_display = [
+        "id", "file", "holder", "algorithm",
+        "sender_key_version", "receiver_key_version", "created_at",
+    ]
+    list_filter = ["algorithm"]
+    search_fields = ["file__upload_id", "holder__username"]
+    readonly_fields = ["created_at"]
+    fields = [
+        "file", "holder", "algorithm",
+        "sender_key_version", "receiver_key_version", "membership_version",
+        "created_at",
+    ]

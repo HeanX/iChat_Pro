@@ -14,6 +14,18 @@ def tailwind(request):
     }
 
 
+def _get_avatar_color(name: str) -> str:
+    AVATAR_COLORS = [
+        '#5c6bc0', '#26a69a', '#42a5f5', '#ffa726', '#ef5350',
+        '#ab47bc', '#66bb6a', '#ec407a', '#8d6e63', '#78909c',
+    ]
+    try:
+        checksum = sum(ord(char) for char in name)
+        return AVATAR_COLORS[checksum % len(AVATAR_COLORS)]
+    except Exception:
+        return '#5c6bc0'
+
+
 def settings_sidebar(request):
     """Expose real account and sidebar settings data to shared templates."""
     if not getattr(request, "user", None) or not request.user.is_authenticated:
@@ -95,10 +107,13 @@ def settings_sidebar(request):
             except ValueError:
                 avatar_url = ""
 
+    avatar_color = _get_avatar_color(display_name)
+
     return {
         "settings_display_name": display_name,
         "settings_initials": (display_name[:1] or user.username[:1] or "?").upper(),
         "settings_avatar_url": avatar_url,
+        "settings_avatar_color": avatar_color,
         "settings_phone_number": phone_number,
         "settings_phone_display": phone_number or "Not set",
         "settings_email": email,

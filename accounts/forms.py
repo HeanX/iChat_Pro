@@ -18,6 +18,12 @@ class RegistrationForm(UserCreationForm):
         },
     )
 
+    user_type = forms.ChoiceField(
+        choices=UserProfile.UserType.choices,
+        initial=UserProfile.UserType.USER,
+        required=False,
+    )
+
     class Meta:
         model = User
         fields = ('username', 'email', 'password1', 'password2')
@@ -80,6 +86,14 @@ class RegistrationForm(UserCreationForm):
             )
 
         return password
+
+    def save(self, commit=True):
+        user = super().save(commit=commit)
+        user_type = self.cleaned_data.get('user_type') or UserProfile.UserType.USER
+        profile, created = UserProfile.objects.get_or_create(user=user)
+        profile.user_type = user_type
+        profile.save()
+        return user
 
 
 class ProfileForm(forms.ModelForm):

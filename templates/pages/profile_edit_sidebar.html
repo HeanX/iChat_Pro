@@ -21,11 +21,11 @@
     <input type="hidden" name="nickname" value="{{ form.nickname.value|default:request.user.profile.nickname }}">
 
     <section class="profile-edit-hero">
-      <button type="button" class="profile-edit-avatar" onclick="document.getElementById('profile-avatar-input').click()" title="Change avatar">
+      <button type="button" class="profile-edit-avatar" onclick="document.getElementById('profile-avatar-input').click()" title="Change Avatar" data-i18n-title="change_avatar" style="background-color: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
         {% if settings_avatar_url %}
         <img src="{{ settings_avatar_url }}" alt="{{ request.user.username }}">
         {% else %}
-        <span>{{ settings_initials|default:request.user.username|slice:":1"|upper }}</span>
+        <span>{{ settings_initials }}</span>
         {% endif %}
         <span class="profile-edit-avatar-icon">
           <i data-lucide="camera" aria-hidden="true"></i>
@@ -37,27 +37,27 @@
 
     <section class="profile-edit-card">
       <label class="profile-edit-field">
-        <span>名字</span>
-        <input type="text" name="first_name" value="{{ form.first_name.value|default:request.user.first_name }}" placeholder="名字">
+        <span data-i18n="first_name">First Name</span>
+        <input type="text" name="first_name" value="{{ form.first_name.value|default:request.user.first_name }}" placeholder="First Name" data-i18n-placeholder="first_name">
       </label>
       {% if form.first_name.errors %}<p class="profile-edit-error">{{ form.first_name.errors.0 }}</p>{% endif %}
 
       <label class="profile-edit-field">
-        <span>姓氏</span>
-        <input type="text" name="last_name" value="{{ form.last_name.value|default:request.user.last_name }}" placeholder="姓氏">
+        <span data-i18n="last_name">Last Name</span>
+        <input type="text" name="last_name" value="{{ form.last_name.value|default:request.user.last_name }}" placeholder="Last Name" data-i18n-placeholder="last_name">
       </label>
       {% if form.last_name.errors %}<p class="profile-edit-error">{{ form.last_name.errors.0 }}</p>{% endif %}
 
       <label class="profile-edit-field profile-edit-field-large">
-        <span>个人简介（可选）</span>
-        <textarea name="bio" rows="2" placeholder="个人简介（可选）">{{ form.bio.value|default:'' }}</textarea>
+        <span data-i18n="bio">Bio (optional)</span>
+        <textarea name="bio" rows="2" placeholder="Bio (optional)" data-i18n-placeholder="bio">{{ form.bio.value|default:'' }}</textarea>
       </label>
       {% if form.bio.errors %}<p class="profile-edit-error">{{ form.bio.errors.0 }}</p>{% endif %}
 
       <input type="date" id="profile-birthday-input" name="birthday" value="{{ request.user.profile.birthday|date:'Y-m-d' }}" class="profile-edit-date-input">
       <button type="button" class="profile-edit-row" onclick="openProfileBirthdayPicker()">
         <i data-lucide="gift" aria-hidden="true"></i>
-        <span id="profile-birthday-label">{% if request.user.profile.birthday %}{{ request.user.profile.birthday|date:'Y-m-d' }}{% else %}Add Birthday{% endif %}</span>
+        <span id="profile-birthday-label">{% if request.user.profile.birthday %}{{ request.user.profile.birthday|date:'Y-m-d' }}{% else %}<span data-i18n="add_birthday">Add Birthday</span>{% endif %}</span>
       </button>
     </section>
 
@@ -67,12 +67,13 @@
     </p>
 
     <section class="profile-edit-card">
-      <div class="profile-edit-section-title">用户名</div>
+      <div class="profile-edit-section-title" data-i18n="username">Username</div>
       <label class="profile-edit-field">
-        <span>用户名（可选）</span>
+        <span data-i18n="username_optional">Username (optional)</span>
         <input type="text" name="username" id="profile-username-input"
           value="{{ form.username.value|default:request.user.username }}"
-          placeholder="用户名（可选）"
+          placeholder="Username (optional)"
+          data-i18n-placeholder="username_optional"
           pattern="^[a-zA-Z0-9_]{5,}$"
           oninput="validateUsername()">
       </label>
@@ -91,7 +92,7 @@
     <div class="profile-edit-save-wrap">
       <button type="submit" class="profile-edit-save">
         <i data-lucide="check" aria-hidden="true"></i>
-        <span>保存修改</span>
+        <span data-i18n="save_changes">Save Changes</span>
       </button>
     </div>
   </form>
@@ -261,14 +262,14 @@
     var displayName = profile.display_name || profile.username;
     var initials = profile.initials || (displayName || '?').slice(0, 1).toUpperCase();
 
-    document.querySelectorAll('.settings-template-name').forEach(function(el) {
+    document.querySelectorAll('.settings-template-name, .settings-display-name-sync').forEach(function(el) {
       el.textContent = displayName;
     });
 
     var usernameInput = document.getElementById('profile-username-input');
     if (usernameInput) usernameInput.value = profile.username || '';
 
-    var avatarButtons = document.querySelectorAll('.settings-template-avatar-wrap, .profile-edit-avatar, .settings-panel-avatar-wrap');
+    var avatarButtons = document.querySelectorAll('.settings-template-avatar-wrap, .profile-edit-avatar, .settings-panel-avatar-wrap, .drawer-avatar-wrap, .main-menu-avatar-wrap');
     avatarButtons.forEach(function(el) {
       var overlay = el.querySelector('.settings-template-avatar-overlay, .profile-edit-avatar-icon, .absolute.inset-0');
       if (profile.avatar) {
@@ -282,19 +283,70 @@
           img.className = 'settings-template-avatar-image';
         } else if (el.classList.contains('settings-panel-avatar-wrap')) {
           img.className = 'w-20 h-20 rounded-full object-cover shadow-md transition-all group-hover:opacity-90';
+        } else if (el.classList.contains('drawer-avatar-wrap')) {
+          img.className = 'w-full h-full object-cover';
+        } else if (el.classList.contains('main-menu-avatar-wrap')) {
+          img.className = 'w-full h-full object-cover';
         }
+        
+        if (el.classList.contains('settings-template-avatar-wrap') || el.classList.contains('profile-edit-avatar') || el.classList.contains('drawer-avatar-wrap') || el.classList.contains('main-menu-avatar-wrap')) {
+          el.style.background = 'transparent';
+          el.style.backgroundColor = 'transparent';
+        }
+        
         el.insertBefore(img, overlay || null);
       } else {
+        var bgVal = profile.avatar_color || '#5c6bc0';
+        
+        // Remove existing img if any
+        el.querySelectorAll('img').forEach(function(child) {
+          child.remove();
+        });
+        
         if (el.classList.contains('settings-panel-avatar-wrap')) {
           var fallback = el.querySelector('.settings-template-avatar-fallback');
           if (fallback) {
             fallback.textContent = initials;
+            fallback.style.backgroundColor = bgVal;
           } else {
             fallback = document.createElement('div');
-            fallback.className = 'settings-template-avatar-fallback w-20 h-20 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90';
+            fallback.className = 'settings-template-avatar-fallback w-20 h-20 rounded-full text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90';
+            fallback.style.backgroundColor = bgVal;
             fallback.textContent = initials;
             el.insertBefore(fallback, overlay || null);
           }
+        } else if (el.classList.contains('drawer-avatar-wrap')) {
+          el.style.backgroundColor = bgVal;
+          var fallback = el.querySelector('.settings-template-avatar-fallback');
+          if (fallback) {
+            fallback.textContent = initials;
+          } else {
+            fallback = document.createElement('span');
+            fallback.className = 'settings-template-avatar-fallback';
+            fallback.textContent = initials;
+            el.insertBefore(fallback, overlay || null);
+          }
+        } else if (el.classList.contains('main-menu-avatar-wrap')) {
+          el.style.backgroundColor = bgVal;
+          var fallback = el.querySelector('.settings-template-avatar-fallback');
+          if (fallback) {
+            fallback.textContent = initials;
+          } else {
+            fallback = document.createElement('span');
+            fallback.className = 'settings-template-avatar-fallback';
+            fallback.textContent = initials;
+            el.insertBefore(fallback, overlay || null);
+          }
+        } else if (el.classList.contains('settings-template-avatar-wrap')) {
+          el.style.background = bgVal;
+          el.style.backgroundColor = bgVal;
+          var fallback = el.querySelector('.settings-template-avatar-fallback');
+          if (fallback) fallback.textContent = initials;
+        } else if (el.classList.contains('profile-edit-avatar')) {
+          el.style.background = bgVal;
+          el.style.backgroundColor = bgVal;
+          var fallback = el.querySelector('.settings-template-avatar-fallback') || el.querySelector('.profile-edit-avatar > span:first-child');
+          if (fallback) fallback.textContent = initials;
         } else {
           var fallback = el.querySelector('.settings-template-avatar-fallback') || el.querySelector('.profile-edit-avatar > span:first-child');
           if (fallback) fallback.textContent = initials;

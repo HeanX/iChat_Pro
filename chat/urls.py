@@ -114,6 +114,7 @@ urlpatterns = [
     path('api/privacy/blocked/', views.blocked_users_list_view, name='api_blocked_users_list'),
     path('api/privacy/block/', views.block_user_view, name='api_block_user'),
     path('api/privacy/unblock/', views.unblock_user_view, name='api_unblock_user'),
+    path('api/reports/', views.report_conversation_view, name='api_report_conversation'),
     path('api/privacy/delete-contacts/', views.delete_synced_contacts_view, name='api_delete_synced_contacts'),
     path('api/privacy/delete-account/', views.delete_account_view, name='api_delete_account'),
     # T27: Auto-delete
@@ -128,4 +129,14 @@ urlpatterns = [
     path('api/groups/<int:conversation_id>/announcement/', views.group_announcement_view, name='api_group_announcement'),
     path('api/groups/<int:conversation_id>/mute-group/', views.group_mute_view, name='api_group_mute'),
     path('api/groups/<int:conversation_id>/members-advanced/', views.group_members_advanced_view, name='api_group_members_advanced'),
+    # Encrypted File Transfer API
+    path('api/files/uploads/', views.create_upload_session_view, name='api_file_upload_create'),
+    path('api/files/uploads/<str:upload_id>/', views.query_upload_view, name='api_file_upload_status'),
+    path('api/files/uploads/<str:upload_id>/chunks/<int:chunk_index>/', views.upload_chunk_view, name='api_file_upload_chunk'),
+    path('api/files/uploads/<str:upload_id>/complete/', views.complete_upload_view, name='api_file_upload_complete'),
+    path('api/files/uploads/<str:upload_id>/cancel/', views.cancel_upload_view, name='api_file_upload_cancel'),
+    path('api/files/<int:file_id>/', views.get_file_metadata_view, name='api_file_metadata'),
+    path('api/files/<int:file_id>/download/', views.download_file_view, name='api_file_download'),
+    path('api/files/<int:file_id>/chunks/<int:chunk_index>/', views.download_chunk_view, name='api_file_download_chunk'),
+    path('api/files/<int:file_id>/messages/', views.send_file_message_view, name='api_file_send_message'),
 ]

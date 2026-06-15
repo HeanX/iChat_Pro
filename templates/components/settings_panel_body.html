@@ -8,7 +8,7 @@
     {% if settings_avatar_url %}
     <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="w-20 h-20 rounded-full object-cover shadow-md transition-all group-hover:opacity-90">
     {% else %}
-    <div class="settings-template-avatar-fallback w-20 h-20 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90">
+    <div class="settings-template-avatar-fallback w-20 h-20 rounded-full text-white flex items-center justify-center font-bold text-3xl shadow-md transition-all group-hover:opacity-90" style="background-color: {{ settings_avatar_color|default:'#5c6bc0' }};">
       {{ settings_initials }}
     </div>
     {% endif %}

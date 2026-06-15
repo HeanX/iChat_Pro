@@ -329,26 +329,26 @@
   </style>
 
   <section class="general-card">
-    <h3 class="general-section-title">设置</h3>
+    <h3 class="general-section-title" data-i18n="settings">Settings</h3>
     <div class="general-row compact">
-      <span>消息字号</span>
+      <span data-i18n="message_font_size">Message Font Size</span>
       <span id="general-font-size-label" class="general-value">16</span>
     </div>
     <input id="general-font-size-range" class="general-range" type="range" min="12" max="24" value="16" step="1">
     <button type="button" class="general-row" data-action="wallpaper">
       <span class="general-icon"><i data-lucide="image"></i></span>
-      <span>聊天壁纸</span>
+      <span data-i18n="chat_wallpaper">Chat Wallpaper</span>
       <i data-lucide="chevron-right" style="color: var(--tg-muted);"></i>
     </button>
     <button type="button" class="general-row" data-action="power-saving">
       <span class="general-icon"><i data-lucide="gauge"></i></span>
-      <span>省电模式</span>
-      <span id="general-power-label" class="general-value">已停用</span>
+      <span data-i18n="power_saving_mode">Power Saving Mode</span>
+      <span id="general-power-label" class="general-value">Disabled</span>
     </button>
   </section>
 
   <section class="general-card">
-    <h3 class="general-section-title">主题颜色</h3>
+    <h3 class="general-section-title" data-i18n="theme_color">Theme Color</h3>
     <div class="wallpaper-strip">
       <button type="button" class="wallpaper-item" data-wallpaper="default" aria-label="Default wallpaper">
         <div class="wallpaper-pill-top"></div>
@@ -393,31 +393,31 @@
     </div>
     <button type="button" class="general-option" data-theme="light">
       <span class="telegram-radio"></span>
-      <span class="general-option-title">日光白</span>
+      <span class="general-option-title" data-i18n="light_theme">Light</span>
     </button>
     <button type="button" class="general-option" data-theme="dark">
       <span class="telegram-radio"></span>
-      <span class="general-option-title">夜间</span>
+      <span class="general-option-title" data-i18n="dark_theme_night">Dark / Night</span>
     </button>
     <button type="button" class="general-option" data-theme="system">
       <span class="telegram-radio"></span>
-      <span class="general-option-title">系统默认</span>
+      <span class="general-option-title" data-i18n="system_default">System Default</span>
     </button>
   </section>
 
   <section class="general-card">
-    <h3 class="general-section-title">时间格式</h3>
+    <h3 class="general-section-title" data-i18n="time_format">Time Format</h3>
     <button type="button" class="general-option" data-time-format="12h">
       <span class="telegram-radio"></span>
       <span>
-        <span class="general-option-title">12小时制</span>
-        <span class="general-option-subtitle">下午 04:39</span>
+        <span class="general-option-title" data-i18n="hour_12">12-Hour</span>
+        <span class="general-option-subtitle">04:39 PM</span>
       </span>
     </button>
     <button type="button" class="general-option" data-time-format="24h">
       <span class="telegram-radio"></span>
       <span>
-        <span class="general-option-title">24小时制</span>
+        <span class="general-option-title" data-i18n="hour_24">24-Hour</span>
         <span class="general-option-subtitle">16:39</span>
       </span>
     </button>

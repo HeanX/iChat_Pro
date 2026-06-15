@@ -224,17 +224,17 @@ def contact_list_view(request):
 
     contacts = Contact.objects.filter(
         models.Q(user=request.user) | models.Q(contact=request.user),
-    ).select_related('user', 'contact')
+    ).select_related('user__profile', 'contact__profile')
 
     incoming = FriendRequest.objects.filter(
         receiver=request.user,
         status=FriendRequest.Status.PENDING,
-    ).select_related('sender')
+    ).select_related('sender__profile')
 
     outgoing = FriendRequest.objects.filter(
         sender=request.user,
         status=FriendRequest.Status.PENDING,
-    ).select_related('receiver')
+    ).select_related('receiver__profile')
 
     context = {
         'contacts': contacts,
@@ -242,6 +242,21 @@ def contact_list_view(request):
         'outgoing_requests': outgoing,
     }
     return render(request, 'pages/contacts.html', context)
+
+
+def _avatar_url(request, user):
+    """Return absolute avatar image URL for a user, or empty string if none set."""
+    try:
+        if user.profile and user.profile.avatar:
+            timestamp = int(user.profile.updated_at.timestamp())
+            return request.build_absolute_uri(f"{user.profile.avatar.url}?t={timestamp}")
+    except Exception:
+        try:
+            if user.profile and user.profile.avatar:
+                return request.build_absolute_uri(user.profile.avatar.url)
+        except Exception:
+            pass
+    return ''
 
 
 @login_required(login_url='login')
@@ -296,13 +311,20 @@ def search_users(request):
                 status=FriendRequest.Status.PENDING,
             ).exists()
 
+            try:
+                user_type = user.profile.user_type
+            except UserProfile.DoesNotExist:
+                user_type = 'user'
+
             results.append({
                 'id': user.id,
                 'username': user.username,
                 'nickname': nickname,
+                'user_type': user_type,
                 'is_contact': is_contact,
                 'has_pending_out': has_pending_out,
                 'has_pending_in': has_pending_in,
+                'avatar_url': _avatar_url(request, user),
             })
 
     return JsonResponse({'results': results})
@@ -545,7 +567,59 @@ def avatar_crop_save_view(request):
 
     avatar_url = ''
     try:
-        avatar_url = request.build_absolute_uri(profile.avatar.url)
+        timestamp = int(profile.updated_at.timestamp())
+        avatar_url = request.build_absolute_uri(f"{profile.avatar.url}?t={timestamp}")
+    except Exception:
+        try:
+            avatar_url = request.build_absolute_uri(profile.avatar.url)
+        except Exception:
+            pass
+
+    # Find contacts and active conversation members to notify of profile change
+    peer_ids = set()
+    try:
+        from django.db.models import Q
+        from chat.models import ConversationMember
+        from .models import Contact
+
+        contacts = Contact.objects.filter(Q(user=request.user) | Q(contact=request.user))
+        for c in contacts:
+            peer_ids.add(c.contact_id if c.user_id == request.user.id else c.user_id)
+
+        my_convs = ConversationMember.objects.filter(
+            user=request.user,
+            status=ConversationMember.Status.ACTIVE
+        ).values_list('conversation_id', flat=True)
+        
+        other_members = ConversationMember.objects.filter(
+            conversation_id__in=my_convs,
+            status=ConversationMember.Status.ACTIVE
+        ).exclude(user=request.user).values_list('user_id', flat=True)
+        
+        peer_ids.update(other_members)
+    except Exception:
+        pass
+
+    # Broadcast event via Channels
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            display_name = profile.nickname or request.user.get_full_name() or request.user.username
+            for pid in peer_ids:
+                async_to_sync(channel_layer.group_send)(
+                    f"user_{pid}",
+                    {
+                        "type": "profile.updated",
+                        "data": {
+                            "user_id": request.user.id,
+                            "username": request.user.username,
+                            "display_name": display_name,
+                            "avatar_url": avatar_url,
+                        }
+                    }
+                )
     except Exception:
         pass
 
@@ -603,11 +677,16 @@ def _profile_payload(request, profile):
     avatar_url = ''
     if profile.avatar:
         try:
-            avatar_url = request.build_absolute_uri(profile.avatar.url)
-        except ValueError:
-            avatar_url = ''
+            timestamp = int(profile.updated_at.timestamp())
+            avatar_url = request.build_absolute_uri(f"{profile.avatar.url}?t={timestamp}")
+        except Exception:
+            try:
+                avatar_url = request.build_absolute_uri(profile.avatar.url)
+            except ValueError:
+                avatar_url = ''
 
     display_name = profile.nickname or request.user.get_full_name() or request.user.username
+    from chat.views import _avatar_color
     return {
         'user_id': request.user.id,
         'username': request.user.username,
@@ -618,6 +697,7 @@ def _profile_payload(request, profile):
         'initials': (display_name[:1] or request.user.username[:1] or '?').upper(),
         'bio': profile.bio,
         'avatar': avatar_url,
+        'avatar_color': _avatar_color(display_name),
         'phone_number': profile.phone_number,
         'location': profile.location,
         'birthday': profile.birthday.isoformat() if profile.birthday else '',
@@ -1269,11 +1349,19 @@ def qr_card_view(request):
     """Return the current user's public card data for QR code sharing."""
     from .models import UserProfile
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    avatar_url = ''
+    if profile.avatar:
+        try:
+            timestamp = int(profile.updated_at.timestamp())
+            avatar_url = request.build_absolute_uri(f"{profile.avatar.url}?t={timestamp}")
+        except Exception:
+            avatar_url = request.build_absolute_uri(profile.avatar.url)
+            
     return JsonResponse({
         'user_id': request.user.id,
         'username': request.user.username,
         'nickname': profile.nickname or request.user.username,
-        'avatar': request.build_absolute_uri(profile.avatar.url) if profile.avatar else '',
+        'avatar': avatar_url,
         'bio': profile.bio,
         'phone_number': profile.phone_number,
     })

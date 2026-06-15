@@ -198,10 +198,9 @@
   }
 
   function forwardMessage(msg) {
-    // For now: show a contact picker by reusing existing contacts list
     var convs = window.conversations || [];
     var targets = convs.filter(function (c) {
-      return c.type === 'single' && c.id !== window.activeChatId;
+      return (c.type === 'single' || c.type === 'group') && String(c.id) !== String(window.activeChatId);
     });
 
     if (targets.length === 0) {
@@ -228,7 +227,10 @@
         '<div class="w-9 h-9 rounded-full overflow-hidden text-white flex items-center justify-center font-bold text-xs flex-shrink-0" style="background-color:' + color + '">' +
         avatarInner +
         '</div>' +
-        '<span class="text-sm font-medium text-textMain truncate">' + (target.name || 'Unknown') + '</span>';
+        '<div class="min-w-0 flex-1">' +
+        '<span class="block text-sm font-medium text-textMain truncate">' + (target.name || 'Unknown') + '</span>' +
+        '<span class="block text-xs text-textSecondary">' + (target.type === 'group' ? t('groupChat', 'Group') : t('privateChat', 'Private')) + '</span>' +
+        '</div>';
       item.addEventListener('click', function () {
         modal.classList.remove('flex');
         modal.classList.add('hidden');
@@ -275,7 +277,10 @@
   async function doForward(msg, targetConv) {
     var convId = window.activeChatId;
     var plaintext = msg.text || '';
-    if (!plaintext) {
+    var sourceFileId = msg.file_id || (msg.file && msg.file.file_id) || null;
+    var sourceConv = (window.conversationsById && window.conversationsById[convId]) || null;
+    var isFileForward = Boolean(sourceFileId);
+    if (!plaintext && !isFileForward) {
       window.showToast(t('msgNothingToCopy', 'Nothing to forward'));
       return;
     }
@@ -286,8 +291,42 @@
         original_message_id: msg.id,
         original_conversation_id: convId,
         client_message_id: clientMsgId,
-        message_type: 'text',
+        message_type: isFileForward ? (msg.message_type || (msg.file && msg.file.message_kind) || 'file') : 'text',
       };
+      if (isFileForward) {
+        payload.file_id = sourceFileId;
+        payload.file_keys = [];
+        if (!window.iChatFileTransfer || !window.iChatFileTransfer.fetchFileKeyBytes) {
+          throw new Error('File transfer module not loaded');
+        }
+        var keyResult = await window.iChatFileTransfer.fetchFileKeyBytes(
+          sourceFileId,
+          sourceConv && sourceConv.type === 'group' ? 'group' : 'single'
+        );
+        var fileKeyBytes = keyResult.fileKeyBytes;
+        var targetE2EE = targetConv.type === 'group' ? window.iChatGroupE2EE : window.iChatPrivateE2EE;
+        if (!targetE2EE || typeof targetE2EE.wrapFileKey !== 'function') {
+          throw new Error('File key wrapping module not loaded');
+        }
+        var selfMetadata = targetConv.type === 'group'
+          ? {
+              group_id: targetConv.id,
+              membership_version: targetConv.membership_version || 1,
+              sender_id: window.myUserId,
+              receiver_id: window.myUserId,
+              sender_key_version: window.localKeyVersion || 1,
+              receiver_key_version: 0,
+            }
+          : {
+              conversation_id: targetConv.id,
+              sender_id: window.myUserId,
+              receiver_id: window.myUserId,
+              sender_key_version: window.localKeyVersion || 1,
+              receiver_key_version: 0,
+            };
+        var selfWrapped = await targetE2EE.wrapFileKey(fileKeyBytes, sourceFileId, window.myUserId, selfMetadata);
+        if (selfWrapped) payload.file_keys.push(selfWrapped);
+      }
 
       if (targetConv.type === 'group') {
         // Group target: encrypt for each member
@@ -306,6 +345,25 @@
         payload.algorithm = result.algorithm;
         payload.sender_key_version = result.sender_key_version;
         payload.membership_version = result.membership_version;
+        if (isFileForward && typeof window.iChatGroupE2EE.wrapFileKey === 'function') {
+          for (var i = 0; i < memberIds.length; i++) {
+            var holderId = memberIds[i];
+            if (Number(holderId) === Number(window.myUserId)) continue;
+            payload.file_keys.push(await window.iChatGroupE2EE.wrapFileKey(
+              fileKeyBytes,
+              sourceFileId,
+              holderId,
+              {
+                group_id: targetConv.id,
+                membership_version: result.membership_version,
+                sender_id: window.myUserId,
+                receiver_id: holderId,
+                sender_key_version: result.sender_key_version,
+                receiver_key_version: 0,
+              }
+            ));
+          }
+        }
         // Enrich each recipient with fields the REST forward view expects:
         // receiver_id (not user_id), sender_key_version, algorithm
         payload.recipients = result.recipients.map(function(r) {
@@ -325,6 +383,20 @@
           throw new Error('Private E2EE module or peer info missing');
         }
         payload.peer_id = targetConv.peer_id;
+        if (isFileForward && typeof window.iChatPrivateE2EE.wrapFileKey === 'function') {
+          payload.file_keys.push(await window.iChatPrivateE2EE.wrapFileKey(
+            fileKeyBytes,
+            sourceFileId,
+            targetConv.peer_id,
+            {
+              conversation_id: targetConv.id,
+              sender_id: window.myUserId,
+              receiver_id: targetConv.peer_id,
+              sender_key_version: window.localKeyVersion || 1,
+              receiver_key_version: 0,
+            }
+          ));
+        }
         var encResult = await window.iChatPrivateE2EE.encryptPrivateMessage({
           plaintext: plaintext,
           conversationId: targetConv.id,
@@ -339,6 +411,9 @@
       }
 
       await apiPost('/api/conversations/' + targetConv.id + '/messages/forward/', payload);
+      if (typeof fetchConversations === 'function') {
+        await fetchConversations();
+      }
       window.showToast(t('msgForwarded', 'Forwarded'));
     } catch (e) {
       console.error('Forward failed:', e);

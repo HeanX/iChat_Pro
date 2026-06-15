@@ -15,6 +15,13 @@
   function requireInteger(value, field) {
     const parsed = Number(value);
     if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      console.error(
+        '[PrivateE2EE] invalid_metadata:',
+        `field="${field}"`,
+        `value=${JSON.stringify(value)}`,
+        `type=${typeof value}`,
+        `parsed=${parsed}`,
+      );
       throw new PrivateChatCryptoError('invalid_metadata', `${field} must be a positive integer.`);
     }
     return parsed;
@@ -314,6 +321,165 @@
     return decryptText(payload, sessionKey);
   }
 
+  // ── File key wrapping (for file transfer) ────────────────────────
+
+  const FILE_KEY_WRAP_HKDF_INFO = 'ichat-file-key-wrap-v1';
+
+  /**
+   * Wrap raw file key bytes for a recipient using ECDH + HKDF + AES-GCM.
+   *
+   * @param {Uint8Array} fileKeyBytes - raw 32-byte file key
+   * @param {number} fileId - server-assigned EncryptedFile.id
+   * @param {number} holderId - recipient user ID (the key holder)
+   * @param {object} [metadata] - {conversation_id, sender_id, receiver_id,
+   *   sender_key_version, receiver_key_version}. If omitted, derives
+   *   defaults from local state or active conversation.
+   * @returns {Promise<{holder_id: number, encrypted_file_key: string, nonce: string,
+   *   auth_tag: string, algorithm: string, sender_key_version: number,
+   *   receiver_key_version: number}>}
+   */
+  async function wrapFileKey(fileKeyBytes, fileId, holderId, metadata) {
+    if (!metadata) {
+      // Try to infer metadata from active conversation state
+      const convId = window.activeChatId || 0;
+      const localId = window.myUserId || 0;
+      metadata = {
+        conversation_id: convId,
+        sender_id: localId,
+        receiver_id: holderId,
+        sender_key_version: window.localKeyVersion || 1,
+        receiver_key_version: 0,
+      };
+    }
+
+    // Fetch recipient's public key
+    const receiverKeyVersion = metadata.receiver_key_version || 0;
+    const remoteKey = await fetchPublicKey(holderId, receiverKeyVersion || undefined);
+    metadata.receiver_key_version = requireInteger(remoteKey.key_version, 'remote_key_version');
+    metadata.sender_key_version = requireInteger(currentRecord().key_version, 'local_key_version');
+    const local = currentRecord();
+    const privateKey = await importPrivateKey(local.private_key);
+
+    // Derive a dedicated wrap session key (separate HKDF info to avoid
+    // domain crossing with message keys)
+    const contextBytes = new TextEncoder().encode(privateContext(metadata));
+    const salt = await window.crypto.subtle.digest('SHA-256', contextBytes);
+    const remotePublicKey = await importPublicKey(remoteKey.identity_public_key);
+    const sharedSecret = await window.crypto.subtle.deriveBits(
+      { name: 'ECDH', public: remotePublicKey },
+      privateKey,
+      256
+    );
+    const hkdfKey = await window.crypto.subtle.importKey('raw', sharedSecret, 'HKDF', false, ['deriveKey']);
+    const wrapSessionKey = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(FILE_KEY_WRAP_HKDF_INFO) },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+
+    // Encrypt the file key with AAD
+    const nonce = window.crypto.getRandomValues(new Uint8Array(12));
+    const aadStr = 'ichat-file-key-wrap-v1:' + fileId + ':' + holderId;
+    const aad = new TextEncoder().encode(aadStr);
+    const combined = new Uint8Array(
+      await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: nonce, tagLength: 128, additionalData: aad },
+        wrapSessionKey,
+        fileKeyBytes
+      )
+    );
+    const tagStart = combined.length - 16;
+
+    return {
+      holder_id: holderId,
+      encrypted_file_key: bytesToBase64(combined.slice(0, tagStart)),
+      nonce: bytesToBase64(nonce),
+      auth_tag: bytesToBase64(combined.slice(tagStart)),
+      algorithm: 'AES-256-GCM',
+      sender_key_version: requireInteger(local.key_version, 'local_key_version'),
+      receiver_key_version: requireInteger(remoteKey.key_version, 'remote_key_version'),
+    };
+  }
+
+  /**
+   * Unwrap a file key received from a sender.
+   *
+   * @param {object} wrapped - {encrypted_file_key, nonce, auth_tag, sender_key_version, receiver_key_version}
+   * @param {number} fileId
+   * @param {number} holderId - local user ID (the key holder)
+   * @param {number} senderId - the user who sent the file
+   * @param {object} [metadata]
+   * @returns {Promise<Uint8Array>} raw 32-byte file key
+   */
+  async function unwrapFileKey(wrapped, fileId, holderId, senderId, metadata) {
+    if (!metadata) {
+      const convId = window.activeChatId || 0;
+      metadata = {
+        conversation_id: convId,
+        sender_id: senderId,
+        receiver_id: holderId,
+        sender_key_version: wrapped.sender_key_version || 0,
+        receiver_key_version: wrapped.receiver_key_version || 0,
+      };
+    }
+
+    const remoteKeyVersion = wrapped.sender_key_version || metadata.sender_key_version || 0;
+    const senderKey = await fetchPublicKey(senderId, remoteKeyVersion || undefined);
+    const local = currentRecord();
+    const privateKey = await importPrivateKey(local.private_key);
+
+    const contextBytes = new TextEncoder().encode(privateContext(metadata));
+    const salt = await window.crypto.subtle.digest('SHA-256', contextBytes);
+    const remotePublicKey = await importPublicKey(senderKey.identity_public_key);
+    const sharedSecret = await window.crypto.subtle.deriveBits(
+      { name: 'ECDH', public: remotePublicKey },
+      privateKey,
+      256
+    );
+    const hkdfKey = await window.crypto.subtle.importKey('raw', sharedSecret, 'HKDF', false, ['deriveKey']);
+    const wrapSessionKey = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(FILE_KEY_WRAP_HKDF_INFO) },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+
+    const ciphertext = base64ToBytes(wrapped.encrypted_file_key);
+    const nonce = base64ToBytes(wrapped.nonce);
+    const authTag = base64ToBytes(wrapped.auth_tag);
+    const combined = new Uint8Array(ciphertext.length + authTag.length);
+    combined.set(ciphertext, 0);
+    combined.set(authTag, ciphertext.length);
+
+    const aadStr = 'ichat-file-key-wrap-v1:' + fileId + ':' + holderId;
+    const aad = new TextEncoder().encode(aadStr);
+
+    return new Uint8Array(
+      await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: nonce, tagLength: 128, additionalData: aad },
+        wrapSessionKey,
+        combined
+      )
+    );
+  }
+
+  /** Wrap file key for the sender themself (multi-device sync). */
+  async function wrapFileKeyForSelf(fileKeyBytes, fileId, holderId) {
+    // For self-wrapping, re-derive the session key with sender==receiver
+    const local = currentRecord();
+    const metadata = {
+      conversation_id: window.activeChatId || 0,
+      sender_id: holderId,
+      receiver_id: holderId,
+      sender_key_version: requireInteger(local.key_version, 'local_key_version'),
+      receiver_key_version: requireInteger(local.key_version, 'local_key_version'),
+    };
+    return wrapFileKey(fileKeyBytes, fileId, holderId, metadata);
+  }
+
   window.iChatPrivateE2EE = {
     MESSAGE_ALGORITHM,
     PrivateChatCryptoError,
@@ -324,6 +490,10 @@
     encryptPrivateMessage,
     decryptPrivateMessage,
     trustPeerKey,
-    forgetPeerKey
+    forgetPeerKey,
+    // File transfer
+    wrapFileKey,
+    unwrapFileKey,
+    wrapFileKeyForSelf,
   };
 })();

@@ -342,19 +342,22 @@
 
 <script>
 (function() {
-  // ── Supported languages ─────────────────────────────────────
+  // ── Supported languages (all 4 fully supported) ────────────────
   var LANG_LOCALE_MAP = {
-    'zh':    { appLang: 'zh', label: '中文' },
-    'zh-TW': { appLang: 'zh', label: '繁中' },  // maps to app zh for now
+    'zh':    { appLang: 'zh', label: '简体中文' },
+    'zh-TW': { appLang: 'zh-TW', label: '繁體中文' },
     'en':    { appLang: 'en', label: 'English' },
-    'ja':    { appLang: 'en', label: '日本語' }  // not fully supported, falls back to en UI
+    'ja':    { appLang: 'ja', label: '日本語' }
   };
 
   // ── Determine current selection from localStorage ────────────
   function getCurrentLang() {
+    // Prefer ichat_lang (set by toggleLanguage) over ichat_sessions
+    var langFromToggle = localStorage.getItem('ichat_lang');
+    if (langFromToggle && LANG_LOCALE_MAP[langFromToggle]) return langFromToggle;
     var saved = {};
     try { saved = JSON.parse(localStorage.getItem('ichat_sessions') || '{}'); } catch(e) {}
-    return saved.uiLang || (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh' ? 'zh' : 'en');
+    return saved.uiLang || (typeof currentLanguage !== 'undefined' ? currentLanguage : 'en');
   }
 
   // ── Render radio buttons ─────────────────────────────────────
@@ -375,7 +378,8 @@
       var lang = row.getAttribute('data-lang');
       if (!lang) return;
 
-      // Persist selection
+      // Persist selection to both storage keys
+      localStorage.setItem('ichat_lang', lang);
       var saved = {};
       try { saved = JSON.parse(localStorage.getItem('ichat_sessions') || '{}'); } catch(e) {}
       saved.uiLang = lang;
@@ -383,19 +387,22 @@
 
       renderRadios(lang);
 
-      // Apply to app-level language toggle (en / zh)
+      // Apply language via toggleLanguage with specific target
       var meta = LANG_LOCALE_MAP[lang];
-      if (meta && typeof currentLanguage !== 'undefined') {
-        if (meta.appLang !== currentLanguage && typeof toggleLanguage === 'function') {
-          toggleLanguage();
-        }
+      if (meta && typeof toggleLanguage === 'function') {
+        toggleLanguage(meta.appLang);
       }
 
       // Update lang display in settings home row
       var displayEl = document.getElementById('lang-display-val');
       if (displayEl && meta) displayEl.textContent = meta.label;
 
-      var toasts = { 'zh': '语言已切换为简体中文', 'zh-TW': '語言已切換為繁體中文', 'en': 'Language set to English', 'ja': '言語を日本語に設定しました' };
+      var toasts = {
+        'zh': '语言已切换为简体中文',
+        'zh-TW': '語言已切換為繁體中文',
+        'en': 'Language set to English',
+        'ja': '言語を日本語に設定しました'
+      };
       if (window.showToast) window.showToast(toasts[lang] || 'Language updated');
     });
   });

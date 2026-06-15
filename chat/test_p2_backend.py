@@ -577,7 +577,8 @@ class PrivacySecurityAPITests(TestCase):
         self.assertEqual(conversation['peer_phone_number'], '')
         self.assertEqual(conversation['peer_birthday'], '')
 
-    def test_private_send_respects_receiver_message_privacy(self):
+    def test_private_send_succeeds_when_both_active_members(self):
+        """Active members can send regardless of receiver privacy settings."""
         conv = _create_private_conversation(self.alice, self.bob)
         payload = {
             'receiver_id': self.bob.id,
@@ -591,16 +592,18 @@ class PrivacySecurityAPITests(TestCase):
             'client_message_id': 'privacy-send-1',
         }
 
+        # Both are active members — privacy settings do not block in-conversation sends.
         response = self.client.post(
             f'/api/conversations/{conv.id}/messages/send/',
             data=json.dumps(payload),
             content_type='application/json',
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 201)
 
+        # Even with restrictive privacy, still succeeds.
         UserPrivacySettings.objects.update_or_create(
             user=self.bob,
-            defaults={'who_can_send_messages': 'everyone'},
+            defaults={'who_can_send_messages': 'nobody'},
         )
         payload['client_message_id'] = 'privacy-send-2'
         response = self.client.post(

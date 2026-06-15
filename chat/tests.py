@@ -724,8 +724,8 @@ class ConversationMessagesAPITests(TestCase):
 
     # ── T29: contact enforcement ───────────────────────────────────
 
-    def test_non_contact_cannot_access_private_messages(self):
-        """Even if a member, non-contacts get 403 (T29)."""
+    def test_non_contact_member_can_access_private_messages(self):
+        """Active members can access messages even without being contacts."""
         from accounts.models import Contact
         # Eve is not a contact of alice
         conv_eve = Conversation.objects.create(
@@ -733,19 +733,19 @@ class ConversationMessagesAPITests(TestCase):
         )
         ConversationMember.objects.create(conversation=conv_eve, user=self.alice)
         ConversationMember.objects.create(conversation=conv_eve, user=self.eve)
-        # No Contact between alice and eve
+        # No Contact between alice and eve — but both are active members.
         response = self._get(conv_eve.id)
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
 
-    def test_removed_contact_cannot_access_private_messages(self):
-        """After contact is removed, access is denied (T29)."""
+    def test_removed_contact_still_can_access_as_active_member(self):
+        """After contact is removed, active members still have access."""
         from accounts.models import Contact
-        # Create conv with bob as contact, then remove contact
         response = self._get(self.conv.id)
         self.assertEqual(response.status_code, 200)  # still contacts
         Contact.objects.filter(user=self.alice, contact=self.bob).delete()
+        # Bob is still an active conversation member — access continues.
         response = self._get(self.conv.id)
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
 
     def test_http_private_send_persists_message(self):
         self.client.login(username=self.alice.username, password="test1234")

@@ -80,7 +80,7 @@ Content-Security-Policy:
   default-src 'self';
   script-src 'self' https://cdn.tailwindcss.com https://unpkg.com;
   style-src 'self' 'unsafe-inline';
-  img-src 'self' data:;
+  img-src 'self' data: blob:;
   connect-src 'self' wss://chat.example.com;
   font-src 'self';
   object-src 'none';

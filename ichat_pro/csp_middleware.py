@@ -85,8 +85,9 @@ class CSPMiddleware:
                 f"ws://{host} "
                 f"wss://{host}"
             ),
-            # Images: allow self + data URIs (favicons, emoji)
-            "img-src": "'self' data:",
+            # Images: allow self + data URIs (favicons, emoji) + blob URLs
+            # (image previews / file transfers via URL.createObjectURL)
+            "img-src": "'self' data: blob:",
             # Fonts: self-hosted only
             "font-src": "'self'",
             # Object: block plugins (Flash, Java, etc.)

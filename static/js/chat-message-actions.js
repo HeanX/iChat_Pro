@@ -105,7 +105,9 @@
     var senderName = msg.isSelf
       ? (currentLanguage === 'zh' ? '你' : 'You')
       : (msg.sender_name || conv.name || 'Unknown');
-    var preview = msg.text || '';
+    var preview = typeof window.getMessageReplyPreviewText === 'function'
+      ? window.getMessageReplyPreviewText(msg)
+      : (msg.text || '');
     if (preview.length > 80) preview = preview.substring(0, 80) + '...';
 
     window.replyToMessage = {
@@ -198,15 +200,15 @@
   }
 
   function forwardMessage(msg) {
-    var convs = window.conversations || [];
-    var targets = convs.filter(function (c) {
-      return (c.type === 'single' || c.type === 'group') && String(c.id) !== String(window.activeChatId);
-    });
-
-    if (targets.length === 0) {
-      window.showToast(t('msgNoForwardTargets', 'No conversations to forward to'));
+    var isBatchForward = Array.isArray(msg);
+    var forwardItems = isBatchForward ? msg.filter(Boolean) : [msg];
+    if (!forwardItems.length) {
+      window.showToast(t('msgNothingToCopy', 'Nothing to forward'));
       return;
     }
+    var convs = window.conversations || [];
+    var allowSameConversation = getForwardAllowSameConversation();
+    var targets = getForwardTargets(convs, allowSameConversation);
 
     // Build a simple picker modal
     var modal = document.getElementById('forward-picker-modal');
@@ -215,32 +217,131 @@
     }
 
     var listEl = modal.querySelector('.forward-picker-list');
-    listEl.innerHTML = '';
-    targets.forEach(function (target) {
-      var item = document.createElement('button');
-      var color = /^#[0-9a-fA-F]{6}$/.test(target.avatar_color || '') ? target.avatar_color : '#5c6bc0';
-      item.className = 'flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-bgSearch transition-colors text-left border-none bg-transparent cursor-pointer';
-      var avatarInner = typeof buildAvatarHtml === 'function'
-        ? buildAvatarHtml(target.avatar_url || '', target.initials || '??', color, '', target.name || '')
-        : (target.initials || '??');
-      item.innerHTML =
-        '<div class="w-9 h-9 rounded-full overflow-hidden text-white flex items-center justify-center font-bold text-xs flex-shrink-0" style="background-color:' + color + '">' +
-        avatarInner +
-        '</div>' +
-        '<div class="min-w-0 flex-1">' +
-        '<span class="block text-sm font-medium text-textMain truncate">' + (target.name || 'Unknown') + '</span>' +
-        '<span class="block text-xs text-textSecondary">' + (target.type === 'group' ? t('groupChat', 'Group') : t('privateChat', 'Private')) + '</span>' +
-        '</div>';
-      item.addEventListener('click', function () {
+    var searchEl = modal.querySelector('.forward-picker-search');
+    var emptyEl = modal.querySelector('.forward-picker-empty');
+    var sameConvEl = modal.querySelector('.forward-picker-same-conversation');
+
+    function selectTarget(target) {
+      return function () {
         modal.classList.remove('flex');
         modal.classList.add('hidden');
-        doForward(msg, target);
+        if (isBatchForward) {
+          doForwardMany(forwardItems, target);
+        } else {
+          doForward(forwardItems[0], target);
+        }
+      };
+    }
+
+    function renderTargets(items, searchResults) {
+      listEl.innerHTML = '';
+      var allItems = (items || []).slice();
+      (searchResults || []).forEach(function (user) {
+        var existingConv = convs.find(function (c) {
+          return c.type === 'single' && String(c.peer_id) === String(user.id);
+        });
+        if (existingConv && (allowSameConversation || String(existingConv.id) !== String(window.activeChatId))) {
+          if (!allItems.some(function (c) { return String(c.id) === String(existingConv.id); })) {
+            allItems.push(existingConv);
+          }
+          return;
+        }
+        allItems.push({
+          type: 'single',
+          is_user_target: true,
+          peer_id: user.id,
+          name: user.nickname || user.username || 'Unknown',
+          username: user.username,
+          peer_user_type: user.user_type || 'user',
+          initials: (user.nickname || user.username || '?').slice(0, 2).toUpperCase(),
+          avatar_url: user.avatar_url || '',
+          avatar_color: '#5c6bc0',
+        });
       });
-      listEl.appendChild(item);
-    });
+
+      if (!allItems.length) {
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        return;
+      }
+      if (emptyEl) emptyEl.classList.add('hidden');
+
+      allItems.forEach(function (target) {
+        var item = document.createElement('button');
+        var color = /^#[0-9a-fA-F]{6}$/.test(target.avatar_color || '') ? target.avatar_color : '#5c6bc0';
+        item.className = 'flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-bgSearch transition-colors text-left border-none bg-transparent cursor-pointer';
+        var avatarInner = typeof buildAvatarHtml === 'function'
+          ? buildAvatarHtml(target.avatar_url || '', target.initials || '??', color, '', target.name || '')
+          : escapeForwardText(target.initials || '??');
+        var label = target.type === 'group'
+          ? t('groupChat', 'Group')
+          : (target.peer_user_type === 'bot'
+            ? (t('botLabel', 'Bot') || 'Bot')
+            : (target.peer_user_type === 'agent' ? (t('agentLabel', 'Agent') || 'Agent') : t('privateChat', 'Private')));
+        item.innerHTML =
+          '<div class="w-9 h-9 rounded-full overflow-hidden text-white flex items-center justify-center font-bold text-xs flex-shrink-0" style="background-color:' + color + '">' +
+          avatarInner +
+          '</div>' +
+          '<div class="min-w-0 flex-1">' +
+          '<span class="block text-sm font-medium text-textMain truncate">' + escapeForwardText(target.name || 'Unknown') + '</span>' +
+          '<span class="block text-xs text-textSecondary">' + escapeForwardText(label) + '</span>' +
+          '</div>';
+        item.addEventListener('click', function () {
+          if (target.is_user_target) {
+            createForwardConversation(target).then(function (conv) {
+              modal.classList.remove('flex');
+              modal.classList.add('hidden');
+              if (isBatchForward) {
+                return doForwardMany(forwardItems, conv);
+              }
+              return doForward(forwardItems[0], conv);
+            }).catch(function (err) {
+              console.error('Create forward conversation failed:', err);
+              window.showToast(t('msgForwardFailed', 'Forward failed'));
+            });
+            return;
+          }
+          selectTarget(target)();
+        });
+        listEl.appendChild(item);
+      });
+    }
+
+    renderTargets(targets, []);
+    if (sameConvEl) {
+      sameConvEl.checked = allowSameConversation;
+      sameConvEl.onchange = function () {
+        allowSameConversation = sameConvEl.checked;
+        setForwardAllowSameConversation(allowSameConversation);
+        targets = getForwardTargets(convs, allowSameConversation);
+        if (searchEl && searchEl.value.trim().length >= 2) {
+          searchEl.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+          renderTargets(targets, []);
+        }
+      };
+    }
+    if (searchEl) {
+      searchEl.value = '';
+      searchEl.oninput = debounceForwardSearch(function () {
+        var query = searchEl.value.trim();
+        if (query.length < 2) {
+          renderTargets(targets, []);
+          return;
+        }
+        searchForwardTargets(query).then(function (users) {
+          renderTargets(targets, users);
+        }).catch(function (err) {
+          console.error('Forward target search failed:', err);
+          renderTargets(targets, []);
+        });
+      }, 250);
+    }
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+    if (!targets.length && searchEl) {
+      setTimeout(function () { searchEl.focus(); }, 30);
+    }
   }
 
   function createForwardModal() {
@@ -255,6 +356,14 @@
       '<i data-lucide="x" class="w-5 h-5"></i>' +
       '</button>' +
       '</div>' +
+      '<div class="px-3 py-2 border-b border-borderColor">' +
+      '<input type="search" class="forward-picker-search w-full bg-bgSearch text-textMain text-sm rounded-lg px-3 py-2 outline-none" placeholder="' + escapeForwardText(t('searchUsers', 'Search users or bots...')) + '">' +
+      '<label class="mt-2 flex items-center gap-2 text-xs text-textSecondary cursor-pointer select-none">' +
+      '<input type="checkbox" class="forward-picker-same-conversation accent-brand-light">' +
+      '<span>' + escapeForwardText(forwardSameConversationLabel()) + '</span>' +
+      '</label>' +
+      '</div>' +
+      '<div class="forward-picker-empty hidden px-5 py-8 text-center text-sm text-textSecondary">' + escapeForwardText(t('msgNoForwardTargets', 'No conversations to forward to')) + '</div>' +
       '<div class="flex-1 overflow-y-auto p-2 forward-picker-list"></div>' +
       '</div>';
     document.body.appendChild(modal);
@@ -274,7 +383,116 @@
     return modal;
   }
 
-  async function doForward(msg, targetConv) {
+  function getForwardTargets(convs, allowSameConversation) {
+    return (convs || []).filter(function (c) {
+      if (!(c.type === 'single' || c.type === 'group')) return false;
+      return allowSameConversation || String(c.id) !== String(window.activeChatId);
+    });
+  }
+
+  function getForwardAllowSameConversation() {
+    try {
+      return localStorage.getItem('ichat.forward.allowSameConversation') === 'true';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setForwardAllowSameConversation(value) {
+    try {
+      localStorage.setItem('ichat.forward.allowSameConversation', value ? 'true' : 'false');
+    } catch (e) {
+      // Ignore storage errors; the current modal state still works.
+    }
+  }
+
+  function forwardSameConversationLabel() {
+    if (window.currentLanguage === 'zh') return '允许转发到当前对话';
+    if (window.currentLanguage === 'zh-hant') return '允許轉寄到目前對話';
+    if (window.currentLanguage === 'ja') return '現在のチャットへの転送を許可';
+    return 'Allow forwarding to this chat';
+  }
+
+  function escapeForwardText(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function debounceForwardSearch(fn, delay) {
+    var timer = null;
+    return function () {
+      clearTimeout(timer);
+      timer = setTimeout(fn, delay);
+    };
+  }
+
+  async function searchForwardTargets(query) {
+    var data = await apiFetch('/contacts/search/?q=' + encodeURIComponent(query));
+    var activePeerId = null;
+    var activeConv = window.conversationsById && window.activeChatId
+      ? window.conversationsById[window.activeChatId]
+      : null;
+    if (activeConv && activeConv.type === 'single') {
+      activePeerId = activeConv.peer_id;
+    }
+    return (data.results || []).filter(function (user) {
+      return String(user.id) !== String(window.myUserId)
+        && String(user.id) !== String(activePeerId)
+        && (user.is_contact || user.user_type === 'bot' || user.user_type === 'agent');
+    });
+  }
+
+  async function createForwardConversation(target) {
+    var data = await apiFetch('/api/conversations/create/', {
+      method: 'POST',
+      body: JSON.stringify({ peer_id: target.peer_id || target.id })
+    });
+    if (typeof fetchConversations === 'function') {
+      await fetchConversations();
+    }
+    var conv = window.conversationsById && window.conversationsById[data.conversation_id];
+    if (!conv && window.conversations) {
+      conv = window.conversations.find(function (c) {
+        return String(c.id) === String(data.conversation_id);
+      });
+    }
+    if (!conv) {
+      throw new Error('Forward conversation was created but not loaded.');
+    }
+    return conv;
+  }
+
+  async function doForwardMany(items, targetConv) {
+    var ok = 0;
+    var failed = 0;
+    for (var i = 0; i < items.length; i++) {
+      try {
+        await doForward(items[i], targetConv, { silent: true });
+        ok += 1;
+      } catch (e) {
+        failed += 1;
+        console.error('Forward selected message failed:', e);
+      }
+    }
+    if (typeof fetchConversations === 'function') {
+      await fetchConversations();
+    }
+    if (typeof window.exitSelectMode === 'function') {
+      window.exitSelectMode();
+    }
+    if (failed) {
+      window.showToast(t('msgForwardFailed', 'Forward failed') + ' (' + ok + '/' + items.length + ')');
+    } else {
+      window.showToast(t('msgForwarded', 'Forwarded'));
+    }
+  }
+
+  async function doForward(msg, targetConv, options) {
+    options = options || {};
     var convId = window.activeChatId;
     var plaintext = msg.text || '';
     var sourceFileId = msg.file_id || (msg.file && msg.file.file_id) || null;
@@ -288,8 +506,8 @@
     try {
       var clientMsgId = 'fwd-' + Date.now() + '-' + Math.random().toString(16).slice(2);
       var payload = {
-        original_message_id: msg.id,
-        original_conversation_id: convId,
+        original_message_id: msg.isAiAssistant ? null : msg.id,
+        original_conversation_id: msg.isAiAssistant ? null : convId,
         client_message_id: clientMsgId,
         message_type: isFileForward ? (msg.message_type || (msg.file && msg.file.message_kind) || 'file') : 'text',
       };
@@ -411,17 +629,30 @@
       }
 
       await apiPost('/api/conversations/' + targetConv.id + '/messages/forward/', payload);
-      if (typeof fetchConversations === 'function') {
+      if (!options.silent && typeof fetchConversations === 'function') {
         await fetchConversations();
       }
-      window.showToast(t('msgForwarded', 'Forwarded'));
+      if (!options.silent) {
+        window.showToast(t('msgForwarded', 'Forwarded'));
+      }
+      return true;
     } catch (e) {
       console.error('Forward failed:', e);
+      if (options.silent) throw e;
       window.showToast(t('msgForwardFailed', 'Forward failed'));
+      return false;
     }
   }
 
   function deleteMessage(msg) {
+    if (msg && msg.isAiAssistant) {
+      if (typeof window.deleteAiMessage === 'function') {
+        window.deleteAiMessage(msg.id);
+        window.showToast(t('msgDeletedToast', 'Message deleted'));
+      }
+      return;
+    }
+
     var convId = window.activeChatId;
     if (!convId) return;
 
@@ -431,7 +662,7 @@
         msg.isDeleted = true;
         msg.text = t('msgDeleted', 'message deleted');
         msg.isSystem = true;
-        if (typeof window.renderMessages === 'function') window.renderMessages();
+        if (typeof window.patchMessageRowInPlace === 'function') window.patchMessageRowInPlace(msg);
         window.showToast(t('msgDeletedToast', 'Message deleted'));
       })
       .catch(function () {
@@ -450,7 +681,7 @@
           ? t('msgYouRecalled', 'You recalled a message')
           : t('msgRecalled', 'message recalled');
         msg.isSystem = true;
-        if (typeof window.renderMessages === 'function') window.renderMessages();
+        if (typeof window.patchMessageRowInPlace === 'function') window.patchMessageRowInPlace(msg);
         window.showToast(t('msgRecalledToast', 'Message recalled'));
       })
       .catch(function () {
@@ -459,10 +690,16 @@
   }
 
   function resendMessage(msg) {
-    // Remove the failed message and retry
+    // Remove the failed message from the array and its DOM row
     var msgs = window.messages || [];
     var idx = msgs.indexOf(msg);
     if (idx >= 0) msgs.splice(idx, 1);
+
+    var row = document.querySelector('.message-bubble-custom[data-message-id="' + msg.id + '"]');
+    if (row) {
+      var msgRow = row.closest('.message-row');
+      if (msgRow) msgRow.remove();
+    }
 
     // Fill textarea and send
     var textarea = document.getElementById('chat-input-textarea');
@@ -475,7 +712,6 @@
         window.sendMessage();
       }
     }
-    if (typeof window.renderMessages === 'function') window.renderMessages();
   }
 
   function selectMessage(msg) {
@@ -510,6 +746,30 @@
     var isSystem = msg.isSystem;
     var isRecalled = msg.isRecalled;
     var isFailed = msg.status === 'failed' || msg.client_status === 'failed';
+
+    if (msg.isAiAssistant) {
+      var aiItems = [
+        {
+          icon: 'copy',
+          label: t('msgCopy', 'Copy'),
+          onClick: function () { copyMessageText(msg); },
+        },
+        {
+          icon: 'corner-up-right',
+          label: t('msgForward', 'Forward'),
+          onClick: function () { forwardMessage(msg); },
+        },
+        { divider: true },
+        {
+          icon: 'trash-2',
+          label: t('msgDelete', 'Delete'),
+          danger: true,
+          onClick: function () { deleteMessage(msg); },
+        },
+      ];
+      window.ContextMenu.show(x, y, aiItems);
+      return;
+    }
 
     // System / recalled messages have very limited menu
     if (isSystem || isRecalled) {

@@ -23,7 +23,7 @@ iChat Pro Phase 1 聚焦端到端加密私聊、群聊、联系人和实时通�
 
 ## 2. 范围与非目标
 
-### 2.1 二期目标
+### 2.1 Phase 4 目标
 
 | 能力 | 目标 |
 | --- | --- |
@@ -451,6 +451,25 @@ class LlmProvider:
 
 为避免数据模型复杂化，首版也可以只展示“生成中”状态，完成后一次性推送完整回复。
 
+### 7.4 Phase 3 最小 LLM Assistant 边界与降级设计
+
+在 Phase 3 “产品化收口/最小 LLM 展示”中，为降低实现风险，对架构和功能进行如下精简约束：
+
+1. **独立生命周期（不作为 Bot 实体）**：AI Assistant 仅作为一个独立的交互式前端面板或独立接口，并不注册为数据库中的 `BotProfile`，不进入 `ConversationMember` 表，也不参与单聊或群聊会话。由此避免重构以 `User` 为主体的消息路由和外键约束体系（该问题的完整解决将延后至 Phase 4 统一建模）。
+2. **本地线程池与同步 Fallback 机制**：由于 Phase 3 的 AI 助手仅用于展示且在本地运行，后台任务处理不强依赖 Redis 和 Celery。本地默认使用 Python 内置的 `ThreadPoolExecutor` 线程池异步分发，或直接同步阻塞调用（结合 Mock Provider 应对测试环境），保障本地开发环境能够零依赖一键启动（`python manage.py runserver`），且不会因外部 API 超时或网络故障阻塞 HTTP 响应。所有真实 Provider 请求必须设置超时时间；超时、网络失败、限流和未配置 API Key 均应返回可理解错误或降级至 Mock，而不是影响主聊天界面。
+3. **隐私保护与数据边界明确**：用户界面应清晰标注隐私免责提示：“*当前 AI 助手服务通过外部大模型接口（Qwen）提供。只有当您在此专属对话框中主动输入并提交文本时，对应的数据才会被发送至云端，系统绝不会自动抓取、上传或分析您的 E2EE 私密聊天内容。*”
+4. **不写入正式消息流**：Phase 3 的 AI 回答仅显示在 AI Assistant 面板中，或作为用户可复制的草稿。系统不得自动代发 AI 内容，也不得把 AI 回复伪装成普通联系人、群成员或 Bot 消息。
+5. **不记录完整明文日志**：默认日志只记录请求状态、耗时、provider、错误码和 token 估算，不记录完整 prompt、answer、API Key、私钥、会话密钥或用户聊天明文。
+
+### 7.5 Phase 4 完整 LLM Bot 前置约束
+
+Phase 4 若要把 LLM 能力从独立 AI Assistant 升级为真正的 LLM Bot，必须先解决主体、认证、密钥信任和明文边界问题：
+
+1. **Bot 必须关联 User 主体**：现有 `ConversationMember.user_id`、`EncryptedMessage.sender_id` 和 `GroupMessage.sender_id` 均指向 `User`。因此 `BotProfile` 不应作为脱离 `User` 的独立消息主体，而应通过 `BotProfile.user = OneToOneField(User)` 关联一条 Bot 专用 User 记录，或在 User 侧提供 `is_bot` 标识。这样才能复用现有会话成员、消息发送、权限校验和 E2EE 密钥分发逻辑。
+2. **Bot Token 认证**：外部 Bot Gateway 连接 HTTP 或 WebSocket 时不能复用普通用户密码登录流程。`BotProfile` 应保存 `token_hash`、token 版本、失效时间和最近使用时间；Bot 使用 Bearer Token 接入，服务端只保存哈希，不保存明文 token。
+3. **E2EE Bot 明示风险**：当用户把 LLM Bot 加入私聊或群聊时，UI 必须明确提示：该 Bot 或其宿主 Gateway 会解密发送给它的消息，并可能继续发送给外部 LLM Provider。此类会话不能简单宣传为“服务器永不可见明文”的普通 E2EE 对话。
+4. **Bot 公钥信任状态**：Bot 作为 E2EE 成员时也必须有公钥指纹、版本号和信任状态。若 Bot key version 或 fingerprint 变化，客户端必须显示高风险警告，避免服务器静默替换 Bot 公钥后截获消息。
+
 ------
 
 ## 8. OpenClaw Agent 接入
@@ -528,7 +547,23 @@ GET  /internal/agents/{agent_id}/tasks/{task_id}
 }
 ```
 
-OpenClaw 返回：
+OpenClaw 接收任务后不应同步阻塞返回模型结果。正式协议推荐立即返回 accepted 状态：
+
+```json
+{
+  "task_id": "task_123",
+  "status": "accepted",
+  "callback_url": "/api/bots/tasks/task_123/callback/"
+}
+```
+
+当 OpenClaw 执行完成、失败或需要人工确认时，再调用 iChat Pro 的回调接口：
+
+```text
+POST /api/bots/tasks/{task_id}/callback/
+```
+
+回调示例：
 
 ```json
 {
@@ -539,6 +574,8 @@ OpenClaw 返回：
   "tool_calls": []
 }
 ```
+
+iChat Pro 接收到回调后保存任务状态，再通过 WebSocket 推送给前端。同步返回 `completed + reply` 仅允许作为本地 Mock 或单元测试便利路径，不作为正式 OpenClaw Adapter 协议。
 
 ### 8.5 工具调用安全
 
@@ -567,7 +604,7 @@ Agent 工具调用不能只依赖 Prompt 约束。必须使用确定性规则：
 
 OpenClaw Gateway 应：
 
-1. 独立进程或容器运行。
+1. 独立进程或容器运行。生产或正式演示环境优先使用 Docker / Podman 等容器隔离。
 2. 使用最小权限账号。
 3. 默认禁止访问宿主机完整文件系统。
 4. 默认禁止 Shell。
@@ -575,6 +612,18 @@ OpenClaw Gateway 应：
 6. 凭据通过环境变量或 Secret 管理，不进入聊天上下文。
 7. 每个 Agent 使用独立工作目录和工具白名单。
 8. 对技能安装进行审核和固定版本管理。
+
+容器化部署建议：
+
+1. 使用只读根文件系统，只有明确挂载的工作目录可写。
+2. 工作目录使用项目专用路径，不挂载用户主目录、SSH Key、浏览器配置、系统凭据目录。
+3. 使用网络白名单，只允许访问必要的 LLM Provider、知识库或内部 callback 地址。
+4. 禁止容器以 privileged 模式运行，禁用宿主 Docker Socket 挂载。
+5. 设置 CPU、内存、执行时长和并发上限，避免 Agent 任务耗尽宿主资源。
+6. 文件路径必须做规范化校验，拒绝 `../`、绝对路径和工作区外访问。
+7. 工具调用前后都写入审计日志，记录脱敏参数、风险级别、审批人和执行结果。
+
+如果未来允许 Python 代码执行或脚本工具，必须额外引入 WASM、微虚拟机、受限解释器或等价沙箱；不得在 Django Web 进程或普通宿主 Python 进程中直接执行不可信代码。
 
 ------
 
@@ -790,7 +839,53 @@ AgentAuditLog
 4. 完整敏感消息明文。
 5. 未脱敏的工具凭据。
 
-### 10.3 Channel
+### 10.3 Channel 与 Conversation 融合建模
+
+Phase 4 不建议把 Channel 设计为与会话列表完全独立的一组表。客户端左侧列表需要统一展示私聊、群聊和频道，并按最后消息时间、置顶、归档、未读数等状态排序。如果 Channel 完全独立，前端和 API 将被迫做跨表 UNION 或额外拼接。
+
+推荐做法：
+
+1. 将 `Conversation.type` 扩展为 `single / group / channel`。
+2. Channel 的订阅者、管理员和发布者仍通过 `ConversationMember` 表达，但根据角色限制只读、发布或管理权限。
+3. 频道最后消息时间、未读数、置顶、静音、归档和隐藏逻辑复用现有会话列表接口。
+4. Channel 元数据可以通过 `ChannelProfile` 或 `ConversationChannelMeta` 与 `Conversation` 一对一关联，而不是单独成为消息路由主体。
+5. 频道消息建议复用统一消息元数据结构，必要时增加 `channel_message` 扩展表保存发布状态、编辑状态和审核状态。
+
+建议结构：
+
+```text
+Conversation
+  id
+  type = channel
+  title
+  avatar
+  status
+  last_message_at
+  created_by_id
+```
+
+```text
+ConversationMember
+  conversation_id
+  user_id
+  role = subscriber | publisher | admin | owner
+  status
+  unread_count
+  muted_until
+  archived_at
+```
+
+```text
+ChannelProfile
+  conversation_id
+  slug
+  description
+  visibility
+  subscriber_count
+  publish_policy
+```
+
+以下独立 Channel 表结构仅作为历史草案参考，不作为 Phase 4 推荐落地模型：
 
 ```text
 Channel
@@ -1024,16 +1119,20 @@ LLM 和 Agent 必须将聊天内容视为不可信输入。防护措施：
 
 建议将二期拆成独立 Issue：
 
-| 编号建议 | 标题 |
-| --- | --- |
-| T33 | Design and implement Channel models and subscription APIs |
-| T34 | Add Bot identities, capabilities, and audit logs |
-| T35 | Implement command Bot workflow and Channel draft publishing |
-| T36 | Add provider-agnostic LLM Bot integration |
-| T37 | Add asynchronous Bot task processing and WebSocket status events |
-| T38 | Implement OpenClaw Agent Gateway adapter |
-| T39 | Add Agent tool approval, sandbox, and policy guard |
-| T40 | Evaluate local Electron Agent and encrypted Bot-member mode |
+| 编号建议 | 标题 | 说明 |
+| --- | --- | --- |
+| T33 | Design and implement Channel models and subscription APIs | 设计和实现 Channel 模型及订阅相关 API |
+| T34 | Add Bot identities, capabilities, and audit logs | 添加 Bot 身份、能力及审计日志支持 |
+| T35 | Implement command Bot workflow and Channel draft publishing | 实现命令 Bot 工作流及 Channel 草稿发布 |
+| T36 | Add provider-agnostic LLM Bot integration | 添加与具体模型厂商无关的通用 LLM Bot 接入层 |
+| T37 | Add asynchronous Bot task processing and WebSocket status events | 添加异步 Bot 任务处理及 WebSocket 状态事件推送 |
+| T38 | Implement OpenClaw Agent Gateway adapter | 实现对接 OpenClaw Agent 网关的适配器 |
+| T39 | Add Agent tool approval, sandbox, and policy guard | 添加 Agent 工具审批流、运行沙箱与安全策略策略守护 |
+| T40 | Evaluate local Electron Agent and encrypted Bot-member mode | 评估本地 Electron 运行 Agent 以及加密 Bot 会话成员模式 |
+| T41 | Design and implement unified Bot-User Actor Model | 设计 BotProfile 与 User 的 One-to-One 关联，避免 Bot 独立作为消息主体撞车现有外键体系（Phase 4） |
+| T42 | Integrate Channels into Conversation Model | 将 Channel 统一为 Conversation.type 的新枚举值，订阅关系使用 ConversationMember 表达，复用列表与排序（Phase 4） |
+| T43 | Design asynchronous callback protocol for Agent tools | 重构 Adapter 与 Gateway 的交互协议为 `accepted + task_id` 异步接收与 webhook / WebSocket 回调模式（Phase 4） |
+| T44 | Implement container-based sandboxing and network isolation for Agent tools | 设计 Docker 容器级别物理隔离、只读文件系统、网络白名单以及工具调用确定性校验策略，杜绝越权（Phase 4） |
 
 ------
 

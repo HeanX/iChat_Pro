@@ -378,32 +378,40 @@
   }
 
   async function unwrapFileKey(wrapped, fileId, holderId, senderId, metadata) {
-    if (!metadata) {
-      metadata = {
-        group_id: window.activeChatId || 0,
-        membership_version: wrapped.membership_version || window.activeMembershipVersion || 1,
-        sender_id: senderId,
-        receiver_id: holderId,
-        sender_key_version: wrapped.sender_key_version || 0,
-        receiver_key_version: wrapped.receiver_key_version || 0,
-      };
-    }
+    const candidateIds = [];
+    if (metadata && metadata.group_id) candidateIds.push(Number(metadata.group_id));
+    if (window.activeChatId) candidateIds.push(Number(window.activeChatId));
+
+    // Remove duplicates while preserving order, and filter to positive integers only
+    const uniqueIds = [...new Set(candidateIds)].filter(id => Number.isInteger(id) && id > 0);
+
+    console.log('[GroupE2EE.unwrapFileKey] Parameters:', {
+      fileId,
+      holderId,
+      senderId,
+      activeChatId: window.activeChatId,
+      wrappedSenderKeyVer: wrapped.sender_key_version,
+      wrappedReceiverKeyVer: wrapped.receiver_key_version,
+      hasMetadata: !!metadata,
+      candidateGroupIds: uniqueIds
+    });
 
     const senderKey = await fetchPublicKey(senderId, wrapped.sender_key_version || undefined);
     const local = currentRecord();
     const privateKey = await importPrivateKey(local.private_key);
 
-    const contextBytes = new TextEncoder().encode(groupContext(metadata));
-    const salt = await window.crypto.subtle.digest('SHA-256', contextBytes);
+    console.log('[GroupE2EE.unwrapFileKey] Key details:', {
+      localKeyVer: local.key_version,
+      localKeyFingerprint: local.key_fingerprint,
+      senderKeyVer: senderKey.key_version,
+      senderKeyFingerprint: senderKey.key_fingerprint
+    });
+
     const remotePublicKey = await importPublicKey(senderKey.identity_public_key);
     const sharedSecret = await window.crypto.subtle.deriveBits(
       { name: 'ECDH', public: remotePublicKey }, privateKey, 256
     );
     const hkdfKey = await window.crypto.subtle.importKey('raw', sharedSecret, 'HKDF', false, ['deriveKey']);
-    const wrapSessionKey = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(FILE_KEY_WRAP_HKDF_INFO) },
-      hkdfKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-    );
 
     const ciphertext = base64ToBytes(wrapped.encrypted_file_key);
     const nonce = base64ToBytes(wrapped.nonce);
@@ -413,14 +421,50 @@
     combined.set(authTag, ciphertext.length);
 
     const aadStr = 'ichat-file-key-wrap-v1:' + fileId + ':' + holderId;
+    console.log('[GroupE2EE.unwrapFileKey] AAD String:', aadStr);
     const aad = new TextEncoder().encode(aadStr);
 
-    return new Uint8Array(
-      await window.crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: nonce, tagLength: 128, additionalData: aad },
-        wrapSessionKey, combined
-      )
-    );
+    let decrypted = null;
+    let lastError = null;
+
+    for (const groupId of uniqueIds) {
+      try {
+        const testMetadata = {
+          group_id: groupId,
+          membership_version: wrapped.membership_version || (metadata && metadata.membership_version) || window.activeMembershipVersion || 1,
+          sender_id: senderId,
+          receiver_id: holderId,
+          sender_key_version: wrapped.sender_key_version || 0,
+          receiver_key_version: wrapped.receiver_key_version || 0,
+        };
+
+        const contextStr = groupContext(testMetadata);
+        const contextBytes = new TextEncoder().encode(contextStr);
+        const salt = await window.crypto.subtle.digest('SHA-256', contextBytes);
+
+        const wrapSessionKey = await window.crypto.subtle.deriveKey(
+          { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(FILE_KEY_WRAP_HKDF_INFO) },
+          hkdfKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+        );
+
+        decrypted = await window.crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: nonce, tagLength: 128, additionalData: aad },
+          wrapSessionKey, combined
+        );
+        console.log('[GroupE2EE.unwrapFileKey] Decrypted successfully using groupId = ' + groupId);
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn('[GroupE2EE.unwrapFileKey] Decryption failed for groupId = ' + groupId + '. Error:', err);
+      }
+    }
+
+    if (!decrypted) {
+      console.error('[GroupE2EE.unwrapFileKey] Decryption failed for all candidate group IDs.');
+      throw lastError || new Error('Decryption failed for all candidate group IDs');
+    }
+
+    return new Uint8Array(decrypted);
   }
 
   async function wrapFileKeyForSelf(fileKeyBytes, fileId, holderId) {

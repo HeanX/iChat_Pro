@@ -1,0 +1,138 @@
+<!-- ai_assistant_window.html - Dedicated AI Assistant View for Phase 3 -->
+<div class="flex-1 flex flex-col h-full min-w-0 relative">
+  
+  <!-- 1. Top Header Navigation (Centered pill using ai-header-normal styling) -->
+  <header id="ai-header-normal" class="select-none flex-shrink-0 z-10 w-full">
+    <div class="chat-header-bubble max-w-[820px] w-full">
+      <div class="chat-header-main">
+        <!-- Back Arrow for Mobile Viewports -->
+        <button onclick="backToSidebar()" class="chat-header-icon-btn md:hidden" title="Back to Chat List">
+          <i data-lucide="arrow-left" class="w-5.5 h-5.5"></i>
+        </button>
+
+        <!-- Profile Info (Clicking opens model details panel) -->
+        <div onclick="toggleAiRightPanel()" class="chat-header-profile cursor-pointer" title="Model Info">
+          <!-- Sparkles Icon Avatar with Blue-Purple Gradient -->
+          <div id="ai-header-avatar" class="w-10 h-10 rounded-full bg-gradient-to-tr from-brand-light to-purple-500 text-white flex items-center justify-center font-bold shadow-sm flex-shrink-0 overflow-hidden">
+            <i data-lucide="sparkles" class="w-5.5 h-5.5"></i>
+          </div>
+
+          <!-- Identity Name -->
+          <div class="chat-header-identity leading-tight">
+            <span id="ai-header-title" class="text-sm font-bold text-textMain">AI Assistant</span>
+            <div class="chat-header-subline flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-green-500"></span>
+              <span id="ai-header-model-status" class="text-xs text-textSecondary">qwen-plus • Online</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Side Actions -->
+      <div class="chat-header-actions">
+        <!-- AI Search Button -->
+        <button onclick="openAiSearch()" class="chat-header-icon-btn" title="Search AI Messages">
+          <i data-lucide="search" class="w-5 h-5"></i>
+        </button>
+
+        <!-- AI Info Button -->
+        <button onclick="toggleAiRightPanel()" class="chat-header-icon-btn" title="Model Info">
+          <i data-lucide="info" class="w-5 h-5"></i>
+        </button>
+
+        <!-- Three dots menu -->
+        <div class="relative">
+          <button id="ai-header-more-btn" onclick="toggleAiMoreMenu(event)" class="chat-header-icon-btn" title="More Operations">
+            <i data-lucide="more-vertical" class="w-5 h-5"></i>
+          </button>
+
+          <!-- AI More Operations Dropdown Menu -->
+          <div id="ai-header-more-dropdown" class="hidden absolute right-0 mt-1.5 w-[230px] bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[20px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
+            <!-- Clear History -->
+            <button onclick="clearAiChat(); toggleAiMoreMenu(event);" class="menu-item-custom danger">
+              <i data-lucide="trash-2"></i>
+              <span>清空聊天历史</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- AI Chat Search Overlay -->
+  <div id="ai-search-overlay" class="chat-search-overlay hidden" style="max-width: 820px; width: calc(100% - 44px);">
+    <div class="chat-search-bar">
+      <i data-lucide="search"></i>
+      <input id="ai-search-input" type="text" placeholder="搜索AI消息" autocomplete="off">
+      <button id="ai-search-prev" type="button" class="chat-search-nav hidden" title="上一个">
+        <i data-lucide="chevron-up"></i>
+      </button>
+      <button id="ai-search-next" type="button" class="chat-search-nav hidden" title="下一个">
+        <i data-lucide="chevron-down"></i>
+      </button>
+      <button id="ai-search-close" type="button" class="chat-search-close" title="关闭">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div id="ai-search-results" class="chat-search-results hidden"></div>
+  </div>
+
+  <!-- 2. Message History Area -->
+  <main id="ai-history-container" class="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar chat-bg-pattern flex flex-col space-y-4">
+    <!-- Default AI Greeting message -->
+    <div class="message-row message-row-peer" id="ai-greeting-bubble">
+      <!-- Standard sized message avatar matching other chat messages -->
+      <div id="ai-greeting-avatar" class="message-avatar bg-gradient-to-tr from-brand-light to-purple-500 text-white flex items-center justify-center font-bold text-xs">
+        AI
+      </div>
+      <div class="message-bubble-custom bubble-peer"><div class="message-text-content">Hello! I am your AI Assistant. I can help you summarize texts, polish message drafts, or answer general questions.<br><br>Please note that I will only process the text you explicitly type and send inside this chat window.</div><div class="message-meta-line"><span id="ai-greeting-time">--:--</span></div></div>
+    </div>
+  </main>
+
+  <!-- 3. Suggestion Prompts Row (Aligned with max-w 820px) -->
+  <div class="flex flex-wrap gap-2 px-6 py-1 select-none justify-center flex-shrink-0 max-w-[820px] w-full mx-auto" id="ai-suggestions-row">
+    <button onclick="aiUsePrompt('📝 请帮我总结以下文本：\n')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
+      <span>📝 总结文本</span>
+    </button>
+    <button onclick="aiUsePrompt('✍️ 请帮我润色以下消息草稿：\n')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
+      <span>✍️ 润色消息</span>
+    </button>
+    <button onclick="aiUsePrompt('❓ 我想向你提问关于：')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
+      <span>❓ 常见提问</span>
+    </button>
+  </div>
+
+  <!-- 4. Privacy Warning Banner (Aligned with max-w 820px using mx-auto) -->
+  <div class="mx-auto my-2 px-3.5 py-2.5 rounded-custom-md bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 text-[11px] text-amber-800 dark:text-amber-300 flex items-start space-x-2 select-none flex-shrink-0 max-w-[820px] w-full">
+    <i data-lucide="shield-alert" class="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0"></i>
+    <span><strong>数据安全与隐私边界说明</strong>：AI 助手不会自动读取、抓取或分析您的 E2EE 私密聊天内容。只有当您在此窗口主动输入并提交文本时，对应的明文数据才会通过安全通道发送给大模型处理。</span>
+  </div>
+
+  <!-- 5. Input Composition Area -->
+  <footer class="chat-footer select-none flex-shrink-0 z-10 w-full">
+    <div id="ai-input-wrapper" class="w-full flex flex-col items-center">
+      
+      <div class="chat-input-capsule telegram-composer">
+        <!-- Floating Prompt/Attachment Spacer Placeholder -->
+        <div class="p-2.5 text-textSecondary/50 flex-shrink-0 select-none">
+          <i data-lucide="sparkles" class="w-5.5 h-5.5 text-brand-light dark:text-brand-dark"></i>
+        </div>
+        
+        <!-- Auto-Growing Messaging Input Area -->
+        <div class="telegram-composer-field flex-1 bg-bgSearch border border-borderColor/50 rounded-custom-lg px-4 py-2 flex items-end space-x-2">
+          <textarea id="ai-input-textarea" rows="1" oninput="adjustTextareaHeight(this)"
+            class="flex-1 bg-transparent text-textMain placeholder-textSecondary/70 focus:outline-none resize-none max-h-[160px] text-sm py-1 font-sans custom-scrollbar"
+            placeholder="Ask AI Assistant..."></textarea>
+        </div>
+
+        <!-- AI Message Dispatcher Button -->
+        <button onclick="sendAiMessage()" id="ai-send-btn"
+          class="telegram-composer-send p-3 bg-brand-light dark:bg-brand-dark hover:opacity-95 text-white rounded-full shadow-md hover:scale-105 transition-all focus:outline-none flex items-center justify-center flex-shrink-0"
+          title="Send to AI">
+          <i data-lucide="send" class="w-5.5 h-5.5"></i>
+        </button>
+      </div>
+
+    </div>
+  </footer>
+</div>

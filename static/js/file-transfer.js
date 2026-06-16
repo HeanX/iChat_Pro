@@ -556,11 +556,21 @@
         // We expose a helper on the E2EE modules:
         let fileKeyBytes;
         if (typeof e2eeModule.unwrapFileKey === 'function') {
+            const unwrapMetadata = {
+                conversation_id: meta.conversation_id || 0,
+                group_id: meta.conversation_id || 0,
+                sender_id: (meta.encrypted_file_key && meta.encrypted_file_key.sender_id) || meta.owner_id || 0,
+                receiver_id: localUserId,
+                sender_key_version: (meta.encrypted_file_key && meta.encrypted_file_key.sender_key_version) || 0,
+                receiver_key_version: (meta.encrypted_file_key && meta.encrypted_file_key.receiver_key_version) || 0,
+                membership_version: (meta.encrypted_file_key && meta.encrypted_file_key.membership_version) || 0
+            };
             fileKeyBytes = await e2eeModule.unwrapFileKey(
                 meta.encrypted_file_key,
                 fileId,
                 localUserId,
-                (meta.encrypted_file_key && meta.encrypted_file_key.sender_id) || meta.owner_id || 0
+                (meta.encrypted_file_key && meta.encrypted_file_key.sender_id) || meta.owner_id || 0,
+                unwrapMetadata
             );
         } else {
             // Fallback: use the decryptText approach with session key
@@ -598,11 +608,21 @@
             throw new Error('File key unwrapping is not available.');
         }
 
+        const unwrapMetadata = {
+            conversation_id: meta.conversation_id || 0,
+            group_id: meta.conversation_id || 0,
+            sender_id: (meta.encrypted_file_key && meta.encrypted_file_key.sender_id) || meta.owner_id || 0,
+            receiver_id: window.myUserId,
+            sender_key_version: (meta.encrypted_file_key && meta.encrypted_file_key.sender_key_version) || 0,
+            receiver_key_version: (meta.encrypted_file_key && meta.encrypted_file_key.receiver_key_version) || 0,
+            membership_version: (meta.encrypted_file_key && meta.encrypted_file_key.membership_version) || 0
+        };
         const fileKeyBytes = await e2eeModule.unwrapFileKey(
             meta.encrypted_file_key,
             fileId,
             window.myUserId,
-            (meta.encrypted_file_key && meta.encrypted_file_key.sender_id) || meta.owner_id || 0
+            (meta.encrypted_file_key && meta.encrypted_file_key.sender_id) || meta.owner_id || 0,
+            unwrapMetadata
         );
         return { fileKeyBytes: fileKeyBytes, fileMeta: meta };
     }
@@ -813,6 +833,7 @@
             ? window.iChatGroupE2EE : window.iChatPrivateE2EE;
         const conv = window.conversationsById && window.conversationsById[session.conversationId];
         const captionText = session.caption || '';
+        const cardPlaintext = captionText || ('[' + (session.messageKind || 'file') + ']');
 
         // Build file keys for recipients
         const fileKeys = [];
@@ -843,7 +864,7 @@
                 throw new Error('Private E2EE module or peer information is missing.');
             }
             cardEncryption = await e2eeModule.encryptPrivateMessage({
-                plaintext: captionText,
+                plaintext: cardPlaintext,
                 conversationId: session.conversationId,
                 receiverId: receiverId,
             });
@@ -857,7 +878,7 @@
             }
             const memberIds = await window.fetchGroupMemberIds(session.conversationId);
             cardEncryption = await e2eeModule.encryptGroupMessage({
-                plaintext: captionText,
+                plaintext: cardPlaintext,
                 groupId: session.conversationId,
                 membershipVersion: conv.membership_version || window.activeMembershipVersion || 1,
                 memberIds: memberIds,

@@ -142,9 +142,17 @@
     <!-- 4. Message Input & Composition Area -->
     <footer class="chat-footer select-none flex-shrink-0 z-10 w-full">
       
-      <!-- Selection Mode Footer Banner -->
-      <div id="chat-input-select-mode-banner" class="hidden h-[54px] bg-bgSidebar border-t border-borderColor items-center justify-center text-textSecondary text-xs font-semibold select-none w-full">
-        <span data-i18n="select_mode_input_disabled">多选模式下输入已禁用</span>
+      <!-- Selection Mode Footer Actions -->
+      <div id="chat-input-select-mode-banner" class="chat-select-footer hidden select-none w-full">
+        <div class="chat-select-footer-bar">
+          <button type="button" id="select-mode-delete-btn" class="chat-select-action chat-select-action-danger" onclick="deleteSelectedMessages()" title="Delete selected">
+            <i data-lucide="trash-2"></i>
+          </button>
+          <div id="select-mode-footer-count" class="chat-select-count">已选择 0 条消息</div>
+          <button type="button" id="select-mode-forward-btn" class="chat-select-action" onclick="forwardSelectedMessages()" title="Forward selected">
+            <i data-lucide="forward"></i>
+          </button>
+        </div>
       </div>
 
       <div id="chat-input-normal-wrapper" class="w-full flex flex-col items-center">

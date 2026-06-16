@@ -12,7 +12,7 @@ from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F, Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.http.multipartparser import MultiPartParser, MultiPartParserError
@@ -21,7 +21,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET
 
 from accounts.models import BlockedUser, Contact, FriendRequest, UserPrivacySettings, UserStorageSettings
-from .consumers import ChatConsumer
+from .consumers import ChatConsumer, ClientPayloadError
 from .models import (
     Conversation,
     ConversationMember,
@@ -159,6 +159,17 @@ def _is_blocked_by(blocker, target):
     ).exists()
 
 
+def _user_type_for(user):
+    try:
+        return user.profile.user_type
+    except Exception:
+        return 'user'
+
+
+def _is_automated_account(user):
+    return _user_type_for(user) in {'agent', 'bot'}
+
+
 def _can_initiate_conversation(sender, receiver):
     """Check whether *sender* is allowed to start a private chat with *receiver*.
 
@@ -172,6 +183,11 @@ def _can_initiate_conversation(sender, receiver):
 
     # Contacts can always chat with each other
     if _are_contacts(sender, receiver):
+        return True, None
+
+    # Bots/agents are intentionally discoverable interaction targets. They do
+    # not require a mutual contact edge before a user can start a chat.
+    if _is_automated_account(receiver):
         return True, None
 
     # Non-contacts: check receiver's privacy settings
@@ -757,22 +773,117 @@ def unread_conversation_view(request, conversation_id):
 # T20: Message operations API
 # ---------------------------------------------------------------------------
 
+def _client_payload_error_response(error, status=400):
+    return JsonResponse({'error': error.code, 'detail': error.message}, status=status)
+
+
+def _normalize_forward_file_keys(file_keys_data, allowed_holder_ids):
+    if not isinstance(file_keys_data, list) or not file_keys_data:
+        return None, JsonResponse(
+            {'error': 'invalid_file_metadata', 'detail': 'file_keys is required for file forwarding.'},
+            status=400,
+        )
+
+    normalized = []
+    holder_ids = set()
+    for fk in file_keys_data:
+        if not isinstance(fk, dict):
+            return None, JsonResponse(
+                {'error': 'invalid_file_metadata', 'detail': 'Each file_key must be an object.'},
+                status=400,
+            )
+        try:
+            holder_id = int(fk.get('holder_id', 0))
+        except (TypeError, ValueError):
+            return None, JsonResponse(
+                {'error': 'invalid_file_metadata', 'detail': 'Each file_key must have a valid holder_id.'},
+                status=400,
+            )
+        if holder_id in holder_ids:
+            continue
+        holder_ids.add(holder_id)
+        if holder_id not in allowed_holder_ids:
+            return None, JsonResponse(
+                {'error': 'invalid_file_metadata', 'detail': 'file_keys may only target active members of the target conversation.'},
+                status=403,
+            )
+
+        encrypted_file_key = str(fk.get('encrypted_file_key', ''))
+        nonce = str(fk.get('nonce', ''))
+        auth_tag = str(fk.get('auth_tag', ''))
+        algorithm = str(fk.get('algorithm', 'AES-256-GCM'))
+        if not encrypted_file_key or not nonce or not auth_tag:
+            return None, JsonResponse(
+                {'error': 'invalid_file_metadata', 'detail': 'Each file_key requires encrypted_file_key, nonce, and auth_tag.'},
+                status=400,
+            )
+        if algorithm != 'AES-256-GCM':
+            return None, JsonResponse(
+                {'error': 'invalid_file_metadata', 'detail': f'Unsupported file key algorithm: {algorithm}.'},
+                status=400,
+            )
+
+        try:
+            sender_key_version = int(fk.get('sender_key_version', 0)) or None
+            receiver_key_version = int(fk.get('receiver_key_version', 0)) or None
+            membership_version = int(fk.get('membership_version', 0)) or None
+        except (TypeError, ValueError):
+            return None, JsonResponse(
+                {'error': 'invalid_file_metadata', 'detail': 'file_key key versions must be integers.'},
+                status=400,
+            )
+
+        normalized.append({
+            'holder_id': holder_id,
+            'encrypted_file_key': encrypted_file_key,
+            'nonce': nonce,
+            'auth_tag': auth_tag,
+            'algorithm': algorithm,
+            'sender_key_version': sender_key_version,
+            'receiver_key_version': receiver_key_version,
+            'membership_version': membership_version,
+        })
+
+    if holder_ids != allowed_holder_ids:
+        return None, JsonResponse(
+            {'error': 'invalid_file_metadata', 'detail': 'file_keys must cover every active member of the target conversation.'},
+            status=400,
+        )
+
+    return normalized, None
+
+
+def _save_forward_file_keys(forward_file, file_keys, sender):
+    for fk in file_keys:
+        EncryptedFileKey.objects.update_or_create(
+            file=forward_file,
+            holder_id=fk['holder_id'],
+            defaults={
+                'sender': sender,
+                'encrypted_file_key': fk['encrypted_file_key'],
+                'nonce': fk['nonce'],
+                'auth_tag': fk['auth_tag'],
+                'algorithm': fk['algorithm'],
+                'sender_key_version': fk['sender_key_version'],
+                'receiver_key_version': fk['receiver_key_version'],
+                'membership_version': fk['membership_version'],
+            },
+        )
+
+
 @login_required(login_url='login')
 @require_POST
 def forward_message_view(request, conversation_id):
-    """Forward an encrypted message to the target conversation.
-
-    The client decrypts the original and re-encrypts for the target.
-    The server only stores ciphertext (E2EE preserved).
-    Accepts the same payload as a normal send but includes metadata about
-    the original message for the UI.
-
-    Validation mirrors the WebSocket send paths (ChatConsumer) to ensure
-    the same security checks apply regardless of transport.
-    """
+    """Forward an encrypted message using the same validation as WebSocket sends."""
     data = _json_body(request)
     original_message_id = data.get('original_message_id')
     original_conversation_id = data.get('original_conversation_id')
+    if original_message_id not in (None, ''):
+        try:
+            original_message_id = int(original_message_id)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'invalid_payload', 'detail': 'original_message_id must be an integer.'}, status=400)
+
     forward_file = None
     file_id = data.get('file_id')
     if file_id:
@@ -803,53 +914,28 @@ def forward_message_view(request, conversation_id):
         if not source_exists:
             return JsonResponse({'error': 'Original message not found or not accessible.'}, status=404)
 
-    # Validate sender is an active member of the target conversation
     member = _get_active_member(conversation_id, request.user)
     if not member:
         return JsonResponse({'error': 'Target conversation not found or not a member.'}, status=404)
 
     conversation = member.conversation
-
-    # Ensure the conversation itself is active
     if conversation.status != Conversation.Status.ACTIVE:
         return JsonResponse({'error': 'Target conversation is not active.'}, status=400)
+    forwarded_reply_to_id = (
+        original_message_id
+        if original_message_id and str(original_conversation_id) != str(conversation.id)
+        else None
+    )
 
-    file_keys_data = data.get('file_keys', [])
-    if forward_file:
-        if not isinstance(file_keys_data, list) or not file_keys_data:
-            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'file_keys is required for file forwarding.'}, status=400)
-
-        holder_ids = set()
-        for fk in file_keys_data:
-            try:
-                holder_id = int(fk.get('holder_id', 0))
-            except (TypeError, ValueError):
-                return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'Each file_key must have a valid holder_id.'}, status=400)
-            if holder_id in holder_ids:
-                continue
-            holder_ids.add(holder_id)
-            EncryptedFileKey.objects.update_or_create(
-                file=forward_file,
-                holder_id=holder_id,
-                defaults={
-                    'sender': request.user,
-                    'encrypted_file_key': str(fk.get('encrypted_file_key', '')),
-                    'nonce': str(fk.get('nonce', '')),
-                    'auth_tag': str(fk.get('auth_tag', '')),
-                    'algorithm': str(fk.get('algorithm', 'AES-256-GCM')),
-                    'sender_key_version': int(fk.get('sender_key_version', 0)) or None,
-                    'receiver_key_version': int(fk.get('receiver_key_version', 0)) or None,
-                    'membership_version': int(fk.get('membership_version', 0)) or None,
-                },
-            )
-
-    # 鈹€鈹€ Private chat forwarding 鈹€鈹€
     if conversation.type == Conversation.Type.SINGLE:
         peer_id = data.get('peer_id')
         if not peer_id:
             return JsonResponse({'error': 'peer_id is required for private chat.'}, status=400)
+        try:
+            peer_id = int(peer_id)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'peer_id must be an integer.'}, status=400)
 
-        # Validate peer is an active member of this conversation
         active_members = ConversationMember.objects.filter(
             conversation=conversation,
             status=ConversationMember.Status.ACTIVE,
@@ -869,85 +955,112 @@ def forward_message_view(request, conversation_id):
         if _is_blocked_by(request.user, peer):
             return JsonResponse({'error': 'You have blocked this user. Unblock them first.'}, status=403)
 
-        # Validate required ciphertext fields
-        ciphertext = data.get('ciphertext', '')
-        nonce = data.get('nonce', '')
-        algorithm = data.get('algorithm', 'AES-256-GCM')
-        if not ciphertext or not nonce:
-            return JsonResponse({'error': 'ciphertext and nonce are required.'}, status=400)
-        if algorithm not in ('AES-256-GCM', 'AES-128-GCM', 'ChaCha20-Poly1305'):
-            return JsonResponse({'error': f'Unsupported algorithm: {algorithm}.'}, status=400)
+        payload = dict(data)
+        payload['conversation_id'] = conversation.id
+        payload['receiver_id'] = peer_id
+        if forwarded_reply_to_id:
+            payload['reply_to_message_id'] = forwarded_reply_to_id
+        try:
+            validated = ChatConsumer.validate_private_message(payload)
+        except ClientPayloadError as error:
+            return _client_payload_error_response(error)
+
+        file_keys = []
+        if forward_file:
+            file_keys, file_error = _normalize_forward_file_keys(
+                data.get('file_keys', []),
+                set(active_members.values_list('user_id', flat=True)),
+            )
+            if file_error:
+                return file_error
 
         try:
-            message = EncryptedMessage.objects.create(
-                conversation=conversation,
-                sender=request.user,
-                receiver_id=peer_id,
-                message_type=data.get('message_type', EncryptedMessage.MessageType.TEXT),
-                ciphertext=ciphertext,
-                nonce=nonce,
-                auth_tag=data.get('auth_tag', ''),
-                algorithm=algorithm,
-                sender_key_version=data.get('sender_key_version'),
-                receiver_key_version=data.get('receiver_key_version'),
-                client_message_id=data.get('client_message_id', ''),
-                reply_to_message_id=original_message_id,
-                file_id=forward_file,
-            )
-            conversation.last_message_id = EncryptedMessage.objects.filter(
-                conversation=conversation,
-            ).latest('created_at').pk
-            conversation.last_message_at = timezone.now()
-            conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
+            with transaction.atomic():
+                existing = EncryptedMessage.objects.filter(
+                    sender=request.user,
+                    client_message_id=validated['client_message_id'],
+                ).first()
+                if existing:
+                    return JsonResponse({
+                        'status': 'ok',
+                        'conversation_id': existing.conversation_id,
+                        'message_id': existing.pk,
+                    }, status=200)
 
-            # Increment unread count for the peer
-            ConversationMember.objects.filter(
-                conversation=conversation,
-                user_id=peer_id,
-                status=ConversationMember.Status.ACTIVE,
-            ).update(unread_count=F('unread_count') + 1)
+                if forward_file:
+                    _save_forward_file_keys(forward_file, file_keys, request.user)
 
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f'user_{peer_id}',
-                {
-                    'type': 'message.single.new',
-                    'data': (
-                        _serialize_file_private_message(message, _build_file_sub_object(forward_file, peer_id))
-                        if forward_file else ChatConsumer.serialize_private_message(message)
-                    ),
-                },
-            )
-            async_to_sync(channel_layer.group_send)(
-                f'user_{request.user.pk}',
-                {
-                    'type': 'message.single.new',
-                    'data': (
-                        _serialize_file_private_message(message, _build_file_sub_object(forward_file, request.user.pk))
-                        if forward_file else ChatConsumer.serialize_private_message(message)
-                    ),
-                },
-            )
+                try:
+                    message = EncryptedMessage.objects.create(
+                        conversation=conversation,
+                        sender=request.user,
+                        receiver_id=validated['receiver_id'],
+                        message_type=validated['message_type'],
+                        ciphertext=validated['ciphertext'],
+                        nonce=validated['nonce'],
+                        auth_tag=validated['auth_tag'],
+                        algorithm=validated['algorithm'],
+                        sender_key_version=validated['sender_key_version'],
+                        receiver_key_version=validated['receiver_key_version'],
+                        client_message_id=validated['client_message_id'],
+                        reply_to_message_id=forwarded_reply_to_id,
+                        file_id=forward_file,
+                    )
+                except IntegrityError:
+                    existing = EncryptedMessage.objects.get(
+                        sender=request.user,
+                        client_message_id=validated['client_message_id'],
+                    )
+                    return JsonResponse({
+                        'status': 'ok',
+                        'conversation_id': existing.conversation_id,
+                        'message_id': existing.pk,
+                    }, status=200)
 
-            return JsonResponse({
-                'status': 'ok',
-                'conversation_id': conversation.id,
-                'message_id': message.pk,
-            }, status=201)
+                conversation.last_message_id = message.pk
+                conversation.last_message_at = message.created_at
+                conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
+
+                ConversationMember.objects.filter(
+                    conversation=conversation,
+                    user_id=peer_id,
+                    status=ConversationMember.Status.ACTIVE,
+                ).update(unread_count=F('unread_count') + 1)
         except (ValueError, KeyError) as e:
             return JsonResponse({'error': f'Invalid payload: {e}'}, status=400)
 
-    # 鈹€鈹€ Group chat forwarding 鈹€鈹€
-    elif conversation.type == Conversation.Type.GROUP:
-        # Mute enforcement (mirrors WebSocket consumers.py:722-726)
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f'user_{peer_id}',
+            {
+                'type': 'message.single.new',
+                'data': (
+                    _serialize_file_private_message(message, _build_file_sub_object(forward_file, peer_id))
+                    if forward_file else ChatConsumer.serialize_private_message(message)
+                ),
+            },
+        )
+        async_to_sync(channel_layer.group_send)(
+            f'user_{request.user.pk}',
+            {
+                'type': 'message.single.new',
+                'data': (
+                    _serialize_file_private_message(message, _build_file_sub_object(forward_file, request.user.pk))
+                    if forward_file else ChatConsumer.serialize_private_message(message)
+                ),
+            },
+        )
+
+        return JsonResponse({
+            'status': 'ok',
+            'conversation_id': conversation.id,
+            'message_id': message.pk,
+        }, status=201)
+
+    if conversation.type == Conversation.Type.GROUP:
         if conversation.muted_until and conversation.muted_until > timezone.now():
             if member.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
                 return JsonResponse({'error': 'This group is muted.'}, status=403)
-
-        # Validate recipients match active members (mirrors consumers.py:728-732)
-        recipients = data.get('recipients', [])
-        if not recipients:
-            return JsonResponse({'error': 'recipients are required for group chat.'}, status=400)
 
         active_member_ids = set(
             ConversationMember.objects.filter(
@@ -955,50 +1068,94 @@ def forward_message_view(request, conversation_id):
                 status=ConversationMember.Status.ACTIVE,
             ).values_list('user_id', flat=True)
         )
-        recipient_user_ids = {r.get('receiver_id') for r in recipients if r.get('receiver_id')}
+
+        payload = dict(data)
+        payload['group_id'] = conversation.id
+        if forwarded_reply_to_id:
+            payload['reply_to_message_id'] = forwarded_reply_to_id
+        try:
+            validated = ChatConsumer.validate_group_message(payload)
+        except ClientPayloadError as error:
+            return _client_payload_error_response(error)
+
+        recipient_user_ids = {r['receiver_id'] for r in validated['recipients']}
         if recipient_user_ids != active_member_ids:
             return JsonResponse({'error': 'Recipients must match current active members.'}, status=400)
 
-        # Validate membership_version
-        client_membership_version = data.get('membership_version')
-        if client_membership_version is not None and client_membership_version != conversation.membership_version:
+        client_membership_version = validated['membership_version']
+        if client_membership_version != conversation.membership_version:
             return JsonResponse({'error': 'Membership version mismatch. Please refresh.'}, status=409)
 
-        group_message = GroupMessage.objects.create(
-            conversation=conversation,
-            sender=request.user,
-            message_type=data.get('message_type', GroupMessage.MessageType.TEXT),
-            client_message_id=data.get('client_message_id', ''),
-            reply_to_message_id=original_message_id,
-            file_id=forward_file,
-        )
-        recipient_objs = [
-            GroupMessageRecipient(
-                group_message=group_message,
-                receiver_id=r['receiver_id'],
-                ciphertext=r.get('ciphertext', ''),
-                nonce=r.get('nonce', ''),
-                auth_tag=r.get('auth_tag', ''),
-                algorithm=r.get('algorithm', 'AES-256-GCM'),
-                sender_key_version=r.get('sender_key_version'),
-                receiver_key_version=r.get('receiver_key_version'),
-                membership_version=client_membership_version,
+        file_keys = []
+        if forward_file:
+            file_keys, file_error = _normalize_forward_file_keys(
+                data.get('file_keys', []),
+                active_member_ids,
             )
-            for r in recipients
-        ]
-        GroupMessageRecipient.objects.bulk_create(recipient_objs)
+            if file_error:
+                return file_error
 
-        active_members = ConversationMember.objects.filter(
-            conversation=conversation,
-            status=ConversationMember.Status.ACTIVE,
-        )
-        active_members.exclude(user=request.user).update(
-            unread_count=F('unread_count') + 1,
-        )
+        with transaction.atomic():
+            existing = GroupMessage.objects.filter(
+                sender=request.user,
+                client_message_id=validated['client_message_id'],
+            ).first()
+            if existing:
+                return JsonResponse({
+                    'status': 'ok',
+                    'conversation_id': existing.conversation_id,
+                    'message_id': existing.pk,
+                }, status=200)
 
-        conversation.last_message_id = group_message.pk
-        conversation.last_message_at = group_message.created_at
-        conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
+            if forward_file:
+                _save_forward_file_keys(forward_file, file_keys, request.user)
+
+            try:
+                group_message = GroupMessage.objects.create(
+                    conversation=conversation,
+                    sender=request.user,
+                    message_type=validated['message_type'],
+                    client_message_id=validated['client_message_id'],
+                    reply_to_message_id=forwarded_reply_to_id,
+                    file_id=forward_file,
+                )
+            except IntegrityError:
+                existing = GroupMessage.objects.get(
+                    sender=request.user,
+                    client_message_id=validated['client_message_id'],
+                )
+                return JsonResponse({
+                    'status': 'ok',
+                    'conversation_id': existing.conversation_id,
+                    'message_id': existing.pk,
+                }, status=200)
+
+            recipient_objs = [
+                GroupMessageRecipient(
+                    group_message=group_message,
+                    receiver_id=r['receiver_id'],
+                    ciphertext=r['ciphertext'],
+                    nonce=r['nonce'],
+                    auth_tag=r['auth_tag'],
+                    algorithm=validated['algorithm'],
+                    sender_key_version=validated['sender_key_version'],
+                    receiver_key_version=r['receiver_key_version'],
+                    membership_version=client_membership_version,
+                )
+                for r in validated['recipients']
+            ]
+            GroupMessageRecipient.objects.bulk_create(recipient_objs)
+
+            ConversationMember.objects.filter(
+                conversation=conversation,
+                status=ConversationMember.Status.ACTIVE,
+            ).exclude(user=request.user).update(
+                unread_count=F('unread_count') + 1,
+            )
+
+            conversation.last_message_id = group_message.pk
+            conversation.last_message_at = group_message.created_at
+            conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
 
         channel_layer = get_channel_layer()
         for recipient_data in ChatConsumer._build_recipients_payload(group_message, conversation):
@@ -2925,10 +3082,7 @@ def _multipart_payload(request):
 
 
 def _get_encrypted_file_or_error(file_id, user):
-    """Fetch EncryptedFile and verify *user* has an EncryptedFileKey for it.
-
-    Returns (file, error_response).  Exactly one is not None.
-    """
+    """Fetch EncryptedFile and verify the user owns it or has its file key."""
     try:
         ef = EncryptedFile.objects.select_related('conversation').get(pk=file_id)
     except EncryptedFile.DoesNotExist:
@@ -2941,15 +3095,10 @@ def _get_encrypted_file_or_error(file_id, user):
     if ef.owner_id == user.pk:
         return ef, None
 
-    # Others must have a file-key record
-    has_key = EncryptedFileKey.objects.filter(file=ef, holder=user).exists()
-    if has_key:
-        # Also verify they are still an active conversation member
-        if ConversationMember.objects.filter(
-            conversation=ef.conversation, user=user,
-            status=ConversationMember.Status.ACTIVE,
-        ).exists():
-            return ef, None
+    # Others must have a file-key record. Forwarded files retain their original
+    # EncryptedFile.conversation, so access cannot depend on that conversation.
+    if EncryptedFileKey.objects.filter(file=ef, holder=user).exists():
+        return ef, None
 
     return None, JsonResponse({'error': 'file_forbidden'}, status=403)
 
@@ -3822,3 +3971,93 @@ def cancel_upload_view(request, upload_id):
         'upload_id': ef.upload_id,
         'status': 'cancelled',
     })
+
+
+# ── Phase 3: AI Assistant Chat API ──────────────────────────────────────────
+
+@login_required(login_url='login')
+def ai_chat_view(request):
+    import json
+    import logging
+    from django.http import JsonResponse, StreamingHttpResponse
+    from .llm import get_llm_provider
+
+    logger = logging.getLogger(__name__)
+
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        user_message = data.get('message', '').strip()
+        history = data.get('history', [])
+        raw_model_config = data.get('model_config') or {}
+        stream_requested = bool(data.get('stream'))
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    if not user_message:
+        return JsonResponse({'error': 'Message content cannot be empty.'}, status=400)
+
+    model_config = {}
+    if isinstance(raw_model_config, dict):
+        model_config = {
+            'endpoint': str(raw_model_config.get('endpoint') or '').strip(),
+            'api_key': str(raw_model_config.get('api_key') or '').strip(),
+            'model': str(raw_model_config.get('model') or '').strip(),
+        }
+    configured_model = model_config.get('model') or 'local-mock-llm'
+    system_prompt = (
+        "You are AI Assistant inside iChat Pro.\n"
+        f"The configured model id for this session is: {configured_model}.\n"
+        "If the user asks what model you are, answer with this configured model id. "
+        "Do not claim to be another product, IDE assistant, application, or model identity.\n"
+        "Be concise, helpful, and transparent that this is the model id configured in iChat Pro."
+    )
+
+    # Format history (role: user/assistant, content: text)
+    formatted_messages = []
+    for turn in history[-10:]:
+        role = turn.get('role')
+        content = turn.get('content')
+        if role in ('user', 'assistant') and content:
+            formatted_messages.append({
+                "role": role,
+                "content": content
+            })
+
+    formatted_messages.append({
+        "role": "user",
+        "content": user_message
+    })
+
+    try:
+        provider = get_llm_provider(model_config=model_config)
+        if stream_requested:
+            def event_stream():
+                try:
+                    for chunk in provider.stream(
+                        messages=formatted_messages,
+                        system=system_prompt
+                    ):
+                        if not chunk:
+                            continue
+                        yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+                except Exception as e:
+                    logger.exception("AI assistant streaming generation failed:")
+                    yield f"data: {json.dumps({'error': 'AI assistant service failed.', 'detail': str(e)}, ensure_ascii=False)}\n\n"
+
+            response = StreamingHttpResponse(event_stream(), content_type='text/event-stream; charset=utf-8')
+            response['Cache-Control'] = 'no-cache'
+            response['X-Accel-Buffering'] = 'no'
+            return response
+
+        response_text = provider.complete(
+            messages=formatted_messages,
+            system=system_prompt
+        )
+        return JsonResponse({'response': response_text})
+    except Exception as e:
+        logger.exception("AI assistant generation failed:")
+        return JsonResponse({'error': 'AI assistant service failed.', 'detail': str(e)}, status=500)

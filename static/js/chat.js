@@ -6,6 +6,8 @@
 let conversations = [];          // Array of conversation objects from GET /api/conversations/
 let conversationsById = {};      // ID → conversation lookup map
 let activeChatId = null;
+let activeSpecialChatId = null;
+let activeAiAssistantId = 'ai-assistant';
 let currentLanguage = localStorage.getItem('ichat_lang') || (function() {
   try { return JSON.parse(localStorage.getItem('ichat_sessions') || '{}').uiLang; } catch(e) { return null; }
 })() || 'en';
@@ -383,6 +385,41 @@ function canDecryptMessagePayload(payload, conversationType) {
   return required.every(isPositiveIntegerValue);
 }
 
+function getMessageTypeLabel(messageType) {
+  const labels = {
+    image: { zh: "\u56fe\u7247", en: "Image" },
+    sticker: { zh: "\u8868\u60c5", en: "Sticker" },
+    file: { zh: "\u6587\u4ef6", en: "File" },
+    text: { zh: "\u6d88\u606f", en: "Message" }
+  };
+  const label = labels[messageType] || labels.text;
+  return currentLanguage === "zh" ? label.zh : label.en;
+}
+
+function getMessageTypePlaceholder(messageType) {
+  return "[" + getMessageTypeLabel(messageType) + "]";
+}
+
+function isDecryptFailureText(text) {
+  const value = String(text || "").trim();
+  return /^\[(Cannot decrypt|\u65e0\u6cd5\u89e3\u5bc6)[\s:：]/i.test(value);
+}
+
+function getMessageReplyPreviewText(msg) {
+  if (!msg) return "";
+  const text = getSearchableMessageText(msg).replace(/\s+/g, " ").trim();
+  const messageType = msg.message_type || (msg.isFile || msg.file || msg.file_id ? "file" : "text");
+  const placeholderTexts = ["[image]", "[file]", "[sticker]", "[Image]", "[File]", "[Sticker]"];
+  if (text && !isDecryptFailureText(text) && placeholderTexts.indexOf(text) === -1) {
+    return text;
+  }
+  if (msg.isFile || msg.file || msg.file_id || ["image", "file", "sticker"].indexOf(messageType) !== -1) {
+    return getMessageTypePlaceholder(messageType);
+  }
+  return text && !isDecryptFailureText(text) ? text : getMessageTypeLabel("text");
+}
+window.getMessageReplyPreviewText = getMessageReplyPreviewText;
+
 async function encryptPrivateMessageWithTrustRetry({ text, conv }) {
   try {
     return await window.iChatPrivateE2EE.encryptPrivateMessage({
@@ -453,6 +490,9 @@ function renderChatList() {
   const chatListContainer = document.getElementById("sidebar-chat-list");
   if (!chatListContainer) return;
   chatListContainer.innerHTML = "";
+  getAiAssistantSessions().forEach(function(session) {
+    appendChatItemToSidebar(getAiConversationListItem(session.id));
+  });
   conversations.forEach(conv => {
     appendChatItemToSidebar(conv);
   });
@@ -508,7 +548,6 @@ function appendChatItemToSidebar(conv) {
   wrapper.id = `chat-item-wrapper-${conv.id}`;
   wrapper.className = "w-full";
 
-  const lastMsgText = conv.last_message_preview || '';
   const lastMsgTime = conv.last_message_at ? formatClockTime(new Date(conv.last_message_at)) : '';
   const unreadCount = Number(conv.unread || 0);
   const safeId = encodeURIComponent(String(conv.id));
@@ -519,16 +558,19 @@ function appendChatItemToSidebar(conv) {
   const safeUnread = escapeHtml(unreadCount);
   const safeAvatarColor = /^#[0-9a-fA-F]{6}$/.test(conv.avatar_color || '') ? conv.avatar_color : '#5c6bc0';
   var avatarInner = conv.avatar_url
-    ? `<img src="${escapeHtml(conv.avatar_url)}" class="w-full h-full object-cover rounded-full">`
+    ? `<img src="${escapeHtml(conv.avatar_url)}" class="${conv.avatar_fit === 'contain' ? 'ai-model-logo-img' : 'w-full h-full object-cover rounded-full'}">`
     : safeInitials;
-  var avatarBgStyle = conv.avatar_url ? 'background-color: transparent' : `background-color: ${safeAvatarColor}`;
+  var avatarBgStyle = conv.avatar_url
+    ? (conv.avatar_fit === 'contain' ? 'background-color: #ffffff' : 'background-color: transparent')
+    : `background-color: ${safeAvatarColor}`;
+  var avatarExtraClass = conv.avatar_fit === 'contain' ? ' ai-model-avatar flex items-center justify-center' : '';
 
   wrapper.innerHTML = `
-    <button id="chat-item-${safeId}" onclick="selectChat('${safeId}')"
-      class="chat-item-btn telegram-chat-item w-full text-left focus:outline-none relative group select-none">
+    <button id="chat-item-${safeId}" onclick="${conv.is_ai_assistant ? `openAiAssistant('${safeId}')` : `selectChat('${safeId}')`}"
+      class="chat-item-btn telegram-chat-item w-full text-left focus:outline-none relative group select-none ${conv.is_ai_assistant && activeSpecialChatId === conv.id ? 'active' : ''}">
 
       <div class="telegram-chat-avatar-wrap">
-        <div class="telegram-chat-avatar" style="${avatarBgStyle}; overflow: hidden;">
+        <div class="telegram-chat-avatar${avatarExtraClass}" style="${avatarBgStyle}; overflow: hidden;">
           ${avatarInner}
         </div>
       </div>
@@ -537,6 +579,7 @@ function appendChatItemToSidebar(conv) {
         <div class="telegram-chat-topline">
           <h3 class="telegram-chat-title">
             <span>${safeName}</span>
+            ${conv.is_ai_assistant ? `<span class="user-role-badge badge-agent">${currentLanguage === 'zh' ? '智能助理' : 'Assistant'}</span>` : ''}
             ${conv.peer_user_type === 'agent' ? `<span class="user-role-badge badge-agent">${currentLanguage === 'zh' ? '智能代理' : 'Agent'}</span>` : ''}
             ${conv.peer_user_type === 'bot' ? `<span class="user-role-badge badge-bot">${currentLanguage === 'zh' ? '机器人' : 'Bot'}</span>` : ''}
             ${conv.is_secure ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark inline-block flex-shrink-0" title="End-to-End Encrypted" data-i18n-title="e2ee_badge"></i>' : ''}
@@ -566,6 +609,10 @@ function appendChatItemToSidebar(conv) {
     btn.addEventListener('contextmenu', function(e) {
       e.preventDefault();
       e.stopPropagation();
+      if (conv.is_ai_assistant) {
+        showAiAssistantConversationMenu(e, conv);
+        return;
+      }
       if (typeof ConversationActions !== 'undefined' && ConversationActions.showMenu) {
         ConversationActions.showMenu(e, conv);
       }
@@ -665,7 +712,7 @@ async function fetchConversations() {
           const isFileMsg = msg.file_id || (msg.file && msg.file.file_id);
           if (msg.message_type === 'system') {
             plaintext = msg.ciphertext;
-          } else if (isFileMsg && !msg.ciphertext) {
+          } else if (isFileMsg && !canDecryptMessagePayload(msg, conv.type)) {
             plaintext = '[' + (msg.message_type || 'file') + ']';
           } else if (!canDecryptMessagePayload(msg, conv.type)) {
             plaintext = 'Encrypted message';
@@ -744,7 +791,7 @@ async function fetchMessages(conversationId, page = 1) {
         const isFileMsg = msg.file_id || (msg.file && msg.file.file_id);
         if (msg.message_type === 'system') {
           plaintext = msg.ciphertext || '';
-        } else if (isFileMsg && !msg.ciphertext) {
+        } else if (isFileMsg && !canDecryptMessagePayload(msg, conv.type)) {
           plaintext = '[' + (msg.message_type || 'file') + ']';
         } else if (!canDecryptMessagePayload(msg, conv.type)) {
           plaintext = decryptFailureLabel({ code: 'invalid_metadata' });
@@ -795,9 +842,10 @@ async function fetchMessages(conversationId, page = 1) {
         });
       } catch (decryptErr) {
         console.warn(`Failed to decrypt message ${msg.id}:`, decryptErr);
+        const isFileMsg = msg.file_id || (msg.file && msg.file.file_id);
         decrypted.push({
           id: msg.id,
-          text: decryptFailureLabel(decryptErr),
+          text: isFileMsg ? ('[' + (msg.message_type || 'file') + ']') : decryptFailureLabel(decryptErr),
           created_at: msg.created_at,
           time: formatClockTime(new Date(msg.created_at)),
           isSelf: msg.sender_id === myUserId,
@@ -807,8 +855,8 @@ async function fetchMessages(conversationId, page = 1) {
           sender_avatar_color: msg.sender_avatar_color,
           sender_avatar_url: msg.sender_avatar_url,
           status: msg.status,
-          decryptError: true,
-          isFile: msg.file_id || (msg.file && msg.file.file_id),
+          decryptError: !isFileMsg,
+          isFile: isFileMsg,
           file: msg.file || null,
           message_type: msg.message_type || 'text',
           file_id: msg.file_id || (msg.file ? msg.file.file_id : null),
@@ -1173,7 +1221,7 @@ async function handlePrivateMessageReceived(data) {
   let decryptError = null;
 
   try {
-    if (isFileMsg && !payload.ciphertext) {
+    if (isFileMsg && !canDecryptMessagePayload(payload, 'single')) {
       plaintext = '[' + (payload.message_type || 'file') + ']';
     } else if (window.iChatPrivateE2EE) {
       plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
@@ -1192,8 +1240,12 @@ async function handlePrivateMessageReceived(data) {
     }
   } catch (err) {
     console.error('Failed to decrypt incoming message:', err);
-    plaintext = decryptFailureLabel(err);
-    decryptError = err;
+    if (isFileMsg) {
+      plaintext = '[' + (payload.message_type || 'file') + ']';
+    } else {
+      plaintext = decryptFailureLabel(err);
+      decryptError = err;
+    }
   }
 
   const newMsg = {
@@ -1229,7 +1281,7 @@ async function handlePrivateMessageReceived(data) {
 
   if (activeChatId === convId) {
     messages.push(newMsg);
-    renderMessages();
+    appendMessageElement(newMsg);
     scrollToBottom();
     // Send delivery receipt
     if (wsClient) {
@@ -1264,7 +1316,7 @@ async function handleGroupMessageReceived(data) {
 
   try {
     let plaintext;
-    if (isFileMsg && !payload.ciphertext) {
+    if (isFileMsg && !canDecryptMessagePayload(payload, 'group')) {
       plaintext = '[' + (payload.message_type || 'file') + ']';
     } else if (window.iChatGroupE2EE) {
       plaintext = await window.iChatGroupE2EE.decryptGroupMessage({
@@ -1304,7 +1356,7 @@ async function handleGroupMessageReceived(data) {
 
     if (activeChatId === convId) {
       messages.push(newMsg);
-      renderMessages();
+      appendMessageElement(newMsg);
       scrollToBottom();
     } else {
       if (conv) {
@@ -1329,7 +1381,7 @@ function handleMessageStatusUpdate(data) {
   const msg = messages.find(m => m.id === payload.message_id);
   if (msg) {
     msg.status = payload.status;
-    renderMessages();
+    patchMessageStatusInPlace(msg);
   }
 }
 
@@ -1342,7 +1394,7 @@ function handleMessageRecalled(data) {
     msg.text = payload.sender_id === myUserId
       ? (currentLanguage === 'zh' ? '你撤回了一条消息' : 'You recalled a message')
       : (currentLanguage === 'zh' ? '消息已被撤回' : 'message recalled');
-    renderMessages();
+    patchMessageRowInPlace(msg);
   }
 }
 
@@ -1354,7 +1406,7 @@ function handleMessageDeleted(data) {
     msg.isDeleted = true;
     msg.isSystem = true;
     msg.text = currentLanguage === 'zh' ? '消息已删除' : 'message deleted';
-    renderMessages();
+    patchMessageRowInPlace(msg);
   }
 }
 
@@ -1364,9 +1416,23 @@ function handleMessageAccepted(data) {
   if (!tempId) return;
   const msg = messages.find(m => m.id === tempId);
   if (msg) {
+    var oldId = msg.id;
     msg.id = payload.message_id;
     msg.status = payload.status || 'sent';
-    renderMessages();
+
+    // Update data-message-id on the bubble before patching status
+    var bubble = document.querySelector('.message-bubble-custom[data-message-id="' + oldId + '"]');
+    if (bubble) {
+      bubble.setAttribute('data-message-id', msg.id);
+      // Also update the selection checkbox id if present
+      var checkbox = document.getElementById('msg-select-check-' + oldId);
+      if (checkbox) checkbox.id = 'msg-select-check-' + msg.id;
+    }
+
+    // Sync selectedMessageIds in case the user entered select mode while sending
+    var selIdx = selectedMessageIds.indexOf(oldId);
+    if (selIdx >= 0) selectedMessageIds[selIdx] = msg.id;
+    patchMessageStatusInPlace(msg);
   }
 }
 
@@ -1722,6 +1788,7 @@ function handleProfileUpdatedEvent(data) {
 async function selectChat(chatId) {
   saveActiveConversationDraftFromInput();
   closeChatSearch();
+  activeSpecialChatId = null;
   activeChatId = parseInt(chatId);
   const conv = conversationsById[activeChatId];
   if (!conv) return;
@@ -1802,6 +1869,8 @@ async function selectChat(chatId) {
   document.getElementById("active-chat-window").classList.remove("hidden");
   const emptyState = document.getElementById("empty-state-window");
   if (emptyState) emptyState.classList.add("hidden");
+  const aiWindow = document.getElementById("ai-assistant-window");
+  if (aiWindow) aiWindow.classList.add("hidden");
 
   // Mobile layout
   if (window.innerWidth < 768) {
@@ -1929,6 +1998,24 @@ async function updateDetailsPanelRich(conv) {
 
   setDetailsText("right-panel-title", getConversationDetailTitle(kind));
 
+  // Restore any AI details panel modifications
+  setDetailsHidden("right-panel-username-row", false);
+  setDetailsHidden("right-panel-bio-row", false);
+  setDetailsHidden("right-panel-notify-row", false);
+  setDetailsHidden("right-panel-action-media", false);
+  setDetailsHidden("right-panel-action-files", false);
+  setDetailsHidden("right-panel-qr-btn", kind === "group");
+  setDetailsHidden("right-panel-ai-settings-card", true);
+
+  const verifyFpBtn = document.querySelector("#right-panel-fingerprint-wrapper .chat-details-verify-btn");
+  if (verifyFpBtn) verifyFpBtn.classList.remove("hidden");
+
+  const encTitle = document.querySelector("#right-panel-encryption-card .chat-details-section-title");
+  if (encTitle) encTitle.textContent = currentLanguage === 'zh' ? '加密详情' : 'Encryption Details';
+
+  const fpLabel = document.querySelector("#right-panel-fingerprint-wrapper span");
+  if (fpLabel) fpLabel.textContent = currentLanguage === 'zh' ? '加密指纹' : 'Cryptographic Fingerprint';
+
   if (avatar) {
     if (conv.avatar_url) {
       avatar.innerHTML = `<img src="${escapeHtml(conv.avatar_url)}" class="w-full h-full object-cover rounded-full">`;
@@ -2039,6 +2126,151 @@ function renderMessages() {
   });
   if (isChatSearchOpen()) {
     runChatSearch(false);
+  }
+}
+
+/**
+ * Incrementally append a single new message to the message history container.
+ *
+ * Unlike renderMessages() this does NOT clear the container — it only creates
+ * one new DOM node and appends it.  When the new message is consecutive with
+ * the previous one (same sender), the previous row is patched in-place so its
+ * avatar/group styling is updated without touching its content (avoiding image
+ * reloads for file/image messages).
+ */
+function appendMessageElement(newMsg) {
+  const container = document.getElementById("message-history-container");
+  if (!container) return;
+
+  if (newMsg.created_at) {
+    newMsg.time = formatClockTime(new Date(newMsg.created_at));
+  }
+
+  const conv = conversationsById[activeChatId];
+  const idx = messages.indexOf(newMsg);
+  if (idx < 0) return;
+
+  // Recompute group-meta for every message so getMessageGroupMetaNew sees the
+  // correct neighbours.  We only need the meta for the new message and the
+  // previous one, but the helper reads index ± 1.
+  const gm = getMessageGroupMetaNew(messages, idx, conv);
+
+  // If the new message is consecutive with the previous one, patch the
+  // previous row in-place so it no longer looks like "last in group".
+  if (gm.isConsecutive) {
+    const prevRow = container.lastElementChild;
+    if (prevRow) {
+      prevRow.classList.remove("message-row-group-last");
+      // Replace the avatar with a spacer on peer messages
+      const prevMsg = messages[idx - 1];
+      if (prevMsg && !prevMsg.isSelf && !prevMsg.isSystem) {
+        const prevAvatar = prevRow.querySelector(".message-avatar");
+        if (prevAvatar) {
+          const spacer = document.createElement("div");
+          spacer.className = "message-avatar-spacer";
+          spacer.setAttribute("aria-hidden", "true");
+          prevAvatar.replaceWith(spacer);
+        }
+      }
+    }
+  }
+
+  const row = createMessageBubbleElementNew(newMsg, gm, conv);
+  container.appendChild(row);
+
+  // Trigger image preview for file/image messages
+  const fileId = newMsg.file_id || (newMsg.file && newMsg.file.file_id);
+  if (fileId) {
+    applyImagePreviewToBubble(row, fileId, conv ? conv.type : null);
+  }
+
+  // Initialise Lucide icons inside the new row
+  if (window.lucide && window.lucide.createIcons) {
+    lucide.createIcons({ nodes: row.querySelectorAll("[data-lucide]") });
+  }
+
+  if (isChatSearchOpen()) {
+    runChatSearch(false);
+  }
+}
+
+/**
+ * Patch the status icon of a single self-sent message in-place.
+ *
+ * Avoids a full renderMessages() cycle so existing images / file previews
+ * in other bubbles are not reloaded.
+ */
+function patchMessageStatusInPlace(msg) {
+  var bubble = document.querySelector('.message-bubble-custom[data-message-id="' + msg.id + '"]');
+  if (!bubble) return;
+
+  // File/image bubbles use .file-image-meta; text & regular file bubbles use .message-meta-line
+  var metaLine = bubble.querySelector('.message-meta-line, .file-image-meta');
+  if (!metaLine) return;
+
+  // Remove any existing status icon (may be a Lucide-rendered SVG)
+  var oldIcon = metaLine.querySelector('.msg-status-icon, .msg-status-sending, .msg-status-read, .msg-status-failed');
+  if (oldIcon) oldIcon.remove();
+
+  // Parse the shared HTML helper to get a new icon element
+  var tmp = document.createElement('div');
+  tmp.innerHTML = renderStatusIconHtml(msg);
+  var newIcon = tmp.firstElementChild;
+  if (!newIcon) return;
+
+  metaLine.appendChild(newIcon);
+
+  if (window.lucide && window.lucide.createIcons) {
+    lucide.createIcons({ nodes: [newIcon] });
+  }
+}
+
+/**
+ * Replace a single message row in-place (used for recall / delete).
+ *
+ * Still isolated to one row — it will not cause other images to reload.
+ */
+/**
+ * Replace a single message row in-place AND re-render its immediate neighbours.
+ *
+ * Recall / delete turn a message into a system row which changes the sender-key
+ * chain, so the previous and next rows may need their group-meta recalculated
+ * (avatar visibility, "last-in-group" / "first-in-group" classes, etc.).
+ */
+function patchMessageRowInPlace(msg) {
+  var container = document.getElementById("message-history-container");
+  if (!container) return;
+
+  var conv = conversationsById[activeChatId];
+  var idx = messages.indexOf(msg);
+  if (idx < 0) return;
+
+  var allRows = container.querySelectorAll(':scope > .message-row');
+  var start = Math.max(0, idx - 1);
+  var end = Math.min(messages.length - 1, idx + 1);
+
+  for (var i = start; i <= end; i++) {
+    var neighbor = messages[i];
+    var oldRow = allRows[i];
+    if (!oldRow) continue;
+
+    var gm = getMessageGroupMetaNew(messages, i, conv);
+    var newRow = createMessageBubbleElementNew(neighbor, gm, conv);
+    oldRow.replaceWith(newRow);
+
+    var fileId = neighbor.file_id || (neighbor.file && neighbor.file.file_id);
+    if (fileId) {
+      applyImagePreviewToBubble(newRow, fileId, conv ? conv.type : null);
+    }
+  }
+
+  // Initialise any new Lucide icons in the replaced rows
+  if (window.lucide && window.lucide.createIcons) {
+    lucide.createIcons({
+      nodes: container.querySelectorAll(
+        '.message-row:nth-child(n+' + (start + 1) + '):nth-child(-n+' + (end + 1) + ') [data-lucide]'
+      ),
+    });
   }
 }
 
@@ -2368,10 +2600,77 @@ function renderInlineMarkdown(text) {
   return html;
 }
 
+function renderCodeBlockMarkdown(code, language) {
+  var safeLanguage = String(language || "").trim().replace(/[^a-z0-9_+.#-]/gi, "");
+  var languageAttr = safeLanguage ? ' data-language="' + escapeHtml(safeLanguage) + '"' : "";
+  return '<pre class="message-code-block"><code' + languageAttr + '>' + escapeHtml(code).replace(/\n$/, "") + '</code></pre>';
+}
+
+function splitMarkdownTableRow(line) {
+  var value = String(line || "").trim();
+  if (value.startsWith("|")) value = value.slice(1);
+  if (value.endsWith("|")) value = value.slice(0, -1);
+  return value.split("|").map(function(cell) {
+    return cell.trim();
+  });
+}
+
+function isMarkdownTableSeparator(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(String(line || ""));
+}
+
+function renderMarkdownTable(headerLine, separatorLine, bodyLines) {
+  var headers = splitMarkdownTableRow(headerLine);
+  var alignments = splitMarkdownTableRow(separatorLine).map(function(cell) {
+    if (/^:-+:$/.test(cell)) return "center";
+    if (/-+:$/.test(cell)) return "right";
+    return "";
+  });
+  var rows = bodyLines.map(splitMarkdownTableRow);
+  var html = '<div class="message-table-wrap"><table class="message-markdown-table"><thead><tr>';
+  headers.forEach(function(header, index) {
+    var alignAttr = alignments[index] ? ' style="text-align: ' + alignments[index] + '"' : "";
+    html += '<th' + alignAttr + '>' + renderInlineMarkdown(header) + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+  rows.forEach(function(row) {
+    html += '<tr>';
+    headers.forEach(function(_, index) {
+      var alignAttr = alignments[index] ? ' style="text-align: ' + alignments[index] + '"' : "";
+      html += '<td' + alignAttr + '>' + renderInlineMarkdown(row[index] || "") + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function renderMarkdownList(items, ordered) {
+  var tag = ordered ? "ol" : "ul";
+  return '<' + tag + ' class="message-markdown-list">' + items.map(function(item) {
+    return '<li>' + renderInlineMarkdown(item) + '</li>';
+  }).join("") + '</' + tag + '>';
+}
+
+function renderToolBlockMarkdown(kind, lines) {
+  var isResponse = kind === "response";
+  var title = isResponse
+    ? (currentLanguage === "zh" ? "工具结果" : "Tool result")
+    : (currentLanguage === "zh" ? "工具调用" : "Tool call");
+  var language = isResponse ? "json" : "xml";
+  return '<details class="message-tool-block"><summary>' + escapeHtml(title) + '</summary>'
+    + renderCodeBlockMarkdown(lines.join("\n"), language)
+    + '</details>';
+}
+
 function renderMessageMarkdown(text) {
   var lines = String(text || "").split(/\r?\n/);
   var html = "";
   var paragraph = [];
+  var codeFence = null;
+  var codeLines = [];
+  var toolBlock = null;
+  var toolLines = [];
 
   function flushParagraph() {
     if (!paragraph.length) return;
@@ -2379,18 +2678,113 @@ function renderMessageMarkdown(text) {
     paragraph = [];
   }
 
-  lines.forEach(function(line) {
+  function flushCodeBlock() {
+    if (codeFence === null) return;
+    html += renderCodeBlockMarkdown(codeLines.join("\n"), codeFence);
+    codeFence = null;
+    codeLines = [];
+  }
+
+  function flushToolBlock() {
+    if (toolBlock === null) return;
+    html += renderToolBlockMarkdown(toolBlock, toolLines);
+    toolBlock = null;
+    toolLines = [];
+  }
+
+  for (var i = 0; i < lines.length; i += 1) {
+    var line = lines[i];
+    var fenceMatch = line.match(/^\s*```([a-z0-9_+.#-]*)\s*$/i);
+    if (fenceMatch) {
+      if (codeFence !== null) {
+        flushCodeBlock();
+      } else {
+        flushParagraph();
+        codeFence = fenceMatch[1] || "";
+        codeLines = [];
+      }
+      continue;
+    }
+    if (codeFence !== null) {
+      codeLines.push(line);
+      continue;
+    }
+
+    if (toolBlock !== null) {
+      var closeTag = toolBlock === "response" ? "</function_response>" : "</function_calls>";
+      if (line.trim() === closeTag) {
+        flushToolBlock();
+      } else {
+        toolLines.push(line);
+      }
+      continue;
+    }
+
+    if (line.trim() === "<function_calls>" || line.trim() === "<function_response>") {
+      flushParagraph();
+      toolBlock = line.trim() === "<function_response>" ? "response" : "call";
+      toolLines = [];
+      continue;
+    }
+
+    if (line.indexOf("|") !== -1 && i + 1 < lines.length && isMarkdownTableSeparator(lines[i + 1])) {
+      flushParagraph();
+      var bodyLines = [];
+      i += 2;
+      while (i < lines.length && lines[i].indexOf("|") !== -1 && lines[i].trim() !== "") {
+        bodyLines.push(lines[i]);
+        i += 1;
+      }
+      i -= 1;
+      html += renderMarkdownTable(line, lines[i - bodyLines.length], bodyLines);
+      continue;
+    }
+
+    var headingMatch = line.match(/^(#{1,4})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      html += '<h' + headingMatch[1].length + '>' + renderInlineMarkdown(headingMatch[2]) + '</h' + headingMatch[1].length + '>';
+      continue;
+    }
+
+    if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) {
+      flushParagraph();
+      html += '<hr class="message-markdown-rule">';
+      continue;
+    }
+
+    var listMatch = line.match(/^\s*([-*+])\s+(.+)$/);
+    var orderedMatch = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (listMatch || orderedMatch) {
+      flushParagraph();
+      var ordered = Boolean(orderedMatch);
+      var items = [];
+      while (i < lines.length) {
+        var current = lines[i];
+        var currentMatch = ordered
+          ? current.match(/^\s*\d+[.)]\s+(.+)$/)
+          : current.match(/^\s*[-*+]\s+(.+)$/);
+        if (!currentMatch) break;
+        items.push(currentMatch[1]);
+        i += 1;
+      }
+      i -= 1;
+      html += renderMarkdownList(items, ordered);
+      continue;
+    }
     if (/^\s*&gt;/.test(escapeHtml(line))) {
       flushParagraph();
       html += '<blockquote>' + renderInlineMarkdown(line.replace(/^\s*>\s?/, "")) + '</blockquote>';
-      return;
+      continue;
     }
     if (line.trim() === "") {
       flushParagraph();
-      return;
+      continue;
     }
     paragraph.push(line);
-  });
+  }
+  flushCodeBlock();
+  flushToolBlock();
   flushParagraph();
   return html || "<p></p>";
 }
@@ -2420,7 +2814,7 @@ function getReplySenderName(replyMsg, conv) {
 
 function getReplyPreviewHtml(replyMsg) {
   if (!replyMsg) return "";
-  const text = getSearchableMessageText(replyMsg).replace(/\s+/g, " ").trim();
+  const text = getMessageReplyPreviewText(replyMsg);
   const preview = text.length > 120 ? text.slice(0, 120) + "..." : text;
   return renderInlineMarkdown(preview || (currentLanguage === "zh" ? "消息" : "Message"));
 }
@@ -2619,7 +3013,7 @@ async function sendMessage() {
     reply_to: replyInfo ? replyInfo.id : null,
   };
   messages.push(tempMsg);
-  renderMessages();
+  appendMessageElement(tempMsg);
   scrollToBottom();
   clearConversationDraft(conv.id);
   updateSidebarPreview(conv, text, time);
@@ -2683,8 +3077,7 @@ async function sendMessage() {
     logToCryptoConsole("[Send Error] " + err.message);
     window.showToast(err.message || "Send failed.");
     const idx = messages.findIndex(m => m.id === clientMsgId);
-    if (idx >= 0) messages[idx].status = "failed";
-    renderMessages();
+    if (idx >= 0) { messages[idx].status = "failed"; patchMessageStatusInPlace(messages[idx]); }
   }
 }
 
@@ -3365,16 +3758,26 @@ function ensureImagePreviewViewer() {
     });
   }
 
+  var previewStage = viewer.querySelector('.image-preview-stage');
+  if (previewStage) {
+    previewStage.addEventListener('wheel', handleImageViewerWheel, { passive: false });
+  }
+
+  var previewImage = viewer.querySelector('.image-preview-full');
+  if (previewImage) {
+    previewImage.setAttribute('draggable', 'false');
+    previewImage.addEventListener('pointerdown', startImageViewerPan);
+    previewImage.addEventListener('dragstart', function (event) {
+      event.preventDefault();
+    });
+  }
+
   document.addEventListener('keydown', function (event) {
     if (!activeImageViewer) return;
     if (event.key === 'Escape') closeImagePreviewViewer();
     if (event.key === '+' || event.key === '=') bumpActiveImageViewerScale(0.2);
     if (event.key === '-' || event.key === '_') bumpActiveImageViewerScale(-0.2);
     if (event.key === 'r' || event.key === 'R') rotateActiveImageViewer();
-  });
-
-  window.addEventListener('resize', function () {
-    if (activeImageViewer) updateImageViewerViewport(viewer);
   });
 
   return viewer;
@@ -3385,29 +3788,73 @@ function updateImageViewerTransform() {
   var viewer = document.getElementById('image-preview-viewer');
   var image = viewer && viewer.querySelector('.image-preview-full');
   if (!image) return;
-  image.style.transform = 'rotate(' + activeImageViewer.rotation + 'deg) scale(' + activeImageViewer.scale + ')';
+  var offsetX = Number(activeImageViewer.offsetX) || 0;
+  var offsetY = Number(activeImageViewer.offsetY) || 0;
+  image.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) rotate(' + activeImageViewer.rotation + 'deg) scale(' + activeImageViewer.scale + ')';
   viewer.classList.toggle('is-zoomed', activeImageViewer.scale > 1);
+  viewer.classList.toggle('is-panning', Boolean(activeImageViewer.isPanning));
   var zoomRange = viewer.querySelector('[data-image-viewer-zoom-range]');
   if (zoomRange && document.activeElement !== zoomRange) {
     zoomRange.value = String(activeImageViewer.scale);
   }
 }
 
-function updateImageViewerViewport(viewer) {
-  if (!viewer) return;
-  var chatWindow = document.getElementById('chat-window-container');
-  var rect = chatWindow && !chatWindow.classList.contains('hidden')
-    ? chatWindow.getBoundingClientRect()
-    : null;
-  if (rect && rect.width > 0) {
-    viewer.style.setProperty('--image-viewer-left', rect.left + 'px');
-    viewer.style.setProperty('--image-viewer-width', rect.width + 'px');
-    viewer.style.setProperty('--image-viewer-center-x', (rect.left + rect.width / 2) + 'px');
-  } else {
-    viewer.style.setProperty('--image-viewer-left', '0px');
-    viewer.style.setProperty('--image-viewer-width', '100vw');
-    viewer.style.setProperty('--image-viewer-center-x', '50vw');
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function startImageViewerPan(event) {
+  if (!activeImageViewer || event.button > 0) return;
+  var image = event.currentTarget;
+  event.preventDefault();
+  activeImageViewer.isPanning = true;
+  activeImageViewer.panStartX = event.clientX;
+  activeImageViewer.panStartY = event.clientY;
+  activeImageViewer.panOriginX = Number(activeImageViewer.offsetX) || 0;
+  activeImageViewer.panOriginY = Number(activeImageViewer.offsetY) || 0;
+  if (image.setPointerCapture) {
+    image.setPointerCapture(event.pointerId);
   }
+  image.addEventListener('pointermove', moveImageViewerPan);
+  image.addEventListener('pointerup', stopImageViewerPan);
+  image.addEventListener('pointercancel', stopImageViewerPan);
+  updateImageViewerTransform();
+}
+
+function moveImageViewerPan(event) {
+  if (!activeImageViewer || !activeImageViewer.isPanning) return;
+  event.preventDefault();
+  activeImageViewer.offsetX = activeImageViewer.panOriginX + event.clientX - activeImageViewer.panStartX;
+  activeImageViewer.offsetY = activeImageViewer.panOriginY + event.clientY - activeImageViewer.panStartY;
+  updateImageViewerTransform();
+}
+
+function stopImageViewerPan(event) {
+  var image = event.currentTarget;
+  if (activeImageViewer) {
+    activeImageViewer.isPanning = false;
+    activeImageViewer.panStartX = 0;
+    activeImageViewer.panStartY = 0;
+    activeImageViewer.panOriginX = 0;
+    activeImageViewer.panOriginY = 0;
+  }
+  if (image && image.hasPointerCapture && image.hasPointerCapture(event.pointerId)) {
+    image.releasePointerCapture(event.pointerId);
+  }
+  if (image) {
+    image.removeEventListener('pointermove', moveImageViewerPan);
+    image.removeEventListener('pointerup', stopImageViewerPan);
+    image.removeEventListener('pointercancel', stopImageViewerPan);
+  }
+  updateImageViewerTransform();
+}
+
+function handleImageViewerWheel(event) {
+  if (!activeImageViewer) return;
+  if (event.target.closest('.image-preview-toolbar, .image-preview-zoom-panel')) return;
+  event.preventDefault();
+  var factor = Math.pow(1.0015, -event.deltaY);
+  setActiveImageViewerScale(activeImageViewer.scale * factor);
 }
 
 function imageViewerFilename() {
@@ -3429,11 +3876,13 @@ function openImagePreviewViewer(payload) {
     message: payload.message || null,
     rotation: 0,
     scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+    isPanning: false,
   };
   image.src = payload.url;
   if (zoomPanel) zoomPanel.classList.add('hidden');
   if (zoomRange) zoomRange.value = '1';
-  updateImageViewerViewport(viewer);
   viewer.classList.remove('hidden');
   document.body.classList.add('image-preview-open');
   updateImageViewerTransform();
@@ -3444,7 +3893,10 @@ function openImagePreviewViewer(payload) {
 
 function closeImagePreviewViewer() {
   var viewer = document.getElementById('image-preview-viewer');
-  if (viewer) viewer.classList.add('hidden');
+  if (viewer) {
+    viewer.classList.add('hidden');
+    viewer.classList.remove('is-panning');
+  }
   document.body.classList.remove('image-preview-open');
   activeImageViewer = null;
 }
@@ -3481,6 +3933,10 @@ function toggleImageViewerZoomPanel() {
 function setActiveImageViewerScale(scale) {
   if (!activeImageViewer) return;
   activeImageViewer.scale = Math.min(3, Math.max(1, Number(scale) || 1));
+  if (activeImageViewer.scale === 1) {
+    activeImageViewer.offsetX = 0;
+    activeImageViewer.offsetY = 0;
+  }
   updateImageViewerTransform();
 }
 
@@ -3512,6 +3968,41 @@ async function shareActiveImageViewer() {
     console.error('Image share failed:', err);
     window.showToast && window.showToast('Share failed.');
   }
+}
+
+/**
+ * Return the HTML for a message status icon (<i data-lucide="…">).
+ * Used by both text and file bubble renderers so the DOM is consistent,
+ * and by patchMessageStatusInPlace() for in-place updates.
+ */
+function renderStatusIconHtml(msg) {
+  var iconName = 'check';
+  var iconClass = 'msg-status-icon';
+  var tooltip = '';
+  var extraClass = '';
+
+  if (msg.status === 'sending') {
+    iconName = 'clock';
+    iconClass += ' msg-status-sending';
+    tooltip = currentLanguage === 'zh' ? '发送中...' : 'Sending...';
+  } else if (msg.status === 'sent') {
+    iconName = 'check';
+    tooltip = currentLanguage === 'zh' ? '已发送' : 'Sent';
+  } else if (msg.status === 'delivered') {
+    iconName = 'check-check';
+    tooltip = currentLanguage === 'zh' ? '已送达' : 'Delivered';
+  } else if (msg.status === 'read') {
+    iconName = 'check-check';
+    iconClass += ' msg-status-read';
+    extraClass = 'text-brand-light dark:text-brand-dark';
+    tooltip = currentLanguage === 'zh' ? '已读' : 'Read';
+  } else if (msg.status === 'failed' || msg.client_status === 'failed') {
+    iconName = 'alert-circle';
+    iconClass += ' msg-status-failed';
+    tooltip = currentLanguage === 'zh' ? '发送失败' : 'Failed to send';
+  }
+
+  return '<i data-lucide="' + iconName + '" class="w-3.5 h-3.5 ' + iconClass + (extraClass ? ' ' + extraClass : '') + '" title="' + tooltip + '"></i>';
 }
 
 function renderFileMessageBubble(div, msg, conv, groupMeta) {
@@ -3570,6 +4061,7 @@ function renderFileMessageBubble(div, msg, conv, groupMeta) {
       '<div class="file-image-meta">' +
         '<span>' + escapeHtml(fileSizeText) + '</span>' +
         '<span>' + messageTime + '</span>' +
+        (msg.isSelf ? renderStatusIconHtml(msg) : '') +
       '</div>' +
       '</div>';
     setTimeout(function () {
@@ -3593,7 +4085,7 @@ function renderFileMessageBubble(div, msg, conv, groupMeta) {
       '</div>' +
       '<div class="file-bubble-preview hidden"></div>' +
       captionHtml +
-      '<div class="message-meta-line"><span>' + messageTime + '</span></div>' +
+      '<div class="message-meta-line"><span>' + messageTime + '</span>' + (msg.isSelf ? renderStatusIconHtml(msg) : '') + '</div>' +
       '</div>';
   }
 
@@ -3721,36 +4213,14 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
   if (msg.isSelf) {
     div.className += " message-row-self";
     if (isSelectingMessages) div.className += " message-row-selecting";
-    var statusIcon = "check";
-    var statusIconClass = "msg-status-icon";
-    var statusTooltip = "";
-    if (msg.status === "sending") {
-      statusIcon = "clock";
-      statusIconClass += " msg-status-sending";
-      statusTooltip = currentLanguage === 'zh' ? '发送中...' : 'Sending...';
-    } else if (msg.status === "sent") {
-      statusIcon = "check";
-      statusTooltip = currentLanguage === 'zh' ? '已发送' : 'Sent';
-    } else if (msg.status === "delivered") {
-      statusIcon = "check-check";
-      statusTooltip = currentLanguage === 'zh' ? '已送达' : 'Delivered';
-    } else if (msg.status === "read") {
-      statusIcon = "check-check";
-      statusIconClass += " msg-status-read";
-      statusTooltip = currentLanguage === 'zh' ? '已读' : 'Read';
-    } else if (msg.status === "failed" || msg.client_status === "failed") {
-      statusIcon = "alert-circle";
-      statusIconClass += " msg-status-failed";
-      statusTooltip = currentLanguage === 'zh' ? '发送失败' : 'Failed to send';
-    }
-    var statusClass = msg.status === "read" ? "text-brand-light dark:text-brand-dark" : "";
+    var statusIconHtml = renderStatusIconHtml(msg);
     div.innerHTML = checkboxHtml
       + '<div class="message-bubble-custom bubble-self" data-message-id="' + msg.id + '">'
       + replyQuoteHtml
       + '<div class="message-text-content">' + messageText + '</div>'
       + '<div class="message-meta-line">'
       + '<span>' + messageTime + '</span>'
-      + '<i data-lucide="' + statusIcon + '" class="w-3.5 h-3.5 ' + statusIconClass + ' ' + statusClass + '" title="' + statusTooltip + '"></i>'
+      + statusIconHtml
       + '</div></div>';
   } else {
     div.className += " message-row-peer";
@@ -4004,6 +4474,14 @@ function setupEventListeners() {
         moreBtn.classList.remove("bg-bgSearch", "text-textMain");
       }
     }
+    // AI More menu
+    const aiMoreDropdown = document.getElementById("ai-header-more-dropdown");
+    const aiMoreBtn = document.getElementById("ai-header-more-btn");
+    if (aiMoreDropdown && !aiMoreDropdown.classList.contains("hidden")) {
+      if (aiMoreBtn && !aiMoreBtn.contains(e.target) && !aiMoreDropdown.contains(e.target)) {
+        aiMoreDropdown.classList.add("hidden");
+      }
+    }
     // 2. Main menu
     const mainDropdown = document.getElementById("main-menu-dropdown");
     const mainBtn = document.getElementById("drawer-btn");
@@ -4202,6 +4680,69 @@ function setupEventListeners() {
     searchSidebarInput.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') {
         clearSearchSidebar();
+      }
+    });
+  }
+
+  // AI Assistant Search & Action Hooks
+  const aiSearchInput = document.getElementById("ai-search-input");
+  const aiSearchClose = document.getElementById("ai-search-close");
+  const aiSearchPrev = document.getElementById("ai-search-prev");
+  const aiSearchNext = document.getElementById("ai-search-next");
+  const aiSearchResultsEl = document.getElementById("ai-search-results");
+  if (aiSearchInput) {
+    aiSearchInput.addEventListener("input", () => runAiSearch(false));
+    aiSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeAiSearch();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        activateAiSearchResult(aiSearchIndex < 0 ? 0 : aiSearchIndex + (e.shiftKey ? -1 : 1));
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        activateAiSearchResult(aiSearchIndex < 0 ? 0 : aiSearchIndex + 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        activateAiSearchResult(aiSearchIndex < 0 ? aiSearchResults.length - 1 : aiSearchIndex - 1);
+      }
+    });
+  }
+  if (aiSearchClose) {
+    aiSearchClose.addEventListener("click", (e) => {
+      e.preventDefault();
+      closeAiSearch();
+    });
+  }
+  if (aiSearchPrev) {
+    aiSearchPrev.addEventListener("click", (e) => {
+      e.preventDefault();
+      activateAiSearchResult(aiSearchIndex < 0 ? aiSearchResults.length - 1 : aiSearchIndex - 1);
+    });
+  }
+  if (aiSearchNext) {
+    aiSearchNext.addEventListener("click", (e) => {
+      e.preventDefault();
+      activateAiSearchResult(aiSearchIndex < 0 ? 0 : aiSearchIndex + 1);
+    });
+  }
+  if (aiSearchResultsEl) {
+    aiSearchResultsEl.addEventListener("click", (e) => {
+      const item = e.target.closest(".chat-search-result-item");
+      if (!item) return;
+      activateAiSearchResult(Number(item.dataset.searchIndex || 0));
+    });
+  }
+
+  // Right Details Panel Search Button Hook
+  const rightPanelSearchBtn = document.getElementById("right-panel-action-search");
+  if (rightPanelSearchBtn) {
+    rightPanelSearchBtn.addEventListener("click", () => {
+      const aiWindow = document.getElementById("ai-assistant-window");
+      if (aiWindow && !aiWindow.classList.contains("hidden")) {
+        openAiSearch();
+      } else {
+        openChatSearch();
       }
     });
   }
@@ -6985,13 +7526,13 @@ window.triggerSelectMessagesAction = function(e) {
   isSelectingMessages = true;
   selectedMessageIds = [];
   
-  // Toggle selection headers
+  // Keep the normal chat header visible; selection controls live in the footer.
   const headerNormal = document.getElementById("chat-header-normal");
   const headerSelect = document.getElementById("chat-header-select-mode");
   if (headerNormal && headerSelect) {
-    headerNormal.classList.add("hidden");
-    headerSelect.classList.remove("hidden");
-    headerSelect.classList.add("flex");
+    headerNormal.classList.remove("hidden");
+    headerSelect.classList.add("hidden");
+    headerSelect.classList.remove("flex");
   }
   
   // Toggle input footer
@@ -7032,13 +7573,20 @@ window.exitSelectMode = function() {
 };
 
 window.updateSelectModeCount = function() {
+  const count = selectedMessageIds.length;
+  const text = currentLanguage === 'zh'
+    ? `已选择 ${count} 条消息`
+    : `Selected ${count} messages`;
   const countEl = document.getElementById("select-mode-count");
   if (countEl) {
-    const text = currentLanguage === 'zh' 
-      ? `已选择 ${selectedMessageIds.length} 条消息`
-      : `Selected ${selectedMessageIds.length} messages`;
     countEl.textContent = text;
   }
+  const footerCountEl = document.getElementById("select-mode-footer-count");
+  if (footerCountEl) footerCountEl.textContent = text;
+  const deleteBtn = document.getElementById("select-mode-delete-btn");
+  const forwardBtn = document.getElementById("select-mode-forward-btn");
+  if (deleteBtn) deleteBtn.disabled = count === 0;
+  if (forwardBtn) forwardBtn.disabled = count === 0;
 };
 
 window.toggleMessageSelection = function(msgId) {
@@ -7061,6 +7609,46 @@ window.toggleMessageSelection = function(msgId) {
     window.lucide.createIcons();
   }
   window.updateSelectModeCount();
+};
+
+function getSelectedMessagesForAction() {
+  const ids = new Set(selectedMessageIds.map(String));
+  return (messages || []).filter(function(msg) {
+    return msg && ids.has(String(msg.id)) && !msg.isSystem && !msg.decryptError;
+  });
+}
+
+window.deleteSelectedMessages = async function() {
+  const selected = getSelectedMessagesForAction();
+  if (!selected.length || !activeChatId) return;
+  const failed = [];
+  for (const msg of selected) {
+    try {
+      await apiFetch('/api/conversations/' + activeChatId + '/messages/' + msg.id + '/', {
+        method: 'DELETE',
+      });
+      msg.isDeleted = true;
+      msg.text = currentLanguage === 'zh' ? '消息已删除' : 'message deleted';
+      msg.isSystem = true;
+    } catch (err) {
+      failed.push(msg.id);
+    }
+  }
+  exitSelectMode();
+  renderMessages();
+  if (failed.length) {
+    window.showToast(currentLanguage === 'zh' ? '部分消息删除失败' : 'Some messages could not be deleted');
+  } else {
+    window.showToast(currentLanguage === 'zh' ? '已删除所选消息' : 'Selected messages deleted');
+  }
+};
+
+window.forwardSelectedMessages = function() {
+  const selected = getSelectedMessagesForAction();
+  if (!selected.length) return;
+  if (window.MessageActions && typeof window.MessageActions.forward === 'function') {
+    window.MessageActions.forward(selected);
+  }
 };
 
 window.triggerReportAction = function(e) {
@@ -7658,5 +8246,1018 @@ function closePrivacyConfirmModal() {
   _privacyConfirmCallback = null;
 }
 
-// Helper function to extract cookies (e.g. csrftoken for Django)
+
+// ── Phase 3: AI Assistant GUI Handlers ─────────────────────────────────────
+
+const AI_MODEL_SETTINGS_KEY = 'ichat_ai_model_settings';
+const AI_HISTORY_KEY = 'ichat_ai_history';
+const AI_CONVERSATION_ID = 'ai-assistant';
+const AI_ASSISTANTS_KEY = 'ichat_ai_assistants';
+const AI_DEFAULT_MODEL_SETTINGS = {
+  endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+  apiKey: '',
+  model: 'qwen-plus'
+};
+
+function getAiAssistantSessions() {
+  let sessions = [];
+  try {
+    sessions = JSON.parse(localStorage.getItem(AI_ASSISTANTS_KEY) || '[]');
+  } catch (err) {
+    sessions = [];
+  }
+  if (!Array.isArray(sessions)) sessions = [];
+  if (!sessions.some(session => session.id === AI_CONVERSATION_ID)) {
+    sessions.unshift({
+      id: AI_CONVERSATION_ID,
+      title: 'AI Assistant',
+      created_at: new Date().toISOString(),
+    });
+  }
+  localStorage.setItem(AI_ASSISTANTS_KEY, JSON.stringify(sessions));
+  return sessions;
+}
+
+function getAiAssistantSession(sessionId = activeAiAssistantId) {
+  return getAiAssistantSessions().find(session => session.id === sessionId) || getAiAssistantSessions()[0];
+}
+
+function getAiStorageSuffix(sessionId = activeAiAssistantId) {
+  return sessionId === AI_CONVERSATION_ID ? '' : `:${sessionId}`;
+}
+
+function getAiHistoryKey(sessionId = activeAiAssistantId) {
+  return `${AI_HISTORY_KEY}${getAiStorageSuffix(sessionId)}`;
+}
+
+function getAiModelSettingsKey(sessionId = activeAiAssistantId) {
+  return `${AI_MODEL_SETTINGS_KEY}${getAiStorageSuffix(sessionId)}`;
+}
+
+function getAiHistory(sessionId = activeAiAssistantId) {
+  try {
+    return JSON.parse(localStorage.getItem(getAiHistoryKey(sessionId)) || '[]');
+  } catch (err) {
+    return [];
+  }
+}
+
+function setAiHistory(history, sessionId = activeAiAssistantId) {
+  localStorage.setItem(getAiHistoryKey(sessionId), JSON.stringify(history || []));
+}
+
+function getAiDisplayModel() {
+  return getAiModelSettings().model || AI_DEFAULT_MODEL_SETTINGS.model;
+}
+
+function getAiProviderInfo(model) {
+  const modelId = model || getAiDisplayModel();
+  const key = String(modelId || '').toLowerCase();
+  if (key.includes('claude')) {
+    return {
+      key: 'claude',
+      model: modelId,
+      providerName: 'Claude',
+      displayName: 'Claude Assistant',
+      shortLabel: 'C',
+      iconUrl: '/static/images/ai-model-claude.svg',
+    };
+  }
+  if (key.includes('gpt') || key.startsWith('o1') || key.startsWith('o3') || key.startsWith('o4') || key.includes('openai')) {
+    return {
+      key: 'gpt',
+      model: modelId,
+      providerName: 'GPT',
+      displayName: 'GPT Assistant',
+      shortLabel: 'GPT',
+      iconUrl: '/static/images/ai-model-gpt.svg',
+    };
+  }
+  if (key.includes('qwen') || key.includes('tongyi')) {
+    return {
+      key: 'qwen',
+      model: modelId,
+      providerName: 'Qwen',
+      displayName: 'Qwen Assistant',
+      shortLabel: 'Q',
+      iconUrl: '/static/images/ai-model-qwen.svg',
+    };
+  }
+  return {
+    key: 'ai',
+    model: modelId,
+    providerName: 'AI',
+    displayName: 'AI Assistant',
+    shortLabel: 'AI',
+    iconUrl: '',
+  };
+}
+
+function renderAiAvatarInner(info) {
+  if (info && info.iconUrl) {
+    return `<img src="${escapeHtml(info.iconUrl)}" alt="${escapeHtml(info.providerName)}" class="ai-model-logo-img">`;
+  }
+  return escapeHtml((info && info.shortLabel) || 'AI');
+}
+
+function renderAiAvatarHtml(className = 'message-avatar', extraClass = '') {
+  const info = getAiProviderInfo();
+  const classes = info.iconUrl
+    ? `${className} ai-model-avatar ${extraClass}`
+    : `${className} bg-gradient-to-tr from-brand-light to-purple-500 text-white flex items-center justify-center font-bold text-xs ${extraClass}`;
+  return `<div class="${classes}" title="${escapeHtml(info.displayName)}">${renderAiAvatarInner(info)}</div>`;
+}
+
+function applyAiAvatarToElement(el, sizeClass) {
+  if (!el) return;
+  const info = getAiProviderInfo();
+  el.className = sizeClass + (info.iconUrl
+    ? ' ai-model-avatar flex items-center justify-center'
+    : ' bg-gradient-to-tr from-brand-light to-purple-500 text-white flex items-center justify-center font-bold shadow-sm');
+  el.innerHTML = renderAiAvatarInner(info);
+  el.title = info.displayName;
+}
+
+function updateAiHeaderModel() {
+  const model = getAiDisplayModel();
+  const info = getAiProviderInfo(model);
+  const headerTitle = document.getElementById("ai-header-title");
+  if (headerTitle) headerTitle.textContent = info.displayName;
+  applyAiAvatarToElement(
+    document.getElementById("ai-header-avatar"),
+    "w-10 h-10 rounded-full flex-shrink-0 overflow-hidden"
+  );
+  applyAiAvatarToElement(
+    document.getElementById("ai-greeting-avatar"),
+    "message-avatar"
+  );
+  const headerStatus = document.getElementById("ai-header-model-status");
+  if (headerStatus) {
+    headerStatus.textContent = `${model} • Online`;
+  }
+  const detailsStatus = document.getElementById("details-status");
+  if (detailsStatus && activeSpecialChatId === activeAiAssistantId) {
+    const settings = getAiModelSettings();
+    detailsStatus.textContent = currentLanguage === 'zh'
+      ? `${model} • ${settings.apiKey ? '已配置' : '未配置 API Key'}`
+      : `${model} • ${settings.apiKey ? 'Configured' : 'API key missing'}`;
+  }
+}
+
+function getAiConversationListItem(sessionId = activeAiAssistantId) {
+  const session = getAiAssistantSession(sessionId);
+  const history = getAiHistory(sessionId);
+  const lastTurn = history.length ? history[history.length - 1] : null;
+  const lastDate = lastTurn && lastTurn.created_at ? new Date(lastTurn.created_at) : null;
+  const model = getAiModelSettings(sessionId).model || AI_DEFAULT_MODEL_SETTINGS.model;
+  const info = getAiProviderInfo(model);
+  return {
+    id: sessionId,
+    type: 'ai',
+    is_ai_assistant: true,
+    name: session && session.title ? session.title : info.displayName,
+    model_display_name: info.displayName,
+    initials: info.shortLabel,
+    avatar_url: info.iconUrl,
+    avatar_fit: 'contain',
+    avatar_color: '#5b6ee1',
+    is_secure: false,
+    unread: 0,
+    last_message_preview: lastTurn
+      ? (lastTurn.role === 'user' ? `${currentLanguage === 'zh' ? '你' : 'You'}: ${lastTurn.content}` : lastTurn.content)
+      : `${model} • ${currentLanguage === 'zh' ? '在线' : 'Online'}`,
+    last_message_at: lastDate && !Number.isNaN(lastDate.getTime()) ? lastDate.toISOString() : null,
+  };
+}
+
+function refreshAiConversationListItem() {
+  renderChatList();
+}
+
+function aiTurnToMessage(turn, index) {
+  const id = turn.id || `ai-msg-${turn.role}-${index}`;
+  const createdAt = turn.created_at || new Date().toISOString();
+  return {
+    id,
+    text: turn.content || '',
+    created_at: createdAt,
+    time: formatClockTime(new Date(createdAt)),
+    isSelf: turn.role === 'user',
+    sender_name: turn.role === 'user' ? (currentLanguage === 'zh' ? '你' : 'You') : getAiProviderInfo().displayName,
+    isAiAssistant: true,
+    message_type: 'text',
+  };
+}
+
+function syncAiMessagesForActions(history) {
+  messages = (history || getAiHistory()).map(aiTurnToMessage);
+}
+
+function findAiTurnById(messageId) {
+  return getAiHistory().find(function(turn, index) {
+    return String(turn.id || `ai-msg-${turn.role}-${index}`) === String(messageId);
+  });
+}
+
+window.deleteAiMessage = function(messageId) {
+  const history = getAiHistory().filter(function(turn, index) {
+    return String(turn.id || `ai-msg-${turn.role}-${index}`) !== String(messageId);
+  });
+  setAiHistory(history);
+  syncAiMessagesForActions(history);
+  renderAiHistory(history);
+  refreshAiConversationListItem();
+};
+
+function createAiAssistantSession() {
+  const sessions = getAiAssistantSessions();
+  const id = `ai-assistant-${Date.now()}`;
+  const count = sessions.length + 1;
+  const currentSettings = getAiModelSettings(activeAiAssistantId);
+  sessions.push({
+    id,
+    title: `AI Assistant ${count}`,
+    created_at: new Date().toISOString(),
+  });
+  localStorage.setItem(AI_ASSISTANTS_KEY, JSON.stringify(sessions));
+  setAiModelSettings(currentSettings, id);
+  renderChatList();
+  openAiAssistant(id);
+}
+
+function deleteAiAssistantSession(sessionId) {
+  if (sessionId === AI_CONVERSATION_ID) {
+    clearAiAssistantSession(sessionId);
+    return;
+  }
+  if (!confirm(currentLanguage === 'zh' ? '确定删除这个 AI Assistant 吗？' : 'Delete this AI Assistant?')) return;
+  const sessions = getAiAssistantSessions().filter(session => session.id !== sessionId);
+  localStorage.setItem(AI_ASSISTANTS_KEY, JSON.stringify(sessions));
+  localStorage.removeItem(getAiHistoryKey(sessionId));
+  localStorage.removeItem(getAiModelSettingsKey(sessionId));
+  if (activeAiAssistantId === sessionId) {
+    activeAiAssistantId = AI_CONVERSATION_ID;
+    renderChatList();
+    openAiAssistant(AI_CONVERSATION_ID);
+    return;
+  }
+  renderChatList();
+}
+
+function clearAiAssistantSession(sessionId = activeAiAssistantId) {
+  localStorage.removeItem(getAiHistoryKey(sessionId));
+  if (activeAiAssistantId === sessionId) {
+    syncAiMessagesForActions([]);
+    renderAiHistory([]);
+  }
+  renderChatList();
+}
+
+function renameAiAssistantSession(sessionId) {
+  const sessions = getAiAssistantSessions();
+  const session = sessions.find(item => item.id === sessionId);
+  if (!session) return;
+  const nextTitle = prompt(currentLanguage === 'zh' ? '输入新的 Assistant 名称' : 'Enter a new Assistant name', session.title || 'AI Assistant');
+  if (!nextTitle || !nextTitle.trim()) return;
+  session.title = nextTitle.trim();
+  localStorage.setItem(AI_ASSISTANTS_KEY, JSON.stringify(sessions));
+  renderChatList();
+  if (activeAiAssistantId === sessionId) updateAiHeaderModel();
+}
+
+function showLegacyAiAssistantConversationMenu(e, conv) {
+  if (!window.ContextMenu) return;
+  const x = e.clientX || 0;
+  const y = e.clientY || 0;
+  window.ContextMenu.show(x, y, [
+    {
+      icon: 'sparkles',
+      label: currentLanguage === 'zh' ? '新建 Assistant' : 'New Assistant',
+      onClick: createAiAssistantSession,
+    },
+    {
+      icon: 'edit-3',
+      label: currentLanguage === 'zh' ? '重命名' : 'Rename',
+      onClick: function() { renameAiAssistantSession(conv.id); },
+    },
+    { divider: true },
+    {
+      icon: 'x-circle',
+      label: currentLanguage === 'zh' ? '清空历史' : 'Clear History',
+      onClick: function() { clearAiAssistantSession(conv.id); },
+    },
+    {
+      icon: 'trash-2',
+      label: currentLanguage === 'zh' ? '删除 Assistant' : 'Delete Assistant',
+      danger: true,
+      onClick: function() { deleteAiAssistantSession(conv.id); },
+    },
+  ]);
+}
+
+function showAiAssistantConversationMenu(e, conv) {
+  if (!window.ContextMenu || !conv) return;
+  const x = e.clientX || 0;
+  const y = e.clientY || 0;
+  const items = [
+    {
+      icon: 'sparkles',
+      label: currentLanguage === 'zh' ? '\u65b0\u5efa Assistant' : 'New Assistant',
+      onClick: createAiAssistantSession,
+    },
+    {
+      icon: 'edit-3',
+      label: currentLanguage === 'zh' ? '\u91cd\u547d\u540d' : 'Rename',
+      onClick: function() { renameAiAssistantSession(conv.id); },
+    },
+    { divider: true },
+    {
+      icon: 'x-circle',
+      label: currentLanguage === 'zh' ? '\u6e05\u7a7a\u5386\u53f2' : 'Clear History',
+      onClick: function() { clearAiAssistantSession(conv.id); },
+    },
+  ];
+
+  if (conv.id !== AI_CONVERSATION_ID) {
+    items.push({
+      icon: 'trash-2',
+      label: currentLanguage === 'zh' ? '\u5220\u9664 Assistant' : 'Delete Assistant',
+      danger: true,
+      onClick: function() { deleteAiAssistantSession(conv.id); },
+    });
+  }
+
+  window.ContextMenu.show(x, y, items);
+}
+
+function bindAiMessageActionHandlers() {
+  const container = document.getElementById("ai-history-container");
+  if (!container || container.dataset.aiActionsBound === "1") return;
+  container.dataset.aiActionsBound = "1";
+  container.addEventListener("contextmenu", function(e) {
+    const bubble = e.target.closest(".message-bubble-custom[data-message-id]");
+    if (!bubble || !container.contains(bubble)) return;
+    const msg = messages.find(function(item) {
+      return String(item.id) === String(bubble.dataset.messageId);
+    });
+    if (!msg || !window.MessageActions || typeof window.MessageActions.showMenu !== 'function') return;
+    e.preventDefault();
+    e.stopPropagation();
+    window.MessageActions.showMenu(e, msg, getAiConversationListItem());
+  });
+}
+
+function getAiModelSettings(sessionId = activeAiAssistantId) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(getAiModelSettingsKey(sessionId)) || '{}');
+    return Object.assign({}, AI_DEFAULT_MODEL_SETTINGS, saved || {});
+  } catch (err) {
+    return Object.assign({}, AI_DEFAULT_MODEL_SETTINGS);
+  }
+}
+
+function setAiModelSettings(settings, sessionId = activeAiAssistantId) {
+  const normalized = Object.assign({}, AI_DEFAULT_MODEL_SETTINGS, settings || {});
+  localStorage.setItem(getAiModelSettingsKey(sessionId), JSON.stringify(normalized));
+  return normalized;
+}
+
+function syncAiModelSettingsForm() {
+  const settings = getAiModelSettings();
+  const endpointInput = document.getElementById("ai-model-endpoint");
+  const apiKeyInput = document.getElementById("ai-model-api-key");
+  const modelSelect = document.getElementById("ai-model-name");
+  const status = document.getElementById("ai-model-settings-status");
+
+  if (endpointInput) endpointInput.value = settings.endpoint || "";
+  if (apiKeyInput) apiKeyInput.value = settings.apiKey || "";
+  if (modelSelect) {
+    const hasOption = Array.from(modelSelect.options).some(option => option.value === settings.model);
+    if (!hasOption && settings.model) {
+      modelSelect.add(new Option(settings.model, settings.model));
+    }
+    modelSelect.value = settings.model || AI_DEFAULT_MODEL_SETTINGS.model;
+  }
+  if (status) {
+    status.textContent = settings.apiKey
+      ? (currentLanguage === 'zh' ? '已保存模型设置，发送消息时将使用该配置。' : 'Model settings saved. New messages will use this configuration.')
+      : (currentLanguage === 'zh' ? '未保存 API Key 时将使用本地 Mock 响应。' : 'Without an API key, the local mock response is used.');
+  }
+}
+
+function saveAiModelSettings() {
+  const endpointInput = document.getElementById("ai-model-endpoint");
+  const apiKeyInput = document.getElementById("ai-model-api-key");
+  const modelSelect = document.getElementById("ai-model-name");
+  const settings = setAiModelSettings({
+    endpoint: endpointInput ? endpointInput.value.trim() : AI_DEFAULT_MODEL_SETTINGS.endpoint,
+    apiKey: apiKeyInput ? apiKeyInput.value.trim() : "",
+    model: modelSelect ? modelSelect.value : AI_DEFAULT_MODEL_SETTINGS.model
+  });
+  syncAiModelSettingsForm();
+  updateAiModelSummary(settings);
+  updateAiHeaderModel();
+  refreshAiConversationListItem();
+  window.showToast && window.showToast(currentLanguage === 'zh' ? 'AI 模型设置已保存。' : 'AI model settings saved.');
+}
+
+function clearAiModelSettings() {
+  localStorage.removeItem(getAiModelSettingsKey(activeAiAssistantId));
+  syncAiModelSettingsForm();
+  updateAiModelSummary(getAiModelSettings());
+  updateAiHeaderModel();
+  refreshAiConversationListItem();
+  window.showToast && window.showToast(currentLanguage === 'zh' ? 'AI 模型设置已清空。' : 'AI model settings cleared.');
+}
+
+function getAiRequestConfigForSend() {
+  const settings = getAiModelSettings();
+  if (!settings.apiKey) return {};
+  return {
+    endpoint: settings.endpoint,
+    api_key: settings.apiKey,
+    model: settings.model
+  };
+}
+
+function updateAiModelSummary(settings) {
+  const config = settings || getAiModelSettings();
+  setDetailsText("right-panel-username", config.model || AI_DEFAULT_MODEL_SETTINGS.model);
+  const status = document.getElementById("details-status");
+  if (status) {
+    status.textContent = currentLanguage === 'zh'
+      ? `${config.model || 'Qwen'} • ${config.apiKey ? '已配置' : '未配置 API Key'}`
+      : `${config.model || 'Qwen'} • ${config.apiKey ? 'Configured' : 'API key missing'}`;
+  }
+}
+
+function openAiAssistant(sessionId = AI_CONVERSATION_ID) {
+  activeAiAssistantId = decodeURIComponent(String(sessionId || AI_CONVERSATION_ID));
+  getAiAssistantSessions();
+  // Save draft of currently active chat
+  saveActiveConversationDraftFromInput();
+  closeChatSearch();
+
+  // De-select active chat item
+  document.querySelectorAll(".chat-item-btn").forEach(item => item.classList.remove("active"));
+  activeChatId = null;
+  activeSpecialChatId = activeAiAssistantId;
+  const aiListItem = document.getElementById(`chat-item-${activeAiAssistantId}`);
+  if (aiListItem) aiListItem.classList.add("active");
+
+  // Toggle layout window visibility
+  const emptyState = document.getElementById("empty-state-window");
+  if (emptyState) emptyState.classList.add("hidden");
+
+  const activeWindow = document.getElementById("active-chat-window");
+  if (activeWindow) activeWindow.classList.add("hidden");
+
+  const aiWindow = document.getElementById("ai-assistant-window");
+  if (aiWindow) aiWindow.classList.remove("hidden");
+
+  // Close details panel if open
+  if (window.rightPanelOpen) {
+    window.toggleRightPanel();
+  }
+
+  // Load and render history from localStorage
+  const history = getAiHistory();
+  syncAiMessagesForActions(history);
+  renderAiHistory(history);
+  bindAiMessageActionHandlers();
+  updateAiHeaderModel();
+
+  // Set greeting time to current system time
+  const greetingTime = document.getElementById("ai-greeting-time");
+  if (greetingTime) {
+    const now = new Date();
+    greetingTime.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Bind Enter key to textarea
+  const textarea = document.getElementById("ai-input-textarea");
+  if (textarea && !window.aiInputListenerBound) {
+    window.aiInputListenerBound = true;
+    textarea.addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendAiMessage();
+      }
+    });
+  }
+
+  // Mobile layout responsiveness
+  if (window.innerWidth < 768) {
+    document.getElementById("sidebar-container").classList.add("hidden");
+    document.getElementById("chat-window-container").classList.remove("hidden");
+    document.getElementById("chat-window-container").classList.add("w-full");
+    window.location.hash = 'ai-assistant-open';
+  }
+
+  scrollAiToBottom();
+  if (typeof lucide !== 'undefined') {
+    lucide.createIcons();
+  }
+}
+
+function scrollAiToBottom() {
+  const container = document.getElementById("ai-history-container");
+  if (container) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function aiUsePrompt(promptText) {
+  const textarea = document.getElementById("ai-input-textarea");
+  if (textarea) {
+    textarea.value = promptText;
+    textarea.focus();
+    adjustTextareaHeight(textarea);
+  }
+}
+
+function clearAiChat() {
+  const confirmMsg = currentLanguage === 'zh'
+    ? '确定要清空与 AI 助手的对话历史吗？'
+    : 'Are you sure you want to clear your AI Assistant chat history?';
+    
+  if (confirm(confirmMsg)) {
+    localStorage.removeItem(getAiHistoryKey(activeAiAssistantId));
+    syncAiMessagesForActions([]);
+    renderAiHistory([]);
+    refreshAiConversationListItem();
+  }
+}
+
+function renderMarkdownText(text) {
+  return renderMessageMarkdown(text);
+}
+
+function renderAiHistory(history) {
+  const container = document.getElementById("ai-history-container");
+  if (!container) return;
+  syncAiMessagesForActions(history);
+
+  // Clear everything except default greeting
+  const greeting = document.getElementById("ai-greeting-bubble");
+  container.innerHTML = "";
+  if (greeting) {
+    container.appendChild(greeting);
+  }
+
+  history.forEach((turn, index) => {
+    const msgId = turn.id || `ai-msg-${turn.role}-${index}`;
+    const createdAt = turn.created_at ? new Date(turn.created_at) : new Date();
+    const timeStr = formatClockTime(createdAt);
+    let bubbleHtml = "";
+    if (turn.role === 'user') {
+      bubbleHtml = `
+        <div class="message-row message-row-self">
+          <div class="message-bubble-custom bubble-self" data-message-id="${msgId}"><div class="message-text-content">${escapeHtml(turn.content)}</div><div class="message-meta-line"><span>${timeStr}</span></div></div>
+        </div>
+      `;
+    } else if (turn.role === 'assistant') {
+      bubbleHtml = `
+        <div class="message-row message-row-peer">
+          ${renderAiAvatarHtml('message-avatar')}
+          <div class="message-bubble-custom bubble-peer" data-message-id="${msgId}"><div class="message-text-content">${renderMarkdownText(turn.content)}</div><div class="message-meta-line"><span>${timeStr}</span></div></div>
+        </div>
+      `;
+    }
+    container.insertAdjacentHTML('beforeend', bubbleHtml);
+  });
+  scrollAiToBottom();
+}
+
+async function sendAiMessage() {
+  const textarea = document.getElementById("ai-input-textarea");
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  if (!text) return;
+
+  // Clear text input
+  textarea.value = "";
+  textarea.style.height = "auto";
+
+  const container = document.getElementById("ai-history-container");
+  if (!container) return;
+
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const userMsgId = 'ai-msg-user-' + Date.now();
+
+  // 1. Append user message bubble
+  const userHtml = `
+    <div class="message-row message-row-self">
+      <div class="message-bubble-custom bubble-self" data-message-id="${userMsgId}"><div class="message-text-content">${escapeHtml(text)}</div><div class="message-meta-line"><span>${timeStr}</span></div></div>
+    </div>
+  `;
+  container.insertAdjacentHTML('beforeend', userHtml);
+  scrollAiToBottom();
+
+  // 2. Fetch history and update local history
+  let aiHistory = getAiHistory();
+  aiHistory.push({ role: 'user', content: text, id: userMsgId, created_at: now.toISOString() });
+  setAiHistory(aiHistory);
+  syncAiMessagesForActions(aiHistory);
+  refreshAiConversationListItem();
+
+  // 3. Append temporary typing bubble
+  const typingId = "ai-typing-" + Date.now();
+  const typingHtml = `
+    <div class="message-row message-row-peer" id="${typingId}">
+      ${renderAiAvatarHtml('message-avatar')}
+      <div class="message-bubble-custom bubble-peer"><div class="message-text-content flex items-center space-x-1.5 py-1"><span class="w-1.5 h-1.5 bg-textSecondary rounded-full animate-bounce" style="animation-delay: 0ms"></span><span class="w-1.5 h-1.5 bg-textSecondary rounded-full animate-bounce" style="animation-delay: 150ms"></span><span class="w-1.5 h-1.5 bg-textSecondary rounded-full animate-bounce" style="animation-delay: 300ms"></span></div></div>
+    </div>
+  `;
+  container.insertAdjacentHTML('beforeend', typingHtml);
+  scrollAiToBottom();
+
+  try {
+    const response = await fetch('/api/ai/chat/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken') || ''
+      },
+      body: JSON.stringify({
+        message: text,
+        history: aiHistory.slice(0, -1).map(h => ({ role: h.role, content: h.content })),
+        model_config: getAiRequestConfigForSend(),
+        stream: true
+      })
+    });
+
+    const typingBubble = document.getElementById(typingId);
+    const replyMsgId = 'ai-msg-assistant-' + Date.now();
+    const replyCreatedAt = new Date();
+    const replyTimeStr = formatClockTime(replyCreatedAt);
+
+    if (response.ok && response.body && (response.headers.get('Content-Type') || '').includes('text/event-stream')) {
+      let reply = "";
+      let displayedReply = "";
+      if (typingBubble) {
+        typingBubble.outerHTML = `
+          <div class="message-row message-row-peer">
+            ${renderAiAvatarHtml('message-avatar')}
+            <div class="message-bubble-custom bubble-peer" data-message-id="${replyMsgId}"><div class="message-text-content"></div><div class="message-meta-line"><span>${replyTimeStr}</span></div></div>
+          </div>
+        `;
+      }
+
+      const replyBubble = document.querySelector(`.message-bubble-custom[data-message-id="${replyMsgId}"] .message-text-content`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let done = false;
+      let renderLoopRunning = false;
+
+      const renderNextCharacters = async () => {
+        if (renderLoopRunning) return;
+        renderLoopRunning = true;
+        try {
+          while (displayedReply.length < reply.length) {
+            const remaining = reply.length - displayedReply.length;
+            const step = remaining > 120 ? 6 : remaining > 40 ? 3 : 1;
+            displayedReply = reply.slice(0, displayedReply.length + step);
+            if (replyBubble) {
+              replyBubble.innerHTML = renderMarkdownText(displayedReply);
+            }
+            scrollAiToBottom();
+            await sleep(18);
+          }
+        } finally {
+          renderLoopRunning = false;
+        }
+      };
+
+      while (!done) {
+        const readResult = await reader.read();
+        done = readResult.done;
+        buffer += decoder.decode(readResult.value || new Uint8Array(), { stream: !done });
+
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const eventText of events) {
+          const dataLines = eventText.split("\n")
+            .filter(line => line.startsWith("data:"))
+            .map(line => line.slice(5).trim());
+          for (const dataLine of dataLines) {
+            if (!dataLine || dataLine === "[DONE]") continue;
+            const eventData = JSON.parse(dataLine);
+            if (eventData.error) {
+              throw new Error(eventData.detail || eventData.error);
+            }
+            if (eventData.delta) {
+              reply += eventData.delta;
+              renderNextCharacters();
+            }
+          }
+        }
+      }
+
+      while (displayedReply.length < reply.length || renderLoopRunning) {
+        await sleep(18);
+      }
+      if (replyBubble) {
+        replyBubble.innerHTML = renderMarkdownText(reply);
+      }
+
+      if (!reply.trim()) {
+        throw new Error("AI assistant returned an empty response.");
+      }
+
+      aiHistory.push({ role: 'assistant', content: reply, id: replyMsgId, created_at: replyCreatedAt.toISOString() });
+      setAiHistory(aiHistory);
+      syncAiMessagesForActions(aiHistory);
+      refreshAiConversationListItem();
+    } else {
+      const data = await response.json();
+
+      if (response.ok && data.response) {
+        const reply = data.response;
+        aiHistory.push({ role: 'assistant', content: reply, id: replyMsgId, created_at: replyCreatedAt.toISOString() });
+        setAiHistory(aiHistory);
+        syncAiMessagesForActions(aiHistory);
+        refreshAiConversationListItem();
+
+        if (typingBubble) {
+          typingBubble.outerHTML = `
+            <div class="message-row message-row-peer">
+              ${renderAiAvatarHtml('message-avatar')}
+              <div class="message-bubble-custom bubble-peer" data-message-id="${replyMsgId}"><div class="message-text-content">${renderMarkdownText(reply)}</div><div class="message-meta-line"><span>${replyTimeStr}</span></div></div>
+            </div>
+          `;
+        }
+      } else {
+        const serverMessage = data.detail || data.error || 'Server error';
+        throw new Error(serverMessage);
+      }
+    }
+  } catch (err) {
+    console.error("AI Assistant service failed:", err);
+    const typingBubble = document.getElementById(typingId);
+    if (typingBubble) {
+      typingBubble.outerHTML = `
+        <div class="message-row message-row-peer">
+          ${renderAiAvatarHtml('message-avatar')}
+          <div class="message-bubble-custom bubble-peer border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400"><div class="message-text-content">AI Assistant response failed. Please check the request address, API key, and model name in Model Info.<br><small class="opacity-80">${escapeHtml(err.message)}</small></div><div class="message-meta-line"><span>Error</span></div></div>
+        </div>
+      `;
+    }
+  }
+  scrollAiToBottom();
+  if (typeof lucide !== 'undefined') {
+    lucide.createIcons();
+  }
+}
+
+// ── AI Assistant Right Panel & Dropdown ──
+
+function toggleAiRightPanel() {
+  const rightPanel = document.getElementById("right-panel");
+  if (!rightPanel) return;
+
+  // Populate right panel with AI Info
+  updateDetailsPanelForAi();
+
+  // Toggle collapse class if it is collapsed
+  if (rightPanel.classList.contains("collapsed")) {
+    window.toggleRightPanel();
+  } else {
+    // Toggle close if already showing AI Model Info
+    const panelTitle = document.getElementById("right-panel-title");
+    if (panelTitle && panelTitle.textContent === (currentLanguage === 'zh' ? '模型信息' : 'Model Info')) {
+      window.toggleRightPanel();
+    }
+  }
+}
+
+function toggleAiMoreMenu(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  const menu = document.getElementById("ai-header-more-dropdown");
+  if (menu) {
+    menu.classList.toggle("hidden");
+  }
+}
+
+async function updateDetailsPanelForAi() {
+  const avatar = document.getElementById("details-avatar");
+  const name = document.getElementById("details-name");
+  const status = document.getElementById("details-status");
+  const fp = document.getElementById("details-fingerprint");
+  const fpWrapper = document.getElementById("right-panel-fingerprint-wrapper");
+  const groupSection = document.getElementById("right-panel-group-section");
+  const protocol = document.getElementById("right-panel-protocol");
+  const resetKeyBtn = document.getElementById("right-panel-reset-key-btn");
+  const verificationStatus = document.getElementById("right-panel-verification-status");
+
+  setDetailsText("right-panel-title", currentLanguage === 'zh' ? '模型信息' : 'Model Info');
+  setDetailsHidden("right-panel-ai-settings-card", false);
+  syncAiModelSettingsForm();
+
+  if (avatar) {
+    applyAiAvatarToElement(avatar, "chat-details-avatar");
+  }
+
+  if (name) {
+    const info = getAiProviderInfo();
+    name.innerHTML = `<span>${escapeHtml(info.displayName)}</span><span class="user-role-badge badge-agent">${escapeHtml(info.providerName)}</span>`;
+  }
+  if (status) {
+    status.textContent = currentLanguage === 'zh' ? 'Qwen 大语言模型 • 在线' : 'Qwen AI Model • Online';
+  }
+
+  updateAiModelSummary();
+  setDetailsText("right-panel-username-label", currentLanguage === 'zh' ? '运行模型' : 'Running Model');
+  setDetailsHidden("right-panel-username-row", false);
+
+  setDetailsText("right-panel-bio", currentLanguage === 'zh'
+    ? '基于通义千问大语言模型，为您提供智能文本总结、草稿润色、知识问答服务。所有对话数据在本地独立存储并隔离，不读取 E2EE 私密消息。'
+    : 'Based on Qwen Large Language Model, providing text summarization, drafting, and QA services. All chat data is isolated locally and never reads E2EE private messages.');
+  setDetailsText("right-panel-bio-label", currentLanguage === 'zh' ? '模型简介' : 'Model Description');
+  setDetailsHidden("right-panel-bio-row", false);
+
+  setDetailsHidden("right-panel-email-row", true);
+  setDetailsHidden("right-panel-phone-row", true);
+  setDetailsHidden("right-panel-location-row", true);
+  setDetailsHidden("right-panel-link-row", true);
+  setDetailsHidden("right-panel-notify-row", true);
+  setDetailsHidden("right-panel-qr-btn", true);
+
+  setDetailsHidden("right-panel-action-media", true);
+  setDetailsHidden("right-panel-action-files", true);
+
+  const encTitle = document.querySelector("#right-panel-encryption-card .chat-details-section-title");
+  if (encTitle) encTitle.textContent = currentLanguage === 'zh' ? '安全与隐私边界' : 'Security & Sandbox';
+
+  if (protocol) protocol.textContent = "HTTPS / TLS 1.3";
+  if (resetKeyBtn) resetKeyBtn.classList.add("hidden");
+
+  if (verificationStatus) {
+    verificationStatus.className = "font-semibold text-green-500 flex items-center space-x-1";
+    verificationStatus.innerHTML = '<i data-lucide="shield-check" class="w-3.5 h-3.5 mr-0.5 inline-block text-green-500"></i><span>' + (currentLanguage === 'zh' ? '已安全隔离' : 'Sandbox Isolated') + '</span>';
+  }
+
+  if (fpWrapper) fpWrapper.classList.remove("hidden");
+  const fpLabel = fpWrapper.querySelector("span");
+  if (fpLabel) fpLabel.textContent = currentLanguage === 'zh' ? '沙箱说明' : 'Sandbox Info';
+
+  if (fp) {
+    fp.textContent = currentLanguage === 'zh'
+      ? "AI 助手对话在本地沙箱内处理。除了您在输入框主动提交给 AI 的内容外，任何私聊、群聊消息或密钥等敏感数据均不会被上传或访问。"
+      : "AI Chat is processed in a local sandbox. No private key, E2EE conversation message, or contact list will be accessed or sent to the model.";
+  }
+
+  const verifyFpBtn = fpWrapper.querySelector(".chat-details-verify-btn");
+  if (verifyFpBtn) verifyFpBtn.classList.add("hidden");
+
+  if (groupSection) groupSection.classList.add("hidden");
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+// ── AI Assistant Search Handlers ──
+
+let aiSearchResults = [];
+let aiSearchIndex = -1;
+
+function getAiSearchEls() {
+  return {
+    overlay: document.getElementById("ai-search-overlay"),
+    input: document.getElementById("ai-search-input"),
+    results: document.getElementById("ai-search-results"),
+    prev: document.getElementById("ai-search-prev"),
+    next: document.getElementById("ai-search-next"),
+    close: document.getElementById("ai-search-close")
+  };
+}
+
+function isAiSearchOpen() {
+  const overlay = document.getElementById("ai-search-overlay");
+  return !!overlay && !overlay.classList.contains("hidden");
+}
+
+function openAiSearch() {
+  const els = getAiSearchEls();
+  if (!els.overlay || !els.input) return;
+  const header = document.getElementById("ai-header-normal");
+  if (header) header.classList.add("chat-search-active");
+  els.overlay.classList.remove("hidden");
+  els.input.focus();
+  els.input.select();
+  runAiSearch(false);
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function closeAiSearch() {
+  const els = getAiSearchEls();
+  const header = document.getElementById("ai-header-normal");
+  if (header) header.classList.remove("chat-search-active");
+  clearAiSearchHighlight();
+  aiSearchResults = [];
+  aiSearchIndex = -1;
+  if (els.input) els.input.value = "";
+  if (els.results) {
+    els.results.innerHTML = "";
+    els.results.classList.add("hidden");
+  }
+  if (els.prev) els.prev.classList.add("hidden");
+  if (els.next) els.next.classList.add("hidden");
+  if (els.overlay) els.overlay.classList.add("hidden");
+}
+
+function clearAiSearchHighlight() {
+  document.querySelectorAll(".message-search-hit").forEach(function(el) {
+    el.classList.remove("message-search-hit");
+  });
+}
+
+function runAiSearch(activateFirst) {
+  const els = getAiSearchEls();
+  if (!els.input) return;
+  const query = els.input.value.trim();
+  clearAiSearchHighlight();
+  aiSearchIndex = -1;
+
+  const history = JSON.parse(localStorage.getItem('ichat_ai_history') || '[]');
+
+  if (!query) {
+    aiSearchResults = [];
+    renderAiSearchResults(query);
+    return;
+  }
+
+  const lowerQuery = query.toLowerCase();
+  aiSearchResults = [];
+  history.forEach(function(turn, index) {
+    if (!turn) return;
+    if (String(turn.content || "").toLowerCase().includes(lowerQuery)) {
+      aiSearchResults.push({
+        id: turn.id || `ai-msg-${turn.role}-${index}`,
+        role: turn.role,
+        content: turn.content,
+        timestamp: turn.timestamp
+      });
+    }
+  });
+
+  renderAiSearchResults(query);
+  if (aiSearchResults.length && activateFirst) {
+    activateAiSearchResult(0);
+  }
+}
+
+function renderAiSearchResults(query) {
+  const els = getAiSearchEls();
+  if (!els.results) return;
+  if (!query || !aiSearchResults.length) {
+    els.results.classList.add("hidden");
+    els.results.innerHTML = "";
+    if (els.prev) els.prev.classList.add("hidden");
+    if (els.next) els.next.classList.add("hidden");
+    return;
+  }
+  if (els.prev) els.prev.classList.remove("hidden");
+  if (els.next) els.next.classList.remove("hidden");
+
+  els.results.classList.remove("hidden");
+  els.results.innerHTML = aiSearchResults.map(function(msg, index) {
+    const sender = msg.role === 'user' ? (currentLanguage === 'zh' ? '我' : 'Me') : 'AI';
+    const cleanText = getSearchableMessageText({ text: msg.content });
+    return `<button type="button" class="chat-search-result-item" data-search-index="${index}">
+      <span class="chat-search-result-sender">${escapeHtml(sender)}</span>
+      <span class="chat-search-result-text">${escapeHtml(cleanText)}</span>
+    </button>`;
+  }).join("");
+}
+
+function activateAiSearchResult(index) {
+  if (!aiSearchResults.length) return;
+  if (index < 0) index = aiSearchResults.length - 1;
+  if (index >= aiSearchResults.length) index = 0;
+  aiSearchIndex = index;
+  clearAiSearchHighlight();
+
+  const msg = aiSearchResults[aiSearchIndex];
+  const bubbles = Array.from(document.querySelectorAll(".message-bubble-custom[data-message-id]"));
+  const bubble = bubbles.find(function(el) {
+    return String(el.dataset.messageId) === String(msg.id);
+  });
+  const row = bubble ? bubble.closest(".message-row") : null;
+  if (row) row.classList.add("message-search-hit");
+  if (bubble) {
+    bubble.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  const els = getAiSearchEls();
+  if (els.results) {
+    els.results.querySelectorAll(".chat-search-result-item").forEach(function(item, itemIndex) {
+      item.classList.toggle("is-active", itemIndex === aiSearchIndex);
+    });
+  }
+}
 

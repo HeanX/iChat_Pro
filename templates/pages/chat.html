@@ -4,7 +4,7 @@
 {% block title %}Workspace - iChat Pro{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260615-image-bubble-type">
+<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260616-ai-badge-active">
 {% endblock %}
 
 {% block content %}
@@ -78,6 +78,11 @@
       <!-- Active Message Window (Hidden initially, toggled visible by selectChat in chat.js) -->
       <div id="active-chat-window" class="hidden h-full flex flex-col">
         {% include 'components/chat_window.html' %}
+      </div>
+
+      <!-- AI Assistant Window (Hidden by default) -->
+      <div id="ai-assistant-window" class="hidden h-full flex flex-col">
+        {% include 'components/ai_assistant_window.html' %}
       </div>
     </div>
 
@@ -305,8 +310,8 @@
 <script src="{% static 'js/file-transfer.js' %}?v=20260615-file-forward"></script>
 <script src="{% static 'js/context-menu.js' %}?v=20260610-t12t14-chat-ux"></script>
 <script src="{% static 'js/chat-conversation-actions.js' %}?v=20260610-t12t14-chat-ux"></script>
-<script src="{% static 'js/chat-message-actions.js' %}?v=20260615-file-forward"></script>
-<script src="{% static 'js/chat.js' %}?v=20260615-image-viewer-center"></script>
+<script src="{% static 'js/chat-message-actions.js' %}?v=20260616-ai-assistant-actions"></script>
+<script src="{% static 'js/chat.js' %}?v=20260616-multi-ai-assistant"></script>
 <script>
   function exportLocalKeyBackup() {
     try {

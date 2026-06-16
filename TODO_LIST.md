@@ -1185,6 +1185,7 @@ Phase 3 重点：
 - [ ] 补齐最终截图、录屏或手动验收记录。
 - [ ] 明确所有未实现入口的占位提示，不伪装为已可用能力。
 - [ ] 增加最小 LLM Provider 抽象，支持 Mock Provider 和可选真实 Provider。
+- [ ] LLM 调用支持本地线程池或同步 fallback，不强依赖 Redis/Celery；真实 Provider 必须设置超时。
 - [ ] 增加 AI Assistant 入口，支持用户主动输入 prompt 并获得模型回答。
 - [ ] 支持至少一个展示型能力：问答、解释文本、总结用户主动提交的文本或生成回复草稿。
 - [ ] 明确 LLM 隐私边界：不自动读取 E2EE 聊天明文，不上传私钥、会话密钥或未授权聊天内容。
@@ -1194,16 +1195,25 @@ Phase 3 建议拆分：
 
 - [ ] P3 T01：展示前稳定化收口与回归验收。
 - [ ] P3 T02：LLM Provider 抽象与 Mock Provider。
+  - *补充：本地支持线程池 (ThreadPoolExecutor) 或同步调用作为 Mock fallback，不强依赖 Redis/Celery，保障开发环境开箱即用；无 API Key、超时、限流和网络失败均应可降级。*
 - [ ] P3 T03：LLM Chat API 与配置状态接口。
+  - *补充：增加接口调用超时、失败兜底逻辑，模型故障或无配置时不阻塞主界面渲染和正常使用。*
 - [ ] P3 T04：AI Assistant 前端入口与基础对话界面。
 - [ ] P3 T05：文本总结或回复草稿演示能力。
 - [ ] P3 T06：LLM 隐私、安全边界和展示说明。
+  - *补充：在前端界面中明确隐私提示，告知 Qwen API 仅发送用户在 AI 助手窗口主动输入的数据。*
 - [ ] P3 T07：Phase 3 演示脚本、截图和验收记录。
+- [ ] P3 T08：AI Assistant 时序与 E2EE 边界对齐。
+  - *补充：UML/时序图中明确 AI Assistant 不是 ConversationMember，不是 Bot，不进入 E2EE 会话成员模型；Phase 4 图中再单独展示 Bot-User Actor 模型。*
 
 ## 8. Phase 4 Backlog
 
 以下内容暂不进入当前 Phase 2 或 Phase 3：
 
+- [ ] P4 Bot-User Actor 模型：设计 `BotProfile.user = OneToOneField(User)` 或 `User.is_bot`，避免 Bot 独立作为消息主体撞车现有外键体系；补充 Bot Token 哈希认证和 Bot 公钥信任状态。
+- [ ] P4 Channel Conversation 融合：将 Channel 统一为 `Conversation.type = channel`，订阅关系使用 `ConversationMember` 表达，复用列表排序、未读、置顶、静音和归档。
+- [ ] P4 OpenClaw 异步任务回调：重构 Adapter 与 Gateway 的交互协议为 `accepted + task_id` 异步接收与 webhook / WebSocket 回调模式；同步 `completed + reply` 仅允许 Mock 或测试使用。
+- [ ] P4 Agent 沙箱隔离：设计 Docker/Podman 容器级别物理隔离、只读文件系统、工作目录限制、网络白名单、资源上限以及工具调用确定性校验策略，杜绝越权。
 - [ ] Channel 模型、订阅关系、频道消息和发布权限。
 - [ ] Bot 身份、Bot 能力、命令 Bot 和系统通知 Bot。
 - [ ] 完整 LLM Bot、翻译、知识库检索、RAG、长期记忆和多模型管理。

@@ -159,13 +159,22 @@ Phase 3 的核心目标包括：
 2. 补齐自动化测试、手动验收记录、截图或录屏。
 3. 增加 AI Assistant 入口，支持用户主动输入 prompt 并获得 LLM 回复。
 4. 支持 Mock Provider 和可选真实 Provider，保证无 API Key 时仍可演示。
-5. 明确 LLM 隐私边界：不自动读取 E2EE 聊天明文，不上传私钥、会话密钥或未授权聊天内容。
-6. 清理所有未实现入口的占位说明，避免把 Phase 4 能力伪装为已完成。
-7. 更新 README、API 文档、需求文档、验收手册和演示材料。
+5. 明确 LLM 隐私边界：不自动读取 E2EE 聊天明文，不上传私钥、会话密钥或未授权聊天内容。Qwen API 只接收用户在 AI Assistant 面板中主动输入或粘贴的内容。
+6. Phase 3 的 AI Assistant 不是 Bot，不进入 `ConversationMember`，不作为会话成员参与私聊或群聊，也不自动代发消息。
+7. 支持本地 Mock 和轻量 fallback。没有配置真实 API Key、外部 API 超时或失败时，系统必须给出明确提示或使用 Mock 演示，不得影响主聊天界面。
+8. 清理所有未实现入口的占位说明，避免把 Phase 4 能力伪装为已完成。
+9. 更新 README、API 文档、需求文档、验收手册和演示材料。
 
 ### 3.5 Phase 4：扩展生态与高级能力
 
 完整 Bot、LLM Agent、Channel、Agent Gateway、Channel 发布、RAG 知识库、长期记忆、多模型管理和更复杂的扩展生态统一顺延为 Phase 4。Phase 4 应在 Phase 3 收口完成、基础通信体验稳定后启动，避免在基础能力仍不完整时叠加复杂生态能力。
+
+Phase 4 启动前必须先完成以下架构约束设计：
+
+1. Bot 必须关联 `User` 主体，例如 `BotProfile.user = OneToOneField(User)` 或 `User.is_bot`，避免 Bot 独立作为消息主体破坏现有外键体系。
+2. Channel 应优先融入 `Conversation` 模型，通过 `Conversation.type = channel` 和 `ConversationMember` 复用侧栏列表、未读数、置顶、静音和归档逻辑。
+3. OpenClaw / Agent Adapter 必须采用异步任务协议，先返回 `accepted + task_id`，完成后通过 callback 和 WebSocket 推送结果，不应让 HTTP 请求同步阻塞等待大模型或工具链。
+4. Agent 工具执行必须使用容器、只读文件系统、工作目录限制、网络白名单、资源上限和审计日志等强隔离手段。
 
 ## 四、业务需求分析
 

@@ -139,4 +139,6 @@ urlpatterns = [
     path('api/files/<int:file_id>/download/', views.download_file_view, name='api_file_download'),
     path('api/files/<int:file_id>/chunks/<int:chunk_index>/', views.download_chunk_view, name='api_file_download_chunk'),
     path('api/files/<int:file_id>/messages/', views.send_file_message_view, name='api_file_send_message'),
+    # Phase 3: AI Assistant API
+    path('api/ai/chat/', views.ai_chat_view, name='api_ai_chat'),
 ]

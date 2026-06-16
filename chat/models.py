@@ -644,3 +644,29 @@ class EncryptedFileKey(models.Model):
 #
 # Hard-deletion is never performed so that audit trails and
 # historical ciphertexts remain recoverable by administrators.
+
+
+class UserLLMConfig(models.Model):
+    """Stores LLM Endpoint and API Key configurations for each user."""
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="llm_config"
+    )
+    api_url = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Custom request base URL or full Anthropic Messages endpoint URL"
+    )
+    api_key = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Custom API Key for LLM provider"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"LLM Config for {self.user.username}"

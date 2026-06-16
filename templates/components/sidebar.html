@@ -52,6 +52,11 @@
               <i data-lucide="users-round"></i>
               <span data-i18n="groups">Groups</span>
             </a>
+            <!-- AI Assistant -->
+            <button onclick="openAiAssistant(); toggleMainMenu(event);" class="main-menu-item-custom">
+              <i data-lucide="sparkles" class="text-brand-light dark:text-brand-dark animate-pulse"></i>
+              <span data-i18n="menu_ai_assistant">AI Assistant</span>
+            </button>
             <!-- Settings -->
             <button id="menu-settings-btn" onclick="navigateSidebar('settings-home'); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="settings"></i>

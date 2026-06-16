@@ -414,24 +414,29 @@
    * @returns {Promise<Uint8Array>} raw 32-byte file key
    */
   async function unwrapFileKey(wrapped, fileId, holderId, senderId, metadata) {
-    if (!metadata) {
-      const convId = window.activeChatId || 0;
-      metadata = {
-        conversation_id: convId,
-        sender_id: senderId,
-        receiver_id: holderId,
-        sender_key_version: wrapped.sender_key_version || 0,
-        receiver_key_version: wrapped.receiver_key_version || 0,
-      };
-    }
+    const candidateIds = [];
+    if (metadata && metadata.conversation_id) candidateIds.push(Number(metadata.conversation_id));
+    if (window.activeChatId) candidateIds.push(Number(window.activeChatId));
 
-    const remoteKeyVersion = wrapped.sender_key_version || metadata.sender_key_version || 0;
+    // Remove duplicates while preserving order, and filter to positive integers only
+    const uniqueIds = [...new Set(candidateIds)].filter(id => Number.isInteger(id) && id > 0);
+
+    console.log('[PrivateE2EE.unwrapFileKey] Parameters:', {
+      fileId,
+      holderId,
+      senderId,
+      activeChatId: window.activeChatId,
+      wrappedSenderKeyVer: wrapped.sender_key_version,
+      wrappedReceiverKeyVer: wrapped.receiver_key_version,
+      hasMetadata: !!metadata,
+      candidateConvIds: uniqueIds
+    });
+
+    const remoteKeyVersion = wrapped.sender_key_version || (metadata && metadata.sender_key_version) || 0;
     const senderKey = await fetchPublicKey(senderId, remoteKeyVersion || undefined);
     const local = currentRecord();
     const privateKey = await importPrivateKey(local.private_key);
 
-    const contextBytes = new TextEncoder().encode(privateContext(metadata));
-    const salt = await window.crypto.subtle.digest('SHA-256', contextBytes);
     const remotePublicKey = await importPublicKey(senderKey.identity_public_key);
     const sharedSecret = await window.crypto.subtle.deriveBits(
       { name: 'ECDH', public: remotePublicKey },
@@ -439,13 +444,6 @@
       256
     );
     const hkdfKey = await window.crypto.subtle.importKey('raw', sharedSecret, 'HKDF', false, ['deriveKey']);
-    const wrapSessionKey = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(FILE_KEY_WRAP_HKDF_INFO) },
-      hkdfKey,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
 
     const ciphertext = base64ToBytes(wrapped.encrypted_file_key);
     const nonce = base64ToBytes(wrapped.nonce);
@@ -457,13 +455,49 @@
     const aadStr = 'ichat-file-key-wrap-v1:' + fileId + ':' + holderId;
     const aad = new TextEncoder().encode(aadStr);
 
-    return new Uint8Array(
-      await window.crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: nonce, tagLength: 128, additionalData: aad },
-        wrapSessionKey,
-        combined
-      )
-    );
+    let decrypted = null;
+    let lastError = null;
+
+    for (const convId of uniqueIds) {
+      if (convId === 0) continue; // Skip 0 since it is not positive and throws error
+      try {
+        const testMetadata = {
+          conversation_id: convId,
+          sender_id: senderId,
+          receiver_id: holderId,
+          sender_key_version: wrapped.sender_key_version || 0,
+          receiver_key_version: wrapped.receiver_key_version || 0,
+        };
+
+        const contextStr = privateContext(testMetadata);
+        const contextBytes = new TextEncoder().encode(contextStr);
+        const salt = await window.crypto.subtle.digest('SHA-256', contextBytes);
+
+        const wrapSessionKey = await window.crypto.subtle.deriveKey(
+          { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(FILE_KEY_WRAP_HKDF_INFO) },
+          hkdfKey,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['encrypt', 'decrypt']
+        );
+
+        decrypted = await window.crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: nonce, tagLength: 128, additionalData: aad },
+          wrapSessionKey,
+          combined
+        );
+        console.log('[PrivateE2EE.unwrapFileKey] Decrypted successfully using convId = ' + convId);
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!decrypted) {
+      throw lastError || new Error('Decryption failed for all candidate conversation IDs');
+    }
+
+    return new Uint8Array(decrypted);
   }
 
   /** Wrap file key for the sender themself (multi-device sync). */

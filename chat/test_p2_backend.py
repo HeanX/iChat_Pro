@@ -16,6 +16,8 @@ from django.test.client import Client
 from chat.models import (
     Conversation,
     ConversationMember,
+    EncryptedFile,
+    EncryptedFileKey,
     EncryptedMessage,
     GroupMessage,
     GroupMessageRecipient,
@@ -28,6 +30,10 @@ from chat.views import RECALL_LIMIT_MINUTES
 from accounts.models import Contact, UserPrivacySettings
 
 User = get_user_model()
+
+VALID_CIPHERTEXT = 'Zm9yd2FyZC1jaXBoZXJ0ZXh0'
+VALID_NONCE = 'MTIzNDU2Nzg5MDEy'
+VALID_AUTH_TAG = 'MTIzNDU2Nzg5MDEyMzQ1Ng=='
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -224,6 +230,27 @@ class ConversationManagementAPITests(TestCase):
         # Pinned conversation should come first
         self.assertTrue(convs[0]['is_pinned'])
 
+    def test_can_create_conversation_with_bot_without_contact(self):
+        bot = _create_user('test_bot')
+        bot.profile.user_type = 'bot'
+        bot.profile.save(update_fields=['user_type'])
+
+        resp = self.client.post(
+            '/api/conversations/create/',
+            data=json.dumps({'peer_id': bot.pk}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        conversation_id = resp.json()['conversation_id']
+        self.assertTrue(
+            ConversationMember.objects.filter(
+                conversation_id=conversation_id,
+                user=bot,
+                status=ConversationMember.Status.ACTIVE,
+            ).exists()
+        )
+
 
 def _get_active_member(conv_id, user):
     return ConversationMember.objects.get(
@@ -314,9 +341,9 @@ class MessageOperationsAPITests(TestCase):
                 'peer_id': u3.pk,
                 'client_message_id': 'forward-private-1',
                 'message_type': 'text',
-                'ciphertext': 'forward-ciphertext',
-                'nonce': 'forward-nonce',
-                'auth_tag': 'forward-tag',
+                'ciphertext': VALID_CIPHERTEXT,
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
                 'algorithm': 'AES-256-GCM',
                 'sender_key_version': 1,
                 'receiver_key_version': 1,
@@ -332,7 +359,104 @@ class MessageOperationsAPITests(TestCase):
         self.assertEqual(forwarded.sender, self.u1)
         self.assertEqual(forwarded.receiver, u3)
         self.assertEqual(forwarded.reply_to_message_id, self.msg.pk)
-        self.assertEqual(forwarded.ciphertext, 'forward-ciphertext')
+        self.assertEqual(forwarded.ciphertext, VALID_CIPHERTEXT)
+
+    def test_forward_private_message_to_same_conversation(self):
+        resp = self.client.post(
+            f'/api/conversations/{self.conv.id}/messages/forward/',
+            data=json.dumps({
+                'original_message_id': self.msg.pk,
+                'original_conversation_id': self.conv.pk,
+                'peer_id': self.u2.pk,
+                'client_message_id': 'forward-private-same-conversation',
+                'message_type': 'text',
+                'ciphertext': VALID_CIPHERTEXT,
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        forwarded = EncryptedMessage.objects.get(pk=resp.json()['message_id'])
+        self.assertEqual(forwarded.conversation, self.conv)
+        self.assertEqual(forwarded.sender, self.u1)
+        self.assertEqual(forwarded.receiver, self.u2)
+        self.assertIsNone(forwarded.reply_to_message_id)
+
+    def test_forward_private_message_is_idempotent(self):
+        u3 = _create_user('carol')
+        Contact.objects.create(user=self.u1, contact=u3)
+        target = _create_private_conversation(self.u1, u3)
+        payload = {
+            'original_message_id': self.msg.pk,
+            'original_conversation_id': self.conv.pk,
+            'peer_id': u3.pk,
+            'client_message_id': 'forward-private-idempotent',
+            'message_type': 'text',
+            'ciphertext': VALID_CIPHERTEXT,
+            'nonce': VALID_NONCE,
+            'auth_tag': VALID_AUTH_TAG,
+            'algorithm': 'AES-256-GCM',
+            'sender_key_version': 1,
+            'receiver_key_version': 1,
+        }
+
+        first = self.client.post(
+            f'/api/conversations/{target.id}/messages/forward/',
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        second = self.client.post(
+            f'/api/conversations/{target.id}/messages/forward/',
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()['message_id'], second.json()['message_id'])
+        self.assertEqual(
+            EncryptedMessage.objects.filter(
+                sender=self.u1,
+                client_message_id='forward-private-idempotent',
+            ).count(),
+            1,
+        )
+
+    def test_forward_private_rejects_invalid_ciphertext(self):
+        u3 = _create_user('carol')
+        Contact.objects.create(user=self.u1, contact=u3)
+        target = _create_private_conversation(self.u1, u3)
+
+        resp = self.client.post(
+            f'/api/conversations/{target.id}/messages/forward/',
+            data=json.dumps({
+                'original_message_id': self.msg.pk,
+                'original_conversation_id': self.conv.pk,
+                'peer_id': u3.pk,
+                'client_message_id': 'forward-private-invalid',
+                'message_type': 'text',
+                'ciphertext': 'not base64',
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(
+            EncryptedMessage.objects.filter(
+                sender=self.u1,
+                client_message_id='forward-private-invalid',
+            ).exists()
+        )
 
     def test_forward_group_message_creates_recipient_copies(self):
         u3 = _create_user('carol')
@@ -351,9 +475,9 @@ class MessageOperationsAPITests(TestCase):
         recipients = [
             {
                 'receiver_id': user.pk,
-                'ciphertext': f'cipher-{user.pk}',
-                'nonce': f'nonce-{user.pk}',
-                'auth_tag': f'tag-{user.pk}',
+                'ciphertext': VALID_CIPHERTEXT,
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
                 'algorithm': 'AES-256-GCM',
                 'sender_key_version': 1,
                 'receiver_key_version': 1,
@@ -367,6 +491,8 @@ class MessageOperationsAPITests(TestCase):
                 'original_conversation_id': self.conv.pk,
                 'client_message_id': 'forward-group-1',
                 'message_type': 'text',
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
                 'membership_version': group.membership_version,
                 'recipients': recipients,
             }),
@@ -382,6 +508,373 @@ class MessageOperationsAPITests(TestCase):
             set(group_message.recipients.values_list('receiver_id', flat=True)),
             {self.u1.pk, self.u2.pk, u3.pk},
         )
+
+    def test_forward_file_rejects_keys_for_non_target_member(self):
+        u3 = _create_user('carol')
+        u4 = _create_user('mallory')
+        Contact.objects.create(user=self.u1, contact=u3)
+        target = _create_private_conversation(self.u1, u3)
+        encrypted_file = EncryptedFile.objects.create(
+            upload_id='00000000-0000-0000-0000-000000000001',
+            client_file_id='file-forward-source',
+            owner=self.u1,
+            conversation=self.conv,
+            message_kind=EncryptedFile.MessageKind.FILE,
+            status=EncryptedFile.Status.AVAILABLE,
+            total_size_bytes=32,
+            chunk_count=1,
+        )
+        EncryptedFileKey.objects.create(
+            file=encrypted_file,
+            holder=self.u1,
+            sender=self.u1,
+            encrypted_file_key='owner-key',
+            nonce=VALID_NONCE,
+            auth_tag=VALID_AUTH_TAG,
+            algorithm='AES-256-GCM',
+        )
+
+        resp = self.client.post(
+            f'/api/conversations/{target.id}/messages/forward/',
+            data=json.dumps({
+                'original_message_id': self.msg.pk,
+                'original_conversation_id': self.conv.pk,
+                'peer_id': u3.pk,
+                'client_message_id': 'forward-file-invalid-holder',
+                'message_type': 'file',
+                'file_id': encrypted_file.pk,
+                'ciphertext': VALID_CIPHERTEXT,
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+                'file_keys': [
+                    {
+                        'holder_id': self.u1.pk,
+                        'encrypted_file_key': 'self-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                    {
+                        'holder_id': u3.pk,
+                        'encrypted_file_key': 'peer-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                    {
+                        'holder_id': u4.pk,
+                        'encrypted_file_key': 'outsider-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                ],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(
+            EncryptedFileKey.objects.filter(file=encrypted_file, holder=u4).exists()
+        )
+
+    def test_forward_file_requires_active_source_conversation_membership(self):
+        owner = _create_user('source_owner')
+        target_peer = _create_user('carol')
+        target = _create_private_conversation(self.u1, target_peer)
+        source_group = _create_group(owner, name='Source Group')
+        source_membership = ConversationMember.objects.create(
+            conversation=source_group,
+            user=self.u1,
+            role=ConversationMember.Role.MEMBER,
+            status=ConversationMember.Status.REMOVED,
+        )
+        encrypted_file = EncryptedFile.objects.create(
+            upload_id='00000000-0000-0000-0000-000000000002',
+            client_file_id='removed-source-file',
+            owner=owner,
+            conversation=source_group,
+            message_kind=EncryptedFile.MessageKind.FILE,
+            status=EncryptedFile.Status.AVAILABLE,
+            total_size_bytes=32,
+            chunk_count=1,
+        )
+        source_message = GroupMessage.objects.create(
+            conversation=source_group,
+            sender=owner,
+            message_type=GroupMessage.MessageType.FILE,
+            file_id=encrypted_file,
+        )
+        GroupMessageRecipient.objects.create(
+            group_message=source_message,
+            receiver=self.u1,
+            ciphertext=VALID_CIPHERTEXT,
+            nonce=VALID_NONCE,
+            auth_tag=VALID_AUTH_TAG,
+            algorithm='AES-256-GCM',
+            sender_key_version=1,
+            receiver_key_version=1,
+        )
+        EncryptedFileKey.objects.create(
+            file=encrypted_file,
+            holder=self.u1,
+            sender=owner,
+            encrypted_file_key='held-key',
+            nonce=VALID_NONCE,
+            auth_tag=VALID_AUTH_TAG,
+            algorithm='AES-256-GCM',
+        )
+
+        resp = self.client.post(
+            f'/api/conversations/{target.id}/messages/forward/',
+            data=json.dumps({
+                'original_message_id': source_message.pk,
+                'original_conversation_id': source_group.pk,
+                'peer_id': target_peer.pk,
+                'client_message_id': 'forward-file-left-source',
+                'message_type': 'file',
+                'file_id': encrypted_file.pk,
+                'ciphertext': VALID_CIPHERTEXT,
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+                'file_keys': [
+                    {
+                        'holder_id': self.u1.pk,
+                        'encrypted_file_key': 'self-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                    {
+                        'holder_id': target_peer.pk,
+                        'encrypted_file_key': 'peer-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                ],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(
+            EncryptedMessage.objects.filter(
+                sender=self.u1,
+                client_message_id='forward-file-left-source',
+            ).exists()
+        )
+        self.assertEqual(source_membership.status, ConversationMember.Status.REMOVED)
+
+    def test_forward_file_fails_after_leaving_source_group_without_file_key(self):
+        owner = _create_user('source_owner')
+        target_peer = _create_user('carol')
+        target = _create_private_conversation(self.u1, target_peer)
+        source_group = _create_group(owner, name='Source Group')
+        ConversationMember.objects.create(
+            conversation=source_group,
+            user=self.u1,
+            role=ConversationMember.Role.MEMBER,
+            status=ConversationMember.Status.REMOVED,
+        )
+        encrypted_file = EncryptedFile.objects.create(
+            upload_id='00000000-0000-0000-0000-000000000003',
+            client_file_id='removed-source-file-no-key',
+            owner=owner,
+            conversation=source_group,
+            message_kind=EncryptedFile.MessageKind.FILE,
+            status=EncryptedFile.Status.AVAILABLE,
+            total_size_bytes=32,
+            chunk_count=1,
+        )
+
+        resp = self.client.post(
+            f'/api/conversations/{target.id}/messages/forward/',
+            data=json.dumps({
+                'original_message_id': 12345,
+                'original_conversation_id': source_group.pk,
+                'peer_id': target_peer.pk,
+                'client_message_id': 'forward-file-left-source-no-key',
+                'message_type': 'file',
+                'file_id': encrypted_file.pk,
+                'ciphertext': VALID_CIPHERTEXT,
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+                'file_keys': [
+                    {
+                        'holder_id': self.u1.pk,
+                        'encrypted_file_key': 'self-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                    {
+                        'holder_id': target_peer.pk,
+                        'encrypted_file_key': 'peer-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                ],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(
+            EncryptedMessage.objects.filter(
+                sender=self.u1,
+                client_message_id='forward-file-left-source-no-key',
+            ).exists()
+        )
+
+    def test_file_metadata_uses_file_key_not_original_conversation_membership(self):
+        owner = _create_user('source_owner')
+        source_group = _create_group(owner, name='Source Group')
+        ConversationMember.objects.create(
+            conversation=source_group,
+            user=self.u1,
+            role=ConversationMember.Role.MEMBER,
+            status=ConversationMember.Status.REMOVED,
+        )
+        encrypted_file = EncryptedFile.objects.create(
+            upload_id='00000000-0000-0000-0000-000000000004',
+            client_file_id='removed-source-file-metadata',
+            owner=owner,
+            conversation=source_group,
+            message_kind=EncryptedFile.MessageKind.FILE,
+            status=EncryptedFile.Status.AVAILABLE,
+            total_size_bytes=32,
+            chunk_count=1,
+        )
+        EncryptedFileKey.objects.create(
+            file=encrypted_file,
+            holder=self.u1,
+            sender=owner,
+            encrypted_file_key='held-key',
+            nonce=VALID_NONCE,
+            auth_tag=VALID_AUTH_TAG,
+            algorithm='AES-256-GCM',
+        )
+
+        resp = self.client.get(f'/api/files/{encrypted_file.pk}/')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['file_id'], encrypted_file.pk)
+
+    def test_forwarded_file_recipient_can_view_and_reforward_without_original_membership(self):
+        owner = _create_user('source_owner')
+        recipient = _create_user('carol')
+        next_peer = _create_user('dave')
+        source_group = _create_group(owner, name='Original Upload Group')
+        source_private = _create_private_conversation(self.u1, recipient)
+        next_private = _create_private_conversation(recipient, next_peer)
+        encrypted_file = EncryptedFile.objects.create(
+            upload_id='00000000-0000-0000-0000-000000000005',
+            client_file_id='forwarded-file-recipient',
+            owner=owner,
+            conversation=source_group,
+            message_kind=EncryptedFile.MessageKind.FILE,
+            status=EncryptedFile.Status.AVAILABLE,
+            total_size_bytes=32,
+            chunk_count=1,
+        )
+        EncryptedFileKey.objects.create(
+            file=encrypted_file,
+            holder=recipient,
+            sender=owner,
+            encrypted_file_key='recipient-key',
+            nonce=VALID_NONCE,
+            auth_tag=VALID_AUTH_TAG,
+            algorithm='AES-256-GCM',
+        )
+        source_message = EncryptedMessage.objects.create(
+            conversation=source_private,
+            sender=self.u1,
+            receiver=recipient,
+            message_type=EncryptedMessage.MessageType.FILE,
+            ciphertext=VALID_CIPHERTEXT,
+            nonce=VALID_NONCE,
+            auth_tag=VALID_AUTH_TAG,
+            algorithm='AES-256-GCM',
+            sender_key_version=1,
+            receiver_key_version=1,
+            client_message_id='source-private-file',
+            file_id=encrypted_file,
+        )
+
+        recipient_client = Client()
+        recipient_client.force_login(recipient)
+        metadata_resp = recipient_client.get(f'/api/files/{encrypted_file.pk}/')
+        self.assertEqual(metadata_resp.status_code, 200)
+
+        forward_resp = recipient_client.post(
+            f'/api/conversations/{next_private.id}/messages/forward/',
+            data=json.dumps({
+                'original_message_id': source_message.pk,
+                'original_conversation_id': source_private.pk,
+                'peer_id': next_peer.pk,
+                'client_message_id': 'recipient-reforward-file',
+                'message_type': 'file',
+                'file_id': encrypted_file.pk,
+                'ciphertext': VALID_CIPHERTEXT,
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+                'file_keys': [
+                    {
+                        'holder_id': recipient.pk,
+                        'encrypted_file_key': 'recipient-new-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                    {
+                        'holder_id': next_peer.pk,
+                        'encrypted_file_key': 'next-peer-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'algorithm': 'AES-256-GCM',
+                        'sender_key_version': 1,
+                        'receiver_key_version': 1,
+                    },
+                ],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(forward_resp.status_code, 201)
+        forwarded = EncryptedMessage.objects.get(pk=forward_resp.json()['message_id'])
+        self.assertEqual(forwarded.sender, recipient)
+        self.assertEqual(forwarded.receiver, next_peer)
+        self.assertEqual(forwarded.file_id, encrypted_file)
 
 
 # ── T22: Presence API Tests ────────────────────────────────────────────

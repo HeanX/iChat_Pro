@@ -4061,3 +4061,20 @@ def ai_chat_view(request):
     except Exception as e:
         logger.exception("AI assistant generation failed:")
         return JsonResponse({'error': 'AI assistant service failed.', 'detail': str(e)}, status=500)
+
+
+# ── P3 T04: AI status endpoint ────────────────────────────────────
+
+
+@login_required(login_url='login')
+@require_GET
+def ai_status_view(request):
+    """Return AI assistant availability and supported modes."""
+    from .models import UserLLMConfig
+    config = UserLLMConfig.objects.filter(user=request.user).first()
+    configured = bool(config and config.api_url)
+    return JsonResponse({
+        'available': True,
+        'configured': configured,
+        'mock_mode': not configured,
+    })

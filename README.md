@@ -192,3 +192,22 @@ Demo accounts after running the script:
 All three are mutual contacts, ready for private and group chat testing.
 
 See [docs/iChat Pro 演示指南.md](docs/iChat%20Pro%20演示指南.md) for a full walkthrough.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Phase 2 Acceptance Manual](docs/iChat%20Pro%20Phase%202%20验收手册.md) | Phase 2 frontend acceptance checklist |
+| [Phase 3 Demo Script](docs/iChat%20Pro%20Phase%203%20演示脚本与验收文档.md) | Phase 3 demo steps and acceptance guide |
+| [UML & Architecture Diagrams](docs/iChat%20Pro%20UML%20与架构图交付文档.md) | System use case, class, component, E2EE sequence diagrams |
+| [Phase 2 Test Coverage](docs/phase2_test_coverage.md) | Backend test coverage report |
+| [Design Docs](docs/) | Full technical documentation (API, database, E2EE protocol, security) |
+
+## AI Assistant (Phase 3)
+
+Phase 3 introduces an AI Assistant panel powered by Qwen (阿里云百炼). The assistant:
+
+- Handles general Q&A, text summarization, and draft generation
+- **Does not** read E2EE chat plaintext or access user private keys
+- Falls back to Mock mode when no API key is configured
+- Configure via `QWEN_API_KEY` and `QWEN_MODEL` environment variables

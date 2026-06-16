@@ -4007,13 +4007,30 @@ def ai_chat_view(request):
             'model': str(raw_model_config.get('model') or '').strip(),
         }
     configured_model = model_config.get('model') or 'local-mock-llm'
-    system_prompt = (
-        "You are AI Assistant inside iChat Pro.\n"
-        f"The configured model id for this session is: {configured_model}.\n"
-        "If the user asks what model you are, answer with this configured model id. "
-        "Do not claim to be another product, IDE assistant, application, or model identity.\n"
-        "Be concise, helpful, and transparent that this is the model id configured in iChat Pro."
-    )
+    mode = data.get('mode', 'chat')
+
+    mode_prompts = {
+        'chat': (
+            "You are AI Assistant inside iChat Pro.\n"
+            f"The configured model id for this session is: {configured_model}.\n"
+            "If the user asks what model you are, answer with this configured model id.\n"
+            "Do not claim to be another product or model identity.\n"
+            "Be concise, helpful, and transparent."
+        ),
+        'summarize': (
+            "You are a text summarization tool in iChat Pro.\n"
+            "Your task: produce a concise summary of the text the user provides.\n"
+            "Do NOT add opinions, analysis, or extra commentary.\n"
+            "Output: a short paragraph followed by 3-5 key-takeaway bullets."
+        ),
+        'draft_reply': (
+            "You are a draft assistant in iChat Pro.\n"
+            "The user provides context and intent. Generate a draft reply they can copy and edit.\n"
+            "Tone: professional, friendly, concise.\n"
+            "Only output the draft text. Do not add meta-commentary."
+        ),
+    }
+    system_prompt = mode_prompts.get(mode, mode_prompts['chat'])
 
     # Format history (role: user/assistant, content: text)
     formatted_messages = []
@@ -4061,3 +4078,20 @@ def ai_chat_view(request):
     except Exception as e:
         logger.exception("AI assistant generation failed:")
         return JsonResponse({'error': 'AI assistant service failed.', 'detail': str(e)}, status=500)
+
+
+# ── P3 T04: AI status endpoint ────────────────────────────────────
+
+
+@login_required(login_url='login')
+@require_GET
+def ai_status_view(request):
+    """Return AI assistant availability and supported modes."""
+    from .models import UserLLMConfig
+    config = UserLLMConfig.objects.filter(user=request.user).first()
+    configured = bool(config and config.api_url)
+    return JsonResponse({
+        'available': True,
+        'configured': configured,
+        'mock_mode': not configured,
+    })

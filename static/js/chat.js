@@ -8,6 +8,7 @@ let conversationsById = {};      // ID → conversation lookup map
 let activeChatId = null;
 let activeSpecialChatId = null;
 let activeAiAssistantId = 'ai-assistant';
+let currentAiMode = 'chat';
 let currentLanguage = localStorage.getItem('ichat_lang') || (function() {
   try { return JSON.parse(localStorage.getItem('ichat_sessions') || '{}').uiLang; } catch(e) { return null; }
 })() || 'en';
@@ -8525,36 +8526,6 @@ function renameAiAssistantSession(sessionId) {
   if (activeAiAssistantId === sessionId) updateAiHeaderModel();
 }
 
-function showLegacyAiAssistantConversationMenu(e, conv) {
-  if (!window.ContextMenu) return;
-  const x = e.clientX || 0;
-  const y = e.clientY || 0;
-  window.ContextMenu.show(x, y, [
-    {
-      icon: 'sparkles',
-      label: currentLanguage === 'zh' ? '新建 Assistant' : 'New Assistant',
-      onClick: createAiAssistantSession,
-    },
-    {
-      icon: 'edit-3',
-      label: currentLanguage === 'zh' ? '重命名' : 'Rename',
-      onClick: function() { renameAiAssistantSession(conv.id); },
-    },
-    { divider: true },
-    {
-      icon: 'x-circle',
-      label: currentLanguage === 'zh' ? '清空历史' : 'Clear History',
-      onClick: function() { clearAiAssistantSession(conv.id); },
-    },
-    {
-      icon: 'trash-2',
-      label: currentLanguage === 'zh' ? '删除 Assistant' : 'Delete Assistant',
-      danger: true,
-      onClick: function() { deleteAiAssistantSession(conv.id); },
-    },
-  ]);
-}
-
 function showAiAssistantConversationMenu(e, conv) {
   if (!window.ContextMenu || !conv) return;
   const x = e.clientX || 0;
@@ -8767,7 +8738,8 @@ function scrollAiToBottom() {
   }
 }
 
-function aiUsePrompt(promptText) {
+function aiUsePrompt(promptText, mode = 'chat') {
+  currentAiMode = mode || 'chat';
   const textarea = document.getElementById("ai-input-textarea");
   if (textarea) {
     textarea.value = promptText;
@@ -8874,6 +8846,8 @@ async function sendAiMessage() {
   scrollAiToBottom();
 
   try {
+    const requestMode = currentAiMode || 'chat';
+    currentAiMode = 'chat';
     const response = await fetch('/api/ai/chat/', {
       method: 'POST',
       headers: {
@@ -8882,6 +8856,7 @@ async function sendAiMessage() {
       },
       body: JSON.stringify({
         message: text,
+        mode: requestMode,
         history: aiHistory.slice(0, -1).map(h => ({ role: h.role, content: h.content })),
         model_config: getAiRequestConfigForSend(),
         stream: true

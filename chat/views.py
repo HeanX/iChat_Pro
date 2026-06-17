@@ -35,6 +35,7 @@ from .models import (
     GroupMessageRecipient,
     UserMessageDeletion,
     UserPresence,
+    UserLLMConfig,
 )
 
 User = get_user_model()
@@ -3975,6 +3976,117 @@ def cancel_upload_view(request, upload_id):
 
 # ── Phase 3: AI Assistant Chat API ──────────────────────────────────────────
 
+AI_SUPPORTED_MODES = {
+    'chat': {
+        'label': 'Chat',
+        'prompt': (
+            "Handle the user's message as a normal assistant conversation. "
+            "Answer directly and keep the response useful, concise, and grounded in the text the user provided."
+        ),
+    },
+    'summarize': {
+        'label': 'Summarize',
+        'prompt': (
+            "Summarize the text the user provides. Preserve key facts, decisions, names, dates, and action items. "
+            "If the input is too short to summarize, say so briefly and answer as a helpful assistant."
+        ),
+    },
+    'draft_reply': {
+        'label': 'Draft Reply',
+        'prompt': (
+            "Draft a polished reply based only on the user's supplied text. "
+            "Keep the tone natural, clear, and ready to send. Do not invent private context."
+        ),
+    },
+}
+AI_DEFAULT_MODE = 'chat'
+
+
+def _normalize_ai_model_config(raw_model_config):
+    if not isinstance(raw_model_config, dict):
+        return {}
+    return {
+        'endpoint': str(raw_model_config.get('endpoint') or '').strip(),
+        'api_key': str(raw_model_config.get('api_key') or '').strip(),
+        'model': str(raw_model_config.get('model') or '').strip(),
+    }
+
+
+def _configured_ai_model_config(model_config):
+    return bool(
+        model_config.get('endpoint')
+        and model_config.get('api_key')
+        and model_config.get('model')
+    )
+
+
+def _server_ai_config_status(user):
+    try:
+        user_config = UserLLMConfig.objects.get(user=user)
+    except UserLLMConfig.DoesNotExist:
+        user_config = None
+
+    user_has_endpoint = bool(user_config and (user_config.api_url or '').strip())
+    user_has_api_key = bool(user_config and (user_config.api_key or '').strip())
+    env_has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    return {
+        'user_endpoint_configured': user_has_endpoint,
+        'user_api_key_configured': user_has_api_key,
+        'env_api_key_configured': env_has_api_key,
+        'server_configured': env_has_api_key,
+    }
+
+
+def _ai_system_prompt(mode, configured_model):
+    mode_config = AI_SUPPORTED_MODES.get(mode) or AI_SUPPORTED_MODES[AI_DEFAULT_MODE]
+    return (
+        "You are AI Assistant inside iChat Pro.\n"
+        f"The configured model id for this session is: {configured_model}.\n"
+        "If the user asks what model you are, answer with this configured model id. "
+        "Do not claim to be another product, IDE assistant, application, or model identity.\n"
+        "Only process text that the user explicitly sends inside this AI Assistant chat. "
+        "Do not claim to have read encrypted private chats, contacts, files, or external pages unless that content was provided in the prompt.\n"
+        f"Mode: {mode}.\n"
+        f"{mode_config['prompt']}"
+    )
+
+
+@login_required(login_url='login')
+def ai_status_view(request):
+    """Return AI assistant availability, configuration state, and supported modes."""
+    if request.method not in ('GET', 'POST'):
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    payload = _json_body(request) if request.method == 'POST' else {}
+    client_model_config = _normalize_ai_model_config((payload or {}).get('model_config') or {})
+    client_configured = _configured_ai_model_config(client_model_config)
+    server_status = _server_ai_config_status(request.user)
+    configured = client_configured or server_status['server_configured']
+
+    return JsonResponse({
+        'available': True,
+        'configured': configured,
+        'mock_mode': not configured,
+        'supported_modes': [
+            {'id': mode_id, 'label': mode_config['label']}
+            for mode_id, mode_config in AI_SUPPORTED_MODES.items()
+        ],
+        'default_mode': AI_DEFAULT_MODE,
+        'active_model': client_model_config.get('model') or (
+            'anthropic-env-default' if server_status['env_api_key_configured'] else 'local-mock-llm'
+        ),
+        'configuration': {
+            'client_model_configured': client_configured,
+            'server_configured': server_status['server_configured'],
+            'user_endpoint_configured': server_status['user_endpoint_configured'],
+            'user_api_key_configured': server_status['user_api_key_configured'],
+            'env_api_key_configured': server_status['env_api_key_configured'],
+            'requires': ['endpoint', 'api_key', 'model'],
+        },
+    })
+
+
 @login_required(login_url='login')
 def ai_chat_view(request):
     import json
@@ -3992,6 +4104,7 @@ def ai_chat_view(request):
         user_message = data.get('message', '').strip()
         history = data.get('history', [])
         raw_model_config = data.get('model_config') or {}
+        raw_mode = str(data.get('mode') or AI_DEFAULT_MODE).strip()
         stream_requested = bool(data.get('stream'))
     except Exception:
         return JsonResponse({'error': 'Invalid request body.'}, status=400)
@@ -3999,38 +4112,10 @@ def ai_chat_view(request):
     if not user_message:
         return JsonResponse({'error': 'Message content cannot be empty.'}, status=400)
 
-    model_config = {}
-    if isinstance(raw_model_config, dict):
-        model_config = {
-            'endpoint': str(raw_model_config.get('endpoint') or '').strip(),
-            'api_key': str(raw_model_config.get('api_key') or '').strip(),
-            'model': str(raw_model_config.get('model') or '').strip(),
-        }
+    model_config = _normalize_ai_model_config(raw_model_config)
+    mode = raw_mode if raw_mode in AI_SUPPORTED_MODES else AI_DEFAULT_MODE
     configured_model = model_config.get('model') or 'local-mock-llm'
-    mode = data.get('mode', 'chat')
-
-    mode_prompts = {
-        'chat': (
-            "You are AI Assistant inside iChat Pro.\n"
-            f"The configured model id for this session is: {configured_model}.\n"
-            "If the user asks what model you are, answer with this configured model id.\n"
-            "Do not claim to be another product or model identity.\n"
-            "Be concise, helpful, and transparent."
-        ),
-        'summarize': (
-            "You are a text summarization tool in iChat Pro.\n"
-            "Your task: produce a concise summary of the text the user provides.\n"
-            "Do NOT add opinions, analysis, or extra commentary.\n"
-            "Output: a short paragraph followed by 3-5 key-takeaway bullets."
-        ),
-        'draft_reply': (
-            "You are a draft assistant in iChat Pro.\n"
-            "The user provides context and intent. Generate a draft reply they can copy and edit.\n"
-            "Tone: professional, friendly, concise.\n"
-            "Only output the draft text. Do not add meta-commentary."
-        ),
-    }
-    system_prompt = mode_prompts.get(mode, mode_prompts['chat'])
+    system_prompt = _ai_system_prompt(mode, configured_model)
 
     # Format history (role: user/assistant, content: text)
     formatted_messages = []
@@ -4079,19 +4164,3 @@ def ai_chat_view(request):
         logger.exception("AI assistant generation failed:")
         return JsonResponse({'error': 'AI assistant service failed.', 'detail': str(e)}, status=500)
 
-
-# ── P3 T04: AI status endpoint ────────────────────────────────────
-
-
-@login_required(login_url='login')
-@require_GET
-def ai_status_view(request):
-    """Return AI assistant availability and supported modes."""
-    from .models import UserLLMConfig
-    config = UserLLMConfig.objects.filter(user=request.user).first()
-    configured = bool(config and config.api_url)
-    return JsonResponse({
-        'available': True,
-        'configured': configured,
-        'mock_mode': not configured,
-    })

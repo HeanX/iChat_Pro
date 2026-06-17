@@ -91,13 +91,13 @@
 
   <!-- 3. Suggestion Prompts Row (Aligned with max-w 820px) -->
   <div class="flex flex-wrap gap-2 px-6 py-1 select-none justify-center flex-shrink-0 max-w-[820px] w-full mx-auto" id="ai-suggestions-row">
-    <button onclick="aiUsePrompt('📝 请帮我总结以下文本：\n')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
+    <button onclick="aiUsePrompt('📝 请帮我总结以下文本：\n', 'summarize')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
       <span>📝 总结文本</span>
     </button>
-    <button onclick="aiUsePrompt('✍️ 请帮我润色以下消息草稿：\n')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
+    <button onclick="aiUsePrompt('✍️ 请帮我润色以下消息草稿：\n', 'draft_reply')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
       <span>✍️ 润色消息</span>
     </button>
-    <button onclick="aiUsePrompt('❓ 我想向你提问关于：')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
+    <button onclick="aiUsePrompt('❓ 我想向你提问关于：', 'chat')" class="px-3 py-1.5 rounded-full bg-bgSidebar border border-borderColor hover:bg-bgSearch text-xs text-textSecondary hover:text-textMain transition-all flex items-center space-x-1 shadow-sm">
       <span>❓ 常见提问</span>
     </button>
   </div>

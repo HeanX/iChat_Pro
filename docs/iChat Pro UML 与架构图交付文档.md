@@ -70,118 +70,47 @@ graph LR
 
 ```mermaid
 erDiagram
-    User ||--|| UserProfile : has
-    User ||--o{ Contact : initiates
-    User ||--o{ FriendRequest : sends
-    User ||--o{ UserPublicKey : owns
-    User ||--o{ KeyTrust : verifies
-    User ||--o{ KeyVerificationRequest : requests
-    User ||--o{ BlockedUser : blocks
-    User ||--|| UserPrivacySettings : configures
-    User ||--|| UserNotificationSettings : configures
-    User ||--|| UserStorageSettings : configures
-    User ||--|| UserGeneralSettings : configures
-    User ||--|| UserChatFolderSettings : configures
-    User ||--|| MultiAccountContext : has
-    User ||--|| UserPresence : has
-    User ||--o{ UserLLMConfig : configures
+    User ||--|| UserProfile : "1:1 资料"
+    User ||--o{ Contact : "1:N 联系人"
+    User ||--o{ FriendRequest : "1:N 好友申请"
+    User ||--o{ UserPublicKey : "1:N 公钥"
+    User ||--o{ KeyTrust : "1:N 密钥信任"
+    User ||--o{ BlockedUser : "1:N 拉黑"
+    User ||--|| UserPrivacySettings : "1:1 隐私设置"
+    User ||--|| UserNotificationSettings : "1:1 通知设置"
+    User ||--|| UserStorageSettings : "1:1 存储设置"
+    User ||--|| UserPresence : "1:1 在线状态"
+    User ||--o{ UserLLMConfig : "1:N LLM配置"
+    User ||--o{ ConversationMember : "1:N 会话成员"
+    User ||--o{ EncryptedMessage : "1:N 私聊消息"
+    User ||--o{ GroupMessageRecipient : "1:N 群聊副本"
+    User ||--o{ EncryptedFileKey : "1:N 文件密钥"
 
-    User ||--o{ ConversationMember : belongs_to
-    User ||--o{ EncryptedMessage : sends_receives
-    User ||--o{ GroupMessage : sends
-    User ||--o{ GroupMessageRecipient : receives
-    User ||--o{ GroupInvitation : invited
-    User ||--o{ EncryptedFile : owns
-    User ||--o{ EncryptedFileKey : holds
+    Conversation ||--o{ ConversationMember : "1:N 成员"
+    Conversation ||--o{ EncryptedMessage : "1:N 私聊密文"
+    Conversation ||--o{ GroupMessage : "1:N 群聊逻辑消息"
+    Conversation ||--o{ GroupAnnouncement : "1:N 群公告"
+    Conversation ||--o{ EncryptedFile : "1:N 加密文件"
 
-    Conversation ||--o{ ConversationMember : contains
-    Conversation ||--o{ EncryptedMessage : holds
-    Conversation ||--o{ GroupMessage : holds
-    Conversation ||--o{ GroupInvitation : has
-    Conversation ||--o{ GroupAnnouncement : has
-    Conversation ||--o{ EncryptedFile : contains
-
-    GroupMessage ||--o{ GroupMessageRecipient : per_recipient
-    EncryptedFile ||--o{ EncryptedFileChunk : chunked
-    EncryptedFile ||--o{ EncryptedFileKey : wrapped
-
-    User {
-        int id PK
-        string username
-        string password
-        string email
-    }
-
-    UserProfile {
-        int id PK
-        int user_id FK
-        string nickname
-        string bio
-        string phone_number
-        string location
-        date birthday
-        string user_type
-    }
-
-    Conversation {
-        int id PK
-        string type "single|group"
-        string name
-        string status "active|archived|deleted"
-        int membership_version
-    }
-
-    EncryptedMessage {
-        int id PK
-        int conversation_id FK
-        int sender_id FK
-        int receiver_id FK
-        text ciphertext
-        string nonce
-        string auth_tag
-        string client_message_id
-        string status "sent|delivered|read|recalled"
-    }
-
-    GroupMessage {
-        int id PK
-        int conversation_id FK
-        int sender_id FK
-        string client_message_id
-        string status
-    }
-
-    GroupMessageRecipient {
-        int id PK
-        int group_message_id FK
-        int receiver_id FK
-        text ciphertext
-        string nonce
-        string auth_tag
-        int membership_version
-        string status
-    }
-
-    UserPublicKey {
-        int id PK
-        int user_id FK
-        text identity_public_key
-        string key_fingerprint
-        int key_version
-        bool is_active
-    }
-
-    UserLLMConfig {
-        int id PK
-        int user_id FK
-        string assistant_id
-        string api_url
-        string api_key "Fernet encrypted"
-        string model
-    }
+    GroupMessage ||--o{ GroupMessageRecipient : "1:N 逐成员密文"
+    EncryptedFile ||--o{ EncryptedFileChunk : "1:N 分块"
+    EncryptedFile ||--o{ EncryptedFileKey : "1:N 密钥包裹"
 ```
 
-**说明：** ER 图展示了 iChat Pro 数据库核心表及其关系。User 为中枢，向下关联资料、隐私、密钥、联系人等 `accounts` 侧 1:1/1:N 关系；通过 ConversationMember 与会话多对多关联。Conversation 统一承载私聊与群聊，消息密文分别存入 EncryptedMessage（私聊）和 GroupMessage + GroupMessageRecipient（群聊逐成员副本）。UserLLMConfig 存储 LLM API Key（Fernet 加密），与 User 为 N:1 关系。
+**核心实体字段说明：**
+
+| 实体 | 关键字段 |
+|------|----------|
+| User | id(PK), username, password, email |
+| UserProfile | user_id(FK), nickname, avatar, bio, user_type |
+| Conversation | id(PK), type(single\|group), status, membership_version |
+| EncryptedMessage | conversation_id(FK), sender_id(FK), receiver_id(FK), ciphertext, nonce, auth_tag, client_message_id, status |
+| GroupMessage | conversation_id(FK), sender_id(FK), client_message_id, status |
+| GroupMessageRecipient | group_message_id(FK), receiver_id(FK), ciphertext, nonce, auth_tag, membership_version |
+| UserPublicKey | user_id(FK), identity_public_key, key_fingerprint, key_version, is_active |
+| UserLLMConfig | user_id(FK), api_url, api_key(Fernet加密), model |
+
+**说明：** ER 图展示 iChat Pro 核心表关系（仅连线，字段见下方表格）。User 为中枢，关联 15 张子表；Conversation 统一承载私聊与群聊，消息密文分别存入 EncryptedMessage 和 GroupMessage + GroupMessageRecipient（逐成员副本）。UserLLMConfig 以 Fernet 加密存 LLM API Key。
 
 ---
 
@@ -192,118 +121,57 @@ classDiagram
     class User {
         +int id
         +str username
-        +str password
         +str email
         +bool is_active
     }
     class UserProfile {
-        +int id
         +str nickname
         +ImageField avatar
         +str bio
-        +str phone_number
-        +str location
-        +date birthday
         +str user_type
     }
     class Contact {
-        +int id
         +User user
         +User contact
-        +datetime created_at
     }
     class FriendRequest {
-        +int id
         +User sender
         +User receiver
         +str status
-        +datetime created_at
     }
     class UserPublicKey {
-        +int id
-        +User user
         +str identity_public_key
         +str key_fingerprint
         +int key_version
         +bool is_active
     }
     class KeyTrust {
-        +int id
         +User user
         +User contact
-        +str key_fingerprint
-        +int key_version
         +str trust_status
     }
-    class KeyVerificationRequest {
-        +int id
-        +User requester
-        +User responder
-        +str requester_key_fingerprint
-        +str responder_key_fingerprint
-        +str status
-    }
     class BlockedUser {
-        +int id
         +User blocker
         +User blocked
     }
-    class UserPrivacySettings {
-        +int id
-        +str last_seen_visibility
-        +str profile_photo_visibility
-        +str who_can_send_messages
-        +int auto_delete_messages_days
-    }
-    class UserNotificationSettings {
-        +int id
-        +bool private_chat_notifications
-        +bool group_chat_notifications
-        +int volume
-    }
-    class UserStorageSettings {
-        +int id
-        +JSONField settings_json
-    }
     class UserLLMConfig {
-        +int id
-        +User user
-        +str assistant_id
         +str api_url
         +str api_key
         +str model
     }
     class Conversation {
-        +int id
         +str type
         +str name
         +str status
         +int membership_version
-        +int auto_delete_seconds
     }
     class ConversationMember {
-        +int id
-        +Conversation conversation
-        +User user
         +str role
         +str status
         +int unread_count
         +bool is_pinned
-        +datetime muted_until
-    }
-    class GroupInvitation {
-        +int id
-        +Conversation conversation
-        +User inviter
-        +User invitee
-        +str status
-        +User reviewed_by
     }
     class EncryptedMessage {
-        +int id
-        +Conversation conversation
-        +User sender
-        +User receiver
         +str ciphertext
         +str nonce
         +str auth_tag
@@ -313,51 +181,15 @@ classDiagram
         +str client_message_id
     }
     class GroupMessage {
-        +int id
-        +Conversation conversation
-        +User sender
         +str client_message_id
         +str sender_copy_ciphertext
         +str status
     }
     class GroupMessageRecipient {
-        +int id
-        +GroupMessage group_message
-        +User receiver
         +str ciphertext
         +str sender_ephemeral_public_key
         +int membership_version
         +str status
-    }
-    class GroupAnnouncement {
-        +int id
-        +Conversation conversation
-        +User author
-        +str content
-        +bool is_active
-    }
-    class UserPresence {
-        +int id
-        +User user
-        +bool is_online
-        +datetime last_seen
-        +str status
-    }
-    class EncryptedFile {
-        +int id
-        +str upload_id
-        +User owner
-        +Conversation conversation
-        +str storage_path
-        +int total_size_bytes
-        +str ciphertext_sha256
-    }
-    class EncryptedFileKey {
-        +int id
-        +EncryptedFile file
-        +User holder
-        +str encrypted_file_key
-        +str sender_ephemeral_public_key
     }
     class LlmProvider {
         <<abstract>>
@@ -365,44 +197,36 @@ classDiagram
         +stream(messages, system) Iterator
     }
     class MockProvider {
-        +complete(messages, system) str
+        +complete() str
     }
     class OpenAICompatibleProvider {
         +str endpoint
-        +str api_key
         +str model
     }
     class AnthropicMessagesProvider {
-        +str api_key
         +str url
         +str model
     }
 
-    User "1" --> "1" UserProfile : has
-    User "1" --> "*" Contact : initiates
-    User "1" --> "*" FriendRequest : sends
-    User "1" --> "*" UserPublicKey : owns
-    User "1" --> "*" KeyTrust : verifies
-    User "1" --> "*" KeyVerificationRequest : requests
-    User "1" --> "*" BlockedUser : blocks
-    User "1" --> "1" UserPrivacySettings : configures
-    User "1" --> "1" UserNotificationSettings : configures
-    User "1" --> "1" UserStorageSettings : configures
-    User "1" --> "*" UserLLMConfig : configures
-    User "1" --> "1" UserPresence : has
-    Conversation "1" --> "*" ConversationMember : contains
-    Conversation "1" --> "*" EncryptedMessage : holds
-    Conversation "1" --> "*" GroupMessage : holds
-    Conversation "1" --> "*" GroupInvitation : has
-    Conversation "1" --> "*" GroupAnnouncement : has
-    GroupMessage "1" --> "*" GroupMessageRecipient : per_recipient
-    EncryptedFile "1" --> "*" EncryptedFileKey : wrapped
-    LlmProvider <|-- MockProvider : implements
-    LlmProvider <|-- OpenAICompatibleProvider : implements
-    LlmProvider <|-- AnthropicMessagesProvider : implements
+    User "1" --> "1" UserProfile
+    User "1" --> "*" Contact
+    User "1" --> "*" FriendRequest
+    User "1" --> "*" UserPublicKey
+    User "1" --> "*" KeyTrust
+    User "1" --> "*" BlockedUser
+    User "1" --> "*" UserLLMConfig
+    Conversation "1" --> "*" ConversationMember
+    Conversation "1" --> "*" EncryptedMessage
+    Conversation "1" --> "*" GroupMessage
+    ConversationMember "*" --> "1" User
+    GroupMessage "1" --> "*" GroupMessageRecipient
+    GroupMessageRecipient "*" --> "1" User
+    LlmProvider <|-- MockProvider
+    LlmProvider <|-- OpenAICompatibleProvider
+    LlmProvider <|-- AnthropicMessagesProvider
 ```
 
-**说明：** 核心类图覆盖 25 个关键类（含抽象 LLM Provider 及其 3 个实现）。`Conversation` 统一承载私聊与群聊，`EncryptedMessage` 只存密文并新增 `sender_copy_*` 字段支持发送方前向保密。`GroupMessage` + `GroupMessageRecipient` 实现逐成员独立密文。`UserLLMConfig` 以 Fernet 加密存储 API Key。`KeyVerificationRequest` 支持双方密钥验证确认流程。
+**说明：** 核心类图聚焦 17 个关键类。`Conversation` 统一承载私聊与群聊。消息密文仅存 `EncryptedMessage`（私聊）和 `GroupMessage` + `GroupMessageRecipient`（群聊逐成员副本），含 `sender_ephemeral_public_key` 和 `sender_copy_ciphertext` 前向保密字段。`UserLLMConfig` 以 Fernet 加密存储 API Key。`LlmProvider` 抽象类派生出 Mock、OpenAI 兼容、Anthropic 三种实现。其余 settings 类（Privacy、Notification、Storage 等）和文件传输类属辅助模型，未在图中展开。
 
 ---
 
@@ -734,8 +558,8 @@ stateDiagram-v2
 
 ### 当前代码一致性校验
 
-- **ER 图一致性**：图中所列表与 `accounts/models.py`（16 个模型）和 `chat/models.py`（17 个模型）完全对应。
-- **类图一致性**：新增 `GroupInvitation`、`KeyVerificationRequest`、`UserLLMConfig`、`LlmProvider` 及 3 个实现类，`EncryptedMessage`/`GroupMessage`/`EncryptedFileKey` 均已加入 `sender_ephemeral_public_key` 和 `sender_copy_*` 前向保密字段。
+- **ER 图一致性**：图中所列关系与 `accounts/models.py`（16 个模型）和 `chat/models.py`（17 个模型）完全对应，字段详见 ER 图下方表格。
+- **类图一致性**：聚焦 17 个核心类，新增 `UserLLMConfig`、`LlmProvider` 及 3 个实现类，`EncryptedMessage`/`GroupMessage`/`GroupMessageRecipient` 均已加入前向保密字段。辅助 settings 类和文件传输类在说明文字中标注。
 - **时序图一致性**：私聊/群聊 E2EE 流程与 `static/js/private-chat-e2ee.js`、`static/js/group-chat-e2ee.js` 和 `chat/consumers.py` 实现一致；AI Assistant 流程与 `chat/llm.py`（`get_llm_provider`、`validate_llm_endpoint`）一致。
 - **组件图一致性**：架构分层与 `ichat_pro/settings.py`（Django + Channels + CSP Middleware）、前端模板结构和 `package.json`（Electron + Tailwind）对应。
 - **LLM 安全边界**：所有图表遵从 `chat/llm.py` 中 `validate_llm_endpoint()` 的 SSRF 防护和 `UserLLMConfig` 的 Fernet 加密方案。

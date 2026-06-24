@@ -731,7 +731,7 @@
     <input type="hidden" name="is_circle" id="ae-is-circle" value="1">
   </form>
 
-  <script>
+  <script nonce="{{ request.csp_nonce }}">
   (function() {
     'use strict';
 

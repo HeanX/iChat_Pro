@@ -4,11 +4,11 @@
 {% block title %}Workspace - iChat Pro{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260616-ai-badge-active">
+<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260624-drawer-btn-fix">
 {% endblock %}
 
 {% block content %}
-<script>
+<script nonce="{{ request.csp_nonce }}">
   (function() {
     try {
       const saved = JSON.parse(localStorage.getItem('ichat_general') || '{}');
@@ -138,7 +138,7 @@
 <!-- BIRTHDAY MODAL (Date of Birth) -->
 <div id="birthday-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-[1.5px] hidden items-center justify-center p-4">
   <div class="birthday-modal-content animate-fadeIn">
-    <button onclick="closeBirthdayModal()" class="birthday-modal-close" title="Close">
+    <button data-ichat-onclick="closeBirthdayModal()" class="birthday-modal-close" title="Close">
       <i data-lucide="x" class="w-5 h-5"></i>
     </button>
 
@@ -178,21 +178,21 @@
 
     <div class="birthday-inputs-row">
       <div class="birthday-input-col">
-        <input type="number" id="birthday-day" placeholder="Day" min="1" max="31" oninput="validateBirthdayInput(this, 1, 31)">
+        <input type="number" id="birthday-day" placeholder="Day" min="1" max="31" data-ichat-oninput="validateBirthdayInput(this, 1, 31)">
       </div>
       <div class="birthday-input-col">
-        <input type="number" id="birthday-month" placeholder="Month" min="1" max="12" oninput="validateBirthdayInput(this, 1, 12)">
+        <input type="number" id="birthday-month" placeholder="Month" min="1" max="12" data-ichat-oninput="validateBirthdayInput(this, 1, 12)">
       </div>
       <div class="birthday-input-col">
-        <input type="number" id="birthday-year" placeholder="Year" min="1900" max="2026" oninput="validateBirthdayInput(this, 1900, 2026)">
+        <input type="number" id="birthday-year" placeholder="Year" min="1900" max="2026" data-ichat-oninput="validateBirthdayInput(this, 1900, 2026)">
       </div>
     </div>
 
-    <a onclick="openBirthdayPrivacyFromModal()" class="birthday-privacy-link">
+    <a data-ichat-onclick="openBirthdayPrivacyFromModal()" class="birthday-privacy-link">
       Choose who can see your birthday in 设置 &gt;
     </a>
 
-    <button onclick="saveBirthdayFromModal()" class="birthday-modal-save-btn">
+    <button data-ichat-onclick="saveBirthdayFromModal()" class="birthday-modal-save-btn">
       保存
     </button>
   </div>
@@ -200,6 +200,7 @@
 
 <!-- Toast Container -->
 <div id="toast-container" class="fixed top-5 left-1/2 -translate-x-1/2 z-[100] pointer-events-none flex flex-col items-center space-y-2"></div>
+<div id="group-invite-notification-tray" class="group-invite-notification-tray hidden"></div>
 <input id="key-backup-import-input" type="file" accept="application/json" class="hidden">
 
 <!-- REPORT MODAL -->
@@ -230,8 +231,8 @@
       </label>
     </div>
     <div class="flex items-center justify-end space-x-3 mt-6">
-      <button onclick="closeReportModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
-      <button onclick="submitReport()" class="px-4 py-2 text-xs font-semibold bg-brand-light dark:bg-brand-dark text-white rounded-custom-md hover:opacity-90 transition-opacity" data-i18n="submit">提交</button>
+      <button data-ichat-onclick="closeReportModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
+      <button data-ichat-onclick="submitReport()" class="px-4 py-2 text-xs font-semibold bg-brand-light dark:bg-brand-dark text-white rounded-custom-md hover:opacity-90 transition-opacity" data-i18n="submit">提交</button>
     </div>
   </div>
 </div>
@@ -244,8 +245,8 @@
       删除后，本地会话记录将从列表中移除。该操作不会删除其他成员的聊天记录。
     </div>
     <div class="flex items-center justify-end space-x-3">
-      <button onclick="closeDeleteConfirmModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
-      <button onclick="confirmDeleteChat()" class="px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-custom-md hover:bg-red-600 transition-colors" data-i18n="delete">确认删除</button>
+      <button data-ichat-onclick="closeDeleteConfirmModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
+      <button data-ichat-onclick="confirmDeleteChat()" class="px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-custom-md hover:bg-red-600 transition-colors" data-i18n="delete">确认删除</button>
     </div>
   </div>
 </div>
@@ -258,7 +259,7 @@
       确定要退出登录吗？
     </div>
     <div class="flex items-center justify-end space-x-3">
-      <button onclick="closeLogoutConfirmModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
+      <button data-ichat-onclick="closeLogoutConfirmModal()" class="px-4 py-2 text-xs font-semibold text-textSecondary hover:text-textMain hover:bg-bgSearch rounded-custom-md transition-colors" data-i18n="cancel">取消</button>
       <a href="{% url 'logout' %}" class="px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-custom-md hover:bg-red-600 transition-colors text-center flex items-center justify-center" data-i18n="logout_confirm_btn">确认</a>
     </div>
   </div>
@@ -267,7 +268,7 @@
 <!-- QR CODE MODAL (P2 T03) -->
 <div id="qr-code-modal" class="modal-backdrop fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] hidden items-center justify-center p-4">
   <div class="bg-bgSidebar border border-borderColor rounded-custom-lg shadow-2xl w-full max-w-[360px] p-6 select-none flex flex-col items-center text-center">
-    <button onclick="closeQRCodeModal()" class="self-end p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all">
+    <button data-ichat-onclick="closeQRCodeModal()" class="self-end p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-textMain transition-all">
       <i data-lucide="x" class="w-5 h-5"></i>
     </button>
     <div class="w-16 h-16 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-xl shadow-md mb-3">
@@ -293,7 +294,7 @@
       </svg>
     </div>
     <p class="text-[11px] text-textSecondary mb-4">iChat Pro — {{ request.user.username }}</p>
-    <button onclick="copyQRCode()" class="w-full py-2.5 bg-brand-light dark:bg-brand-dark text-white font-semibold text-sm rounded-custom-md hover:opacity-95 transition-all" data-qr-username="{{ request.user.username }}">
+    <button data-ichat-onclick="copyQRCode()" class="w-full py-2.5 bg-brand-light dark:bg-brand-dark text-white font-semibold text-sm rounded-custom-md hover:opacity-95 transition-all" data-qr-username="{{ request.user.username }}">
       <i data-lucide="copy" class="w-4 h-4 inline mr-1.5"></i>
       Copy QR Code
     </button>
@@ -304,15 +305,15 @@
 
 {% block extra_js %}
 <!-- Main Chat Interaction JavaScript -->
-<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}?v=20260609-explicit-key-reset" data-current-user-id="{{ request.user.pk }}" data-username="{{ request.user.username }}" data-email="{{ request.user.email|default:'' }}" data-avatar-url="{{ settings_avatar_url|default:'' }}" data-initials="{{ settings_initials|default:'' }}" data-avatar-color="{{ settings_avatar_color|default:'#5c6bc0' }}"></script>
-<script src="{% static 'js/private-chat-e2ee.js' %}?v=20260615-file-transfer-fix2"></script>
-<script src="{% static 'js/group-chat-e2ee.js' %}?v=20260615-file-transfer-fix2"></script>
-<script src="{% static 'js/file-transfer.js' %}?v=20260615-file-forward"></script>
+<script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}?v=20260624-versioned-local-keys" data-current-user-id="{{ request.user.pk }}" data-username="{{ request.user.username }}" data-email="{{ request.user.email|default:'' }}" data-avatar-url="{{ settings_avatar_url|default:'' }}" data-initials="{{ settings_initials|default:'' }}" data-avatar-color="{{ settings_avatar_color|default:'#5c6bc0' }}"></script>
+<script src="{% static 'js/private-chat-e2ee.js' %}?v=20260624-group-key-reset"></script>
+<script src="{% static 'js/group-chat-e2ee.js' %}?v=20260624-group-key-reset"></script>
+<script src="{% static 'js/file-transfer.js' %}?v=20260624-group-key-reset"></script>
 <script src="{% static 'js/context-menu.js' %}?v=20260610-t12t14-chat-ux"></script>
 <script src="{% static 'js/chat-conversation-actions.js' %}?v=20260610-t12t14-chat-ux"></script>
-<script src="{% static 'js/chat-message-actions.js' %}?v=20260616-ai-assistant-actions"></script>
-<script src="{% static 'js/chat.js' %}?v=20260617-ai-status-modes"></script>
-<script>
+<script src="{% static 'js/chat-message-actions.js' %}?v=20260624-group-key-reset"></script>
+<script src="{% static 'js/chat.js' %}?v=20260624-drawer-btn-fix"></script>
+<script nonce="{{ request.csp_nonce }}">
   function exportLocalKeyBackup() {
     try {
       window.iChatKeyManager.exportBackup();

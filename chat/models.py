@@ -1,3 +1,7 @@
+import base64
+import hashlib
+
+from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 from django.db import models
 
@@ -112,6 +116,62 @@ class ConversationMember(models.Model):
         return f"Member #{self.user_id} in Conversation #{self.conversation_id}"
 
 
+class GroupInvitation(models.Model):
+    """Two-step invitation workflow for adding users to existing groups."""
+
+    class Status(models.TextChoices):
+        PENDING_ADMIN = "pending_admin", "Pending Admin Approval"
+        PENDING_INVITEE = "pending_invitee", "Pending Invitee Approval"
+        ACCEPTED = "accepted", "Accepted"
+        REJECTED = "rejected", "Rejected"
+        CANCELLED = "cancelled", "Cancelled"
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="group_invitations"
+    )
+    inviter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_group_invitations",
+    )
+    invitee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="received_group_invitations",
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING_ADMIN
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_group_invitations",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "invitee"],
+                condition=models.Q(status__in=["pending_admin", "pending_invitee"]),
+                name="unique_pending_group_invitation",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["conversation", "status"]),
+            models.Index(fields=["invitee", "status"]),
+            models.Index(fields=["inviter", "status"]),
+        ]
+
+    def __str__(self):
+        return f"Invite #{self.id}: user #{self.invitee_id} to group #{self.conversation_id}"
+
+
 class EncryptedMessage(models.Model):
     """Private chat encrypted message. NO plaintext fields allowed."""
 
@@ -149,6 +209,11 @@ class EncryptedMessage(models.Model):
     ciphertext = models.TextField(null=True, blank=True)
     nonce = models.CharField(max_length=64, null=True, blank=True)
     auth_tag = models.CharField(max_length=64, null=True, blank=True)
+    sender_ephemeral_public_key = models.TextField(null=True, blank=True)
+    sender_copy_ciphertext = models.TextField(null=True, blank=True)
+    sender_copy_nonce = models.CharField(max_length=64, null=True, blank=True)
+    sender_copy_auth_tag = models.CharField(max_length=64, null=True, blank=True)
+    sender_copy_ephemeral_public_key = models.TextField(null=True, blank=True)
     algorithm = models.CharField(max_length=50)
     sender_key_version = models.IntegerField(null=True, blank=True)
     receiver_key_version = models.IntegerField(null=True, blank=True)
@@ -230,6 +295,11 @@ class GroupMessage(models.Model):
         blank=True,
         related_name="group_messages",
     )
+    # sender_copy so the sender's other devices can decrypt their own group messages
+    sender_copy_ciphertext = models.TextField(null=True, blank=True)
+    sender_copy_nonce = models.CharField(max_length=64, null=True, blank=True)
+    sender_copy_auth_tag = models.CharField(max_length=64, null=True, blank=True)
+    sender_copy_ephemeral_public_key = models.TextField(null=True, blank=True)
 
     class Meta:
         indexes = [
@@ -272,6 +342,7 @@ class GroupMessageRecipient(models.Model):
     algorithm = models.CharField(max_length=50)
     sender_key_version = models.IntegerField(null=True, blank=True)
     receiver_key_version = models.IntegerField(null=True, blank=True)
+    sender_ephemeral_public_key = models.TextField(null=True, blank=True)
     membership_version = models.IntegerField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.SENT
@@ -622,6 +693,7 @@ class EncryptedFileKey(models.Model):
     sender_key_version = models.PositiveIntegerField(null=True, blank=True)
     receiver_key_version = models.PositiveIntegerField(null=True, blank=True)
     membership_version = models.PositiveIntegerField(null=True, blank=True)
+    sender_ephemeral_public_key = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -647,12 +719,13 @@ class EncryptedFileKey(models.Model):
 
 
 class UserLLMConfig(models.Model):
-    """Stores LLM Endpoint and API Key configurations for each user."""
-    user = models.OneToOneField(
+    """Stores LLM Endpoint and API Key configurations for each AI assistant session."""
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="llm_config"
+        related_name="llm_configs"
     )
+    assistant_id = models.CharField(max_length=80, default="ai-assistant")
     api_url = models.CharField(
         max_length=255,
         blank=True,
@@ -668,5 +741,62 @@ class UserLLMConfig(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    ENCRYPTED_PREFIX = "fernet:"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Track whether api_key has already been encrypted in this instance
+        # so that save() never double-encrypts.
+        self._api_key_encrypted = False
+
+    @staticmethod
+    def _fernet():
+        digest = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
+        return Fernet(base64.urlsafe_b64encode(digest))
+
+    @classmethod
+    def encrypt_api_key(cls, raw_api_key):
+        if not raw_api_key:
+            return raw_api_key
+        if str(raw_api_key).startswith(cls.ENCRYPTED_PREFIX):
+            return raw_api_key
+        token = cls._fernet().encrypt(str(raw_api_key).encode("utf-8")).decode("ascii")
+        return f"{cls.ENCRYPTED_PREFIX}{token}"
+
+    @classmethod
+    def decrypt_api_key(cls, stored_api_key):
+        if not stored_api_key:
+            return ""
+        stored_api_key = str(stored_api_key)
+        if not stored_api_key.startswith(cls.ENCRYPTED_PREFIX):
+            # Backward compatibility for rows created before encrypted storage.
+            return stored_api_key
+        token = stored_api_key[len(cls.ENCRYPTED_PREFIX):]
+        try:
+            return cls._fernet().decrypt(token.encode("ascii")).decode("utf-8")
+        except (InvalidToken, UnicodeDecodeError):
+            return ""
+
+    def get_api_key(self):
+        return self.decrypt_api_key(self.api_key)
+
+    def set_api_key(self, raw_api_key):
+        self.api_key = self.encrypt_api_key(raw_api_key)
+        self._api_key_encrypted = True
+
+    def save(self, *args, **kwargs):
+        if self.api_key and not self._api_key_encrypted:
+            self.api_key = self.encrypt_api_key(self.api_key)
+            self._api_key_encrypted = True
+        super().save(*args, **kwargs)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "assistant_id"],
+                name="unique_llm_config_per_assistant",
+            )
+        ]
+
     def __str__(self):
-        return f"LLM Config for {self.user.username}"
+        return f"LLM Config for {self.user.username} / {self.assistant_id}"

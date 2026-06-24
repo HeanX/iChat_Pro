@@ -21,7 +21,7 @@
 
     <div class="lang-inner-divider"></div>
 
-    <button type="button" class="lang-toggle-row lang-toggle-row--link" onclick="showToast('翻译排除语言设置即将推出')">
+    <button type="button" class="lang-toggle-row lang-toggle-row--link" data-ichat-onclick="showToast('翻译排除语言设置即将推出')">
       <span class="lang-toggle-label">无需翻译</span>
       <span class="lang-value-right" id="lang-no-translate-val">中文</span>
     </button>
@@ -340,7 +340,7 @@
   }
 </style>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
 (function() {
   // ── Supported languages (all 4 fully supported) ────────────────
   var LANG_LOCALE_MAP = {

@@ -1,0 +1,26 @@
+{# groups_sidebar.html - sidebar-embedded group management view #}
+<div class="settings-template-body groups-sidebar-body">
+  <section class="settings-template-card groups-sidebar-summary" aria-label="Group actions">
+    <button type="button" data-ichat-onclick="startGroupCreationFromGroups()" class="settings-template-row">
+      <span class="settings-template-row-icon"><i data-lucide="users-round"></i></span>
+      <span class="settings-template-row-main">
+        <span class="settings-template-row-title" data-i18n="menu_new_group">New Group</span>
+        <span class="settings-template-row-subtitle">Create a secure group chat</span>
+      </span>
+      <i data-lucide="chevron-right" class="settings-template-chevron"></i>
+    </button>
+  </section>
+
+  <section class="settings-template-card groups-sidebar-list-card" aria-label="My groups">
+    <div class="groups-sidebar-section-head">
+      <span data-i18n="groups">Groups</span>
+      <span id="groups-sidebar-count">0</span>
+    </div>
+    <div id="groups-sidebar-list" class="groups-sidebar-list">
+      <div class="groups-sidebar-empty">
+        <i data-lucide="users-round"></i>
+        <span>No groups yet.</span>
+      </div>
+    </div>
+  </section>
+</div>

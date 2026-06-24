@@ -96,10 +96,20 @@ urlpatterns = [
         views.send_private_message_view,
         name='api_conversation_message_send',
     ),
+    path(
+        'api/conversations/<int:conversation_id>/messages/send-group/',
+        views.send_group_message_view,
+        name='api_group_message_send',
+    ),
     # Group management
     path('api/groups/', views.create_group_view, name='api_create_group'),
     path('api/groups/<int:conversation_id>/', views.update_group_view, name='api_update_group'),
     path('api/groups/<int:conversation_id>/invite/', views.invite_member_view, name='api_invite_member'),
+    path('api/groups/<int:conversation_id>/invite-candidates/', views.group_invite_candidates_view, name='api_group_invite_candidates'),
+    path('api/group-invitations/pending/', views.pending_group_invitations_view, name='api_pending_group_invitations'),
+    path('api/group-invitations/<int:invitation_id>/approve/', views.group_invitation_approve_view, name='api_group_invitation_approve'),
+    path('api/group-invitations/<int:invitation_id>/reject/', views.group_invitation_reject_view, name='api_group_invitation_reject'),
+    path('api/group-invitations/<int:invitation_id>/accept/', views.group_invitation_accept_view, name='api_group_invitation_accept'),
     path('api/groups/<int:conversation_id>/remove/', views.remove_member_view, name='api_remove_member'),
     path('api/groups/<int:conversation_id>/leave/', views.leave_group_view, name='api_leave_group'),
     path('api/groups/<int:conversation_id>/disband/', views.disband_group_view, name='api_disband_group'),
@@ -140,7 +150,7 @@ urlpatterns = [
     path('api/files/<int:file_id>/chunks/<int:chunk_index>/', views.download_chunk_view, name='api_file_download_chunk'),
     path('api/files/<int:file_id>/messages/', views.send_file_message_view, name='api_file_send_message'),
     # Phase 3: AI Assistant API
+    path('api/ai/config/', views.ai_config_view, name='api_ai_config'),
     path('api/ai/status/', views.ai_status_view, name='api_ai_status'),
     path('api/ai/chat/', views.ai_chat_view, name='api_ai_chat'),
-    path('api/ai/status/', views.ai_status_view, name='api_ai_status'),
 ]

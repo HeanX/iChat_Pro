@@ -5,17 +5,17 @@
     <section class="profile-edit-card">
       <div class="profile-edit-section-title" data-i18n="who_can_see_my_birthday">Who can see my birthday</div>
 
-      <div class="birthday-settings-option selected" id="birthday-vis-everyone" onclick="selectBirthdayVis('everyone')">
+      <div class="birthday-settings-option selected" id="birthday-vis-everyone" data-ichat-onclick="selectBirthdayVis('everyone')">
         <span class="text-sm text-textMain">Everybody</span>
         <span class="telegram-radio"></span>
       </div>
 
-      <div class="birthday-settings-option" id="birthday-vis-contacts" onclick="selectBirthdayVis('contacts')">
+      <div class="birthday-settings-option" id="birthday-vis-contacts" data-ichat-onclick="selectBirthdayVis('contacts')">
         <span class="text-sm text-textMain">My Contacts</span>
         <span class="telegram-radio"></span>
       </div>
 
-      <div class="birthday-settings-option" id="birthday-vis-nobody" onclick="selectBirthdayVis('nobody')">
+      <div class="birthday-settings-option" id="birthday-vis-nobody" data-ichat-onclick="selectBirthdayVis('nobody')">
         <span class="text-sm text-textMain">Nobody</span>
         <span class="telegram-radio"></span>
       </div>
@@ -28,7 +28,7 @@
     <section class="profile-edit-card">
       <div class="profile-edit-section-title" data-i18n="exceptions">Exceptions</div>
 
-      <div class="profile-edit-row has-chevron" onclick="showToast('Exceptions coming in Phase 3')">
+      <div class="profile-edit-row has-chevron" data-ichat-onclick="showToast('Exceptions coming in Phase 3')">
         <i data-lucide="user-minus" class="w-5 h-5 text-textSecondary" aria-hidden="true"></i>
         <div class="flex-1 flex flex-col">
           <span class="text-sm text-textMain" data-i18n="never_allow">Never Allow</span>
@@ -37,7 +37,7 @@
         <i data-lucide="chevron-right" aria-hidden="true"></i>
       </div>
 
-      <div class="profile-edit-row has-chevron" onclick="showToast('Exceptions coming in Phase 3')">
+      <div class="profile-edit-row has-chevron" data-ichat-onclick="showToast('Exceptions coming in Phase 3')">
         <i data-lucide="user-plus" class="w-5 h-5 text-textSecondary" aria-hidden="true"></i>
         <div class="flex-1 flex flex-col">
           <span class="text-sm text-textMain" data-i18n="always_allow">Always Allow</span>
@@ -54,7 +54,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   function selectBirthdayVis(value) {
     // Save to localStorage
     localStorage.setItem('birthday_visibility', value);

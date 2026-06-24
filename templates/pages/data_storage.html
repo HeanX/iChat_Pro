@@ -339,7 +339,7 @@
   <div id="storage-toast" class="storage-toast"></div>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   (function() {
     const SETTINGS_URL = '/api/storage/settings/';
     const STATS_URL = '/api/storage/stats/';

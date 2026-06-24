@@ -112,7 +112,7 @@
      * @param {CryptoKey} fileKey
      * @param {string} clientFileId - stable client-generated file UUID (AAD)
      * @param {number} chunkIndex
-     * @returns {{ciphertext: Uint8Array, nonce: Uint8Array, authTag: Uint8Array}}
+     * @returns {{ciphertext: Uint8Array, nonce: Uint8Array, authTag: Uint8Array, ciphertextSha256: string}}
      */
     async function encryptFileChunk(chunkBytes, fileKey, clientFileId, chunkIndex) {
         const nonce = window.crypto.getRandomValues(new Uint8Array(12));
@@ -129,10 +129,17 @@
         );
         // Split: last 16 bytes = auth tag
         const tagStart = combined.length - 16;
+        const ciphertext = combined.slice(0, tagStart);
+
+        // Compute SHA-256 of ciphertext for integrity verification
+        const ciphertextHash = await window.crypto.subtle.digest('SHA-256', ciphertext);
+        const ciphertextSha256 = bytesToHex(new Uint8Array(ciphertextHash));
+
         return {
-            ciphertext: combined.slice(0, tagStart),
+            ciphertext: ciphertext,
             nonce: nonce,
             authTag: combined.slice(tagStart),
+            ciphertextSha256: ciphertextSha256,
         };
     }
 
@@ -396,7 +403,7 @@
             formData.append('chunk', new Blob([encrypted.ciphertext]), 'chunk.bin');
             formData.append('nonce', bytesToBase64(encrypted.nonce));
             formData.append('auth_tag', bytesToBase64(encrypted.authTag));
-            formData.append('ciphertext_sha256', '');  // optional
+            formData.append('ciphertext_sha256', encrypted.ciphertextSha256 || '');
             formData.append('size_bytes', String(encrypted.ciphertext.length));
 
             const url = '/api/files/uploads/' + encodeURIComponent(this.uploadId) +
@@ -428,9 +435,10 @@
                 throw new Error('Not all chunks uploaded');
             }
 
+            // Server computes and stores merged ciphertext SHA-256 during chunk assembly
             const resp = await window.apiFetch(
                 '/api/files/uploads/' + encodeURIComponent(this.uploadId) + '/complete/',
-                { method: 'POST', body: JSON.stringify({ ciphertext_sha256: '' }) }
+                { method: 'POST' }
             );
 
             this.status = 'completed';
@@ -736,6 +744,53 @@
 
     // ── File picker ─────────────────────────────────────────────────────
 
+    async function sendSelectedFile(file, conversationId, conversationType, messageKind, options) {
+        if (!conversationId) {
+            window.showToast && window.showToast('Please select a conversation first.');
+            return;
+        }
+
+        messageKind = messageKind || 'file';
+        options = options || {};
+
+        if (!file) return;
+
+        const shouldPromoteImage = options.promoteImages !== false;
+        const actualKind = shouldPromoteImage && file.type && file.type.indexOf('image/') === 0
+            ? 'image'
+            : messageKind;
+
+        const limit = actualKind === 'image' ? 20 * 1024 * 1024
+            : actualKind === 'sticker' ? 2 * 1024 * 1024
+            : MAX_FILE_SIZE;
+        if (file.size > limit) {
+            window.showToast && window.showToast('File too large. Maximum size: ' + (limit / 1024 / 1024) + ' MB.');
+            return;
+        }
+
+        try {
+            if (actualKind === 'image' && options.showImageModal !== false) {
+                await showImageUploadModal(file, conversationId, conversationType, actualKind);
+            } else {
+                const replyToMessageId = getCurrentReplyId();
+                clearReplyState();
+                await startUploadFlow(file, conversationId, conversationType, actualKind, {
+                    replyToMessageId: replyToMessageId,
+                });
+            }
+        } catch (err) {
+            console.error('File upload failed:', err);
+            window.showToast && window.showToast('Upload failed: ' + (err.message || 'Unknown error'));
+        }
+    }
+
+    async function sendSelectedFiles(files, conversationId, conversationType, messageKind, options) {
+        const list = Array.from(files || []).filter(Boolean);
+        for (const file of list) {
+            await sendSelectedFile(file, conversationId, conversationType, messageKind, options);
+        }
+    }
+
     /**
      * Show a file picker dialog and start the upload flow.
      *
@@ -765,32 +820,7 @@
 
         input.onchange = async function () {
             const file = input.files[0];
-            if (!file) return;
-            const actualKind = file.type && file.type.indexOf('image/') === 0 ? 'image' : messageKind;
-
-            // Validate size
-            const limit = actualKind === 'image' ? 20 * 1024 * 1024
-                : actualKind === 'sticker' ? 2 * 1024 * 1024
-                : MAX_FILE_SIZE;
-            if (file.size > limit) {
-                window.showToast && window.showToast('File too large. Maximum size: ' + (limit / 1024 / 1024) + ' MB.');
-                return;
-            }
-
-            try {
-                if (actualKind === 'image') {
-                    await showImageUploadModal(file, conversationId, conversationType, actualKind);
-                } else {
-                    const replyToMessageId = getCurrentReplyId();
-                    clearReplyState();
-                    await startUploadFlow(file, conversationId, conversationType, actualKind, {
-                        replyToMessageId: replyToMessageId,
-                    });
-                }
-            } catch (err) {
-                console.error('File upload failed:', err);
-                window.showToast && window.showToast('Upload failed: ' + (err.message || 'Unknown error'));
-            }
+            await sendSelectedFile(file, conversationId, conversationType, messageKind);
         };
 
         input.click();
@@ -877,12 +907,20 @@
                 throw new Error('Group E2EE module is not loaded.');
             }
             const memberIds = await window.fetchGroupMemberIds(session.conversationId);
-            cardEncryption = await e2eeModule.encryptGroupMessage({
-                plaintext: cardPlaintext,
-                groupId: session.conversationId,
-                membershipVersion: conv.membership_version || window.activeMembershipVersion || 1,
-                memberIds: memberIds,
-            });
+            cardEncryption = window.encryptGroupMessageWithTrustRetry
+                ? await window.encryptGroupMessageWithTrustRetry({
+                    plaintext: cardPlaintext,
+                    conv: conv,
+                    groupId: session.conversationId,
+                    membershipVersion: conv.membership_version || window.activeMembershipVersion || 1,
+                    memberIds: memberIds,
+                })
+                : await e2eeModule.encryptGroupMessage({
+                    plaintext: cardPlaintext,
+                    groupId: session.conversationId,
+                    membershipVersion: conv.membership_version || window.activeMembershipVersion || 1,
+                    memberIds: memberIds,
+                });
 
             if (typeof e2eeModule.wrapFileKey === 'function') {
                 for (const holderId of memberIds) {
@@ -920,6 +958,8 @@
             ciphertext: cardEncryption.ciphertext || '',
             nonce: cardEncryption.nonce || '',
             auth_tag: cardEncryption.auth_tag || '',
+            sender_ephemeral_public_key: cardEncryption.sender_ephemeral_public_key,
+            sender_copy: cardEncryption.sender_copy,
             algorithm: cardEncryption.algorithm || 'AES-256-GCM',
             sender_key_version: cardEncryption.sender_key_version || 0,
             receiver_key_version: cardEncryption.receiver_key_version || 0,
@@ -1038,6 +1078,8 @@
         UploadSession: UploadSession,
         startUploadFlow: startUploadFlow,
         sendFileMessage: sendFileMessage,
+        sendSelectedFile: sendSelectedFile,
+        sendSelectedFiles: sendSelectedFiles,
 
         // Download
         downloadAndDecryptFile: downloadAndDecryptFile,

@@ -17,7 +17,7 @@
       <input type="checkbox" id="notif-all-accounts" data-field="all_accounts_notifications">
       <span class="telegram-switch"></span>
     </label>
-    <button type="button" class="notification-link-row" onclick="enablePrivateNotifications()">
+    <button type="button" class="notification-link-row" data-ichat-onclick="enablePrivateNotifications()">
       <i data-lucide="bell"></i>
       <span data-i18n="enable_private_chats">Enable Private Chats</span>
     </button>
@@ -38,7 +38,7 @@
     <div class="notification-volume-row">
       <div class="notification-volume-label">
         <span>Volume</span>
-        <button type="button" id="notif-volume-val" onclick="testNotificationVolume()">80%</button>
+        <button type="button" id="notif-volume-val" data-ichat-onclick="testNotificationVolume()">80%</button>
       </div>
       <input type="range" min="0" max="100" value="80" id="notif-volume" data-field="volume">
     </div>
@@ -282,7 +282,7 @@
   }
 </style>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   var NOTIF_API_URL = '/api/settings/notifications/';
   var NOTIF_UPDATE_URL = '/api/settings/notifications/update/';
   var notifSaveTimer = null;

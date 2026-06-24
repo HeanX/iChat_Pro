@@ -1,159 +1,255 @@
 {% extends 'base_auth.html' %}
 {% load static %}
 
-{% block title %}登录 — iChat Pro{% endblock %}
+{% block title %}登录 - iChat Pro{% endblock %}
+{% block auth_wrapper_class %}auth-wrapper-login auth-wrapper-scan{% endblock %}
+{% block auth_card_class %}auth-card-login auth-card-scan{% endblock %}
 
 {% block auth_card %}
-<!-- Card Section Title -->
-<p class="auth-section-title">欢迎回来</p>
-<p class="auth-section-sub">登录您的账户，开始安全聊天</p>
-
-<!-- Server-side Error Messages -->
-{% if messages or errors %}
-<div class="auth-error is-visible" id="server-error-box" role="alert">
-  <i data-lucide="alert-circle"></i>
-  <div>
-    {% if errors %}
-      {% for error in errors %}
-        <p>{{ error }}</p>
-      {% endfor %}
-    {% else %}
-      {% for message in messages %}
-        <p>{{ message }}</p>
-      {% endfor %}
-    {% endif %}
-  </div>
-</div>
-{% endif %}
-
-<!-- Client-side Validation Error Box -->
-<div class="auth-error" id="validation-error-box" role="alert">
-  <i data-lucide="alert-circle"></i>
-  <span id="validation-error-text"></span>
-</div>
-
-<!-- Login Form -->
-<form id="login-form" method="POST" action="{% url 'login' %}" onsubmit="return handleFormSubmit(event)">
-  {% csrf_token %}
-  <input type="hidden" name="next" value="{{ request.GET.next|default:'' }}">
-
-  <!-- Username / Email -->
-  <div class="auth-field">
-    <label class="auth-label" for="username">用户名或邮箱</label>
-    <div class="auth-input-wrap">
-      <span class="auth-input-icon">
-        <i data-lucide="user"></i>
-      </span>
-      <input
-        type="text"
-        id="username"
-        name="username"
-        class="auth-input"
-        placeholder="e.g. alice 或 alice@example.com"
-        autocomplete="username"
-        required
-      >
-    </div>
-  </div>
-
-  <!-- Password -->
-  <div class="auth-field">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <label class="auth-label" for="password">密码</label>
-      <span class="auth-forgot">Phase 1 暂不支持找回密码</span>
-    </div>
-    <div class="auth-input-wrap">
-      <span class="auth-input-icon">
-        <i data-lucide="key-round"></i>
-      </span>
-      <input
-        type="password"
-        id="password"
-        name="password"
-        class="auth-input"
-        placeholder="输入您的密码"
-        autocomplete="current-password"
-        required
-      >
-      <button type="button" class="auth-pw-toggle" onclick="togglePw()" aria-label="显示/隐藏密码">
-        <i data-lucide="eye" id="pw-toggle-icon"></i>
-      </button>
-    </div>
-  </div>
-
-  <!-- Remember Me -->
-  <div class="auth-row" style="margin-top:-4px;">
-    <label class="auth-check-label">
-      <input type="checkbox" id="remember_me" name="remember_me">
-      保持登录状态
+<section class="login-scan-panel" id="scan-panel" aria-labelledby="scan-title">
+  <div class="login-scan-copy">
+    <h1 id="scan-title">扫码登录</h1>
+    <ol class="login-scan-steps">
+      <li><span>1</span>打开 iChat Pro 手机端</li>
+      <li><span>2</span>进入设置，选择已登录设备</li>
+      <li><span>3</span>扫描二维码以关联你的账户</li>
+    </ol>
+    <a class="login-help-link" href="{% url 'register' %}">
+      没有 iChat Pro 账号？立即注册
+      <i data-lucide="arrow-up-right"></i>
+    </a>
+    <label class="login-keep-signed">
+      <input type="checkbox" checked>
+      <span>在此浏览器上保持登录状态</span>
+      <i data-lucide="info"></i>
     </label>
   </div>
 
-  <!-- Submit Button -->
-  <button type="submit" id="submit-btn" class="auth-submit">
-    <span id="submit-text">登录</span>
-    <i data-lucide="arrow-right" id="submit-icon"></i>
-  </button>
-</form>
+  <div class="login-qr-column" aria-label="扫码区域">
+    <div class="login-qr-card" aria-hidden="true">
+      <div class="login-qr-code">
+        <img src="{% static 'images/login-qr.png' %}" alt="iChat Pro QR Code">
+        <div class="login-qr-logo">
+          <i data-lucide="shield-check"></i>
+        </div>
+      </div>
+    </div>
+    <button type="button" class="login-text-link" data-ichat-onclick="showPasswordLogin()">
+      使用用户名登录
+      <i data-lucide="chevron-right"></i>
+    </button>
+  </div>
+</section>
 
-<!-- Demo Quick-fill -->
-<div class="auth-demo-strip">
-  <button type="button" class="auth-demo-btn" onclick="fillDemo()">⚡ 快速填入演示账户</button>
-</div>
+<section class="login-form-panel is-hidden" id="password-panel" aria-labelledby="login-title">
+  <h1 class="auth-section-title" id="login-title">输入用户名</h1>
+  <p class="auth-section-sub">请输入你的用户名和密码以登录 iChat Pro。</p>
 
-<!-- Nav to Register -->
-<div class="auth-nav">
-  还没有账号？<a href="{% url 'register' %}" id="register-link">立即注册</a>
-</div>
+  <div class="auth-error" id="validation-error-box" role="alert">
+    <i data-lucide="alert-circle"></i>
+    <span id="validation-error-text"></span>
+  </div>
+
+  <form id="login-form" method="POST" action="{% url 'login' %}" data-ichat-onsubmit="handleFormSubmit(event)">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.GET.next|default:'' }}">
+
+    <div class="auth-field">
+      <label class="auth-label" for="username">用户名</label>
+      <div class="auth-input-wrap">
+        <span class="auth-input-icon">
+          <i data-lucide="user"></i>
+        </span>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          class="auth-input"
+          placeholder="请输入用户名"
+          autocomplete="username"
+          required
+        >
+      </div>
+    </div>
+
+    <div class="auth-field">
+      <div class="auth-label-row">
+        <label class="auth-label" for="password">密码</label>
+        <span class="auth-forgot">Phase 1 暂不支持找回密码</span>
+      </div>
+      <div class="auth-input-wrap">
+        <span class="auth-input-icon">
+          <i data-lucide="key-round"></i>
+        </span>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          class="auth-input"
+          placeholder="请输入密码"
+          autocomplete="current-password"
+          required
+        >
+        <button type="button" class="auth-pw-toggle" data-ichat-onclick="togglePw()" aria-label="显示或隐藏密码">
+          <i data-lucide="eye" id="pw-toggle-icon"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="auth-row" style="justify-content: center; margin-top: 6px;">
+      <label class="auth-check-label">
+        <input type="checkbox" id="remember_me" name="remember_me" checked>
+        保持登录状态
+      </label>
+    </div>
+
+    <div style="display: flex; justify-content: center;">
+      <button type="submit" id="submit-btn" class="auth-submit">
+        <span id="submit-text">登录</span>
+      </button>
+    </div>
+  </form>
+
+  <div class="auth-demo-strip" style="display: flex; justify-content: center; margin-top: 16px;">
+    <button type="button" class="auth-demo-btn" data-ichat-onclick="fillDemo()">
+      <i data-lucide="zap"></i>
+      <span>快速填入演示账户</span>
+    </button>
+  </div>
+
+  <div style="display: flex; justify-content: center; margin-top: 24px;">
+    <button type="button" class="login-back-link" data-ichat-onclick="showScanLogin()">
+      使用二维码登录
+      <i data-lucide="chevron-right"></i>
+    </button>
+  </div>
+
+  <div class="auth-nav" style="display: flex; justify-content: center; margin-top: 16px;">
+    还没有账号？<a href="{% url 'register' %}" id="register-link">立即注册</a>
+  </div>
+</section>
 {% endblock %}
 
 {% block extra_js %}
-<script>
-  // --- Password visibility toggle ---
+{% if messages or errors %}
+<script id="login-server-messages" type="application/json">
+[
+  {% if errors %}
+    {% for error in errors %}
+      "{{ error|escapejs }}"{% if not forloop.last %},{% endif %}
+    {% endfor %}
+  {% else %}
+    {% for message in messages %}
+      "{{ message|escapejs }}"{% if not forloop.last %},{% endif %}
+    {% endfor %}
+  {% endif %}
+]
+</script>
+{% endif %}
+<script nonce="{{ request.csp_nonce }}">
+  function translateLoginMessage(message) {
+    const text = String(message || '').trim();
+    const lower = text.toLowerCase();
+    if (lower.includes('invalid username or password')) {
+      return '用户名或密码错误，请重试。';
+    }
+    if (lower.includes('disabled')) {
+      return '该账号已被禁用，请联系管理员。';
+    }
+    if (lower.includes('this field is required') || lower.includes('required')) {
+      return '请填写用户名和密码。';
+    }
+    if (lower.includes('please enter a correct username and password')) {
+      return '用户名或密码错误，请重试。';
+    }
+    if (lower.includes('welcome back')) {
+      return '登录成功。';
+    }
+    return text || '操作失败，请重试。';
+  }
+
+  function escapeToastHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (char) {
+      return {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char];
+    });
+  }
+
+  function showAuthToast(message, options) {
+    const container = document.getElementById('auth-toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'auth-toast';
+    if (options && options.type === 'error') toast.classList.add('is-error');
+    toast.innerHTML = '<i data-lucide="' + ((options && options.icon) || 'info') + '"></i><span>' + escapeToastHtml(message) + '</span>';
+    container.appendChild(toast);
+    lucide.createIcons();
+    window.setTimeout(function () {
+      toast.classList.add('is-hiding');
+      window.setTimeout(function () { toast.remove(); }, 260);
+    }, 2600);
+  }
+
+  function setLoginMode(mode) {
+    const scanPanel = document.getElementById('scan-panel');
+    const passwordPanel = document.getElementById('password-panel');
+    const showPassword = mode === 'password';
+    scanPanel.classList.toggle('is-hidden', showPassword);
+    passwordPanel.classList.toggle('is-hidden', !showPassword);
+    if (showPassword) {
+      const username = document.getElementById('username');
+      if (username) username.focus();
+    }
+    lucide.createIcons();
+  }
+
+  function showPasswordLogin() {
+    setLoginMode('password');
+  }
+
+  function showScanLogin() {
+    setLoginMode('scan');
+  }
+
   function togglePw() {
     const input = document.getElementById('password');
-    const icon  = document.getElementById('pw-toggle-icon');
+    const icon = document.getElementById('pw-toggle-icon');
     const isHidden = input.type === 'password';
     input.type = isHidden ? 'text' : 'password';
     icon.setAttribute('data-lucide', isHidden ? 'eye-off' : 'eye');
     lucide.createIcons();
   }
 
-  // --- Demo credential fill ---
   function fillDemo() {
     document.getElementById('username').value = 'alice';
     document.getElementById('password').value = 'demo1234';
     hideError();
   }
 
-  // --- Error helpers ---
   function showError(msg) {
-    const box  = document.getElementById('validation-error-box');
-    const text = document.getElementById('validation-error-text');
-    text.textContent = msg;
-    box.classList.add('is-visible');
-    // Re-trigger shake animation
-    box.style.animation = 'none';
-    box.offsetHeight; // reflow
-    box.style.animation = '';
-    lucide.createIcons();
+    showAuthToast(msg, { type: 'error', icon: 'alert-circle' });
   }
 
   function hideError() {
-    document.getElementById('validation-error-box').classList.remove('is-visible');
+    const box = document.getElementById('validation-error-box');
+    if (box) box.classList.remove('is-visible');
   }
 
-  // --- Form submit handler ---
   function handleFormSubmit(event) {
-    const username  = document.getElementById('username').value.trim();
-    const password  = document.getElementById('password').value;
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
     const submitBtn = document.getElementById('submit-btn');
 
     hideError();
 
     if (username.length < 3) {
       event.preventDefault();
-      showError('用户名或邮箱至少需要 3 个字符。');
+      showError('用户名至少需要 3 个字符。');
       return false;
     }
 
@@ -163,7 +259,6 @@
       return false;
     }
 
-    // Loading state
     submitBtn.disabled = true;
     submitBtn.innerHTML = `
       <span class="auth-btn-spinner"></span>
@@ -171,5 +266,21 @@
     `;
     return true;
   }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const serverMessages = document.getElementById('login-server-messages');
+    if (serverMessages) {
+      setLoginMode('password');
+      try {
+        JSON.parse(serverMessages.textContent || '[]').forEach(function (message, index) {
+          window.setTimeout(function () {
+            showAuthToast(translateLoginMessage(message), { type: 'error', icon: 'alert-circle' });
+          }, index * 160);
+        });
+      } catch (error) {
+        showAuthToast('登录失败，请重试。', { type: 'error', icon: 'alert-circle' });
+      }
+    }
+  });
 </script>
 {% endblock %}

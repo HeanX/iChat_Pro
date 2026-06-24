@@ -1,4 +1,5 @@
 /* ==========================================================================
+/* ==========================================================================
    iChat Pro CSS - auth.css
    Redesigned to match the settings / chat GUI design language.
    ========================================================================== */
@@ -7,23 +8,30 @@
    Auth page root — full-screen centered layout
    -------------------------------------------------------------------------- */
 .auth-page {
-  min-height: 100vh;
+  height: 100vh;
   width: 100vw;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  background-color: var(--color-search-bg);
-  /* Subtle dot-grid pattern identical to settings panel background */
-  background-image: radial-gradient(circle, var(--auth-dot-color, rgba(0,0,0,.07)) 1px, transparent 1px);
-  background-size: 22px 22px;
+  justify-content: flex-start;
+  background-color: #e7eef5;
+  background-image:
+    linear-gradient(rgba(231, 238, 245, 0.28), rgba(231, 238, 245, 0.28)),
+    var(--chat-bg-image);
+  background-repeat: repeat;
+  background-position: 0 0;
+  background-size: 120px 120px;
   padding: 24px 16px;
   box-sizing: border-box;
   position: relative;
-  overflow: auto;
+  overflow-y: auto;
 }
 
 [data-theme="dark"] .auth-page {
-  --auth-dot-color: rgba(255,255,255,.05);
+  background-color: #0f1720;
+  background-image:
+    linear-gradient(rgba(15, 23, 32, 0.18), rgba(15, 23, 32, 0.18)),
+    var(--chat-bg-image);
 }
 
 /* --------------------------------------------------------------------------
@@ -37,6 +45,7 @@
   align-items: center;
   gap: 0;
   animation: authSlideUp 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  margin: auto 0;
 }
 
 @keyframes authSlideUp {
@@ -86,7 +95,7 @@
 .auth-brand-name {
   font-size: 1.75rem;
   font-weight: 800;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
   color: var(--color-text-main);
   line-height: 1.1;
 }
@@ -349,6 +358,74 @@
   flex-shrink: 0;
   margin-top: 1px;
   stroke-width: 2;
+}
+
+.auth-toast-container {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(92vw, 520px);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.auth-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 15, 15, 0.82);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(12px);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  pointer-events: auto;
+  animation: authToastIn 0.22s ease both;
+}
+
+[data-theme="dark"] .auth-toast {
+  background: rgba(39, 39, 42, 0.92);
+}
+
+.auth-toast.is-error svg {
+  color: var(--color-error);
+}
+
+.auth-toast svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--color-primary);
+  stroke-width: 2.4;
+}
+
+.auth-toast span {
+  overflow-wrap: anywhere;
+}
+
+.auth-toast.is-hiding {
+  animation: authToastOut 0.26s ease both;
+}
+
+@keyframes authToastIn {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes authToastOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-10px) scale(0.98); }
 }
 
 @keyframes authShake {
@@ -751,4 +828,578 @@
 
 .identity-card:has(input[type="radio"]:checked) .identity-card-title {
   color: var(--color-primary);
+}
+
+/* --------------------------------------------------------------------------
+   Login redesign - WhatsApp Web inspired layout with iChat Pro branding
+   -------------------------------------------------------------------------- */
+.auth-wrapper-login {
+  max-width: 900px;
+  align-items: stretch;
+}
+
+.auth-wrapper-login .auth-brand {
+  align-self: flex-start;
+  flex-direction: row;
+  gap: 10px;
+  text-align: left;
+  margin-bottom: 34px;
+  margin-left: 2px;
+}
+
+.auth-wrapper-login .auth-logo-ring {
+  width: 38px;
+  height: 38px;
+  margin: 0;
+  box-shadow: 0 6px 18px rgba(51, 144, 236, 0.22);
+  animation: none;
+}
+
+.auth-wrapper-login .auth-logo-ring svg {
+  width: 21px;
+  height: 21px;
+}
+
+.auth-wrapper-login .auth-brand-name {
+  font-size: 1.16rem;
+  line-height: 1;
+}
+
+.auth-wrapper-login .auth-brand-sub {
+  display: none;
+}
+
+.auth-card-login {
+  display: block;
+  min-height: 380px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+
+.login-form-panel {
+  padding: 42px 48px 32px;
+}
+
+.auth-card-scan .is-hidden {
+  display: none;
+}
+
+.login-scan-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 278px;
+  gap: 54px;
+  min-height: 380px;
+  padding: 44px 48px 34px;
+  background: var(--color-sidebar-bg);
+}
+
+.login-scan-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.login-scan-copy h1 {
+  margin: 0 0 24px;
+  color: var(--color-text-main);
+  font-size: 1.75rem;
+  font-weight: 300;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.login-scan-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  color: var(--color-text-secondary);
+  list-style: none;
+  font-size: 0.92rem;
+  font-weight: 300;
+}
+
+.login-scan-steps li {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: auto;
+  line-height: 1.6;
+}
+
+.login-scan-steps span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  border: 1px solid var(--color-text-secondary);
+  border-radius: 50%;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  font-weight: 300;
+  flex: 0 0 auto;
+}
+
+.login-help-link,
+.login-text-link,
+.login-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-primary);
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.login-help-link {
+  width: fit-content;
+  margin-top: 18px;
+  border-bottom: 2px solid var(--color-primary);
+  padding-bottom: 2px;
+  font-size: 0.88rem;
+}
+
+.login-help-link svg,
+.login-text-link svg,
+.login-back-link svg {
+  width: 16px;
+  height: 16px;
+}
+
+.login-keep-signed {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-top: auto;
+  padding-top: 24px;
+  color: var(--color-text-main);
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+
+.login-keep-signed input {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  accent-color: var(--color-primary);
+}
+
+.login-keep-signed svg {
+  width: 15px;
+  height: 15px;
+  color: var(--color-text-secondary);
+}
+
+.login-qr-column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 30px;
+}
+
+.login-qr-card {
+  width: 220px;
+  height: 220px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+}
+
+.login-qr-code {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-qr-code img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.login-qr-logo {
+  position: absolute;
+  inset: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  box-shadow: 0 0 0 8px #fff;
+}
+
+.login-qr-logo svg {
+  width: 27px;
+  height: 27px;
+}
+
+.login-text-link,
+.login-back-link {
+  border: 0;
+  cursor: pointer;
+  background: transparent;
+  font-size: 0.88rem;
+}
+
+.login-text-link {
+  border-bottom: 2px solid var(--color-primary);
+  padding: 0 0 3px;
+}
+
+.login-back-link {
+  margin-bottom: 28px;
+  padding: 0;
+}
+
+.auth-section-kicker {
+  margin-bottom: 10px;
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.auth-card-login .auth-section-title {
+  margin: 0 0 8px;
+  color: var(--color-text-main);
+  font-size: 1.38rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.auth-card-login .auth-section-sub {
+  max-width: 430px;
+  margin-bottom: 26px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.auth-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-card-login .auth-input {
+  height: 52px;
+  border-radius: 14px;
+  background: var(--color-bg);
+  font-size: 0.94rem;
+}
+
+.auth-card-login .auth-field {
+  margin-bottom: 16px;
+}
+
+.auth-card-login .auth-row {
+  margin: -1px 0 18px;
+}
+
+.auth-card-login .auth-submit {
+  height: 52px;
+  border-radius: 999px;
+  font-size: 0.94rem;
+}
+
+.auth-card-login .auth-demo-strip {
+  margin-top: 16px;
+}
+
+.auth-demo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.auth-demo-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.login-trust-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 44px 44px;
+  border-left: 1px solid var(--color-border);
+  background:
+    linear-gradient(135deg, rgba(51, 144, 236, 0.12), transparent 42%),
+    linear-gradient(180deg, var(--color-search-bg), var(--color-bg));
+}
+
+[data-theme="dark"] .login-trust-panel {
+  background:
+    linear-gradient(135deg, rgba(135, 116, 225, 0.18), transparent 42%),
+    linear-gradient(180deg, var(--color-search-bg), var(--color-sidebar-bg));
+}
+
+.login-trust-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 112px;
+  height: 112px;
+  margin-bottom: 28px;
+  border-radius: 28px;
+  border: 1px solid rgba(51, 144, 236, 0.18);
+  background: var(--color-sidebar-bg);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.08);
+}
+
+.login-trust-orbit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 22px;
+  color: #fff;
+  background: var(--color-primary);
+}
+
+.login-trust-orbit svg {
+  width: 34px;
+  height: 34px;
+}
+
+.login-trust-copy {
+  max-width: 310px;
+}
+
+.login-trust-eyebrow {
+  margin-bottom: 8px;
+  color: var(--color-primary);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.login-trust-copy h2 {
+  margin-bottom: 10px;
+  color: var(--color-text-main);
+  font-size: 1.38rem;
+  line-height: 1.25;
+}
+
+.login-trust-copy p {
+  color: var(--color-text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+
+.login-trust-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.login-trust-list div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-main);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.login-trust-list svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-success);
+}
+
+.auth-wrapper-login .auth-footer-badges {
+  margin-top: 28px;
+}
+
+/* WhatsApp style Username Login Panel layout */
+.login-form-panel .auth-section-title {
+  text-align: center;
+  font-size: 1.75rem;
+  font-weight: 300;
+  line-height: 1.2;
+  margin-bottom: 12px;
+}
+
+.login-form-panel .auth-section-sub {
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  font-weight: 300;
+  color: var(--color-text-secondary);
+}
+
+.login-form-panel .auth-submit {
+  width: 100%;
+  max-width: 160px;
+  height: 42px;
+  border-radius: 999px;
+  font-size: 0.92rem;
+  font-weight: 500;
+  margin: 12px auto 0;
+}
+
+.login-form-panel .login-back-link {
+  margin-bottom: 0;
+  font-weight: 400;
+}
+
+/* WhatsApp style Register Panel layout */
+.register-form-panel .auth-section-title {
+  text-align: center;
+  font-size: 1.75rem;
+  font-weight: 300;
+  line-height: 1.2;
+  margin-bottom: 12px;
+}
+
+.register-form-panel .auth-section-sub {
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  font-weight: 300;
+  color: var(--color-text-secondary);
+  margin-bottom: 24px;
+}
+
+.register-form-panel .auth-submit {
+  width: 100%;
+  max-width: 220px;
+  height: 42px;
+  border-radius: 999px;
+  font-size: 0.92rem;
+  font-weight: 500;
+  margin: 12px auto 0;
+}
+
+@media (max-width: 860px) {
+  .auth-wrapper-login .auth-brand {
+    margin-bottom: 28px;
+  }
+
+  .auth-card-login {
+    grid-template-columns: 1fr;
+  }
+
+  .login-scan-panel {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    padding: 34px 30px 30px;
+  }
+
+  .login-scan-copy h1 {
+    margin-bottom: 18px;
+    font-size: 1.45rem;
+  }
+
+  .login-qr-column {
+    align-items: center;
+    gap: 24px;
+  }
+
+  .login-keep-signed {
+    padding-top: 20px;
+  }
+
+  .login-trust-panel {
+    border-left: 0;
+    border-top: 1px solid var(--color-border);
+    padding: 28px;
+  }
+
+  .login-trust-visual {
+    width: 76px;
+    height: 76px;
+    margin-bottom: 18px;
+    border-radius: 22px;
+  }
+
+  .login-trust-orbit {
+    width: 46px;
+    height: 46px;
+    border-radius: 16px;
+  }
+
+  .login-trust-orbit svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+@media (max-width: 560px) {
+  .auth-page {
+    padding: 20px 14px;
+  }
+
+  .auth-wrapper-login .auth-brand {
+    margin-bottom: 22px;
+  }
+
+  .auth-card-login {
+    border-radius: 18px;
+  }
+
+  .login-scan-panel {
+    padding: 26px 18px 24px;
+  }
+
+  .login-scan-steps {
+    font-size: 0.88rem;
+  }
+
+  .login-scan-steps li {
+    min-height: 48px;
+    gap: 12px;
+  }
+
+  .login-qr-card {
+    width: min(220px, 100%);
+    height: auto;
+    aspect-ratio: 1;
+  }
+
+  .login-form-panel {
+    padding: 28px 18px 24px;
+  }
+
+  .auth-card-login .auth-section-title {
+    font-size: 1.28rem;
+  }
+
+  .auth-label-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .login-trust-panel {
+    padding: 24px 22px;
+  }
+
+  .login-form-panel .auth-section-title,
+  .register-form-panel .auth-section-title {
+    font-size: 1.45rem;
+  }
 }

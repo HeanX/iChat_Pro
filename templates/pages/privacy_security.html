@@ -468,7 +468,7 @@
   <div id="privacy-toast" class="privacy-toast"></div>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   (function() {
     const SETTINGS_URL = '/api/privacy/settings/';
     const BLOCKED_URL = '/api/privacy/blocked/';

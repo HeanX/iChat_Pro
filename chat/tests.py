@@ -10,12 +10,14 @@ from django.db import IntegrityError
 from django.test import TestCase, TransactionTestCase
 
 from ichat_pro.asgi import application
+from accounts.models import Contact, UserPrivacySettings
 
 from .models import (
     AdminOperationLog,
     Conversation,
     ConversationMember,
     EncryptedMessage,
+    GroupInvitation,
     GroupMessage,
     GroupMessageRecipient,
 )
@@ -346,9 +348,11 @@ class GroupAPITests(TestCase):
         gid = self._create_group()
         resp = self._post(f"/api/groups/{gid}/invite/", {"user_id": self.bob.id})
         self.assertEqual(resp.status_code, 201)
-        self.assertTrue(
+        invitation = GroupInvitation.objects.get(conversation_id=gid, invitee=self.bob)
+        self.assertEqual(invitation.status, GroupInvitation.Status.PENDING_INVITEE)
+        self.assertFalse(
             ConversationMember.objects.filter(
-                conversation_id=gid, user=self.bob
+                conversation_id=gid, user=self.bob, status=ConversationMember.Status.ACTIVE
             ).exists()
         )
 
@@ -364,8 +368,10 @@ class GroupAPITests(TestCase):
             user=self.bob,
         )
         self.assertEqual(resp.status_code, 201)
+        invitation = GroupInvitation.objects.get(conversation_id=gid, invitee=self.eve)
+        self.assertEqual(invitation.status, GroupInvitation.Status.PENDING_INVITEE)
 
-    def test_regular_member_cannot_invite(self):
+    def test_regular_member_invite_requires_admin_approval(self):
         gid = self._create_group()
         ConversationMember.objects.create(
             conversation_id=gid, user=self.bob, role=ConversationMember.Role.MEMBER
@@ -375,7 +381,138 @@ class GroupAPITests(TestCase):
             {"user_id": self.eve.id},
             user=self.bob,
         )
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 201)
+        invitation = GroupInvitation.objects.get(conversation_id=gid, invitee=self.eve)
+        self.assertEqual(invitation.status, GroupInvitation.Status.PENDING_ADMIN)
+
+    def test_invite_candidates_include_bot_contacts(self):
+        gid = self._create_group()
+        bot = User.objects.create_user(username="test_bot", password="test1234")
+        bot.profile.user_type = "bot"
+        bot.profile.save(update_fields=["user_type"])
+        Contact.objects.create(user=self.alice, contact=bot)
+
+        self.client.login(username=self.alice.username, password="test1234")
+        resp = self.client.get(f"/api/groups/{gid}/invite-candidates/")
+
+        self.assertEqual(resp.status_code, 200)
+        candidates = resp.json()["candidates"]
+        self.assertIn(bot.id, [item["user_id"] for item in candidates])
+        candidate = next(item for item in candidates if item["user_id"] == bot.id)
+        self.assertEqual(candidate["username"], "test_bot")
+        self.assertEqual(candidate["user_type"], "bot")
+
+    def test_invite_candidates_include_former_bot_member(self):
+        gid = self._create_group()
+        bot = User.objects.create_user(username="test_bot", password="test1234")
+        bot.profile.user_type = "bot"
+        bot.profile.save(update_fields=["user_type"])
+        ConversationMember.objects.create(
+            conversation_id=gid,
+            user=bot,
+            status=ConversationMember.Status.LEFT,
+        )
+
+        self.client.login(username=self.alice.username, password="test1234")
+        resp = self.client.get(f"/api/groups/{gid}/invite-candidates/")
+
+        self.assertEqual(resp.status_code, 200)
+        candidate = next(
+            item for item in resp.json()["candidates"] if item["user_id"] == bot.id
+        )
+        self.assertTrue(candidate["can_invite"])
+        self.assertEqual(candidate["reason_code"], "former_member")
+
+        invite = self._post(f"/api/groups/{gid}/invite/", {"user_id": bot.id})
+        self.assertEqual(invite.status_code, 201)
+
+    def test_invite_candidates_show_unavailable_reasons(self):
+        gid = self._create_group()
+        ConversationMember.objects.create(conversation_id=gid, user=self.bob)
+        pending_user = User.objects.create_user(username="pending", password="test1234")
+        Contact.objects.create(user=self.alice, contact=pending_user)
+        GroupInvitation.objects.create(
+            conversation_id=gid,
+            inviter=self.alice,
+            invitee=pending_user,
+            status=GroupInvitation.Status.PENDING_INVITEE,
+        )
+        blocked = User.objects.create_user(username="blocked", password="test1234")
+        Contact.objects.create(user=self.alice, contact=blocked)
+        privacy, _ = UserPrivacySettings.objects.get_or_create(user=blocked)
+        privacy.who_can_add_me_to_groups = "nobody"
+        privacy.save(update_fields=["who_can_add_me_to_groups"])
+
+        self.client.login(username=self.alice.username, password="test1234")
+        resp = self.client.get(f"/api/groups/{gid}/invite-candidates/")
+
+        self.assertEqual(resp.status_code, 200)
+        by_id = {item["user_id"]: item for item in resp.json()["candidates"]}
+        self.assertFalse(by_id[self.alice.id]["can_invite"])
+        self.assertEqual(by_id[self.alice.id]["reason_code"], "self")
+        self.assertFalse(by_id[self.bob.id]["can_invite"])
+        self.assertEqual(by_id[self.bob.id]["reason_code"], "already_member")
+        self.assertFalse(by_id[pending_user.id]["can_invite"])
+        self.assertEqual(by_id[pending_user.id]["reason_code"], "pending_invitation")
+        self.assertFalse(by_id[blocked.id]["can_invite"])
+        self.assertEqual(by_id[blocked.id]["reason_code"], "not_allowed")
+
+    def test_group_invitation_accept_creates_member_after_admin_approval(self):
+        gid = self._create_group()
+        ConversationMember.objects.create(
+            conversation_id=gid, user=self.bob, role=ConversationMember.Role.MEMBER
+        )
+        resp = self._post(
+            f"/api/groups/{gid}/invite/",
+            {"user_id": self.eve.id},
+            user=self.bob,
+        )
+        self.assertEqual(resp.status_code, 201)
+        invitation_id = resp.json()["invitation_id"]
+
+        approve = self._post(f"/api/group-invitations/{invitation_id}/approve/", {})
+        self.assertEqual(approve.status_code, 200)
+        self.assertEqual(approve.json()["status"], GroupInvitation.Status.PENDING_INVITEE)
+
+        accept = self._post(
+            f"/api/group-invitations/{invitation_id}/accept/",
+            {},
+            user=self.eve,
+        )
+        self.assertEqual(accept.status_code, 200)
+        self.assertTrue(
+            ConversationMember.objects.filter(
+                conversation_id=gid,
+                user=self.eve,
+                status=ConversationMember.Status.ACTIVE,
+            ).exists()
+        )
+
+    def test_invitee_can_list_and_accept_pending_group_invitation(self):
+        gid = self._create_group("Invite Me")
+        resp = self._post(f"/api/groups/{gid}/invite/", {"user_id": self.bob.id})
+        self.assertEqual(resp.status_code, 201)
+        invitation_id = resp.json()["invitation_id"]
+
+        self.client.login(username=self.bob.username, password="test1234")
+        pending = self.client.get("/api/group-invitations/pending/")
+        self.assertEqual(pending.status_code, 200)
+        invitations = pending.json()["invitations"]
+        self.assertEqual(len(invitations), 1)
+        self.assertEqual(invitations[0]["id"], invitation_id)
+        self.assertEqual(invitations[0]["group_name"], "Invite Me")
+
+        accept = self.client.post(f"/api/group-invitations/{invitation_id}/accept/")
+        self.assertEqual(accept.status_code, 200)
+        self.assertTrue(
+            ConversationMember.objects.filter(
+                conversation_id=gid,
+                user=self.bob,
+                status=ConversationMember.Status.ACTIVE,
+            ).exists()
+        )
+        pending_after = self.client.get("/api/group-invitations/pending/")
+        self.assertEqual(pending_after.json()["invitations"], [])
 
     def test_cannot_invite_duplicate_user(self):
         gid = self._create_group()
@@ -756,6 +893,13 @@ class ConversationMessagesAPITests(TestCase):
                 "ciphertext": "aGk=",
                 "nonce": "MTIzNDU2Nzg5MDEy",
                 "auth_tag": "MTIzNDU2Nzg5MDEyMzQ1Ng==",
+                "sender_ephemeral_public_key": "cHVibGljLWtleS1mb3ItYm9i",
+                "sender_copy": {
+                    "ciphertext": "c2VuZGVyLWNvcHk=",
+                    "nonce": "QUJDREVGR0hJSktM",
+                    "auth_tag": "QUJDREVGR0hJSktMTU5PUA==",
+                    "sender_ephemeral_public_key": "cHVibGljLWtleS1mb3ItYWxpY2U=",
+                },
                 "algorithm": "AES-256-GCM",
                 "sender_key_version": 1,
                 "receiver_key_version": 1,
@@ -766,10 +910,14 @@ class ConversationMessagesAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["ciphertext"], "c2VuZGVyLWNvcHk=")
+        self.assertEqual(response.json()["sender_ephemeral_public_key"], "cHVibGljLWtleS1mb3ItYWxpY2U=")
         message = EncryptedMessage.objects.get(client_message_id="http-send-1")
         self.assertEqual(message.conversation, self.conv)
         self.assertEqual(message.sender, self.alice)
         self.assertEqual(message.receiver, self.bob)
+        self.assertEqual(message.ciphertext, "aGk=")
+        self.assertEqual(message.sender_ephemeral_public_key, "cHVibGljLWtleS1mb3ItYm9i")
         self.conv.refresh_from_db()
         self.assertEqual(self.conv.last_message_id, message.id)
 

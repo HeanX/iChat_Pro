@@ -13,7 +13,7 @@ from chat.models import (
     GroupMessage, GroupMessageRecipient, GroupAnnouncement,
     UserMessageDeletion, UserPresence,
 )
-from accounts.models import Contact, KeyTrust, UserPublicKey
+from accounts.models import Contact, KeyTrust, KeyVerificationRequest, UserPublicKey
 
 User = get_user_model()
 
@@ -316,6 +316,63 @@ class KeyTrustTests(TestCase):
         resp = self.c.get(f'/api/keys/contacts/{self.u2.pk}/fingerprints/')
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(resp.json()['active_key'])
+
+    def test_key_verification_request_accepts_and_trusts_both_sides(self):
+        self._upload_key(self.c, self.key1_raw, self.fp1)
+        self._upload_key(self.c2, self.key2_raw, self.fp2)
+
+        create_resp = self.c.post(
+            '/api/keys/verification-requests/',
+            data=f'{{"user_id":{self.u2.pk}}}',
+            content_type='application/json',
+        )
+        self.assertEqual(create_resp.status_code, 201)
+        request_id = create_resp.json()['request']['id']
+
+        accept_resp = self.c2.post(
+            f'/api/keys/verification-requests/{request_id}/respond/',
+            data='{"action":"accept"}',
+            content_type='application/json',
+        )
+
+        self.assertEqual(accept_resp.status_code, 200)
+        self.assertTrue(KeyTrust.objects.filter(
+            user=self.u1,
+            contact=self.u2,
+            key_fingerprint=self.fp2,
+            trust_status=KeyTrust.TrustStatus.VERIFIED,
+        ).exists())
+        self.assertTrue(KeyTrust.objects.filter(
+            user=self.u2,
+            contact=self.u1,
+            key_fingerprint=self.fp1,
+            trust_status=KeyTrust.TrustStatus.VERIFIED,
+        ).exists())
+
+    def test_key_verification_expires_if_key_changes_before_accept(self):
+        self._upload_key(self.c, self.key1_raw, self.fp1)
+        self._upload_key(self.c2, self.key2_raw, self.fp2)
+        create_resp = self.c.post(
+            '/api/keys/verification-requests/',
+            data=f'{{"user_id":{self.u2.pk}}}',
+            content_type='application/json',
+        )
+        request_id = create_resp.json()['request']['id']
+
+        raw = b'\x04' + b'\x09' * 64
+        import hashlib
+        fp = hashlib.sha256(raw).hexdigest().upper()
+        self._upload_key(self.c2, raw, fp)
+
+        accept_resp = self.c2.post(
+            f'/api/keys/verification-requests/{request_id}/respond/',
+            data='{"action":"accept"}',
+            content_type='application/json',
+        )
+
+        self.assertEqual(accept_resp.status_code, 409)
+        verification = KeyVerificationRequest.objects.get(pk=request_id)
+        self.assertEqual(verification.status, KeyVerificationRequest.Status.EXPIRED)
 
 
 # ── T40: Additional comprehensive tests ─────────────────────────────

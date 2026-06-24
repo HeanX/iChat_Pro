@@ -60,6 +60,13 @@ class PrivateRealtimeMessageTests(TransactionTestCase):
             'ciphertext': 'c2VjcmV0',
             'nonce': 'AAAAAAAAAAAAAAAA',
             'auth_tag': 'AAAAAAAAAAAAAAAAAAAAAA==',
+            'sender_ephemeral_public_key': 'cHVibGljLWtleS1mb3ItcmVjZWl2ZXI=',
+            'sender_copy': {
+                'ciphertext': 'c2VuZGVyLWNvcHk=',
+                'nonce': 'BBBBBBBBBBBBBBBB',
+                'auth_tag': 'BBBBBBBBBBBBBBBBBBBBBB==',
+                'sender_ephemeral_public_key': 'cHVibGljLWtleS1mb3Itc2VuZGVy',
+            },
             'algorithm': 'AES-256-GCM',
             'sender_key_version': 1,
             'receiver_key_version': 1,
@@ -86,9 +93,12 @@ class PrivateRealtimeMessageTests(TransactionTestCase):
         received = await receiver.receive_json_from()
         self.assertEqual(sent['event'], 'message.single.accepted')
         self.assertEqual(sent['data']['client_message_id'], 'test-uuid-default')
+        self.assertEqual(sent['data']['ciphertext'], 'c2VuZGVyLWNvcHk=')
+        self.assertEqual(sent['data']['sender_ephemeral_public_key'], 'cHVibGljLWtleS1mb3Itc2VuZGVy')
         self.assertEqual(received['event'], 'message.single.new')
         self.assertEqual(received['data']['message_id'], sent['data']['message_id'])
-        self.assertEqual(received['data']['ciphertext'], sent['data']['ciphertext'])
+        self.assertEqual(received['data']['ciphertext'], 'c2VjcmV0')
+        self.assertEqual(received['data']['sender_ephemeral_public_key'], 'cHVibGljLWtleS1mb3ItcmVjZWl2ZXI=')
         self.assertNotIn('plaintext', received['data'])
         message = await self._message(sent['data']['message_id'])
         membership = await self._membership(self.receiver.pk)

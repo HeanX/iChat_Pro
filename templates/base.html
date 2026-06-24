@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="{% static 'css/tailwind.css' %}?v=20260611-local-fallback">
     <!-- Tailwind CSS Play CDN (development) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
+    <script nonce="{{ request.csp_nonce }}">
         tailwind.config = {
             darkMode: ['class', '[data-theme="dark"]'],
             theme: {
@@ -52,22 +52,8 @@
     
     {% block content %}{% endblock %}
 
-    <script>
-        // Apply theme early to avoid flashes
-        const savedTheme = localStorage.getItem('ichat-theme') || 'light';
-        document.documentElement.setAttribute('data-theme', savedTheme);
-        if (savedTheme === 'dark') {
-            document.body.classList.add('dark');
-        }
-        
-        // Initialize all Lucide icons and remove preload to enable transitions
-        document.addEventListener('DOMContentLoaded', () => {
-            lucide.createIcons();
-            setTimeout(() => {
-                document.body.classList.remove('preload');
-            }, 100);
-        });
-    </script>
+    <script src="{% static 'js/event-dispatcher.js' %}?v=20260620-csp-events"></script>
+    <script src="{% static 'js/base-init.js' %}?v=20260620-csp-nonce"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

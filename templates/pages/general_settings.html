@@ -426,7 +426,7 @@
   <div id="general-toast" class="general-toast"></div>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   (function() {
     const GENERAL_SETTINGS_URL = '/api/settings/general/';
     const DEFAULTS = {

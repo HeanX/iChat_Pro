@@ -2,55 +2,40 @@
 {% load static %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/auth.css' %}?v=20260614-redesign">
+<link rel="stylesheet" href="{% static 'css/auth.css' %}?v=20260624-scroll-fix">
 {% endblock %}
 
 {% block content %}
-<!-- Theme Toggle Button -->
-<button class="auth-theme-btn" onclick="toggleTheme()" title="切换主题" aria-label="切换主题">
+<button class="auth-theme-btn" data-auth-theme-toggle title="切换主题" aria-label="切换主题">
   <i data-lucide="sun" class="icon-sun"></i>
   <i data-lucide="moon" class="icon-moon"></i>
 </button>
 
-<!-- Full-screen auth page -->
-<div class="auth-page">
-  <div class="auth-wrapper">
+<div id="auth-toast-container" class="auth-toast-container" aria-live="polite" aria-atomic="true"></div>
 
-    <!-- App Brand Logo -->
+<div class="auth-page">
+  <div class="auth-wrapper {% block auth_wrapper_class %}{% endblock %}">
     <div class="auth-brand">
       <div class="auth-logo-ring">
         <i data-lucide="shield-check"></i>
       </div>
       <span class="auth-brand-name">iChat Pro</span>
-      <span class="auth-brand-sub">端对端加密安全通讯</span>
+      <span class="auth-brand-sub">端到端加密安全通讯</span>
     </div>
 
-    <!-- Auth Card Slot -->
-    <div class="auth-card">
+    <div class="auth-card {% block auth_card_class %}{% endblock %}">
       {% block auth_card %}{% endblock %}
     </div>
 
-    <!-- Footer Trust Badges -->
     <div class="auth-footer-badges">
       <div class="badge-row">
         <i data-lucide="lock"></i>
-        <span>零知识架构 · 端对端加密</span>
+        <span>零知识架构 · 端到端加密</span>
       </div>
       <span>&copy; 2026 iChat Pro. 所有对话均为私密加密。</span>
     </div>
-
   </div>
 </div>
 
-<script>
-  function toggleTheme() {
-    const html = document.documentElement;
-    const current = html.getAttribute('data-theme') || 'light';
-    const next = current === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', next);
-    html.classList.toggle('dark', next === 'dark');
-    localStorage.setItem('ichat-theme', next);
-    if (window.lucide) lucide.createIcons();
-  }
-</script>
+<script src="{% static 'js/auth-theme.js' %}?v=20260620-csp-nonce"></script>
 {% endblock %}

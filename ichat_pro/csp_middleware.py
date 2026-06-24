@@ -17,6 +17,8 @@ Reference: docs/iChat Pro 浏览器端安全威胁模型.md
            docs/iChat Pro 部署安全说明.md
 """
 
+import secrets
+
 from django.conf import settings
 
 
@@ -32,6 +34,7 @@ class CSPMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        request.csp_nonce = secrets.token_urlsafe(16)
         response = self.get_response(request)
 
         # Build policy directives
@@ -63,22 +66,41 @@ class CSPMiddleware:
         # In production (TAILWIND_CDN=False) drop the Tailwind CDN from CSP whitelist
         use_tailwind_cdn = getattr(settings, "TAILWIND_CDN", settings.DEBUG)
         tailwind_cdn = "https://cdn.tailwindcss.com " if use_tailwind_cdn else ""
+        nonce = getattr(request, "csp_nonce", "")
+        script_sources = [
+            "'self'",
+            f"'nonce-{nonce}'",
+            tailwind_cdn.strip(),
+            "https://unpkg.com",
+        ]
+        style_sources = [
+            "'self'",
+            tailwind_cdn.strip(),
+        ]
+        legacy_inline = getattr(settings, "CSP_ALLOW_UNSAFE_INLINE", None)
+        allow_inline_script = (
+            bool(legacy_inline)
+            if legacy_inline is not None
+            else getattr(settings, "CSP_ALLOW_UNSAFE_INLINE_SCRIPT", False)
+        )
+        allow_inline_style = (
+            bool(legacy_inline)
+            if legacy_inline is not None
+            else getattr(settings, "CSP_ALLOW_UNSAFE_INLINE_STYLE", True)
+        )
+        if allow_inline_script:
+            script_sources.insert(1, "'unsafe-inline'")
+        if allow_inline_style:
+            style_sources.insert(1, "'unsafe-inline'")
+        script_sources = " ".join(source for source in script_sources if source)
+        style_sources = " ".join(source for source in style_sources if source)
 
         directives = {
             "default-src": "'self'",
             # Script: allow self, CDN deps, and inline (Phase 1 baseline)
-            "script-src": (
-                "'self' "
-                "'unsafe-inline' "  # Phase 2: replace with nonce + strict-dynamic
-                + tailwind_cdn +
-                "https://unpkg.com"
-            ),
+            "script-src": script_sources,
             # Style: allow self + inline; Tailwind CDN only needed in dev
-            "style-src": (
-                "'self' "
-                "'unsafe-inline' "
-                + tailwind_cdn.rstrip()
-            ),
+            "style-src": style_sources,
             # Connect: allow self + WebSocket (ws/wss)
             "connect-src": (
                 "'self' "

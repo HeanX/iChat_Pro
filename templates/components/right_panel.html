@@ -3,12 +3,12 @@
 
   <header class="chat-details-header">
     <h3 id="right-panel-title" class="chat-details-title" data-i18n="chat_info_title">聊天信息</h3>
-    <button onclick="window.toggleRightPanel()" class="chat-details-close" title="Close Panel" data-i18n-title="close_panel">
+    <button data-ichat-onclick="window.toggleRightPanel()" class="chat-details-close" title="Close Panel" data-i18n-title="close_panel">
       <i data-lucide="x" class="w-6 h-6"></i>
     </button>
   </header>
 
-  <div class="chat-details-scroll custom-scrollbar">
+  <div id="right-panel-main-view" class="chat-details-scroll custom-scrollbar">
     <section class="chat-details-hero">
       <div id="details-avatar" class="chat-details-avatar">--</div>
       <div class="chat-details-heading">
@@ -103,7 +103,13 @@
       <div class="ai-model-settings-form">
         <label class="ai-model-setting-field" for="ai-model-endpoint">
           <span>请求地址</span>
-          <input id="ai-model-endpoint" type="url" spellcheck="false" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions">
+          <div class="ai-endpoint-combobox">
+            <input id="ai-model-endpoint" type="url" spellcheck="false" autocomplete="off" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions">
+            <button id="ai-model-endpoint-toggle" class="ai-endpoint-combobox-toggle" type="button" aria-label="选择请求地址">
+              <i data-lucide="chevron-down"></i>
+            </button>
+            <div id="ai-model-endpoint-menu" class="ai-endpoint-menu hidden"></div>
+          </div>
         </label>
         <label class="ai-model-setting-field" for="ai-model-api-key">
           <span>API Key</span>
@@ -126,18 +132,18 @@
               <option value="claude-haiku-4.5-20251001">Claude Haiku 4.5 20251001</option>
             </optgroup>
             <optgroup label="GPT">
-              <option value="gpt-5-5">GPT 5.5</option>
-              <option value="gpt-5-4">GPT 5.4</option>
+              <option value="gpt-5.5">GPT 5.5</option>
+              <option value="gpt-5.4">GPT 5.4</option>
               <option value="gpt-5.3-codex-spark">GPT 5.3 codex spark</option>
             </optgroup>
           </select>
         </label>
         <div class="ai-model-settings-actions">
-          <button id="ai-model-save-settings" type="button" onclick="saveAiModelSettings()">
+          <button id="ai-model-save-settings" type="button" data-ichat-onclick="saveAiModelSettings()">
             <i data-lucide="save"></i>
             <span>保存设置</span>
           </button>
-          <button id="ai-model-clear-settings" type="button" onclick="clearAiModelSettings()">
+          <button id="ai-model-clear-settings" type="button" data-ichat-onclick="clearAiModelSettings()">
             <i data-lucide="rotate-ccw"></i>
             <span>清空</span>
           </button>
@@ -160,13 +166,13 @@
           </strong>
         </div>
         <div id="right-panel-fingerprint-wrapper" class="chat-details-fingerprint-wrap">
-          <span data-i18n="cryptographic_fingerprint">加密指纹</span>
+          <span data-i18n="cryptographic_fingerprint">安全密钥</span>
           <code id="details-fingerprint">Loading real fingerprint...</code>
-          <button onclick="showFingerprintModal()" class="chat-details-verify-btn" title="Verify Fingerprint keys" data-i18n-title="verify_fingerprint_btn">
+          <button data-ichat-onclick="showFingerprintModal()" class="chat-details-verify-btn" title="Verify Fingerprint keys" data-i18n-title="verify_fingerprint_btn">
             <i data-lucide="shield-check"></i>
-            <span data-i18n="verify_fingerprint_btn">验证指纹</span>
+            <span data-i18n="verify_fingerprint_btn">安全验证</span>
           </button>
-          <button id="right-panel-reset-key-btn" onclick="resetIdentityKeyFromPanel()" class="chat-details-reset-btn" title="Reset local encryption identity">
+          <button id="right-panel-reset-key-btn" data-ichat-onclick="resetIdentityKeyFromPanel()" class="chat-details-reset-btn" title="Reset local encryption identity">
             <i data-lucide="rotate-cw"></i>
             <span data-i18n="reset_key_btn">重置密钥</span>
           </button>
@@ -184,7 +190,10 @@
       <div class="chat-details-card chat-details-members-card">
         <div class="chat-details-card-header">
           <h5 id="right-panel-members-count">群组成员</h5>
-          <button id="right-panel-manage-group-btn" onclick="if(activeChatId) navigateToGroupManage(activeChatId)" type="button">
+          <button id="right-panel-invite-group-btn" data-ichat-onclick="if(activeChatId) openGroupInviteFromDetails(activeChatId)" type="button">
+            邀请
+          </button>
+          <button id="right-panel-manage-group-btn" data-ichat-onclick="if(activeChatId) navigateToGroupManage(activeChatId)" type="button">
             管理
           </button>
         </div>
@@ -193,5 +202,13 @@
         </div>
       </div>
     </section>
+  </div>
+
+  <div id="right-panel-group-manage-view" class="hidden flex-1 min-h-0 overflow-hidden">
+    {% include 'pages/group_manage_sidebar.html' %}
+  </div>
+
+  <div id="right-panel-group-invite-view" class="hidden flex-1 min-h-0 overflow-hidden">
+    {% include 'pages/group_invite_sidebar.html' %}
   </div>
 </div>

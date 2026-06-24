@@ -1,0 +1,42 @@
+<div id="group-invite-content" class="group-manage-panel">
+  <div id="group-invite-loading" class="group-manage-loading">
+    <div class="animate-spin w-6 h-6 border-2 border-brand-light border-t-transparent rounded-full"></div>
+  </div>
+
+  <div id="group-invite-loaded" class="hidden group-manage-scroll custom-scrollbar">
+    <section class="group-manage-topbar">
+      <button type="button" data-ichat-onclick="closeGroupManagePanel()" class="chat-details-icon-btn" title="Back">
+        <i data-lucide="arrow-left"></i>
+      </button>
+      <h3>邀请成员</h3>
+      <span></span>
+    </section>
+
+    <section class="chat-details-card group-manage-hero-card">
+      <div id="group-invite-avatar" class="chat-details-avatar group-manage-avatar">G</div>
+      <div class="group-manage-hero-copy">
+        <h4 id="group-invite-name"></h4>
+        <div class="group-manage-meta">
+          <span id="group-invite-member-count"></span>
+          <span id="group-invite-my-role"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="chat-details-card group-manage-card">
+      <div class="chat-details-card-header">
+        <h5>选择联系人</h5>
+      </div>
+      <div class="group-manage-note group-invite-policy">
+        普通成员邀请需要群管理审核，并由对方同意后生效；管理员邀请会直接进入对方确认。      </div>
+      <div class="group-manage-search group-invite-search">
+        <i data-lucide="search"></i>
+        <input id="group-manage-invite-search" type="text" placeholder="搜索联系人..."
+          data-ichat-oninput="groupManageFilterInviteContacts(this.value)">
+      </div>
+      <div id="group-manage-invite-list" class="group-manage-list">
+        <div class="group-manage-empty">没有可邀请的联系人</div>
+      </div>
+    </section>
+  </div>
+</div>

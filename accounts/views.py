@@ -5,6 +5,9 @@ import io
 import json
 import re
 
+from PIL import Image, UnidentifiedImageError
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
@@ -25,15 +28,19 @@ from .forms import ProfileForm, RegistrationForm
 from .models import (
     Contact,
     FriendRequest,
+    KeyVerificationRequest,
     KeyTrust,
     UserChatFolderSettings,
     UserGeneralSettings,
+    UserPrivacySettings,
     UserProfile,
     UserPublicKey,
 )
 
 
 MAX_PUBLIC_KEY_BYTES = 512
+MAX_AVATAR_UPLOAD_BYTES = 5 * 1024 * 1024
+MAX_AVATAR_PIXELS = 4096 * 4096
 
 
 def _json_body(request):
@@ -174,14 +181,13 @@ def login_view(request):
             if target is not None and not target.is_active:
                 messages.error(
                     request,
-                    'This account has been disabled. '
-                    'Please contact an administrator.',
+                    '该账号已被禁用，请联系管理员。',
                 )
             else:
                 # Use a generic message to prevent account enumeration
                 messages.error(
                     request,
-                    'Invalid username or password. Please try again.',
+                    '用户名或密码错误，请重试。',
                 )
         else:
             # Distinguish between missing fields and bad credentials
@@ -189,14 +195,13 @@ def login_view(request):
                 if target is not None and not target.is_active:
                     messages.error(
                         request,
-                        'This account has been disabled. '
-                        'Please contact an administrator.',
+                        '该账号已被禁用，请联系管理员。',
                     )
                 else:
                     # Use a generic message to prevent account enumeration
                     messages.error(
                         request,
-                        'Invalid username or password. Please try again.',
+                        '用户名或密码错误，请重试。',
                     )
             else:
                 for field, errors in form.errors.items():
@@ -210,7 +215,6 @@ def login_view(request):
 
 def logout_view(request):
     logout(request)
-    messages.info(request, 'You have been logged out.')
     next_url = _safe_next_url(request.GET.get('next') or '', fallback='login')
     return redirect(next_url)
 
@@ -556,9 +560,30 @@ def avatar_crop_save_view(request):
     ext = 'jpg' if fmt in ('jpeg', 'jpg') else fmt
 
     try:
-        raw = base64.b64decode(match.group('data'))
+        raw = base64.b64decode(match.group('data'), validate=True)
     except Exception:
         return JsonResponse({'error': 'decode_error'}, status=400)
+    if len(raw) > MAX_AVATAR_UPLOAD_BYTES:
+        return JsonResponse({'error': 'image_too_large'}, status=400)
+
+    try:
+        with Image.open(io.BytesIO(raw)) as image:
+            image.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.width * image.height > MAX_AVATAR_PIXELS:
+                return JsonResponse({'error': 'image_too_large'}, status=400)
+            image = image.convert('RGBA' if ext == 'png' else 'RGB')
+            normalized = io.BytesIO()
+            save_format = 'JPEG' if ext == 'jpg' else ext.upper()
+            if save_format == 'WEBP':
+                image.save(normalized, format=save_format, quality=90)
+            elif save_format == 'PNG':
+                image.save(normalized, format=save_format, optimize=True)
+            else:
+                image.save(normalized, format=save_format, quality=90, optimize=True)
+            raw = normalized.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError):
+        return JsonResponse({'error': 'invalid_image'}, status=400)
 
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
 
@@ -1131,6 +1156,199 @@ def key_trust_list_view(request):
     return JsonResponse({'trusts': results})
 
 
+def _key_verification_allowed(user, target):
+    if user == target:
+        return False
+    if Contact.objects.filter(
+        (models.Q(user=user) & models.Q(contact=target))
+        | (models.Q(user=target) & models.Q(contact=user)),
+    ).exists():
+        return True
+    return Conversation.objects.filter(
+        type=Conversation.Type.SINGLE,
+        status=Conversation.Status.ACTIVE,
+        members__user=user,
+        members__status=ChatMember.Status.ACTIVE,
+    ).filter(
+        members__user=target,
+        members__status=ChatMember.Status.ACTIVE,
+    ).exists()
+
+
+def _serialize_key_verification_request(verification, viewer=None):
+    return {
+        'id': verification.pk,
+        'requester_id': verification.requester_id,
+        'requester_username': verification.requester.username,
+        'responder_id': verification.responder_id,
+        'responder_username': verification.responder.username,
+        'requester_key_version': verification.requester_key_version,
+        'requester_key_fingerprint': verification.requester_key_fingerprint,
+        'responder_key_version': verification.responder_key_version,
+        'responder_key_fingerprint': verification.responder_key_fingerprint,
+        'status': verification.status,
+        'direction': (
+            'incoming'
+            if viewer is not None and verification.responder_id == viewer.pk
+            else 'outgoing'
+        ),
+        'created_at': verification.created_at.isoformat(),
+        'responded_at': verification.responded_at.isoformat() if verification.responded_at else None,
+    }
+
+
+def _push_key_verification_event(verification, event):
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+    for user in (verification.requester, verification.responder):
+        async_to_sync(channel_layer.group_send)(
+            f'user_{user.pk}',
+            {
+                'type': 'key.verification.new',
+                'data': {
+                    'event': event,
+                    'verification': _serialize_key_verification_request(verification, viewer=user),
+                },
+            },
+        )
+
+
+def _upsert_verified_key_trust(user, contact, key):
+    return KeyTrust.objects.update_or_create(
+        user=user,
+        contact=contact,
+        key_fingerprint=key.key_fingerprint,
+        defaults={
+            'key_version': key.key_version,
+            'trust_status': KeyTrust.TrustStatus.VERIFIED,
+            'verified_at': timezone.now(),
+        },
+    )
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def key_verification_requests_view(request):
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    if request.method == 'GET':
+        pending = KeyVerificationRequest.objects.filter(
+            models.Q(requester=request.user) | models.Q(responder=request.user),
+            status=KeyVerificationRequest.Status.PENDING,
+        ).select_related('requester', 'responder').order_by('-created_at')
+        return JsonResponse({
+            'requests': [
+                _serialize_key_verification_request(item, viewer=request.user)
+                for item in pending
+            ],
+        })
+
+    payload = _json_body(request)
+    user_id = payload.get('user_id')
+    try:
+        target = User.objects.get(id=user_id, is_active=True)
+    except (TypeError, ValueError, User.DoesNotExist):
+        return JsonResponse({'error': 'User not found.'}, status=404)
+
+    if not _key_verification_allowed(request.user, target):
+        return JsonResponse({'error': 'Only contacts or active private-chat members can verify keys.'}, status=403)
+
+    requester_key = _active_key(request.user.pk)
+    responder_key = _active_key(target.pk)
+    if requester_key is None or responder_key is None:
+        return JsonResponse({'error': 'Both users must have active encryption keys.'}, status=404)
+
+    existing = KeyVerificationRequest.objects.filter(
+        requester=request.user,
+        responder=target,
+        status=KeyVerificationRequest.Status.PENDING,
+    ).select_related('requester', 'responder').first()
+    if existing:
+        return JsonResponse({
+            'status': 'ok',
+            'request': _serialize_key_verification_request(existing, viewer=request.user),
+        })
+
+    verification = KeyVerificationRequest.objects.create(
+        requester=request.user,
+        responder=target,
+        requester_key_fingerprint=requester_key.key_fingerprint,
+        requester_key_version=requester_key.key_version,
+        responder_key_fingerprint=responder_key.key_fingerprint,
+        responder_key_version=responder_key.key_version,
+    )
+    _push_key_verification_event(verification, 'requested')
+    return JsonResponse({
+        'status': 'ok',
+        'request': _serialize_key_verification_request(verification, viewer=request.user),
+    }, status=201)
+
+
+@login_required
+@require_POST
+def key_verification_request_respond_view(request, request_id):
+    payload = _json_body(request)
+    action = payload.get('action')
+    if action not in {'accept', 'decline', 'cancel'}:
+        return JsonResponse({'error': 'Invalid action.'}, status=400)
+
+    try:
+        verification = KeyVerificationRequest.objects.select_related('requester', 'responder').get(
+            pk=request_id,
+            status=KeyVerificationRequest.Status.PENDING,
+        )
+    except KeyVerificationRequest.DoesNotExist:
+        return JsonResponse({'error': 'Verification request not found.'}, status=404)
+
+    if action == 'cancel':
+        if verification.requester_id != request.user.pk:
+            return JsonResponse({'error': 'Only the requester can cancel this request.'}, status=403)
+        verification.status = KeyVerificationRequest.Status.CANCELLED
+        verification.responded_at = timezone.now()
+        verification.save(update_fields=['status', 'responded_at', 'updated_at'])
+        _push_key_verification_event(verification, 'cancelled')
+        return JsonResponse({'status': 'ok', 'request': _serialize_key_verification_request(verification, viewer=request.user)})
+
+    if verification.responder_id != request.user.pk:
+        return JsonResponse({'error': 'Only the invited contact can respond.'}, status=403)
+
+    if action == 'decline':
+        verification.status = KeyVerificationRequest.Status.DECLINED
+        verification.responded_at = timezone.now()
+        verification.save(update_fields=['status', 'responded_at', 'updated_at'])
+        _push_key_verification_event(verification, 'declined')
+        return JsonResponse({'status': 'ok', 'request': _serialize_key_verification_request(verification, viewer=request.user)})
+
+    requester_key = _active_key(verification.requester_id)
+    responder_key = _active_key(verification.responder_id)
+    keys_match_request = (
+        requester_key is not None
+        and responder_key is not None
+        and requester_key.key_fingerprint == verification.requester_key_fingerprint
+        and requester_key.key_version == verification.requester_key_version
+        and responder_key.key_fingerprint == verification.responder_key_fingerprint
+        and responder_key.key_version == verification.responder_key_version
+    )
+    if not keys_match_request:
+        verification.status = KeyVerificationRequest.Status.EXPIRED
+        verification.responded_at = timezone.now()
+        verification.save(update_fields=['status', 'responded_at', 'updated_at'])
+        _push_key_verification_event(verification, 'expired')
+        return JsonResponse({'error': 'Keys changed. Start a new verification request.'}, status=409)
+
+    with transaction.atomic():
+        _upsert_verified_key_trust(verification.requester, verification.responder, responder_key)
+        _upsert_verified_key_trust(verification.responder, verification.requester, requester_key)
+        verification.status = KeyVerificationRequest.Status.ACCEPTED
+        verification.responded_at = timezone.now()
+        verification.save(update_fields=['status', 'responded_at', 'updated_at'])
+
+    _push_key_verification_event(verification, 'accepted')
+    return JsonResponse({'status': 'ok', 'request': _serialize_key_verification_request(verification, viewer=request.user)})
+
+
 # ── Notification settings API (P2 T23) ────────────────────────────
 
 
@@ -1347,10 +1565,10 @@ def notification_settings_update_view(request):
 @require_GET
 def qr_card_view(request):
     """Return the current user's public card data for QR code sharing."""
-    from .models import UserProfile
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    privacy, _ = UserPrivacySettings.objects.get_or_create(user=request.user)
     avatar_url = ''
-    if profile.avatar:
+    if profile.avatar and privacy.profile_photo_visibility != 'nobody':
         try:
             timestamp = int(profile.updated_at.timestamp())
             avatar_url = request.build_absolute_uri(f"{profile.avatar.url}?t={timestamp}")
@@ -1362,8 +1580,8 @@ def qr_card_view(request):
         'username': request.user.username,
         'nickname': profile.nickname or request.user.username,
         'avatar': avatar_url,
-        'bio': profile.bio,
-        'phone_number': profile.phone_number,
+        'bio': profile.bio if privacy.bio_visibility != 'nobody' else '',
+        'phone_number': profile.phone_number if privacy.phone_number_visibility == 'everyone' else '',
     })
 
 
@@ -1484,9 +1702,20 @@ def profile_updates_view(request):
     """Return recent profile update events for contacts."""
     from .models import UserProfileUpdateLog
     since = request.GET.get('since')
-    qs = UserProfileUpdateLog.objects.select_related('user').order_by('-created_at')[:50]
+    contact_ids = set(
+        Contact.objects.filter(models.Q(user=request.user) | models.Q(contact=request.user))
+        .values_list('user_id', 'contact_id')
+    )
+    visible_user_ids = {request.user.id}
+    for user_id, contact_id in contact_ids:
+        visible_user_ids.add(contact_id if user_id == request.user.id else user_id)
+
+    qs = UserProfileUpdateLog.objects.select_related('user').filter(
+        user_id__in=visible_user_ids,
+    ).order_by('-created_at')
     if since:
         qs = qs.filter(created_at__gt=since)
+    qs = qs[:50]
     results = [{'id': e.id, 'user_id': e.user_id, 'username': e.user.username,
                 'created_at': e.created_at.isoformat()} for e in qs]
     return JsonResponse({'updates': results})

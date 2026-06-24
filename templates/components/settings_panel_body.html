@@ -52,7 +52,7 @@
 <div class="py-3">
   <h4 class="text-xs font-bold text-brand-light dark:text-brand-dark uppercase tracking-wider px-4 mb-2" data-i18n="system_preferences">System Preferences</h4>
 
-  <button onclick="toggleTheme()" class="w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
+  <button data-ichat-onclick="toggleTheme()" class="w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors">
     <div class="flex items-center space-x-3.5">
       <div class="text-textSecondary"><i data-lucide="moon" class="w-5 h-5"></i></div>
       <span class="text-sm font-medium text-textMain" data-i18n="dark_theme_mode">Dark Theme Mode</span>
@@ -64,7 +64,7 @@
     </div>
   </button>
 
-  <button onclick="toggleLanguage()" class="w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors border-t border-borderColor/40">
+  <button data-ichat-onclick="toggleLanguage()" class="w-full px-4 py-3 hover-bg-search-op-65 flex items-center justify-between text-left transition-colors border-t border-borderColor/40">
     <div class="flex items-center space-x-3.5">
       <div class="text-textSecondary"><i data-lucide="languages" class="w-5 h-5"></i></div>
       <span class="text-sm font-medium text-textMain" data-i18n="language_mode">Language / 语言</span>
@@ -85,7 +85,7 @@
     </div>
     <input type="range" min="0" max="4" value="2"
       class="w-full h-1 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-brand-light dark:accent-brand-dark focus:outline-none"
-      oninput="updateSelfDestructLabel(this.value)">
+      data-ichat-oninput="updateSelfDestructLabel(this.value)">
     <div class="flex justify-between text-[9px] text-textSecondary mt-1">
       <span data-i18n="off">Off</span>
       <span>1m</span>
@@ -104,7 +104,7 @@
     <div class="py-2">
       <button id="key-mgmt-toggle-btn"
         class="w-full py-2.5 flex items-center space-x-3.5 hover:opacity-85 text-left transition-opacity"
-        onclick="toggleKeyManagement()">
+        data-ichat-onclick="toggleKeyManagement()">
         <div class="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg">
           <i data-lucide="key" class="w-5 h-5"></i>
         </div>
@@ -137,12 +137,12 @@
           </div>
         </div>
         <div class="grid grid-cols-2 gap-2">
-          <button id="btn-key-generate" class="py-2 px-3 text-xs font-semibold rounded-custom-md bg-brand-light dark:bg-brand-dark text-white hover:opacity-90 transition-opacity" onclick="keyMgrGenerate()">Generate Keys</button>
-          <button id="btn-key-upload" class="py-2 px-3 text-xs font-semibold rounded-custom-md border border-brand-light dark:border-brand-dark text-brand-light dark:text-brand-dark hover:bg-brand-light/10 transition-colors" onclick="keyMgrUpload()">Upload to Server</button>
-          <button id="btn-key-export" class="py-2 px-3 text-xs font-semibold rounded-custom-md border border-borderColor text-textMain hover:bg-bgSearch transition-colors" onclick="keyMgrExport()">Export Backup</button>
+          <button id="btn-key-generate" class="py-2 px-3 text-xs font-semibold rounded-custom-md bg-brand-light dark:bg-brand-dark text-white hover:opacity-90 transition-opacity" data-ichat-onclick="keyMgrGenerate()">Generate Keys</button>
+          <button id="btn-key-upload" class="py-2 px-3 text-xs font-semibold rounded-custom-md border border-brand-light dark:border-brand-dark text-brand-light dark:text-brand-dark hover:bg-brand-light/10 transition-colors" data-ichat-onclick="keyMgrUpload()">Upload to Server</button>
+          <button id="btn-key-export" class="py-2 px-3 text-xs font-semibold rounded-custom-md border border-borderColor text-textMain hover:bg-bgSearch transition-colors" data-ichat-onclick="keyMgrExport()">Export Backup</button>
           <label id="btn-key-import-label" class="py-2 px-3 text-xs font-semibold rounded-custom-md border border-borderColor text-textMain hover:bg-bgSearch transition-colors text-center cursor-pointer">
             Import Backup
-            <input type="file" id="key-import-input" accept=".json" class="hidden" onchange="keyMgrImport(event)">
+            <input type="file" id="key-import-input" accept=".json" class="hidden" data-ichat-onchange="keyMgrImport(event)">
           </label>
         </div>
         <div id="key-mgmt-message" class="hidden text-xs p-2.5 rounded-custom-md border"></div>
@@ -150,7 +150,7 @@
     </div>
 
     <div class="py-2">
-      <button id="security-status-toggle-btn" class="w-full py-2.5 flex items-center space-x-3.5 hover:opacity-85 text-left transition-opacity" onclick="toggleSecurityStatus()">
+      <button id="security-status-toggle-btn" class="w-full py-2.5 flex items-center space-x-3.5 hover:opacity-85 text-left transition-opacity" data-ichat-onclick="toggleSecurityStatus()">
         <div class="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
           <i data-lucide="shield-check" class="w-5 h-5"></i>
         </div>
@@ -176,7 +176,7 @@
           </div>
         </div>
         <div id="security-trust-list" class="space-y-2"></div>
-        <button onclick="refreshSecurityStatus()" class="w-full py-2 text-xs font-medium text-brand-light dark:text-brand-dark hover:underline">Refresh Status</button>
+        <button data-ichat-onclick="refreshSecurityStatus()" class="w-full py-2 text-xs font-medium text-brand-light dark:text-brand-dark hover:underline">Refresh Status</button>
       </div>
     </div>
 

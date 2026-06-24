@@ -1,16 +1,18 @@
 import copy
 import hashlib
 import json
+import logging
 import os
 import shutil
 import uuid as uuid_lib
 from datetime import timedelta
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from channels.layers import get_channel_layer
 from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import F, Q
@@ -30,6 +32,7 @@ from .models import (
     EncryptedFileChunk,
     EncryptedFileKey,
     EncryptedMessage,
+    GroupInvitation,
     GroupAnnouncement,
     GroupMessage,
     GroupMessageRecipient,
@@ -39,6 +42,7 @@ from .models import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 AVATAR_COLORS = [
     '#5c6bc0', '#26a69a', '#42a5f5', '#ffa726', '#ef5350',
@@ -225,6 +229,22 @@ def _json_body(request):
         return json.loads(request.body.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {}
+
+
+def _rate_limit(request, bucket, *, limit, window_seconds):
+    user_id = request.user.pk if request.user.is_authenticated else 'anon'
+    key = f'rl:{bucket}:{user_id}'
+    count = cache.get(key, 0)
+    if count >= limit:
+        return JsonResponse({'error': 'rate_limited', 'retry_after_seconds': window_seconds}, status=429)
+    if count == 0:
+        cache.set(key, 1, window_seconds)
+    else:
+        try:
+            cache.incr(key)
+        except ValueError:
+            cache.set(key, 1, window_seconds)
+    return None
 
 
 def _parse_int(value, default=0, min_value=None, max_value=None):
@@ -451,19 +471,7 @@ def conversations_list_view(request):
         if conversation.type == Conversation.Type.SINGLE:
             last_msg = _visible_private_messages_queryset(membership).order_by('-created_at').first()
             if last_msg:
-                last_message_data = {
-                    'id': last_msg.id,
-                    'ciphertext': last_msg.ciphertext,
-                    'nonce': last_msg.nonce,
-                    'auth_tag': last_msg.auth_tag,
-                    'algorithm': last_msg.algorithm,
-                    'sender_id': last_msg.sender_id,
-                    'receiver_id': last_msg.receiver_id,
-                    'message_type': last_msg.message_type,
-                    'file_id': last_msg.file_id_id,
-                    'sender_key_version': last_msg.sender_key_version,
-                    'receiver_key_version': last_msg.receiver_key_version,
-                }
+                last_message_data = _private_message_payload_for_viewer(last_msg, request.user.pk)
         else:
             last_msg = (
                 _visible_group_recipients_queryset(membership)
@@ -472,19 +480,26 @@ def conversations_list_view(request):
                 .first()
             )
             if last_msg:
+                gm = last_msg.group_message
+                is_sender = gm.sender_id == request.user.pk
+                has_sender_copy = gm.sender_copy_ciphertext and gm.sender_copy_nonce and gm.sender_copy_auth_tag
                 last_message_data = {
-                    'id': last_msg.group_message.id,
+                    'id': gm.id,
                     'group_id': conversation.id,
-                    'ciphertext': last_msg.ciphertext,
-                    'nonce': last_msg.nonce,
-                    'auth_tag': last_msg.auth_tag,
+                    'ciphertext': gm.sender_copy_ciphertext if is_sender and has_sender_copy else last_msg.ciphertext,
+                    'nonce': gm.sender_copy_nonce if is_sender and has_sender_copy else last_msg.nonce,
+                    'auth_tag': gm.sender_copy_auth_tag if is_sender and has_sender_copy else last_msg.auth_tag,
                     'algorithm': last_msg.algorithm,
-                    'sender_id': last_msg.group_message.sender_id,
+                    'sender_id': gm.sender_id,
                     'receiver_id': request.user.id,
-                    'message_type': last_msg.group_message.message_type,
-                    'file_id': last_msg.group_message.file_id_id,
+                    'message_type': gm.message_type,
+                    'file_id': gm.file_id_id,
                     'sender_key_version': last_msg.sender_key_version or 0,
                     'receiver_key_version': last_msg.receiver_key_version or 0,
+                    'sender_ephemeral_public_key': (
+                        gm.sender_copy_ephemeral_public_key if is_sender and has_sender_copy
+                        else last_msg.sender_ephemeral_public_key
+                    ),
                     'membership_version': last_msg.membership_version or 0,
                 }
 
@@ -843,6 +858,7 @@ def _normalize_forward_file_keys(file_keys_data, allowed_holder_ids):
             'sender_key_version': sender_key_version,
             'receiver_key_version': receiver_key_version,
             'membership_version': membership_version,
+            'sender_ephemeral_public_key': str(fk.get('sender_ephemeral_public_key', '') or '') or None,
         })
 
     if holder_ids != allowed_holder_ids:
@@ -868,6 +884,7 @@ def _save_forward_file_keys(forward_file, file_keys, sender):
                 'sender_key_version': fk['sender_key_version'],
                 'receiver_key_version': fk['receiver_key_version'],
                 'membership_version': fk['membership_version'],
+                'sender_ephemeral_public_key': fk.get('sender_ephemeral_public_key'),
             },
         )
 
@@ -992,6 +1009,7 @@ def forward_message_view(request, conversation_id):
                     _save_forward_file_keys(forward_file, file_keys, request.user)
 
                 try:
+                    sender_copy = validated.get('sender_copy') or {}
                     message = EncryptedMessage.objects.create(
                         conversation=conversation,
                         sender=request.user,
@@ -1000,6 +1018,11 @@ def forward_message_view(request, conversation_id):
                         ciphertext=validated['ciphertext'],
                         nonce=validated['nonce'],
                         auth_tag=validated['auth_tag'],
+                        sender_ephemeral_public_key=validated.get('sender_ephemeral_public_key'),
+                        sender_copy_ciphertext=sender_copy.get('ciphertext'),
+                        sender_copy_nonce=sender_copy.get('nonce'),
+                        sender_copy_auth_tag=sender_copy.get('auth_tag'),
+                        sender_copy_ephemeral_public_key=sender_copy.get('sender_ephemeral_public_key'),
                         algorithm=validated['algorithm'],
                         sender_key_version=validated['sender_key_version'],
                         receiver_key_version=validated['receiver_key_version'],
@@ -1036,8 +1059,8 @@ def forward_message_view(request, conversation_id):
             {
                 'type': 'message.single.new',
                 'data': (
-                    _serialize_file_private_message(message, _build_file_sub_object(forward_file, peer_id))
-                    if forward_file else ChatConsumer.serialize_private_message(message)
+                    _serialize_file_private_message(message, _build_file_sub_object(forward_file, peer_id), viewer_id=peer_id)
+                    if forward_file else ChatConsumer.serialize_private_message(message, viewer_id=peer_id)
                 ),
             },
         )
@@ -1046,8 +1069,8 @@ def forward_message_view(request, conversation_id):
             {
                 'type': 'message.single.new',
                 'data': (
-                    _serialize_file_private_message(message, _build_file_sub_object(forward_file, request.user.pk))
-                    if forward_file else ChatConsumer.serialize_private_message(message)
+                    _serialize_file_private_message(message, _build_file_sub_object(forward_file, request.user.pk), viewer_id=request.user.pk)
+                    if forward_file else ChatConsumer.serialize_private_message(message, viewer_id=request.user.pk)
                 ),
             },
         )
@@ -1111,6 +1134,7 @@ def forward_message_view(request, conversation_id):
             if forward_file:
                 _save_forward_file_keys(forward_file, file_keys, request.user)
 
+            sender_copy = validated.get('sender_copy') or {}
             try:
                 group_message = GroupMessage.objects.create(
                     conversation=conversation,
@@ -1119,6 +1143,10 @@ def forward_message_view(request, conversation_id):
                     client_message_id=validated['client_message_id'],
                     reply_to_message_id=forwarded_reply_to_id,
                     file_id=forward_file,
+                    sender_copy_ciphertext=sender_copy.get('ciphertext'),
+                    sender_copy_nonce=sender_copy.get('nonce'),
+                    sender_copy_auth_tag=sender_copy.get('auth_tag'),
+                    sender_copy_ephemeral_public_key=sender_copy.get('sender_ephemeral_public_key'),
                 )
             except IntegrityError:
                 existing = GroupMessage.objects.get(
@@ -1141,6 +1169,7 @@ def forward_message_view(request, conversation_id):
                     algorithm=validated['algorithm'],
                     sender_key_version=validated['sender_key_version'],
                     receiver_key_version=r['receiver_key_version'],
+                    sender_ephemeral_public_key=r.get('sender_ephemeral_public_key'),
                     membership_version=client_membership_version,
                 )
                 for r in validated['recipients']
@@ -1295,31 +1324,32 @@ def recall_message_view(request, conversation_id, message_id):
         })
 
     else:  # Group
-        try:
-            group_message = GroupMessage.objects.select_for_update().get(
-                pk=message_id, conversation_id=conversation_id,
-            )
-        except GroupMessage.DoesNotExist:
-            return JsonResponse({'error': 'Message not found.'}, status=404)
+        with transaction.atomic():
+            try:
+                group_message = GroupMessage.objects.select_for_update().get(
+                    pk=message_id, conversation_id=conversation_id,
+                )
+            except GroupMessage.DoesNotExist:
+                return JsonResponse({'error': 'Message not found.'}, status=404)
 
-        if group_message.sender_id != request.user.pk:
-            return JsonResponse({'error': 'Only the sender can recall this message.'}, status=403)
-        if group_message.status == GroupMessage.Status.RECALLED:
-            return JsonResponse({'error': 'Message already recalled.'}, status=409)
+            if group_message.sender_id != request.user.pk:
+                return JsonResponse({'error': 'Only the sender can recall this message.'}, status=403)
+            if group_message.status == GroupMessage.Status.RECALLED:
+                return JsonResponse({'error': 'Message already recalled.'}, status=409)
 
-        elapsed = (timezone.now() - group_message.created_at).total_seconds()
-        if elapsed > RECALL_LIMIT_MINUTES * 60:
-            return JsonResponse(
-                {'error': f'Recall time limit exceeded ({RECALL_LIMIT_MINUTES} minutes).'},
-                status=400,
-            )
+            elapsed = (timezone.now() - group_message.created_at).total_seconds()
+            if elapsed > RECALL_LIMIT_MINUTES * 60:
+                return JsonResponse(
+                    {'error': f'Recall time limit exceeded ({RECALL_LIMIT_MINUTES} minutes).'},
+                    status=400,
+                )
 
-        group_message.status = GroupMessage.Status.RECALLED
-        group_message.recalled_at = timezone.now()
-        group_message.save(update_fields=['status', 'recalled_at', 'updated_at'])
-        GroupMessageRecipient.objects.filter(
-            group_message=group_message,
-        ).update(status=GroupMessageRecipient.Status.RECALLED)
+            group_message.status = GroupMessage.Status.RECALLED
+            group_message.recalled_at = timezone.now()
+            group_message.save(update_fields=['status', 'recalled_at', 'updated_at'])
+            GroupMessageRecipient.objects.filter(
+                group_message=group_message,
+            ).update(status=GroupMessageRecipient.Status.RECALLED)
 
         # Broadcast to all active group members
         channel_layer = get_channel_layer()
@@ -1536,15 +1566,17 @@ def update_group_view(request, conversation_id):
 
 @login_required(login_url='login')
 def invite_member_view(request, conversation_id):
-    """Invite a user to a group. Owner / admin only."""
+    """Create a two-step group invitation.
+
+    Any active group member can invite. Owner/admin invitations skip admin review,
+    but the invited user still has to accept before membership is created.
+    """
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed."}, status=405)
 
     actor = _get_member(conversation_id, request.user)
     if not actor or actor.status != ConversationMember.Status.ACTIVE:
         return JsonResponse({"error": "Not an active member of this group."}, status=403)
-    if actor.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
-        return JsonResponse({"error": "Permission denied."}, status=403)
 
     try:
         conversation = Conversation.objects.get(
@@ -1571,27 +1603,353 @@ def invite_member_view(request, conversation_id):
         return JsonResponse({"error": "This user only allows contacts to invite them."}, status=403)
 
     if ConversationMember.objects.filter(
-        conversation=conversation, user=target
+        conversation=conversation, user=target, status=ConversationMember.Status.ACTIVE,
     ).exists():
         return JsonResponse({"error": "User is already a member."}, status=409)
 
-    ConversationMember.objects.create(
-        conversation=conversation,
-        user=target,
-        role=ConversationMember.Role.MEMBER,
+    initial_status = (
+        GroupInvitation.Status.PENDING_INVITEE
+        if actor.role in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN)
+        else GroupInvitation.Status.PENDING_ADMIN
     )
+    try:
+        invitation, created = GroupInvitation.objects.get_or_create(
+            conversation=conversation,
+            invitee=target,
+            status__in=[
+                GroupInvitation.Status.PENDING_ADMIN,
+                GroupInvitation.Status.PENDING_INVITEE,
+            ],
+            defaults={
+                "inviter": request.user,
+                "status": initial_status,
+                "reviewed_by": request.user if initial_status == GroupInvitation.Status.PENDING_INVITEE else None,
+                "reviewed_at": timezone.now() if initial_status == GroupInvitation.Status.PENDING_INVITEE else None,
+            },
+        )
+    except TypeError:
+        # get_or_create cannot express __in lookup as creation kwargs on older Django paths.
+        invitation = GroupInvitation.objects.filter(
+            conversation=conversation,
+            invitee=target,
+            status__in=[
+                GroupInvitation.Status.PENDING_ADMIN,
+                GroupInvitation.Status.PENDING_INVITEE,
+            ],
+        ).first()
+        if invitation:
+            created = False
+        else:
+            invitation = GroupInvitation.objects.create(
+                conversation=conversation,
+                inviter=request.user,
+                invitee=target,
+                status=initial_status,
+                reviewed_by=request.user if initial_status == GroupInvitation.Status.PENDING_INVITEE else None,
+                reviewed_at=timezone.now() if initial_status == GroupInvitation.Status.PENDING_INVITEE else None,
+            )
+            created = True
+    except IntegrityError:
+        invitation = GroupInvitation.objects.filter(
+            conversation=conversation,
+            invitee=target,
+            status__in=[
+                GroupInvitation.Status.PENDING_ADMIN,
+                GroupInvitation.Status.PENDING_INVITEE,
+            ],
+        ).first()
+        created = False
+
+    if not invitation:
+        return JsonResponse({"error": "Invitation already exists."}, status=409)
+
+    # Send WebSocket push notification
+    channel_layer = get_channel_layer()
+    if invitation.status == GroupInvitation.Status.PENDING_INVITEE:
+        async_to_sync(ChatConsumer.broadcast_group_invitation)(
+            channel_layer, _group_invitation_push_payload(invitation), target.id,
+        )
+    elif invitation.status == GroupInvitation.Status.PENDING_ADMIN:
+        async_to_sync(ChatConsumer.broadcast_group_invitation_to_admins)(
+            channel_layer, conversation.id,
+        )
+
+    return JsonResponse({
+        "status": invitation.status,
+        "invitation_id": invitation.id,
+        "user_id": target.id,
+        "requires_admin_approval": invitation.status == GroupInvitation.Status.PENDING_ADMIN,
+        "requires_invitee_approval": invitation.status == GroupInvitation.Status.PENDING_INVITEE,
+    }, status=201 if created else 200)
+
+
+@login_required(login_url='login')
+@require_GET
+def group_invite_candidates_view(request, conversation_id):
+    """Return group invite candidates with availability reasons."""
+    actor = _get_member(conversation_id, request.user)
+    if not actor or actor.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({"error": "Not an active member of this group."}, status=403)
+
+    try:
+        conversation = Conversation.objects.get(
+            id=conversation_id,
+            type=Conversation.Type.GROUP,
+            status=Conversation.Status.ACTIVE,
+        )
+    except Conversation.DoesNotExist:
+        return JsonResponse({"error": "Group not found or not active."}, status=404)
+
+    membership_by_user_id = {
+        membership.user_id: membership
+        for membership in ConversationMember.objects.filter(
+            conversation=conversation,
+        ).select_related("user__profile")
+    }
+    pending_by_user_id = {
+        invitation.invitee_id: invitation
+        for invitation in GroupInvitation.objects.filter(
+            conversation=conversation,
+            status__in=[
+                GroupInvitation.Status.PENDING_ADMIN,
+                GroupInvitation.Status.PENDING_INVITEE,
+            ],
+        ).select_related("invitee__profile")
+    }
+
+    candidates_by_id = {}
+
+    def add_candidate(user, source):
+        if not user:
+            return
+        existing = candidates_by_id.get(user.id, {})
+        sources = set(existing.get("sources", []))
+        sources.add(source)
+        membership = membership_by_user_id.get(user.id)
+        pending = pending_by_user_id.get(user.id)
+        can_invite = True
+        reason_code = "available"
+        reason = "可邀请"
+
+        if user.id == request.user.id:
+            can_invite = False
+            reason_code = "self"
+            reason = "当前用户自己"
+        elif membership and membership.status == ConversationMember.Status.ACTIVE:
+            can_invite = False
+            reason_code = "already_member"
+            reason = "已经在群里的成员"
+        elif pending:
+            can_invite = False
+            reason_code = "pending_invitation"
+            reason = "已经有待处理邀请的人"
+        else:
+            privacy, _ = UserPrivacySettings.objects.get_or_create(user=user)
+            if privacy.who_can_add_me_to_groups == "nobody":
+                can_invite = False
+                reason_code = "not_allowed"
+                reason = "不允许被邀请进群的人"
+            elif privacy.who_can_add_me_to_groups == "contacts" and not _are_contacts(user, request.user):
+                can_invite = False
+                reason_code = "not_allowed"
+                reason = "不允许被邀请进群的人"
+            elif membership and membership.status in (
+                ConversationMember.Status.LEFT,
+                ConversationMember.Status.REMOVED,
+            ):
+                reason_code = "former_member"
+                reason = "曾经退群，可重新邀请"
+
+        display_name = _display_name(user)
+        candidates_by_id[user.id] = {
+            "user_id": user.id,
+            "username": user.username,
+            "display_name": display_name,
+            "initials": _initials(display_name),
+            "avatar_color": _avatar_color(display_name),
+            "avatar_url": _avatar_url(request, user),
+            "user_type": _user_type_for(user),
+            "can_invite": can_invite,
+            "reason_code": reason_code,
+            "reason": reason,
+            "membership_status": membership.status if membership else None,
+            "invitation_status": pending.status if pending else None,
+            "sources": sorted(sources),
+        }
+
+    add_candidate(request.user, "self")
+
+    contacts = Contact.objects.filter(
+        Q(user=request.user) | Q(contact=request.user),
+    ).select_related("user__profile", "contact__profile")
+    for entry in contacts:
+        peer = entry.contact if entry.user_id == request.user.id else entry.user
+        add_candidate(peer, "contact")
+
+    for membership in membership_by_user_id.values():
+        add_candidate(membership.user, "group_member")
+
+    for invitation in pending_by_user_id.values():
+        add_candidate(invitation.invitee, "pending_invitation")
+
+    candidates = sorted(
+        candidates_by_id.values(),
+        key=lambda item: (
+            0 if item["can_invite"] else 1,
+            item["reason_code"],
+            (item["display_name"] or item["username"]).lower(),
+        ),
+    )
+    return JsonResponse({"candidates": candidates})
+
+
+@login_required(login_url='login')
+@require_GET
+def pending_group_invitations_view(request):
+    """Return group invitations waiting for the current user's approval."""
+    invitations = (
+        GroupInvitation.objects
+        .filter(invitee=request.user, status=GroupInvitation.Status.PENDING_INVITEE)
+        .select_related("conversation", "inviter__profile")
+        .order_by("-created_at")
+    )
+    return JsonResponse({
+        "invitations": [
+            {
+                "id": inv.id,
+                "status": inv.status,
+                "group_id": inv.conversation_id,
+                "group_name": inv.conversation.name or f"Group #{inv.conversation_id}",
+                "group_avatar": inv.conversation.avatar,
+                "group_initials": _initials(inv.conversation.name or "G"),
+                "group_avatar_color": _avatar_color(inv.conversation.name or "G"),
+                "inviter_id": inv.inviter_id,
+                "inviter_username": inv.inviter.username,
+                "inviter_display_name": _display_name(inv.inviter),
+                "created_at": inv.created_at.isoformat(),
+            }
+            for inv in invitations
+        ]
+    })
+
+
+def _activate_group_invitation(invitation, actor):
+    conversation = invitation.conversation
+    member, _ = ConversationMember.objects.update_or_create(
+        conversation=conversation,
+        user=invitation.invitee,
+        defaults={
+            "role": ConversationMember.Role.MEMBER,
+            "status": ConversationMember.Status.ACTIVE,
+            "left_at": None,
+        },
+    )
+    invitation.status = GroupInvitation.Status.ACCEPTED
+    invitation.responded_at = timezone.now()
+    invitation.save(update_fields=["status", "responded_at", "updated_at"])
     conversation.membership_version = F('membership_version') + 1
     conversation.save(update_fields=['membership_version', 'updated_at'])
     conversation.refresh_from_db(fields=['membership_version'])
     _broadcast_member_change(
         group_id=conversation.pk,
         change='member_added',
-        actor_id=request.user.pk,
-        affected_user_id=target.id,
+        actor_id=actor.pk,
+        affected_user_id=member.user_id,
         membership_version=conversation.membership_version,
     )
+    return member
 
-    return JsonResponse({"status": "ok", "user_id": target.id}, status=201)
+
+def _group_invitation_push_payload(invitation):
+    conversation = invitation.conversation
+    inviter = invitation.inviter
+    return {
+        'invitation_id': invitation.id,
+        'group_id': invitation.conversation_id,
+        'group_name': conversation.name or f'Group #{invitation.conversation_id}',
+        'group_avatar': conversation.avatar,
+        'group_initials': _initials(conversation.name or "G"),
+        'group_avatar_color': _avatar_color(conversation.name or "G"),
+        'inviter_id': invitation.inviter_id,
+        'inviter_username': inviter.username,
+        'inviter_display_name': _display_name(inviter),
+        'status': invitation.status,
+        'created_at': invitation.created_at.isoformat(),
+    }
+
+
+@login_required(login_url='login')
+@require_POST
+def group_invitation_approve_view(request, invitation_id):
+    invitation = GroupInvitation.objects.select_related(
+        "conversation", "invitee", "inviter",
+    ).filter(pk=invitation_id).first()
+    if not invitation:
+        return JsonResponse({"error": "Invitation not found."}, status=404)
+    actor = _get_member(invitation.conversation_id, request.user)
+    if not actor or actor.status != ConversationMember.Status.ACTIVE:
+        return JsonResponse({"error": "Not an active member of this group."}, status=403)
+    if actor.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+        return JsonResponse({"error": "Admin permission required."}, status=403)
+    if invitation.status != GroupInvitation.Status.PENDING_ADMIN:
+        return JsonResponse({"error": "Invitation is not waiting for admin approval."}, status=409)
+    invitation.status = GroupInvitation.Status.PENDING_INVITEE
+    invitation.reviewed_by = request.user
+    invitation.reviewed_at = timezone.now()
+    invitation.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+
+    # Notify the invitee via WebSocket
+    channel_layer = get_channel_layer()
+    async_to_sync(ChatConsumer.broadcast_group_invitation)(
+        channel_layer, _group_invitation_push_payload(invitation), invitation.invitee_id,
+    )
+
+    return JsonResponse({"status": invitation.status, "invitation_id": invitation.id})
+
+
+@login_required(login_url='login')
+@require_POST
+def group_invitation_reject_view(request, invitation_id):
+    invitation = GroupInvitation.objects.select_related("conversation").filter(pk=invitation_id).first()
+    if not invitation:
+        return JsonResponse({"error": "Invitation not found."}, status=404)
+    actor = _get_member(invitation.conversation_id, request.user)
+    is_admin = actor and actor.status == ConversationMember.Status.ACTIVE and actor.role in (
+        ConversationMember.Role.OWNER,
+        ConversationMember.Role.ADMIN,
+    )
+    is_invitee = invitation.invitee_id == request.user.pk
+    if not (is_admin or is_invitee):
+        return JsonResponse({"error": "Permission denied."}, status=403)
+    if invitation.status not in (GroupInvitation.Status.PENDING_ADMIN, GroupInvitation.Status.PENDING_INVITEE):
+        return JsonResponse({"error": "Invitation is no longer pending."}, status=409)
+    previous_status = invitation.status
+    invitation.status = GroupInvitation.Status.REJECTED
+    invitation.responded_at = timezone.now()
+    if is_admin and previous_status == GroupInvitation.Status.PENDING_ADMIN:
+        invitation.reviewed_by = request.user
+        invitation.reviewed_at = timezone.now()
+    invitation.save(update_fields=["status", "responded_at", "reviewed_by", "reviewed_at", "updated_at"])
+    return JsonResponse({"status": invitation.status, "invitation_id": invitation.id})
+
+
+@login_required(login_url='login')
+@require_POST
+def group_invitation_accept_view(request, invitation_id):
+    invitation = GroupInvitation.objects.select_related("conversation", "invitee").filter(pk=invitation_id).first()
+    if not invitation:
+        return JsonResponse({"error": "Invitation not found."}, status=404)
+    if invitation.invitee_id != request.user.pk:
+        return JsonResponse({"error": "Only the invited user can accept this invitation."}, status=403)
+    if invitation.status != GroupInvitation.Status.PENDING_INVITEE:
+        return JsonResponse({"error": "Invitation is not ready for invitee approval."}, status=409)
+    member = _activate_group_invitation(invitation, request.user)
+    return JsonResponse({
+        "status": invitation.status,
+        "invitation_id": invitation.id,
+        "group_id": invitation.conversation_id,
+        "user_id": member.user_id,
+    })
 
 
 @login_required(login_url='login')
@@ -1832,12 +2190,29 @@ def group_messages_view(request, conversation_id):
             "sender_avatar_color": _avatar_color(_display_name(r.group_message.sender)),
             "sender_avatar_url": _avatar_url(request, r.group_message.sender),
             "message_type": r.group_message.message_type,
-            "ciphertext": r.ciphertext,
-            "nonce": r.nonce,
-            "auth_tag": r.auth_tag,
+            "ciphertext": (
+                r.group_message.sender_copy_ciphertext
+                if r.group_message.sender_id == request.user.pk and r.group_message.sender_copy_ciphertext
+                else r.ciphertext
+            ),
+            "nonce": (
+                r.group_message.sender_copy_nonce
+                if r.group_message.sender_id == request.user.pk and r.group_message.sender_copy_nonce
+                else r.nonce
+            ),
+            "auth_tag": (
+                r.group_message.sender_copy_auth_tag
+                if r.group_message.sender_id == request.user.pk and r.group_message.sender_copy_auth_tag
+                else r.auth_tag
+            ),
             "algorithm": r.algorithm,
             "sender_key_version": r.sender_key_version or 0,
             "receiver_key_version": r.receiver_key_version or 0,
+            "sender_ephemeral_public_key": (
+                r.group_message.sender_copy_ephemeral_public_key
+                if r.group_message.sender_id == request.user.pk and r.group_message.sender_copy_ephemeral_public_key
+                else r.sender_ephemeral_public_key
+            ),
             "reply_to_message_id": r.group_message.reply_to_message_id,
             "membership_version": r.membership_version or 0,
             "file_id": r.group_message.file_id_id,
@@ -1915,30 +2290,7 @@ def conversation_messages_view(request, conversation_id):
     page_obj = paginator.get_page(page_number)
 
     messages_data = [
-        {
-            "id": msg.id,
-            "sender_id": msg.sender_id,
-            "sender_initials": _initials(_display_name(msg.sender)),
-            "sender_avatar_color": _avatar_color(_display_name(msg.sender)),
-            "sender_avatar_url": _avatar_url(request, msg.sender),
-            "receiver_id": msg.receiver_id,
-            "message_type": msg.message_type,
-            "ciphertext": msg.ciphertext,
-            "nonce": msg.nonce,
-            "auth_tag": msg.auth_tag,
-            "algorithm": msg.algorithm,
-            "sender_key_version": msg.sender_key_version,
-            "receiver_key_version": msg.receiver_key_version,
-            "reply_to_message_id": msg.reply_to_message_id,
-            "file_id": msg.file_id_id,
-            "file": (
-                _build_file_sub_object(msg.file_id, request.user.pk)
-                if msg.file_id_id else None
-            ),
-            "status": msg.status,
-            "recalled_at": msg.recalled_at.isoformat() if msg.recalled_at else None,
-            "created_at": msg.created_at.isoformat(),
-        }
+        _private_message_payload_for_viewer(msg, request.user.pk, request=request)
         for msg in page_obj
     ]
 
@@ -2118,7 +2470,47 @@ def send_private_message_view(request, conversation_id):
         {'type': 'message.single.new', 'data': message},
     )
 
-    return JsonResponse(message, status=201)
+    sender_message = ChatConsumer.serialize_private_message_by_id(
+        message['message_id'],
+        viewer_id=request.user.pk,
+    )
+    return JsonResponse(sender_message, status=201)
+
+
+@login_required(login_url='login')
+def send_group_message_view(request, conversation_id):
+    """Persist a group encrypted message over HTTP and broadcast it.
+
+    This is the HTTP fallback when the WebSocket is unavailable.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    data = _json_body(request)
+    data['group_id'] = conversation_id
+
+    try:
+        accepted, recipients = async_to_sync(ChatConsumer.create_group_message)(
+            request.user.pk, data,
+        )
+    except Exception as error:
+        code = getattr(error, 'code', 'invalid_payload')
+        detail = getattr(error, 'message', str(error))
+        status = 404 if code == 'conversation_not_found' else 400
+        if code == 'conversation_forbidden':
+            status = 403
+        return JsonResponse({'error': code, 'detail': detail}, status=status)
+
+    channel_layer = get_channel_layer()
+    for recipient_data in recipients:
+        if recipient_data['receiver_id'] == request.user.pk:
+            continue
+        async_to_sync(channel_layer.group_send)(
+            ChatConsumer.user_group(recipient_data['receiver_id']),
+            {'type': 'message.group.new', 'data': recipient_data},
+        )
+
+    return JsonResponse(accepted, status=201)
 
 
 # ---------------------------------------------------------------------------
@@ -2498,7 +2890,7 @@ def privacy_settings_view(request):
             'updated_fields': updated_fields,
         })
 
-# 鈹€鈹€ T27: Auto-delete messages API 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# ──── T27: Auto-delete messages API ──────────────────────────────────────────────────────────────────────
 
 @login_required(login_url='login')
 def auto_delete_setting_view(request):
@@ -2735,7 +3127,7 @@ def conversation_auto_delete_view(request, conversation_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-# 鈹€鈹€ T33/T34: Unified search API with scope filtering 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# ──── T33/T34: Unified search API with scope filtering ────────────────────────────────
 
 @login_required(login_url='login')
 def search_unified_view(request):
@@ -2748,12 +3140,19 @@ def search_unified_view(request):
         return JsonResponse({'results': results, 'scope': scope})
 
     user = request.user
+    contact_peer_ids = set()
+    for user_id, contact_id in Contact.objects.filter(
+        Q(user=user) | Q(contact=user),
+    ).values_list('user_id', 'contact_id'):
+        contact_peer_ids.add(contact_id if user_id == user.id else user_id)
 
     # Contacts search
     if scope in ('all', 'contacts', 'private_chats'):
         name_matches = User.objects.filter(
             Q(username__icontains=query) | Q(profile__nickname__icontains=query),
-        ).exclude(id=user.id).distinct().select_related('profile')[:10]
+        ).exclude(id=user.id).filter(
+            Q(id__in=contact_peer_ids) | Q(profile__user_type__in=['agent', 'bot'])
+        ).distinct().select_related('profile')[:10]
 
         for u in name_matches:
             try:
@@ -2776,14 +3175,13 @@ def search_unified_view(request):
             type=Conversation.Type.GROUP,
             name__icontains=query,
             status=Conversation.Status.ACTIVE,
+            members__user=user,
+            members__status=ConversationMember.Status.ACTIVE,
         )[:10]
         for g in group_matches:
-            is_member = ConversationMember.objects.filter(
-                conversation=g, user=user, status=ConversationMember.Status.ACTIVE,
-            ).exists()
             results['groups'].append({
                 'id': g.id, 'name': g.name,
-                'is_member': is_member,
+                'is_member': True,
                 'member_count': ConversationMember.objects.filter(
                     conversation=g, status=ConversationMember.Status.ACTIVE,
                 ).count(),
@@ -2818,7 +3216,7 @@ def search_unified_view(request):
     return JsonResponse({'results': results, 'scope': scope, 'query': query})
 
 
-# 鈹€鈹€ T37: Advanced group management 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# ──── T37: Advanced group management ──────────────────────────────────────────────────────────────────────
 
 def _require_admin(conversation_id, user):
     """Return (member, conversation) if user is admin/owner, else (None, error_response)."""
@@ -3010,12 +3408,34 @@ def group_members_advanced_view(request, conversation_id):
     members = ConversationMember.objects.filter(
         conversation=conv, status=ConversationMember.Status.ACTIVE,
     ).select_related('user__profile')
+    pending_invitations = []
+    if member.role in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+        pending_invitations = [
+            {
+                'id': inv.id,
+                'status': inv.status,
+                'inviter_id': inv.inviter_id,
+                'inviter_username': inv.inviter.username,
+                'invitee_id': inv.invitee_id,
+                'invitee_username': inv.invitee.username,
+                'invitee_display_name': _display_name(inv.invitee),
+                'invitee_initials': _initials(_display_name(inv.invitee)),
+                'invitee_avatar_color': _avatar_color(_display_name(inv.invitee)),
+                'invitee_avatar_url': _avatar_url(request, inv.invitee),
+                'created_at': inv.created_at.isoformat(),
+            }
+            for inv in GroupInvitation.objects.filter(
+                conversation=conv,
+                status=GroupInvitation.Status.PENDING_ADMIN,
+            ).select_related('inviter', 'invitee__profile')
+        ]
 
     return JsonResponse({
         'group_id': conv.id,
         'name': conv.name,
         'owner_id': conv.created_by_id,
         'membership_version': conv.membership_version,
+        'pending_invitations': pending_invitations,
         'members': [
             {
                 'user_id': m.user_id,
@@ -3573,7 +3993,25 @@ def send_file_message_view(request, file_id):
     if conversation_id != ef.conversation_id:
         return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'conversation_id does not match file conversation.'}, status=400)
 
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Not an active member of this conversation.'}, status=403)
+
+    conversation = member.conversation
+    if conversation.status != Conversation.Status.ACTIVE:
+        return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Conversation is not active.'}, status=403)
+    if conversation.type != conversation_type:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'conversation_type does not match conversation.'}, status=400)
+
+    active_members = ConversationMember.objects.filter(
+        conversation=conversation,
+        status=ConversationMember.Status.ACTIVE,
+    )
+    active_member_ids = set(active_members.values_list('user_id', flat=True))
+
     client_message_id = str(data.get('client_message_id', '')).strip()
+    if not client_message_id or len(client_message_id) > 64:
+        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'client_message_id is required (max 64 chars).'}, status=400)
     reply_to_message_id = data.get('reply_to_message_id')
     if reply_to_message_id in ('', None):
         reply_to_message_id = None
@@ -3587,6 +4025,14 @@ def send_file_message_view(request, file_id):
     file_keys_data = data.get('file_keys', [])
     if not isinstance(file_keys_data, list) or not file_keys_data:
         return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'file_keys is required.'}, status=400)
+
+    normalized_file_keys, file_keys_error = _normalize_forward_file_keys(
+        file_keys_data,
+        active_member_ids,
+    )
+    if file_keys_error:
+        return file_keys_error
+    file_keys_data = normalized_file_keys
 
     holder_ids = set()
     for fk in file_keys_data:
@@ -3608,9 +4054,10 @@ def send_file_message_view(request, file_id):
                 'nonce': str(fk.get('nonce', '')),
                 'auth_tag': str(fk.get('auth_tag', '')),
                 'algorithm': str(fk.get('algorithm', 'AES-256-GCM')),
-                'sender_key_version': int(fk.get('sender_key_version', 0)) or None,
-                'receiver_key_version': int(fk.get('receiver_key_version', 0)) or None,
-                'membership_version': int(fk.get('membership_version', 0)) or None,
+                'sender_key_version': fk.get('sender_key_version'),
+                'receiver_key_version': fk.get('receiver_key_version'),
+                'membership_version': fk.get('membership_version'),
+                'sender_ephemeral_public_key': fk.get('sender_ephemeral_public_key'),
             },
         )
 
@@ -3628,17 +4075,45 @@ def send_file_message_view(request, file_id):
         except (TypeError, ValueError):
             return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'receiver_id is required for single chat.'}, status=400)
 
+        if (
+            len(active_member_ids) != 2
+            or request.user.pk not in active_member_ids
+            or receiver_id not in active_member_ids
+            or receiver_id == request.user.pk
+        ):
+            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Receiver is not the private-chat peer.'}, status=403)
+
+        receiver = User.objects.filter(pk=receiver_id, is_active=True).first()
+        if not receiver:
+            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Receiver is not active.'}, status=403)
+        if _is_blocked_by(receiver, request.user) or _is_blocked_by(request.user, receiver):
+            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Blocked users cannot exchange file messages.'}, status=403)
+
+        payload = dict(data)
+        payload['conversation_id'] = conversation.id
+        payload['receiver_id'] = receiver_id
+        payload['file_id'] = ef.pk
+        try:
+            validated_payload = ChatConsumer.validate_private_message(payload)
+        except ClientPayloadError as error:
+            return _client_payload_error_response(error)
+
         message = EncryptedMessage.objects.create(
             conversation=ef.conversation,
             sender=request.user,
             receiver_id=receiver_id,
             message_type=message_type,
-            ciphertext=ciphertext,
-            nonce=nonce,
-            auth_tag=auth_tag,
-            algorithm=algorithm,
-            sender_key_version=sender_key_version,
-            receiver_key_version=receiver_key_version,
+            ciphertext=validated_payload['ciphertext'],
+            nonce=validated_payload['nonce'],
+            auth_tag=validated_payload['auth_tag'],
+            sender_ephemeral_public_key=validated_payload.get('sender_ephemeral_public_key'),
+            sender_copy_ciphertext=(validated_payload.get('sender_copy') or {}).get('ciphertext'),
+            sender_copy_nonce=(validated_payload.get('sender_copy') or {}).get('nonce'),
+            sender_copy_auth_tag=(validated_payload.get('sender_copy') or {}).get('auth_tag'),
+            sender_copy_ephemeral_public_key=(validated_payload.get('sender_copy') or {}).get('sender_ephemeral_public_key'),
+            algorithm=validated_payload['algorithm'],
+            sender_key_version=validated_payload['sender_key_version'],
+            receiver_key_version=validated_payload['receiver_key_version'],
             client_message_id=client_message_id or None,
             reply_to_message_id=reply_to_message_id,
             file_id=ef,
@@ -3650,10 +4125,12 @@ def send_file_message_view(request, file_id):
         receiver_serialized = _serialize_file_private_message(
             message,
             _build_file_sub_object(ef, receiver_id),
+            viewer_id=receiver_id,
         )
         sender_serialized = _serialize_file_private_message(
             message,
             _build_file_sub_object(ef, request.user.pk),
+            viewer_id=request.user.pk,
         )
 
         # Broadcast to receiver
@@ -3677,10 +4154,19 @@ def send_file_message_view(request, file_id):
 
     else:
         # ── Group chat ──
-        membership_version = int(data.get('membership_version', 0)) or None
+        if conversation.muted_until and conversation.muted_until > timezone.now():
+            if member.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
+                return JsonResponse({'error': 'group_muted', 'detail': 'This group is muted.'}, status=403)
+
+        try:
+            membership_version = int(data.get('membership_version', 0))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'membership_version is required for group chat.'}, status=400)
+        if membership_version <= 0:
+            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'membership_version is required for group chat.'}, status=400)
 
         # Check membership version
-        if membership_version and membership_version != ef.conversation.membership_version:
+        if membership_version != ef.conversation.membership_version:
             return JsonResponse({
                 'error': 'membership_version_conflict',
                 'detail': f'Current membership version is {ef.conversation.membership_version}.',
@@ -3691,6 +4177,24 @@ def send_file_message_view(request, file_id):
         if not isinstance(recipients_data, list) or not recipients_data:
             return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'recipients is required for group chat.'}, status=400)
 
+        payload = dict(data)
+        payload['group_id'] = conversation.id
+        payload['file_id'] = ef.pk
+        try:
+            validated_payload = ChatConsumer.validate_group_message(payload)
+        except ClientPayloadError as error:
+            return _client_payload_error_response(error)
+
+        recipient_user_ids = set()
+        for r in recipients_data:
+            try:
+                recipient_user_ids.add(int(r.get('receiver_id', 0)))
+            except (TypeError, ValueError):
+                return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'recipient receiver_id must be an integer.'}, status=400)
+        if recipient_user_ids != active_member_ids:
+            return JsonResponse({'error': 'recipients_mismatch', 'detail': 'Recipients must match current active members.'}, status=400)
+
+        sender_copy = data.get('sender_copy') or {}
         group_msg = GroupMessage.objects.create(
             conversation=ef.conversation,
             sender=request.user,
@@ -3698,13 +4202,17 @@ def send_file_message_view(request, file_id):
             client_message_id=client_message_id or None,
             reply_to_message_id=reply_to_message_id,
             file_id=ef,
+            sender_copy_ciphertext=sender_copy.get('ciphertext'),
+            sender_copy_nonce=sender_copy.get('nonce'),
+            sender_copy_auth_tag=sender_copy.get('auth_tag'),
+            sender_copy_ephemeral_public_key=sender_copy.get('sender_ephemeral_public_key'),
         )
         ef.conversation.last_message_at = group_msg.created_at
         ef.conversation.last_message_id = group_msg.id
         ef.conversation.save(update_fields=['last_message_at', 'last_message_id'])
 
         channel_layer = get_channel_layer()
-        for r in recipients_data:
+        for r in validated_payload['recipients']:
             try:
                 recv_id = int(r.get('receiver_id', 0))
             except (TypeError, ValueError):
@@ -3716,9 +4224,10 @@ def send_file_message_view(request, file_id):
                 ciphertext=str(r.get('ciphertext', '')),
                 nonce=str(r.get('nonce', '')),
                 auth_tag=str(r.get('auth_tag', '')),
-                algorithm=str(r.get('algorithm', 'AES-256-GCM')),
-                sender_key_version=int(r.get('sender_key_version', 0)) or None,
+                algorithm=validated_payload['algorithm'],
+                sender_key_version=validated_payload['sender_key_version'],
                 receiver_key_version=int(r.get('receiver_key_version', 0)) or None,
+                sender_ephemeral_public_key=str(r.get('sender_ephemeral_public_key') or '') or None,
                 membership_version=membership_version,
             )
 
@@ -3742,6 +4251,7 @@ def _build_file_sub_object(ef, holder_id):
     """Build the ``file`` sub-object for WebSocket / API responses."""
     file_obj = {
         'file_id': ef.id,
+        'conversation_id': ef.conversation_id,
         'message_kind': ef.message_kind,
         'chunk_count': ef.chunk_count,
         'total_size_bytes': ef.total_size_bytes,
@@ -3762,31 +4272,65 @@ def _build_file_sub_object(ef, holder_id):
             'sender_key_version': fk.sender_key_version,
             'receiver_key_version': fk.receiver_key_version,
             'membership_version': fk.membership_version,
+            'sender_ephemeral_public_key': fk.sender_ephemeral_public_key,
         }
     return file_obj
 
 
-def _serialize_file_private_message(message, file_obj):
-    """Serialize a private file message for WebSocket broadcast."""
-    return {
-        'message_id': message.id,
-        'conversation_id': message.conversation_id,
-        'sender_id': message.sender_id,
-        'receiver_id': message.receiver_id,
-        'message_type': message.message_type,
-        'ciphertext': message.ciphertext or '',
-        'nonce': message.nonce or '',
-        'auth_tag': message.auth_tag or '',
-        'algorithm': message.algorithm,
-        'sender_key_version': message.sender_key_version,
-        'receiver_key_version': message.receiver_key_version,
-        'client_message_id': message.client_message_id or '',
-        'reply_to_message_id': message.reply_to_message_id,
-        'file': file_obj if message.file_id else None,
-        'status': message.status,
-        'recalled_at': message.recalled_at.isoformat() if message.recalled_at else None,
-        'created_at': message.created_at.isoformat(),
+def _private_message_payload_for_viewer(message, viewer_id, request=None, file_obj_marker=None):
+    """Serialize a private message using the copy decryptable by viewer_id."""
+    use_sender_copy = (
+        int(viewer_id) == message.sender_id
+        and message.sender_copy_ciphertext
+        and message.sender_copy_nonce
+        and message.sender_copy_auth_tag
+    )
+    file_obj = None
+    if message.file_id_id:
+        if file_obj_marker is not None:
+            file_obj = file_obj_marker
+        else:
+            file_obj = _build_file_sub_object(message.file_id, viewer_id)
+    payload = {
+        "id": message.id,
+        "message_id": message.id,
+        "conversation_id": message.conversation_id,
+        "sender_id": message.sender_id,
+        "receiver_id": message.receiver_id,
+        "message_type": message.message_type,
+        "ciphertext": message.sender_copy_ciphertext if use_sender_copy else message.ciphertext,
+        "nonce": message.sender_copy_nonce if use_sender_copy else message.nonce,
+        "auth_tag": message.sender_copy_auth_tag if use_sender_copy else message.auth_tag,
+        "algorithm": message.algorithm,
+        "sender_key_version": message.sender_key_version,
+        "receiver_key_version": message.receiver_key_version,
+        "sender_ephemeral_public_key": (
+            message.sender_copy_ephemeral_public_key
+            if use_sender_copy
+            else message.sender_ephemeral_public_key
+        ),
+        "reply_to_message_id": message.reply_to_message_id,
+        "file_id": message.file_id_id,
+        "file": file_obj,
+        "status": message.status,
+        "recalled_at": message.recalled_at.isoformat() if message.recalled_at else None,
+        "created_at": message.created_at.isoformat(),
     }
+    if request is not None:
+        payload.update({
+            "sender_initials": _initials(_display_name(message.sender)),
+            "sender_avatar_color": _avatar_color(_display_name(message.sender)),
+            "sender_avatar_url": _avatar_url(request, message.sender),
+        })
+    return payload
+
+
+def _serialize_file_private_message(message, file_obj, viewer_id=None):
+    """Serialize a private file message for WebSocket broadcast."""
+    viewer_id = viewer_id or message.receiver_id
+    payload = _private_message_payload_for_viewer(message, viewer_id, file_obj_marker=file_obj)
+    payload['client_message_id'] = message.client_message_id or ''
+    return payload
 
 
 def _serialize_file_group_recipient(group_msg, recipient, file_obj):
@@ -3810,6 +4354,7 @@ def _serialize_file_group_recipient(group_msg, recipient, file_obj):
         'algorithm': recipient.algorithm,
         'sender_key_version': recipient.sender_key_version,
         'receiver_key_version': recipient.receiver_key_version,
+        'sender_ephemeral_public_key': recipient.sender_ephemeral_public_key,
         'membership_version': recipient.membership_version,
         'reply_to_message_id': group_msg.reply_to_message_id,
         'file': file_obj if group_msg.file_id else None,
@@ -3859,6 +4404,7 @@ def get_file_metadata_view(request, file_id):
             'sender_key_version': file_key.sender_key_version,
             'receiver_key_version': file_key.receiver_key_version,
             'membership_version': file_key.membership_version,
+            'sender_ephemeral_public_key': file_key.sender_ephemeral_public_key,
         },
         'chunks': [
             {
@@ -4007,27 +4553,60 @@ def _normalize_ai_model_config(raw_model_config):
         return {}
     return {
         'endpoint': str(raw_model_config.get('endpoint') or '').strip(),
-        'api_key': str(raw_model_config.get('api_key') or '').strip(),
         'model': str(raw_model_config.get('model') or '').strip(),
+        'assistant_id': _normalize_ai_assistant_id(raw_model_config.get('assistant_id')),
     }
+
+
+def _normalize_ai_assistant_id(value):
+    assistant_id = str(value or 'ai-assistant').strip()
+    if not assistant_id:
+        return 'ai-assistant'
+    return assistant_id[:80]
 
 
 def _configured_ai_model_config(model_config):
     return bool(
         model_config.get('endpoint')
-        and model_config.get('api_key')
         and model_config.get('model')
     )
 
 
-def _server_ai_config_status(user):
+def _trusted_ai_model_config(user, client_model_config):
+    """Build model config from server-side credentials only.
+
+    Browser-provided API keys are intentionally ignored. A per-assistant
+    user config may provide the endpoint and encrypted API key; the model id
+    remains a non-secret client preference.
+    """
+    assistant_id = client_model_config.get('assistant_id') or 'ai-assistant'
     try:
-        user_config = UserLLMConfig.objects.get(user=user)
+        user_config = UserLLMConfig.objects.get(user=user, assistant_id=assistant_id)
+    except UserLLMConfig.DoesNotExist:
+        user_config = None
+
+    model = client_model_config.get('model') or 'qwen-plus'
+    if user_config and (user_config.api_url or '').strip() and user_config.get_api_key():
+        return {
+            'endpoint': (user_config.api_url or '').strip(),
+            'api_key': user_config.get_api_key(),
+            'model': model,
+        }
+
+    return {}
+
+
+def _server_ai_config_status(user, assistant_id='ai-assistant'):
+    try:
+        user_config = UserLLMConfig.objects.get(
+            user=user,
+            assistant_id=_normalize_ai_assistant_id(assistant_id),
+        )
     except UserLLMConfig.DoesNotExist:
         user_config = None
 
     user_has_endpoint = bool(user_config and (user_config.api_url or '').strip())
-    user_has_api_key = bool(user_config and (user_config.api_key or '').strip())
+    user_has_api_key = bool(user_config and user_config.get_api_key())
     env_has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     return {
@@ -4053,15 +4632,110 @@ def _ai_system_prompt(mode, configured_model):
 
 
 @login_required(login_url='login')
+def ai_config_view(request):
+    """Save or retrieve the user's LLM provider configuration (endpoint + encrypted API key)."""
+    import json as _json
+    from .llm import (
+        is_anthropic_messages_endpoint,
+        normalize_anthropic_messages_endpoint,
+        normalize_chat_completions_endpoint,
+    )
+
+    limited = _rate_limit(request, 'ai_config', limit=30, window_seconds=60)
+    if limited:
+        return limited
+
+    if request.method == 'GET':
+        assistant_id = _normalize_ai_assistant_id(request.GET.get('assistant_id'))
+        try:
+            user_config = UserLLMConfig.objects.get(
+                user=request.user,
+                assistant_id=assistant_id,
+            )
+        except UserLLMConfig.DoesNotExist:
+            user_config = None
+
+        return JsonResponse({
+            'configured': bool(user_config and user_config.api_url and user_config.get_api_key()),
+            'assistant_id': assistant_id,
+            'endpoint': (user_config.api_url or '').strip() if user_config else '',
+            'has_api_key': bool(user_config and user_config.get_api_key()),
+        })
+
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    try:
+        data = _json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    raw_endpoint = str(data.get('endpoint') or '').strip()
+    raw_api_key = str(data.get('api_key') or '').strip()
+    assistant_id = _normalize_ai_assistant_id(data.get('assistant_id'))
+
+    # Allow clearing the config by sending empty endpoint and empty api_key
+    if not raw_endpoint and not raw_api_key:
+        UserLLMConfig.objects.filter(
+            user=request.user,
+            assistant_id=assistant_id,
+        ).delete()
+        return JsonResponse({
+            'configured': False,
+            'assistant_id': assistant_id,
+            'endpoint': '',
+            'has_api_key': False,
+        })
+
+    if not raw_endpoint:
+        return JsonResponse({'error': 'endpoint is required.'}, status=400)
+
+    try:
+        normalized_endpoint = (
+            normalize_anthropic_messages_endpoint(raw_endpoint)
+            if is_anthropic_messages_endpoint(raw_endpoint)
+            else normalize_chat_completions_endpoint(raw_endpoint)
+        )
+    except ValueError as e:
+        logger.warning("AI config rejected unsafe model endpoint: %s", e)
+        return JsonResponse({'error': str(e)}, status=400)
+
+    user_config, _created = UserLLMConfig.objects.update_or_create(
+        user=request.user,
+        assistant_id=assistant_id,
+        defaults={'api_url': normalized_endpoint},
+    )
+    if raw_api_key:
+        user_config.set_api_key(raw_api_key)
+        user_config.save(update_fields=['api_key', 'updated_at'])
+    elif _created:
+        # New record without an API key: still save the endpoint-only row.
+        pass
+
+    return JsonResponse({
+        'configured': bool(user_config.api_url and user_config.get_api_key()),
+        'assistant_id': assistant_id,
+        'endpoint': (user_config.api_url or '').strip(),
+        'has_api_key': bool(user_config.get_api_key()),
+    })
+
+
+@login_required(login_url='login')
 def ai_status_view(request):
     """Return AI assistant availability, configuration state, and supported modes."""
     if request.method not in ('GET', 'POST'):
         return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
+    limited = _rate_limit(request, 'ai_status', limit=60, window_seconds=60)
+    if limited:
+        return limited
+
     payload = _json_body(request) if request.method == 'POST' else {}
     client_model_config = _normalize_ai_model_config((payload or {}).get('model_config') or {})
-    client_configured = _configured_ai_model_config(client_model_config)
-    server_status = _server_ai_config_status(request.user)
+    trusted_model_config = _trusted_ai_model_config(request.user, client_model_config)
+    client_configured = _configured_ai_model_config(trusted_model_config)
+    assistant_id = client_model_config.get('assistant_id') or 'ai-assistant'
+    server_status = _server_ai_config_status(request.user, assistant_id)
     configured = client_configured or server_status['server_configured']
 
     return JsonResponse({
@@ -4073,7 +4747,7 @@ def ai_status_view(request):
             for mode_id, mode_config in AI_SUPPORTED_MODES.items()
         ],
         'default_mode': AI_DEFAULT_MODE,
-        'active_model': client_model_config.get('model') or (
+        'active_model': trusted_model_config.get('model') or client_model_config.get('model') or (
             'anthropic-env-default' if server_status['env_api_key_configured'] else 'local-mock-llm'
         ),
         'configuration': {
@@ -4082,7 +4756,7 @@ def ai_status_view(request):
             'user_endpoint_configured': server_status['user_endpoint_configured'],
             'user_api_key_configured': server_status['user_api_key_configured'],
             'env_api_key_configured': server_status['env_api_key_configured'],
-            'requires': ['endpoint', 'api_key', 'model'],
+            'requires': ['server_side_api_key', 'endpoint', 'model'],
         },
     })
 
@@ -4099,6 +4773,10 @@ def ai_chat_view(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
+    limited = _rate_limit(request, 'ai_chat', limit=20, window_seconds=60)
+    if limited:
+        return limited
+
     try:
         data = json.loads(request.body)
         user_message = data.get('message', '').strip()
@@ -4111,10 +4789,13 @@ def ai_chat_view(request):
 
     if not user_message:
         return JsonResponse({'error': 'Message content cannot be empty.'}, status=400)
+    if len(user_message) > 8000:
+        return JsonResponse({'error': 'Message content is too long.'}, status=400)
 
-    model_config = _normalize_ai_model_config(raw_model_config)
+    client_model_config = _normalize_ai_model_config(raw_model_config)
+    model_config = _trusted_ai_model_config(request.user, client_model_config)
     mode = raw_mode if raw_mode in AI_SUPPORTED_MODES else AI_DEFAULT_MODE
-    configured_model = model_config.get('model') or 'local-mock-llm'
+    configured_model = model_config.get('model') or client_model_config.get('model') or 'local-mock-llm'
     system_prompt = _ai_system_prompt(mode, configured_model)
 
     # Format history (role: user/assistant, content: text)
@@ -4136,19 +4817,34 @@ def ai_chat_view(request):
     try:
         provider = get_llm_provider(model_config=model_config)
         if stream_requested:
-            def event_stream():
+            stream_end = object()
+
+            def next_stream_chunk(iterator):
                 try:
-                    for chunk in provider.stream(
-                        messages=formatted_messages,
-                        system=system_prompt
-                    ):
+                    return next(iterator)
+                except StopIteration:
+                    return stream_end
+
+            async def event_stream():
+                iterator = provider.stream(
+                    messages=formatted_messages,
+                    system=system_prompt
+                )
+                try:
+                    while True:
+                        chunk = await sync_to_async(next_stream_chunk, thread_sensitive=False)(iterator)
+                        if chunk is stream_end:
+                            break
                         if not chunk:
                             continue
                         yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+                except ValueError as e:
+                    logger.warning("AI assistant rejected unsafe model endpoint: %s", e)
+                    yield f"data: {json.dumps({'error': 'Invalid model endpoint.'}, ensure_ascii=False)}\n\n"
                 except Exception as e:
                     logger.exception("AI assistant streaming generation failed:")
-                    yield f"data: {json.dumps({'error': 'AI assistant service failed.', 'detail': str(e)}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'error': 'AI assistant service failed.'}, ensure_ascii=False)}\n\n"
 
             response = StreamingHttpResponse(event_stream(), content_type='text/event-stream; charset=utf-8')
             response['Cache-Control'] = 'no-cache'
@@ -4160,7 +4856,10 @@ def ai_chat_view(request):
             system=system_prompt
         )
         return JsonResponse({'response': response_text})
+    except ValueError as e:
+        logger.warning("AI assistant rejected unsafe model endpoint: %s", e)
+        return JsonResponse({'error': 'Invalid model endpoint.'}, status=400)
     except Exception as e:
         logger.exception("AI assistant generation failed:")
-        return JsonResponse({'error': 'AI assistant service failed.', 'detail': str(e)}, status=500)
+        return JsonResponse({'error': 'AI assistant service failed.'}, status=500)
 

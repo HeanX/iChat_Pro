@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -21,14 +23,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
+# SECURITY WARNING: don't run with debug turned on in production!
+# Set DJANGO_DEBUG=False in production environments.
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
+
+if not DEBUG and not os.environ.get('DJANGO_SECRET_KEY'):
+    raise ImproperlyConfigured('DJANGO_SECRET_KEY must be set when DJANGO_DEBUG=False.')
+
 SECRET_KEY = os.environ.get(
     'DJANGO_SECRET_KEY',
     'django-insecure-dev-only-change-me-before-production',
 )
-
-# SECURITY WARNING: don't run with debug turned on in production!
-# Set DJANGO_DEBUG=False in production environments.
-DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
 _ALLOWED_HOSTS_RAW = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1')
 ALLOWED_HOSTS = [h.strip() for h in _ALLOWED_HOSTS_RAW.split(',') if h.strip()]
@@ -145,11 +150,25 @@ if _REDIS_URL:
             },
         },
     }
+
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': _REDIS_URL,
+        }
+    }
 else:
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels.layers.InMemoryChannelLayer',
         },
+    }
+
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'ichat-pro-dev-cache',
+        }
     }
 
 
@@ -199,6 +218,18 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 # Tailwind CSS: use Play CDN in dev, static build in production
 TAILWIND_CDN = DEBUG
+CSP_ALLOW_UNSAFE_INLINE_SCRIPT = os.environ.get('CSP_ALLOW_UNSAFE_INLINE_SCRIPT', 'false').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+CSP_ALLOW_UNSAFE_INLINE_STYLE = os.environ.get('CSP_ALLOW_UNSAFE_INLINE_STYLE', 'true').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
 
 # =============================================================================
 # Production security settings (T25)

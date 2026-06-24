@@ -4,6 +4,7 @@
   const IDENTITY_ALGORITHM = 'ECDH-P256';
   const MESSAGE_ALGORITHM = 'AES-256-GCM';
   const HKDF_INFO = 'chat-message-encryption-v1';
+  const TRUST_STORAGE_PREFIX = 'ichat_peer_identity:';
 
   class GroupChatCryptoError extends Error {
     constructor(code, message) {
@@ -30,7 +31,7 @@
 
   function currentRecord() {
     const record = window.iChatKeyManager && window.iChatKeyManager.loadCurrentRecord();
-    if (!record || !record.private_key || !record.key_version) {
+    if (!record || !record.key_version) {
       throw new GroupChatCryptoError(
         'local_key_missing',
         'Local private key is missing. Import your key backup or initialize a new identity key.'
@@ -60,12 +61,33 @@
   }
 
   async function importPrivateKey(privateKeyJwk) {
+    if (privateKeyJwk && privateKeyJwk.type === 'private') return privateKeyJwk;
     return window.crypto.subtle.importKey(
       'jwk',
       privateKeyJwk,
       { name: 'ECDH', namedCurve: 'P-256' },
       false,
       ['deriveBits']
+    );
+  }
+
+  async function currentPrivateKey(localRecord, keyVersion = null) {
+    if (
+      window.iChatKeyManager &&
+      typeof window.iChatKeyManager.getCurrentPrivateKey === 'function'
+    ) {
+      const key = await window.iChatKeyManager.getCurrentPrivateKey(keyVersion);
+      if (key) return key;
+    }
+    if (
+      localRecord.private_key &&
+      (keyVersion === null || Number(localRecord.key_version) === Number(keyVersion))
+    ) {
+      return importPrivateKey(localRecord.private_key);
+    }
+    throw new GroupChatCryptoError(
+      'local_key_missing',
+      'Local private key is missing. Import your key backup or initialize a new identity key.'
     );
   }
 
@@ -77,6 +99,18 @@
       false,
       []
     );
+  }
+
+  async function generateEphemeralKeyPair() {
+    return window.crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      ['deriveBits']
+    );
+  }
+
+  async function exportPublicKeyBase64(publicKey) {
+    return bytesToBase64(new Uint8Array(await window.crypto.subtle.exportKey('spki', publicKey)));
   }
 
   function groupContext(metadata) {
@@ -91,10 +125,9 @@
     ].join(':');
   }
 
-  async function deriveGroupSessionKey(localPrivateKey, remoteIdentityPublicKey, metadata) {
+  async function deriveGroupSessionKeyWithPublicKey(localPrivateKey, remotePublicKey, metadata) {
     const contextBytes = new TextEncoder().encode(groupContext(metadata));
     const salt = await window.crypto.subtle.digest('SHA-256', contextBytes);
-    const remotePublicKey = await importPublicKey(remoteIdentityPublicKey);
     const sharedSecret = await window.crypto.subtle.deriveBits(
       { name: 'ECDH', public: remotePublicKey },
       localPrivateKey,
@@ -112,6 +145,14 @@
       { name: 'AES-GCM', length: 256 },
       false,
       ['encrypt', 'decrypt']
+    );
+  }
+
+  async function deriveGroupSessionKey(localPrivateKey, remoteIdentityPublicKey, metadata) {
+    return deriveGroupSessionKeyWithPublicKey(
+      localPrivateKey,
+      await importPublicKey(remoteIdentityPublicKey),
+      metadata
     );
   }
 
@@ -173,6 +214,10 @@
   }
 
   async function fetchPublicKey(userId, keyVersion) {
+    // Check cache first
+    const cached = _getCachedPublicKey(userId, keyVersion);
+    if (cached) return cached;
+
     const suffix = keyVersion !== undefined ? `${requireInteger(keyVersion, 'key_version')}/` : '';
     const response = await fetch(`/api/keys/${encodeURIComponent(userId)}/${suffix}`);
     if (response.status === 404) {
@@ -191,6 +236,8 @@
     ) {
       throw new GroupChatCryptoError('invalid_peer_key', 'The identity-key response is invalid or unsupported.');
     }
+    // Cache the fetched key
+    _cachePublicKey(key.user_id, key.key_version, key);
     return key;
   }
 
@@ -216,6 +263,93 @@
     return keyMap;
   }
 
+  function loadPeerTrust(userId) {
+    const storageKey = `${TRUST_STORAGE_PREFIX}${userId}`;
+    const previous = localStorage.getItem(storageKey);
+    if (!previous) return null;
+    let trusted;
+    try {
+      trusted = JSON.parse(previous);
+    } catch (error) {
+      throw new GroupChatCryptoError(
+        'peer_trust_invalid',
+        'The saved member security-key record is damaged. Clear it and verify the fingerprint again.'
+      );
+    }
+    if (!trusted || typeof trusted !== 'object') {
+      throw new GroupChatCryptoError(
+        'peer_trust_invalid',
+        'The saved member security-key record is damaged. Clear it and verify the fingerprint again.'
+      );
+    }
+    if (!trusted.versions) {
+      trusted.versions = {};
+      if (trusted.key_version && trusted.key_fingerprint) {
+        trusted.versions[String(trusted.key_version)] = trusted.key_fingerprint;
+      }
+    }
+    return trusted;
+  }
+
+  function rememberPeerIdentity(key, options = {}) {
+    const trusted = loadPeerTrust(key.user_id);
+    if (trusted) {
+      const versionStr = String(key.key_version);
+      const trustedFingerprint = trusted.versions[versionStr];
+      if (trustedFingerprint !== key.key_fingerprint) {
+        if (!trustedFingerprint && options.allowNewVersionForDecrypt) {
+          if (typeof CustomEvent === 'function' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(new CustomEvent('ichat:peer-key-observed', {
+              detail: {
+                user_id: key.user_id,
+                key_version: key.key_version,
+                key_fingerprint: key.key_fingerprint
+              }
+            }));
+          }
+          return;
+        }
+        const error = new GroupChatCryptoError(
+          'peer_key_changed',
+          'A group member security key changed. Verify the new fingerprint before sending or decrypting group messages.'
+        );
+        error.key_change_reason = trustedFingerprint ? 'fingerprint_mismatch' : 'new_key_version';
+        error.user_id = key.user_id;
+        error.key_version = key.key_version;
+        error.key_fingerprint = key.key_fingerprint;
+        error.key = {
+          user_id: key.user_id,
+          key_version: key.key_version,
+          key_fingerprint: key.key_fingerprint
+        };
+        throw error;
+      }
+      return;
+    }
+    localStorage.setItem(`${TRUST_STORAGE_PREFIX}${key.user_id}`, JSON.stringify({
+      user_id: key.user_id,
+      versions: {
+        [String(key.key_version)]: key.key_fingerprint
+      }
+    }));
+  }
+
+  function trustPeerKey(key) {
+    let trusted = loadPeerTrust(key.user_id);
+    if (!trusted) {
+      trusted = {
+        user_id: key.user_id,
+        versions: {}
+      };
+    }
+    trusted.versions[String(key.key_version)] = key.key_fingerprint;
+    localStorage.setItem(`${TRUST_STORAGE_PREFIX}${key.user_id}`, JSON.stringify(trusted));
+  }
+
+  function forgetPeerKey(userId) {
+    localStorage.removeItem(`${TRUST_STORAGE_PREFIX}${requireInteger(userId, 'user_id')}`);
+  }
+
   async function encryptGroupMessage({ plaintext, groupId, membershipVersion, memberIds }) {
     const local = currentRecord();
     requireInteger(groupId, 'group_id');
@@ -235,13 +369,13 @@
       );
     }
 
-    const privateKey = await importPrivateKey(local.private_key);
     const senderId = requireInteger(local.user_id, 'local_user_id');
     const senderKeyVersion = requireInteger(local.key_version, 'local_key_version');
 
     const recipients = [];
     for (const receiverId of uniqueMemberIds) {
       const receiverKey = keyMap[String(receiverId)];
+      if (receiverId !== senderId) rememberPeerIdentity(receiverKey);
       const metadata = {
         group_id: groupId,
         membership_version: membershipVersion,
@@ -250,22 +384,57 @@
         sender_key_version: senderKeyVersion,
         receiver_key_version: receiverKey.key_version
       };
-      const sessionKey = await deriveGroupSessionKey(privateKey, receiverKey.identity_public_key, metadata);
+      const ephemeralKeyPair = await generateEphemeralKeyPair();
+      const senderEphemeralPublicKey = await exportPublicKeyBase64(ephemeralKeyPair.publicKey);
+      const sessionKey = await deriveGroupSessionKey(
+        ephemeralKeyPair.privateKey,
+        receiverKey.identity_public_key,
+        metadata
+      );
       const encrypted = await encryptText(plaintext, sessionKey);
       recipients.push({
         receiver_id: receiverId,
         receiver_key_version: receiverKey.key_version,
         ciphertext: encrypted.ciphertext,
         nonce: encrypted.nonce,
-        auth_tag: encrypted.auth_tag
+        auth_tag: encrypted.auth_tag,
+        sender_ephemeral_public_key: senderEphemeralPublicKey
       });
+    }
+
+    // ── sender_copy: encrypt for the sender's own identity key ─────
+    // so the sender's other devices can decrypt their own group messages.
+    let senderCopy = null;
+    if (local.identity_public_key) {
+      const selfMetadata = {
+        group_id: groupId,
+        membership_version: membershipVersion,
+        sender_id: senderId,
+        receiver_id: senderId,
+        sender_key_version: senderKeyVersion,
+        receiver_key_version: senderKeyVersion
+      };
+      const selfEphemeral = await generateEphemeralKeyPair();
+      const selfSessionKey = await deriveGroupSessionKey(
+        selfEphemeral.privateKey,
+        local.identity_public_key,
+        selfMetadata
+      );
+      const selfEncrypted = await encryptText(plaintext, selfSessionKey);
+      senderCopy = {
+        ciphertext: selfEncrypted.ciphertext,
+        nonce: selfEncrypted.nonce,
+        auth_tag: selfEncrypted.auth_tag,
+        sender_ephemeral_public_key: await exportPublicKeyBase64(selfEphemeral.publicKey)
+      };
     }
 
     return {
       algorithm: MESSAGE_ALGORITHM,
       sender_key_version: senderKeyVersion,
       membership_version: membershipVersion,
-      recipients
+      recipients,
+      sender_copy: senderCopy
     };
   }
 
@@ -281,18 +450,15 @@
     }
 
     const receiverKeyVersion = requireInteger(payload.receiver_key_version, 'receiver_key_version');
-    if (receiverKeyVersion !== requireInteger(local.key_version, 'local_key_version')) {
-      throw new GroupChatCryptoError(
-        'local_key_changed',
-        'Your current device key cannot decrypt this message. Import the matching key backup.'
-      );
-    }
+    const privateKey = await currentPrivateKey(local, receiverKeyVersion);
 
     const senderKeyVersion = requireInteger(payload.sender_key_version, 'sender_key_version');
     const senderId = requireInteger(payload.sender_id, 'sender_id');
     const senderKey = await fetchPublicKey(senderId, senderKeyVersion);
+    if (senderId !== requireInteger(local.user_id, 'local_user_id')) {
+      rememberPeerIdentity(senderKey, { allowNewVersionForDecrypt: true });
+    }
 
-    const privateKey = await importPrivateKey(local.private_key);
     const metadata = {
       group_id: requireInteger(payload.group_id, 'group_id'),
       membership_version: requireInteger(payload.membership_version, 'membership_version'),
@@ -301,7 +467,13 @@
       sender_key_version: senderKeyVersion,
       receiver_key_version: receiverKeyVersion
     };
-    const sessionKey = await deriveGroupSessionKey(privateKey, senderKey.identity_public_key, metadata);
+    const sessionKey = payload.sender_ephemeral_public_key
+      ? await deriveGroupSessionKey(
+          privateKey,
+          payload.sender_ephemeral_public_key,
+          metadata
+        )
+      : await deriveGroupSessionKey(privateKey, senderKey.identity_public_key, metadata);
     return decryptText(payload, sessionKey);
   }
 
@@ -324,6 +496,24 @@
 
   const FILE_KEY_WRAP_HKDF_INFO = 'ichat-file-key-wrap-v1';
 
+  // ── In-memory public key cache ─────────────────────────────────
+  const _publicKeyCache = new Map();  // key: `${userId}:v${keyVersion}`
+  const PUBLIC_KEY_CACHE_MAX = 200;
+
+  function _cachePublicKey(userId, keyVersion, key) {
+    const cacheKey = `${userId}:v${keyVersion}`;
+    if (_publicKeyCache.size >= PUBLIC_KEY_CACHE_MAX) {
+      const firstKey = _publicKeyCache.keys().next().value;
+      _publicKeyCache.delete(firstKey);
+    }
+    _publicKeyCache.set(cacheKey, key);
+  }
+
+  function _getCachedPublicKey(userId, keyVersion) {
+    const cacheKey = `${userId}:v${keyVersion}`;
+    return _publicKeyCache.get(cacheKey) || null;
+  }
+
   async function wrapFileKey(fileKeyBytes, fileId, holderId, metadata) {
     if (!metadata) {
       metadata = {
@@ -340,13 +530,16 @@
     metadata.receiver_key_version = requireInteger(remoteKey.key_version, 'remote_key_version');
     metadata.sender_key_version = requireInteger(currentRecord().key_version, 'local_key_version');
     const local = currentRecord();
-    const privateKey = await importPrivateKey(local.private_key);
+
+    // Generate ephemeral key pair for forward secrecy
+    const ephemeralKeyPair = await generateEphemeralKeyPair();
+    const senderEphemeralPublicKeyB64 = await exportPublicKeyBase64(ephemeralKeyPair.publicKey);
 
     const contextBytes = new TextEncoder().encode(groupContext(metadata));
     const salt = await window.crypto.subtle.digest('SHA-256', contextBytes);
     const remotePublicKey = await importPublicKey(remoteKey.identity_public_key);
     const sharedSecret = await window.crypto.subtle.deriveBits(
-      { name: 'ECDH', public: remotePublicKey }, privateKey, 256
+      { name: 'ECDH', public: remotePublicKey }, ephemeralKeyPair.privateKey, 256
     );
     const hkdfKey = await window.crypto.subtle.importKey('raw', sharedSecret, 'HKDF', false, ['deriveKey']);
     const wrapSessionKey = await window.crypto.subtle.deriveKey(
@@ -374,6 +567,7 @@
       sender_key_version: requireInteger(local.key_version, 'local_key_version'),
       receiver_key_version: requireInteger(remoteKey.key_version, 'remote_key_version'),
       membership_version: metadata.membership_version,
+      sender_ephemeral_public_key: senderEphemeralPublicKeyB64,
     };
   }
 
@@ -396,18 +590,26 @@
       candidateGroupIds: uniqueIds
     });
 
-    const senderKey = await fetchPublicKey(senderId, wrapped.sender_key_version || undefined);
     const local = currentRecord();
-    const privateKey = await importPrivateKey(local.private_key);
+    const localKeyVersion = wrapped.receiver_key_version || (metadata && metadata.receiver_key_version) || null;
+    const privateKey = await currentPrivateKey(local, localKeyVersion);
+
+    // Use sender's ephemeral public key (forward secrecy) if available;
+    // fall back to sender identity key for legacy wrapped keys.
+    let remotePublicKey;
+    if (wrapped.sender_ephemeral_public_key) {
+      remotePublicKey = await importPublicKey(wrapped.sender_ephemeral_public_key);
+    } else {
+      const senderKey = await fetchPublicKey(senderId, wrapped.sender_key_version || undefined);
+      remotePublicKey = await importPublicKey(senderKey.identity_public_key);
+    }
 
     console.log('[GroupE2EE.unwrapFileKey] Key details:', {
       localKeyVer: local.key_version,
       localKeyFingerprint: local.key_fingerprint,
-      senderKeyVer: senderKey.key_version,
-      senderKeyFingerprint: senderKey.key_fingerprint
+      usingEphemeralKey: !!wrapped.sender_ephemeral_public_key,
     });
 
-    const remotePublicKey = await importPublicKey(senderKey.identity_public_key);
     const sharedSecret = await window.crypto.subtle.deriveBits(
       { name: 'ECDH', public: remotePublicKey }, privateKey, 256
     );
@@ -491,6 +693,8 @@
     decryptGroupMessage,
     fetchGroupMemberKeys,
     fetchBatchPublicKeys,
+    trustPeerKey,
+    forgetPeerKey,
     // File transfer
     wrapFileKey,
     unwrapFileKey,

@@ -17,6 +17,7 @@ function _t4(en, zh, zhTW, ja) { return {en, zh, 'zh-TW': zhTW, ja}[currentLangu
 let isSelectingMessages = false;
 let selectedMessageIds = [];
 let messages = [];               // Decrypted messages for the currently active conversation
+let aiMessages = [];            // AI assistant conversation turns (separate from chat messages)
 let messagePage = 1;
 let hasMoreMessages = false;
 let isLoadingMessages = false;
@@ -27,10 +28,18 @@ let wsClient = null;             // v1 /ws/chat/ client
 let e2eeKeyReady = true;
 let e2eeKeyError = null;
 let groupMembersByConversation = {};
+let pendingOutgoingMessages = {};
 let fingerprintCacheByUserId = {};
 let contactKeyStatusCacheByUserId = {};
 let keyTrustListCache = null;
 let detailsPanelRequestId = 0;
+let activeGroupManageId = null;
+let groupManageState = { group: null, members: [], pendingInvitations: [], inviteCandidates: [], announcement: null, inviteOpen: false, mode: "manage" };
+let groupInviteContactCache = new Map();
+let groupInviteSearchTimer = null;
+let pendingGroupInvitations = [];
+let pendingKeyVerificationRequests = [];
+let pendingGroupInvitationTimer = null;
 let currentSearchTab = 'chats';     // Active search type tab
 let searchDebounceTimer = null;    // Debounce timer for search input
 let chatSearchResults = [];
@@ -448,6 +457,76 @@ async function encryptPrivateMessageWithTrustRetry({ text, conv }) {
   }
 }
 
+function groupKeyFromPeerKeyError(err) {
+  if (!err) return null;
+  if (err.key && err.key.user_id && err.key.key_version && err.key.key_fingerprint) {
+    return err.key;
+  }
+  if (err.user_id && err.key_version && err.key_fingerprint) {
+    return {
+      user_id: err.user_id,
+      key_version: err.key_version,
+      key_fingerprint: err.key_fingerprint
+    };
+  }
+  return null;
+}
+
+async function encryptGroupMessageWithTrustRetry({ plaintext, text, conv, groupId, membershipVersion, memberIds }) {
+  if (!window.iChatGroupE2EE || !window.iChatGroupE2EE.encryptGroupMessage) {
+    throw new Error("Group E2EE module is not loaded.");
+  }
+
+  const targetGroupId = groupId || (conv && conv.id);
+  let targetMemberIds = memberIds;
+  if (!targetMemberIds) {
+    targetMemberIds = await fetchGroupMemberIds(targetGroupId);
+  }
+  const targetMembershipVersion = membershipVersion || (conv && conv.membership_version) || window.activeMembershipVersion || 1;
+  const messageText = plaintext != null ? plaintext : text;
+  let confirmed = false;
+  const trustedKeys = new Set();
+  const maxAttempts = Math.max(2, targetMemberIds.length + 2);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await window.iChatGroupE2EE.encryptGroupMessage({
+        plaintext: messageText,
+        groupId: targetGroupId,
+        membershipVersion: targetMembershipVersion,
+        memberIds: targetMemberIds
+      });
+    } catch (err) {
+      const key = groupKeyFromPeerKeyError(err);
+      const canTrustNewVersion = (
+        err &&
+        err.code === 'peer_key_changed' &&
+        err.key_change_reason === 'new_key_version' &&
+        key &&
+        window.iChatGroupE2EE.trustPeerKey
+      );
+      if (!canTrustNewVersion) throw err;
+
+      if (!confirmed) {
+        confirmed = window.confirm(
+          currentLanguage === 'zh'
+            ? "\u7fa4\u6210\u5458\u7684\u52a0\u5bc6\u5bc6\u94a5\u5df2\u91cd\u7f6e\u3002\u662f\u5426\u4fe1\u4efb\u65b0\u5bc6\u94a5\u5e76\u91cd\u65b0\u53d1\u9001\uff1f\u65e7\u6d88\u606f\u4ecd\u9700\u8981\u539f\u5bc6\u94a5\u5907\u4efd\u624d\u80fd\u89e3\u5bc6\u3002"
+            : "A group member reset their encryption key. Trust the new key and retry sending? Older messages still require the original key backup."
+        );
+        if (!confirmed) throw err;
+      }
+
+      const trustKey = `${key.user_id}:${key.key_version}:${key.key_fingerprint}`;
+      if (trustedKeys.has(trustKey)) throw err;
+      window.iChatGroupE2EE.trustPeerKey(key);
+      trustedKeys.add(trustKey);
+    }
+  }
+
+  throw new Error("Unable to encrypt the group message after trusting rotated member keys.");
+}
+window.encryptGroupMessageWithTrustRetry = encryptGroupMessageWithTrustRetry;
+
 // ============================================================================
 // 1. API Helpers
 // ============================================================================
@@ -497,6 +576,80 @@ function renderChatList() {
   conversations.forEach(conv => {
     appendChatItemToSidebar(conv);
   });
+  renderGroupsSidebar();
+}
+
+function getSidebarGroups() {
+  return (conversations || []).filter(function(conv) {
+    return conv && conv.type === "group";
+  });
+}
+
+function renderGroupsSidebar(query) {
+  const list = document.getElementById("groups-sidebar-list");
+  if (!list) return;
+  const count = document.getElementById("groups-sidebar-count");
+  const input = document.getElementById("groups-sidebar-search");
+  const cleaned = String(query != null ? query : (input ? input.value : "")).trim().toLowerCase();
+  const groups = getSidebarGroups().filter(function(group) {
+    if (!cleaned) return true;
+    const haystack = String((group.name || "") + " " + (group.last_message_preview || "")).toLowerCase();
+    return haystack.includes(cleaned);
+  });
+  if (count) count.textContent = String(groups.length);
+  if (groups.length === 0) {
+    list.innerHTML = `<div class="groups-sidebar-empty">
+      <i data-lucide="users-round"></i>
+      <span>${cleaned ? (currentLanguage === "zh" ? "没有匹配的群聊" : "No matching groups") : (currentLanguage === "zh" ? "暂无群聊" : "No groups yet")}</span>
+    </div>`;
+    if (window.lucide) window.lucide.createIcons();
+    return;
+  }
+  list.innerHTML = groups.map(function(group) {
+    const safeName = escapeHtml(group.name || "Unnamed Group");
+    const safeInitials = escapeHtml(group.initials || String(group.name || "G").slice(0, 2).toUpperCase());
+    const safeAvatarColor = /^#[0-9a-fA-F]{6}$/.test(group.avatar_color || "") ? group.avatar_color : "#5c6bc0";
+    const avatarInner = group.avatar_url
+      ? `<img src="${escapeHtml(group.avatar_url)}" alt="" class="w-full h-full object-cover">`
+      : safeInitials;
+    const avatarStyle = group.avatar_url ? "background-color: transparent" : `background-color: ${safeAvatarColor}`;
+    const members = Number(group.member_count || group.members_count || 0);
+    const preview = group.last_message_preview
+      ? renderSidebarPreview(group, group.last_message_preview, group.last_message_sender_id)
+      : escapeHtml(currentLanguage === "zh" ? "打开群聊" : "Open group chat");
+    return `<div class="groups-sidebar-row" data-group-id="${Number(group.id)}">
+      <button type="button" class="groups-sidebar-main" onclick="openGroupFromSidebar(${Number(group.id)})">
+        <span class="groups-sidebar-avatar" style="${avatarStyle}">${avatarInner}</span>
+        <span class="groups-sidebar-copy">
+          <span class="groups-sidebar-title">${safeName}</span>
+          <span class="groups-sidebar-subtitle">${preview}</span>
+        </span>
+        <span class="groups-sidebar-meta">${members ? members : ""}</span>
+      </button>
+      <button type="button" class="groups-sidebar-action" onclick="openGroupInviteFromSidebar(${Number(group.id)})" title="${currentLanguage === "zh" ? "邀请成员" : "Invite members"}">
+        <i data-lucide="user-plus"></i>
+      </button>
+    </div>`;
+  }).join("");
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function startGroupCreationFromGroups() {
+  resetGroupCreationFlow();
+  navigateSidebar("group-add-members");
+}
+
+async function openGroupFromSidebar(groupId) {
+  if (!groupId || !conversationsById[groupId]) return;
+  navigateSidebar("chat");
+  await selectChat(groupId);
+}
+
+async function openGroupInviteFromSidebar(groupId) {
+  if (!groupId || !conversationsById[groupId]) return;
+  navigateSidebar("chat");
+  await selectChat(groupId);
+  await openGroupInviteFromDetails(groupId);
 }
 
 function renderDraftPreview(text) {
@@ -729,6 +882,7 @@ async function fetchConversations() {
               receiver_id: msg.receiver_id,
               sender_key_version: msg.sender_key_version,
               receiver_key_version: msg.receiver_key_version,
+              sender_ephemeral_public_key: msg.sender_ephemeral_public_key,
             });
           } else {
             plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
@@ -736,6 +890,7 @@ async function fetchConversations() {
               ciphertext: msg.ciphertext,
               nonce: msg.nonce,
               auth_tag: msg.auth_tag,
+              sender_ephemeral_public_key: msg.sender_ephemeral_public_key,
               conversation_id: conv.id,
               sender_id: msg.sender_id,
               receiver_id: msg.receiver_id,
@@ -808,6 +963,7 @@ async function fetchMessages(conversationId, page = 1) {
             receiver_id: msg.receiver_id,
             sender_key_version: msg.sender_key_version,
             receiver_key_version: msg.receiver_key_version,
+            sender_ephemeral_public_key: msg.sender_ephemeral_public_key,
           });
         } else {
           plaintext = await window.iChatPrivateE2EE.decryptPrivateMessage({
@@ -815,6 +971,7 @@ async function fetchMessages(conversationId, page = 1) {
             ciphertext: msg.ciphertext,
             nonce: msg.nonce,
             auth_tag: msg.auth_tag,
+            sender_ephemeral_public_key: msg.sender_ephemeral_public_key,
             conversation_id: data.conversation_id || conv.id,
             sender_id: msg.sender_id,
             receiver_id: msg.receiver_id,
@@ -881,6 +1038,12 @@ async function fetchMessages(conversationId, page = 1) {
 
 async function fetchGroupMemberIds(conversationId) {
   const data = await apiFetch(`/api/groups/${conversationId}/members/`);
+  const membershipVersion = Number(data.membership_version);
+  if (Number.isSafeInteger(membershipVersion) && membershipVersion > 0) {
+    const conv = conversationsById[conversationId];
+    if (conv) conv.membership_version = membershipVersion;
+    window.activeMembershipVersion = membershipVersion;
+  }
   groupMembersByConversation[conversationId] = {};
   (data.members || []).forEach(member => {
     groupMembersByConversation[conversationId][member.user_id] = member;
@@ -1188,6 +1351,10 @@ function handleIncomingMessage(data) {
     handleMessageAccepted(data);
   } else if (event === 'group.members.changed') {
     fetchConversations();
+  } else if (event === 'group.invitation.new') {
+    handleGroupInvitationNew(data);
+  } else if (event === 'key.verification.new') {
+    handleKeyVerificationNew(data);
   } else if (event === 'typing' || event === 'typing.indicator') {
     handleTypingEvent(data);
   } else if (event === 'presence.updated') {
@@ -1206,10 +1373,39 @@ function handleIncomingMessage(data) {
       window.iChatFileTransfer._onUploadCompleted(payload);
     }
   } else if (event === 'error') {
-    logToCryptoConsole(`[WebSocket Error] ${data.data?.message || 'Unknown error'}`);
+    handleWebSocketError(data);
   } else {
     console.log('[WebSocket] Unknown event:', event, data);
   }
+}
+
+async function handleWebSocketError(data) {
+  const payload = data.data || {};
+  const requestId = data.request_id || payload.request_id;
+  const code = payload.code || data.code || 'error';
+  const message = payload.message || data.message || 'Unknown error';
+  logToCryptoConsole(`[WebSocket Error] ${code}: ${message}`);
+
+  if (requestId && pendingOutgoingMessages[requestId]) {
+    const pending = pendingOutgoingMessages[requestId];
+    delete pendingOutgoingMessages[requestId];
+    const msg = messages.find(m => m.id === requestId);
+    if (msg) {
+      msg.status = 'failed';
+      msg.error = message;
+      patchMessageStatusInPlace(msg);
+    }
+    if (pending.conversationId && (code === 'membership_conflict' || code === 'recipients_mismatch')) {
+      try {
+        await fetchGroupMemberIds(pending.conversationId);
+        await fetchConversations();
+      } catch (refreshErr) {
+        console.warn('[WebSocket Error] Failed to refresh group state after send rejection:', refreshErr);
+      }
+    }
+  }
+
+  window.showToast && window.showToast(message);
 }
 
 async function handlePrivateMessageReceived(data) {
@@ -1230,6 +1426,7 @@ async function handlePrivateMessageReceived(data) {
         ciphertext: payload.ciphertext,
         nonce: payload.nonce,
         auth_tag: payload.auth_tag,
+        sender_ephemeral_public_key: payload.sender_ephemeral_public_key,
         conversation_id: payload.conversation_id,
         sender_id: payload.sender_id,
         receiver_id: payload.receiver_id,
@@ -1284,8 +1481,8 @@ async function handlePrivateMessageReceived(data) {
     messages.push(newMsg);
     appendMessageElement(newMsg);
     scrollToBottom();
-    // Send delivery receipt
-    if (wsClient) {
+    // Send delivery receipt (only for messages from others)
+    if (!newMsg.isSelf && wsClient) {
       wsClient.sendPayload({
         event: 'message.receipt.update',
         data: {
@@ -1331,6 +1528,7 @@ async function handleGroupMessageReceived(data) {
         receiver_id: payload.receiver_id,
         sender_key_version: payload.sender_key_version,
         receiver_key_version: payload.receiver_key_version,
+        sender_ephemeral_public_key: payload.sender_ephemeral_public_key,
       });
     } else {
       plaintext = '[Encrypted group message — E2EE module not loaded]';
@@ -1415,6 +1613,7 @@ function handleMessageAccepted(data) {
   const payload = data.data || data;
   const tempId = payload.client_message_id;
   if (!tempId) return;
+  delete pendingOutgoingMessages[tempId];
   const msg = messages.find(m => m.id === tempId);
   if (msg) {
     var oldId = msg.id;
@@ -1889,6 +2088,7 @@ async function selectChat(chatId) {
   renderMessages();
   scrollToBottom();
   restoreDraftForActiveConversation();
+  showRightPanelMainView();
   await updateDetailsPanelRich(conv);
 
   // Send read receipts for any undelivered messages
@@ -1935,7 +2135,12 @@ async function updateDetailsPanel(conv) {
   if (conv.is_secure) {
     if (fpWrapper) fpWrapper.classList.remove("hidden");
     if (protocol) protocol.textContent = "ECDH + HKDF + AES-GCM";
-    if (resetKeyBtn) resetKeyBtn.classList.toggle("hidden", conv.type === "group");
+    if (resetKeyBtn) {
+      resetKeyBtn.classList.remove("hidden");
+      resetKeyBtn.title = currentLanguage === 'zh' ? "\u91cd\u7f6e\u672c\u673a\u52a0\u5bc6\u8eab\u4efd" : "Reset local encryption identity";
+      const resetLabel = resetKeyBtn.querySelector("span");
+      if (resetLabel) resetLabel.textContent = currentLanguage === 'zh' ? "\u91cd\u7f6e\u672c\u673a\u5bc6\u94a5" : "Reset Local Key";
+    }
     if (verificationStatus) {
       verificationStatus.className = "font-semibold text-amber-500 flex items-center space-x-1";
       verificationStatus.innerHTML = '<i data-lucide="shield-question" class="w-3.5 h-3.5 mr-0.5 inline-block text-amber-500"></i><span>' + _t4('Unverified', '待验证', '待驗證', '未検証') + '</span>';
@@ -2070,7 +2275,12 @@ async function updateDetailsPanelRich(conv) {
   }
 
   if (protocol) protocol.textContent = conv.is_secure ? "ECDH + HKDF + AES-GCM" : "未启用";
-  if (resetKeyBtn) resetKeyBtn.classList.toggle("hidden", kind === "group");
+  if (resetKeyBtn) {
+    resetKeyBtn.classList.toggle("hidden", !conv.is_secure);
+    resetKeyBtn.title = currentLanguage === 'zh' ? "\u91cd\u7f6e\u672c\u673a\u52a0\u5bc6\u8eab\u4efd" : "Reset local encryption identity";
+    const resetLabel = resetKeyBtn.querySelector("span");
+    if (resetLabel) resetLabel.textContent = currentLanguage === 'zh' ? "\u91cd\u7f6e\u672c\u673a\u5bc6\u94a5" : "Reset Local Key";
+  }
 
   if (conv.is_secure) {
     if (fpWrapper) fpWrapper.classList.remove("hidden");
@@ -2369,6 +2579,11 @@ function getSearchResultAvatarHtmlRich(msg, conv) {
 
 function renderSearchResultSnippet(msg) {
   const html = renderMessageContent(msg && msg.text);
+  return html.replace(/<p>/g, '<span>').replace(/<\/p>/g, '</span>');
+}
+
+function renderAiSearchResultSnippet(msg) {
+  const html = renderMessageMarkdown(msg && msg.text);
   return html.replace(/<p>/g, '<span>').replace(/<\/p>/g, '</span>');
 }
 
@@ -2954,6 +3169,93 @@ function setupFormatToolbar() {
   updateMarkdownPreview();
 }
 
+function getTransferFiles(dataTransfer) {
+  if (!dataTransfer) return [];
+  if (dataTransfer.files && dataTransfer.files.length) {
+    return Array.from(dataTransfer.files).filter(Boolean);
+  }
+  if (!dataTransfer.items || !dataTransfer.items.length) return [];
+  return Array.from(dataTransfer.items)
+    .filter(function(item) { return item && item.kind === "file"; })
+    .map(function(item) { return item.getAsFile(); })
+    .filter(Boolean);
+}
+
+function transferHasFiles(dataTransfer) {
+  if (!dataTransfer) return false;
+  if (dataTransfer.files && dataTransfer.files.length) return true;
+  return Array.from(dataTransfer.items || []).some(function(item) {
+    return item && item.kind === "file";
+  });
+}
+
+async function sendComposerFiles(files) {
+  var fileList = Array.from(files || []).filter(Boolean);
+  if (!fileList.length) return false;
+
+  if (!activeChatId) {
+    window.showToast && window.showToast('Please select a conversation first.');
+    return false;
+  }
+
+  if (!e2eeKeyReady) {
+    var recovered = await recoverE2EEKeyForSending();
+    if (!recovered) {
+      window.showToast && window.showToast(e2eeKeyError || 'Local encryption key is unavailable.');
+      return false;
+    }
+  }
+
+  if (!window.iChatFileTransfer || typeof window.iChatFileTransfer.sendSelectedFiles !== "function") {
+    window.showToast && window.showToast('File transfer is not ready yet.');
+    return false;
+  }
+
+  var conv = conversationsById[activeChatId];
+  var convType = conv ? conv.type : 'single';
+  await window.iChatFileTransfer.sendSelectedFiles(fileList, activeChatId, convType, 'file', {
+    promoteImages: false,
+    showImageModal: false,
+  });
+  return true;
+}
+
+function setupComposerFileDropAndPaste(chatInput) {
+  if (!chatInput || chatInput.dataset.fileDropPasteBound === "true") return;
+  chatInput.dataset.fileDropPasteBound = "true";
+
+  var composer = chatInput.closest(".chat-input-capsule") || chatInput;
+
+  chatInput.addEventListener("paste", function(event) {
+    var files = getTransferFiles(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    sendComposerFiles(files);
+  });
+
+  ["dragenter", "dragover"].forEach(function(eventName) {
+    composer.addEventListener(eventName, function(event) {
+      if (!transferHasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      composer.classList.add("is-file-drag-over");
+    });
+  });
+
+  composer.addEventListener("dragleave", function(event) {
+    if (event.relatedTarget && composer.contains(event.relatedTarget)) return;
+    composer.classList.remove("is-file-drag-over");
+  });
+
+  composer.addEventListener("drop", function(event) {
+    var files = getTransferFiles(event.dataTransfer);
+    composer.classList.remove("is-file-drag-over");
+    if (!files.length) return;
+    event.preventDefault();
+    sendComposerFiles(files);
+  });
+}
+
 // 8. Create Message Bubble DOM Node
 
 // 9. Encrypt & Send Message
@@ -3024,55 +3326,80 @@ async function sendMessage() {
   updateMarkdownPreview();
 
   try {
+    // ── Encrypt ──────────────────────────────────────────────
+    let wsEvent, wsData, httpUrl, httpBody;
+
     if (conv.type === "group") {
       if (!window.iChatGroupE2EE || !window.iChatGroupE2EE.encryptGroupMessage) {
         throw new Error("Group E2EE module is not loaded.");
       }
-        const memberIds = await fetchGroupMemberIds(conv.id);
-        const result = await window.iChatGroupE2EE.encryptGroupMessage({
-          plaintext: text,
-          groupId: conv.id,
-          membershipVersion: conv.membership_version || 1,
-          memberIds
-        });
-        if (!wsClient || !wsClient.sendPayload || !wsClient.sendPayload({
-            event: "message.group.send",
-            request_id: clientMsgId,
-            data: {
-              group_id: conv.id,
-              membership_version: result.membership_version,
-              sender_key_version: result.sender_key_version,
-              message_type: "text",
-              algorithm: result.algorithm,
-              client_message_id: clientMsgId,
-              recipients: result.recipients,
-              reply_to_message_id: tempMsg.reply_to || undefined
-            }
-          })) {
-            throw new Error("WebSocket is not connected.");
-        }
+      const memberIds = await fetchGroupMemberIds(conv.id);
+      const result = await encryptGroupMessageWithTrustRetry({
+        plaintext: text,
+        conv,
+        membershipVersion: conv.membership_version || window.activeMembershipVersion || 1,
+        memberIds
+      });
+      wsEvent = "message.group.send";
+      wsData = {
+        group_id: conv.id,
+        membership_version: result.membership_version,
+        sender_key_version: result.sender_key_version,
+        message_type: "text",
+        algorithm: result.algorithm,
+        client_message_id: clientMsgId,
+        recipients: result.recipients,
+        sender_copy: result.sender_copy || undefined,
+        reply_to_message_id: tempMsg.reply_to || undefined
+      };
+      httpUrl = `/api/conversations/${conv.id}/messages/send-group/`;
+      httpBody = JSON.stringify(wsData);
     } else {
       if (!window.iChatPrivateE2EE || !window.iChatPrivateE2EE.encryptPrivateMessage || !conv.peer_id) {
         throw new Error("Private E2EE module or peer information is missing.");
       }
-        const result = await encryptPrivateMessageWithTrustRetry({ text, conv });
-        const accepted = await apiFetch(`/api/conversations/${conv.id}/messages/send/`, {
-          method: "POST",
-          body: JSON.stringify({
-            receiver_id: conv.peer_id,
-            ciphertext: result.ciphertext,
-            nonce: result.nonce,
-            auth_tag: result.auth_tag,
-            algorithm: result.algorithm,
-            sender_key_version: result.sender_key_version,
-            receiver_key_version: result.receiver_key_version,
-            client_message_id: clientMsgId,
-            message_type: "text",
-            reply_to_message_id: tempMsg.reply_to || undefined,
-          })
-        });
-        handleMessageAccepted({ data: accepted });
+      const result = await encryptPrivateMessageWithTrustRetry({ text, conv });
+      wsEvent = "message.single.send";
+      wsData = {
+        conversation_id: conv.id,
+        receiver_id: conv.peer_id,
+        ciphertext: result.ciphertext,
+        nonce: result.nonce,
+        auth_tag: result.auth_tag,
+        sender_ephemeral_public_key: result.sender_ephemeral_public_key,
+        sender_copy: result.sender_copy,
+        algorithm: result.algorithm,
+        sender_key_version: result.sender_key_version,
+        receiver_key_version: result.receiver_key_version,
+        client_message_id: clientMsgId,
+        message_type: "text",
+        reply_to_message_id: tempMsg.reply_to || undefined,
+      };
+      httpUrl = `/api/conversations/${conv.id}/messages/send/`;
+      httpBody = JSON.stringify(wsData);
     }
+
+    // ── Send: WebSocket first, HTTP fallback ──────────────────
+    let accepted;
+    const wsOk = wsClient && wsClient.sendPayload && wsClient.sendPayload({
+      event: wsEvent,
+      request_id: clientMsgId,
+      data: wsData,
+    });
+    if (wsOk) {
+      pendingOutgoingMessages[clientMsgId] = {
+        conversationId: conv.id,
+        conversationType: conv.type,
+        text
+      };
+      // WebSocket accepted — response arrives async via handleMessageAccepted
+      return;
+    }
+
+    // WebSocket unavailable — fall back to HTTP
+    logToCryptoConsole("[Send] WebSocket unavailable, falling back to HTTP");
+    accepted = await apiFetch(httpUrl, { method: "POST", body: httpBody });
+    handleMessageAccepted({ data: accepted });
   } catch (err) {
     console.error("Send failed:", err);
     logToCryptoConsole("[Send Error] " + err.message);
@@ -3386,20 +3713,10 @@ async function submitCreateGroupForm() {
       method: "POST",
       body: JSON.stringify({
         name: name,
-        avatar: selectedGroupAvatarBase64 || ""
+        avatar: selectedGroupAvatarBase64 || "",
+        initial_member_ids: Array.from(selectedMemberIds).map(function(uid) { return parseInt(uid, 10); })
       })
     });
-    
-    for (const uid of selectedMemberIds) {
-      try {
-        await apiFetch("/api/groups/" + data.id + "/invite/", {
-          method: "POST",
-          body: JSON.stringify({ user_id: parseInt(uid) })
-        });
-      } catch (e) {
-        console.warn("Failed to invite", uid, e);
-      }
-    }
     
     await fetchConversations();
     if (data.id) selectChat(data.id.toString());
@@ -3412,6 +3729,929 @@ async function submitCreateGroupForm() {
     window.showToast("创建群组失败，请重试");
   } finally {
     if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+// ============================================================================
+// Group Management Sidebar
+// ============================================================================
+
+function getManagedGroupId() {
+  return activeGroupManageId || activeChatId;
+}
+
+function getManagedGroupConv() {
+  const groupId = getManagedGroupId();
+  return groupId ? conversationsById[groupId] : null;
+}
+
+function getMyGroupManageMember() {
+  return groupManageState.members.find(function(member) {
+    return Number(member.user_id) === Number(myUserId);
+  }) || null;
+}
+
+function canManageGroupMembers() {
+  const me = getMyGroupManageMember();
+  return !!me && (me.role === "owner" || me.role === "admin");
+}
+
+function canOwnerManageGroup() {
+  const me = getMyGroupManageMember();
+  return !!me && me.role === "owner";
+}
+
+function getRoleTranslation(role) {
+  const normalized = String(role || "member").toLowerCase();
+  if (currentLanguage === "zh") {
+    if (normalized === "owner") return "群主";
+    if (normalized === "admin") return "管理员";
+    return "成员";
+  }
+  if (normalized === "owner") return "Owner";
+  if (normalized === "admin") return "Admin";
+  return "Member";
+}
+
+function groupManageMemberAvatarHtml(member, sizeClass) {
+  const classes = sizeClass || "chat-details-member-avatar";
+  if (member && member.avatar_url) {
+    return `<div class="${classes} rounded-full overflow-hidden flex-shrink-0 bg-bgSearch"><img src="${escapeHtml(member.avatar_url)}" alt="" class="w-full h-full object-cover"></div>`;
+  }
+  const color = member && /^#[0-9a-fA-F]{6}$/.test(member.avatar_color || "") ? member.avatar_color : "#5c6bc0";
+  const initials = (member && (member.initials || member.display_name || member.username || "?")) || "?";
+  return `<div class="${classes} rounded-full text-white flex items-center justify-center font-bold text-sm flex-shrink-0" style="background-color:${color}">${escapeHtml(String(initials).slice(0, 2).toUpperCase())}</div>`;
+}
+
+async function fetchGroupManageState(groupId) {
+  const membersData = await apiFetch(`/api/groups/${groupId}/members-advanced/`);
+  let announcementData = { announcement: null };
+  let inviteCandidatesData = { candidates: [] };
+  try {
+    announcementData = await apiFetch(`/api/groups/${groupId}/announcement/`);
+  } catch (err) {
+    console.warn("Failed to load group announcement", err);
+  }
+  try {
+    inviteCandidatesData = await apiFetch(`/api/groups/${groupId}/invite-candidates/`);
+  } catch (err) {
+    console.warn("Failed to load group invite candidates", err);
+  }
+  groupManageState.group = membersData;
+  groupManageState.members = membersData.members || [];
+  groupManageState.pendingInvitations = membersData.pending_invitations || [];
+  groupManageState.inviteCandidates = inviteCandidatesData.candidates || [];
+  groupManageState.announcement = announcementData.announcement || null;
+  groupMembersByConversation[groupId] = {};
+  groupManageState.members.forEach(function(member) {
+    groupMembersByConversation[groupId][member.user_id] = member;
+  });
+}
+
+async function navigateToGroupManage(groupId) {
+  const conv = conversationsById[groupId || activeChatId];
+  if (!conv || conv.type !== "group") {
+    window.showToast(currentLanguage === "zh" ? "请选择一个群聊" : "Select a group chat first.");
+    return;
+  }
+  activeGroupManageId = conv.id;
+  groupManageState.mode = "manage";
+  groupManageState.inviteOpen = false;
+  openGroupSubPanel("manage");
+  await refreshGroupManageSidebar();
+}
+
+function showRightPanelMainView() {
+  const mainView = document.getElementById("right-panel-main-view");
+  const manageView = document.getElementById("right-panel-group-manage-view");
+  const inviteView = document.getElementById("right-panel-group-invite-view");
+  if (manageView) manageView.classList.add("hidden");
+  if (inviteView) inviteView.classList.add("hidden");
+  if (mainView) mainView.classList.remove("hidden");
+}
+
+async function openGroupInviteFromDetails(groupId) {
+  const conv = conversationsById[groupId || activeChatId];
+  if (!conv || conv.type !== "group") {
+    window.showToast(currentLanguage === "zh" ? "请选择一个群聊" : "Select a group chat first.");
+    return;
+  }
+  activeGroupManageId = conv.id;
+  groupManageState.mode = "invite";
+  groupManageState.inviteOpen = true;
+  openGroupSubPanel("invite");
+  await refreshGroupManageSidebar();
+}
+
+function openGroupManagePanel() {
+  openGroupSubPanel(groupManageState.mode === "invite" ? "invite" : "manage");
+}
+
+function openGroupSubPanel(mode) {
+  const mainView = document.getElementById("right-panel-main-view");
+  const manageView = document.getElementById("right-panel-group-manage-view");
+  const inviteView = document.getElementById("right-panel-group-invite-view");
+  const rightPanel = document.getElementById("right-panel");
+  if (mainView) mainView.classList.add("hidden");
+  if (manageView) manageView.classList.toggle("hidden", mode !== "manage");
+  if (inviteView) inviteView.classList.toggle("hidden", mode !== "invite");
+  if (rightPanel) rightPanel.classList.remove("collapsed");
+}
+
+function closeGroupManagePanel() {
+  showRightPanelMainView();
+  groupManageState.inviteOpen = false;
+  groupManageState.mode = "manage";
+  if (activeChatId && conversationsById[activeChatId]) {
+    updateDetailsPanelRich(conversationsById[activeChatId]);
+  }
+}
+
+async function refreshGroupManageSidebar() {
+  const groupId = getManagedGroupId();
+  if (!groupId) return;
+  const isInviteMode = groupManageState.mode === "invite";
+  const loading = document.getElementById(isInviteMode ? "group-invite-loading" : "group-manage-loading");
+  const loaded = document.getElementById(isInviteMode ? "group-invite-loaded" : "group-manage-loaded");
+  if (loading) loading.classList.remove("hidden");
+  if (loaded) loaded.classList.add("hidden");
+  try {
+    await fetchGroupManageState(groupId);
+    renderGroupManageSidebar();
+    renderGroupInviteSidebar();
+  } catch (err) {
+    console.error("Failed to load group management panel:", err);
+    window.showToast(err.message || (currentLanguage === "zh" ? "加载群管理失败" : "Could not load group management."));
+  } finally {
+    if (loading) loading.classList.add("hidden");
+    if (loaded) loaded.classList.remove("hidden");
+  }
+}
+
+function renderGroupManageSidebar() {
+  const conv = getManagedGroupConv();
+  if (!conv) return;
+  const group = groupManageState.group || {};
+  const members = groupManageState.members || [];
+  const me = getMyGroupManageMember();
+  const canAdmin = canManageGroupMembers();
+  const canOwner = canOwnerManageGroup();
+  const panelTitle = document.getElementById("group-manage-panel-title");
+  if (panelTitle) panelTitle.textContent = currentLanguage === "zh" ? "群组管理" : "Group Management";
+
+  const avatar = document.getElementById("group-manage-avatar");
+  if (avatar) {
+    if (conv.avatar_url || group.avatar) {
+      avatar.innerHTML = `<img src="${escapeHtml(conv.avatar_url || group.avatar)}" alt="" class="w-full h-full rounded-full object-cover">`;
+      avatar.style.backgroundColor = "transparent";
+    } else {
+      avatar.textContent = conv.initials || String(group.name || conv.name || "G").slice(0, 2).toUpperCase();
+      avatar.style.backgroundColor = conv.avatar_color || "#5c6bc0";
+    }
+    avatar.classList.toggle("cursor-pointer", canOwner);
+    avatar.title = canOwner ? "Tap to change group avatar" : "";
+  }
+
+  const name = document.getElementById("group-manage-name");
+  if (name) {
+    name.textContent = group.name || conv.name || "";
+    name.classList.toggle("cursor-pointer", canOwner);
+    name.classList.toggle("hover:underline", canOwner);
+    name.title = canOwner ? "Tap to edit group name" : "";
+  }
+  const count = document.getElementById("group-manage-member-count");
+  if (count) count.textContent = `${members.length || conv.member_count || 0} ${currentLanguage === "zh" ? "位成员" : "members"}`;
+  const myRole = document.getElementById("group-manage-my-role");
+  if (myRole) myRole.textContent = me ? getRoleTranslation(me.role) : "";
+
+  const settings = document.getElementById("group-manage-settings-section");
+  if (settings) settings.classList.toggle("hidden", !canAdmin);
+  const annActions = document.getElementById("group-announcement-actions");
+  if (annActions) annActions.classList.toggle("hidden", !canAdmin);
+  const disbandBtn = document.getElementById("group-manage-disband-btn");
+  if (disbandBtn) disbandBtn.classList.toggle("hidden", !canOwner);
+
+  renderGroupManageAnnouncement();
+  renderGroupManagePendingInvitations();
+  renderGroupManageMembers();
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function renderGroupInviteSidebar() {
+  const conv = getManagedGroupConv();
+  const content = document.getElementById("group-invite-content");
+  if (!conv || !content) return;
+  const group = groupManageState.group || {};
+  const members = groupManageState.members || [];
+  const me = getMyGroupManageMember();
+  const avatar = document.getElementById("group-invite-avatar");
+  if (avatar) {
+    if (conv.avatar_url || group.avatar) {
+      avatar.innerHTML = `<img src="${escapeHtml(conv.avatar_url || group.avatar)}" alt="" class="w-full h-full rounded-full object-cover">`;
+      avatar.style.backgroundColor = "transparent";
+    } else {
+      avatar.textContent = conv.initials || String(group.name || conv.name || "G").slice(0, 2).toUpperCase();
+      avatar.style.backgroundColor = conv.avatar_color || "#5c6bc0";
+    }
+  }
+  const name = document.getElementById("group-invite-name");
+  if (name) name.textContent = group.name || conv.name || "";
+  const count = document.getElementById("group-invite-member-count");
+  if (count) count.textContent = `${members.length || conv.member_count || 0} ${currentLanguage === "zh" ? "位成员" : "members"}`;
+  const myRole = document.getElementById("group-invite-my-role");
+  if (myRole) myRole.textContent = me ? getRoleTranslation(me.role) : "";
+  renderGroupManageInviteList();
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function renderGroupManageAnnouncement() {
+  const content = document.getElementById("group-announcement-content");
+  if (!content) return;
+  const ann = groupManageState.announcement;
+  if (!ann || !ann.content) {
+    content.innerHTML = `<span class="text-textSecondary italic">${currentLanguage === "zh" ? "暂无公告" : "No announcement"}</span>`;
+    return;
+  }
+  content.innerHTML = `<div class="whitespace-pre-wrap leading-relaxed">${escapeHtml(ann.content)}</div>
+    <div class="text-[10px] text-textSecondary mt-2">${escapeHtml(ann.author_username || "")}</div>`;
+}
+
+function renderGroupManagePendingInvitations() {
+  const section = document.getElementById("group-manage-pending-section");
+  const list = document.getElementById("group-manage-pending-list");
+  if (!section || !list) return;
+  const invitations = groupManageState.pendingInvitations || [];
+  section.classList.toggle("hidden", invitations.length === 0);
+  list.innerHTML = invitations.map(function(inv) {
+    const member = {
+      display_name: inv.invitee_display_name,
+      username: inv.invitee_username,
+      initials: inv.invitee_initials,
+      avatar_color: inv.invitee_avatar_color,
+      avatar_url: inv.invitee_avatar_url,
+    };
+    return `<div class="group-manage-invite-row">
+      ${groupManageMemberAvatarHtml(member)}
+      <div class="chat-details-member-copy">
+        <div class="chat-details-member-name">${escapeHtml(inv.invitee_display_name || inv.invitee_username || "Unknown")}</div>
+        <div class="chat-details-member-status">${currentLanguage === "zh" ? "由" : "Invited by"} @${escapeHtml(inv.inviter_username || "")}</div>
+      </div>
+      <div class="group-manage-member-actions">
+        <button onclick="groupManageApproveInvitation(${Number(inv.id)})" title="Approve invitation"><i data-lucide="check" class="w-4 h-4"></i></button>
+        <button onclick="groupManageRejectInvitation(${Number(inv.id)})" title="Reject invitation"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderGroupManageMembers() {
+  const list = document.getElementById("group-manage-members-list");
+  const header = document.getElementById("group-manage-members-header");
+  if (!list) return;
+  const members = (groupManageState.members || []).slice().sort(function(a, b) {
+    const rank = { owner: 0, admin: 1, member: 2 };
+    return (rank[a.role] || 3) - (rank[b.role] || 3) || String(a.display_name || a.username).localeCompare(String(b.display_name || b.username));
+  });
+  if (header) header.textContent = currentLanguage === "zh" ? `成员 (${members.length})` : `Members (${members.length})`;
+  list.innerHTML = members.map(function(member) {
+    const canAct = Number(member.user_id) !== Number(myUserId);
+    const actions = groupManageMemberActions(member, canAct);
+    return `<div class="group-manage-member-row"
+        data-user-id="${escapeHtml(member.user_id)}"
+        data-search="${escapeHtml((member.display_name || "") + " " + (member.username || "") + " " + getRoleTranslation(member.role))}">
+      ${groupManageMemberAvatarHtml(member)}
+      <div class="chat-details-member-copy">
+        <div class="chat-details-member-name">${escapeHtml(member.display_name || member.username || "Unknown")}</div>
+        <div class="chat-details-member-status">@${escapeHtml(member.username || "")}</div>
+      </div>
+      <div class="group-manage-member-actions-wrap">
+        <span class="chat-details-member-role">${escapeHtml(getRoleTranslation(member.role))}</span>
+        ${actions}
+      </div>
+    </div>`;
+  }).join("") || `<div class="text-xs text-textSecondary text-center py-6">${currentLanguage === "zh" ? "暂无成员" : "No members"}</div>`;
+}
+
+async function groupManageApproveInvitation(invitationId) {
+  if (!invitationId) return;
+  try {
+    await apiFetch(`/api/group-invitations/${invitationId}/approve/`, { method: "POST" });
+    window.showToast(currentLanguage === "zh" ? "已批准，等待对方同意" : "Approved. Waiting for the invitee.");
+    await refreshGroupManageAfterMutation();
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "批准失败" : "Approval failed."));
+  }
+}
+
+async function groupManageRejectInvitation(invitationId) {
+  if (!invitationId) return;
+  try {
+    await apiFetch(`/api/group-invitations/${invitationId}/reject/`, { method: "POST" });
+    window.showToast(currentLanguage === "zh" ? "已拒绝邀请" : "Invitation rejected.");
+    await refreshGroupManageAfterMutation();
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "拒绝失败" : "Reject failed."));
+  }
+}
+
+function groupManageMemberActions(member, canAct) {
+  if (!canAct) return "";
+  const role = String(member.role || "member").toLowerCase();
+  const buttons = [];
+  if (canOwnerManageGroup()) {
+    if (role === "member") {
+      buttons.push(`<button onclick="groupManagePromoteMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-brand-light" title="Set admin"><i data-lucide="shield-plus" class="w-4 h-4"></i></button>`);
+    } else if (role === "admin") {
+      buttons.push(`<button onclick="groupManageDemoteMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-amber-500" title="Remove admin"><i data-lucide="shield-minus" class="w-4 h-4"></i></button>`);
+    }
+    if (role !== "owner") {
+      buttons.push(`<button onclick="groupManageTransferOwner(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-purple-500" title="Transfer owner"><i data-lucide="crown" class="w-4 h-4"></i></button>`);
+    }
+  }
+  if (canManageGroupMembers() && role !== "owner" && (canOwnerManageGroup() || role === "member")) {
+    buttons.push(`<button onclick="groupManageRemoveMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-red-500" title="Remove member"><i data-lucide="user-minus" class="w-4 h-4"></i></button>`);
+  }
+  return buttons.length ? `<div class="group-manage-member-actions">${buttons.join("")}</div>` : "";
+}
+
+function groupManageFilterMembers(query) {
+  const cleaned = String(query || "").trim().toLowerCase();
+  document.querySelectorAll(".group-manage-member-row").forEach(function(row) {
+    const haystack = String(row.dataset.search || "").toLowerCase();
+    row.classList.toggle("hidden", !!cleaned && !haystack.includes(cleaned));
+  });
+}
+
+function getInviteCandidateAvatarHtml(contact) {
+  const initials = String(contact.initials || contact.display_name || contact.username || "?").slice(0, 2).toUpperCase();
+  if (contact.avatar_html) {
+    return `<div class="chat-details-member-avatar">${contact.avatar_html}</div>`;
+  }
+  if (contact.avatar_url) {
+    return `<div class="chat-details-member-avatar"><img src="${escapeHtml(contact.avatar_url)}" alt="" class="w-full h-full object-cover"></div>`;
+  }
+  return `<div class="chat-details-member-avatar" style="background-color:${escapeHtml(contact.avatar_color || "#5c6bc0")}">${escapeHtml(initials)}</div>`;
+}
+
+function getContactCandidatesFromSidebar() {
+  const map = new Map(groupInviteContactCache);
+  (groupManageState.inviteCandidates || []).forEach(function(contact) {
+    const id = Number(contact.user_id);
+    if (!id) return;
+    map.set(id, Object.assign({}, map.get(id) || {}, contact, {
+      user_id: id,
+      username: contact.username || "",
+      display_name: contact.display_name || contact.username || "",
+      can_invite: contact.can_invite !== false,
+      reason_code: contact.reason_code || "available",
+      reason: contact.reason || (currentLanguage === "zh" ? "可邀请" : "Available"),
+      user_type: contact.user_type || "user",
+    }));
+  });
+  document.querySelectorAll(".group-add-member-item[data-user-id]").forEach(function(row) {
+    const id = Number(row.dataset.userId);
+    if (!id || map.has(id)) return;
+    const title = row.querySelector(".settings-template-row-title");
+    const avatar = row.querySelector(".w-10");
+    map.set(id, {
+      user_id: id,
+      username: row.dataset.username || "",
+      display_name: title ? title.textContent.trim() : (row.dataset.username || ""),
+      avatar_html: avatar ? avatar.innerHTML : "",
+      can_invite: true,
+      reason_code: "available",
+      reason: currentLanguage === "zh" ? "可邀请" : "Available",
+    });
+  });
+  document.querySelectorAll("#sidebar-contacts-content .avatar-clickable[data-user-id]").forEach(function(avatar) {
+    const id = Number(avatar.dataset.userId);
+    if (!id || map.has(id)) return;
+    const row = avatar.closest("[data-contact-search]");
+    const nameEl = row ? row.querySelector("p.text-sm, .settings-template-row-title") : null;
+    const username = row ? String(row.dataset.contactSearch || "").trim() : "";
+    const displayName = nameEl ? nameEl.textContent.trim() : username;
+    map.set(id, {
+      user_id: id,
+      username: username,
+      display_name: displayName || username,
+      avatar_html: avatar.innerHTML || "",
+      can_invite: true,
+      reason_code: "available",
+      reason: currentLanguage === "zh" ? "可邀请" : "Available",
+    });
+  });
+  groupInviteContactCache = map;
+  return Array.from(map.values());
+}
+
+function renderGroupManageInviteList(query) {
+  const list = document.getElementById("group-manage-invite-list");
+  if (!list) return;
+  const input = document.getElementById("group-manage-invite-search");
+  const cleaned = String(query != null ? query : (input ? input.value : "")).trim().toLowerCase();
+  const candidates = getContactCandidatesFromSidebar().filter(function(contact) {
+    if (!cleaned) return true;
+    const haystack = String((contact.display_name || "") + " " + (contact.username || "") + " " + (contact.reason || "")).toLowerCase();
+    return haystack.includes(cleaned);
+  });
+  list.innerHTML = candidates.map(function(contact) {
+    const canInvite = contact.can_invite !== false;
+    const statusText = contact.reason || (canInvite ? (currentLanguage === "zh" ? "可邀请" : "Available") : "");
+    const statusClass = canInvite ? "group-invite-status is-ready" : "group-invite-status is-disabled";
+    const actionHtml = canInvite
+      ? `<button type="button" onclick="groupManageInviteMember(${Number(contact.user_id)})" class="group-invite-check-btn" title="${currentLanguage === "zh" ? "邀请" : "Invite"}"><i data-lucide="check"></i></button>`
+      : `<span class="group-invite-check-btn is-disabled" title="${escapeHtml(statusText)}"><i data-lucide="check"></i></span>`;
+    return `<div class="group-manage-invite-row${canInvite ? "" : " is-disabled"}"
+        data-search="${escapeHtml((contact.display_name || "") + " " + (contact.username || "") + " " + statusText)}">
+      ${getInviteCandidateAvatarHtml(contact)}
+      <div class="chat-details-member-copy">
+        <div class="chat-details-member-name">${escapeHtml(contact.display_name || contact.username || "Unknown")}</div>
+        <div class="chat-details-member-status">@${escapeHtml(contact.username || "")}</div>
+        <div class="${statusClass}">${escapeHtml(statusText)}</div>
+      </div>
+      ${actionHtml}
+    </div>`;
+  }).join("") || `<div class="text-xs text-textSecondary text-center py-4">${currentLanguage === "zh" ? "没有匹配的联系人" : "No matching contacts"}</div>`;
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function groupManageFilterInviteContacts(query) {
+  renderGroupManageInviteList(query);
+  const cleaned = String(query || "").trim();
+  clearTimeout(groupInviteSearchTimer);
+  if (cleaned.length < 1) return;
+  groupInviteSearchTimer = setTimeout(function() {
+    fetchGroupInviteSearchContacts(cleaned);
+  }, 220);
+}
+
+async function fetchGroupInviteSearchContacts(query) {
+  try {
+    const data = await apiFetch("/contacts/search/?q=" + encodeURIComponent(query));
+    const results = Array.isArray(data.results) ? data.results : [];
+    results.forEach(function(user) {
+      if (!user || !user.is_contact) return;
+      const id = Number(user.id);
+      if (!id || groupInviteContactCache.has(id)) return;
+      const avatarHtml = user.avatar_url
+        ? `<img src="${escapeHtml(user.avatar_url)}" alt="" class="w-full h-full object-cover">`
+        : `<span>${escapeHtml(String(user.nickname || user.username || "?").slice(0, 2).toUpperCase())}</span>`;
+      groupInviteContactCache.set(id, {
+        user_id: id,
+        username: user.username || "",
+        display_name: user.nickname || user.username || "",
+        avatar_html: avatarHtml,
+        can_invite: true,
+        reason_code: "available",
+        reason: currentLanguage === "zh" ? "可邀请" : "Available",
+      });
+    });
+    renderGroupManageInviteList(query);
+  } catch (err) {
+    console.warn("Failed to search invite contacts", err);
+  }
+}function groupManageToggleInvitePanel(forceOpen) {
+  if (!getMyGroupManageMember()) return;
+  if (forceOpen === false) {
+    closeGroupManagePanel();
+    return;
+  }
+  openGroupInviteFromDetails(getManagedGroupId());
+}
+
+async function groupManageInviteMember(userId) {
+  const groupId = getManagedGroupId();
+  if (!groupId || !userId) return;
+  try {
+    const data = await apiFetch(`/api/groups/${groupId}/invite/`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: Number(userId) })
+    });
+    const status = data.status || "pending";
+    window.showToast(currentLanguage === "zh"
+      ? (status === "pending_invitee" ? "邀请已发送，等待对方同意" : "邀请已提交，等待管理员审核")
+      : (status === "pending_invitee" ? "Invitation sent. Waiting for the invitee." : "Invitation submitted for admin approval."));
+    await refreshGroupManageAfterMutation();
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "邀请失败" : "Invite failed."));
+  }
+}
+
+async function refreshGroupManageAfterMutation() {
+  const groupId = getManagedGroupId();
+  await refreshGroupManageSidebar();
+  await fetchConversations();
+  if (groupId && conversationsById[groupId]) {
+    updateDetailsPanelRich(conversationsById[groupId]);
+  }
+}
+
+async function fetchPendingGroupInvitations() {
+  try {
+    const [data, keyData] = await Promise.all([
+      apiFetch("/api/group-invitations/pending/"),
+      apiFetch("/api/keys/verification-requests/")
+    ]);
+    pendingGroupInvitations = Array.isArray(data.invitations) ? data.invitations : [];
+    pendingKeyVerificationRequests = Array.isArray(keyData.requests) ? keyData.requests : [];
+    renderPendingGroupInvitations();
+    renderPendingKeyVerifications();
+  } catch (err) {
+    console.warn("Failed to load pending notifications", err);
+  }
+}
+
+function renderPendingGroupInvitations() {
+  const tray = document.getElementById("group-invite-notification-tray");
+  if (!tray) return;
+  tray.classList.toggle("hidden", pendingGroupInvitations.length === 0);
+  tray.innerHTML = pendingGroupInvitations.map(function(invitation) {
+    const groupName = invitation.group_name || (currentLanguage === "zh" ? "群聊" : "Group");
+    const avatarHtml = invitation.group_avatar
+      ? `<img src="${escapeHtml(invitation.group_avatar)}" alt="">`
+      : escapeHtml(invitation.group_initials || String(groupName).slice(0, 2).toUpperCase());
+    const avatarColor = invitation.group_avatar ? "transparent" : (invitation.group_avatar_color || "#5c6bc0");
+    const inviter = invitation.inviter_display_name || invitation.inviter_username || "";
+    return `<section class="group-invite-notification-card" data-invitation-id="${Number(invitation.id)}">
+      <div class="group-invite-notification-avatar" style="background-color:${escapeHtml(avatarColor)}">${avatarHtml}</div>
+      <div class="group-invite-notification-main">
+        <div class="group-invite-notification-title">${escapeHtml(groupName)}</div>
+        <div class="group-invite-notification-text">${currentLanguage === "zh"
+          ? `${escapeHtml(inviter)} 邀请你加入该群聊`
+          : `${escapeHtml(inviter)} invited you to join this group`}</div>
+        <div class="group-invite-notification-actions">
+          <button type="button" onclick="respondToGroupInvitation(${Number(invitation.id)}, 'reject')">${currentLanguage === "zh" ? "拒绝" : "Decline"}</button>
+          <button type="button" onclick="respondToGroupInvitation(${Number(invitation.id)}, 'accept')">${currentLanguage === "zh" ? "同意" : "Accept"}</button>
+        </div>
+      </div>
+    </section>`;
+  }).join("");
+}
+
+function renderPendingKeyVerifications() {
+  const tray = document.getElementById("group-invite-notification-tray");
+  if (!tray) return;
+  const existing = tray.querySelectorAll("[data-key-verification-id]");
+  existing.forEach(function(node) { node.remove(); });
+  const cards = pendingKeyVerificationRequests.map(function(request) {
+    const incoming = request.direction === "incoming";
+    const otherName = incoming
+      ? (request.requester_username || (currentLanguage === "zh" ? "联系人" : "Contact"))
+      : (request.responder_username || (currentLanguage === "zh" ? "联系人" : "Contact"));
+    const versionText = incoming
+      ? `v${escapeHtml(request.requester_key_version)} / v${escapeHtml(request.responder_key_version)}`
+      : `v${escapeHtml(request.responder_key_version)} / v${escapeHtml(request.requester_key_version)}`;
+    return `<section class="group-invite-notification-card" data-key-verification-id="${Number(request.id)}">
+      <div class="group-invite-notification-avatar" style="background-color:#10b981"><i data-lucide="shield-check" class="w-5 h-5 text-white"></i></div>
+      <div class="group-invite-notification-main">
+        <div class="group-invite-notification-title">${currentLanguage === "zh" ? "安全验证请求" : "Security verification"}</div>
+        <div class="group-invite-notification-text">${incoming
+          ? (currentLanguage === "zh"
+            ? `${escapeHtml(otherName)} 请求与你确认当前加密密钥（${versionText}）`
+            : `${escapeHtml(otherName)} wants to verify the current encryption keys (${versionText})`)
+          : (currentLanguage === "zh"
+            ? `已向 ${escapeHtml(otherName)} 发送安全验证请求，等待对方同意`
+            : `Waiting for ${escapeHtml(otherName)} to accept your security request`)}</div>
+        <div class="group-invite-notification-actions">
+          ${incoming
+            ? `<button type="button" onclick="respondToKeyVerification(${Number(request.id)}, 'decline')">${currentLanguage === "zh" ? "拒绝" : "Decline"}</button>
+               <button type="button" onclick="respondToKeyVerification(${Number(request.id)}, 'accept')">${currentLanguage === "zh" ? "同意" : "Accept"}</button>`
+            : `<button type="button" onclick="respondToKeyVerification(${Number(request.id)}, 'cancel')">${currentLanguage === "zh" ? "取消" : "Cancel"}</button>`}
+        </div>
+      </div>
+    </section>`;
+  });
+  if (cards.length) {
+    tray.insertAdjacentHTML("beforeend", cards.join(""));
+  }
+  tray.classList.toggle(
+    "hidden",
+    pendingGroupInvitations.length === 0 && pendingKeyVerificationRequests.length === 0
+  );
+  if (cards.length && tray.querySelector("[data-lucide]") && window.lucide) lucide.createIcons();
+}
+
+async function respondToGroupInvitation(invitationId, action) {
+  if (!invitationId) return;
+  const endpoint = action === "accept" ? "accept" : "reject";
+  try {
+    await apiFetch(`/api/group-invitations/${invitationId}/${endpoint}/`, { method: "POST" });
+    pendingGroupInvitations = pendingGroupInvitations.filter(function(invitation) {
+      return Number(invitation.id) !== Number(invitationId);
+    });
+    renderPendingGroupInvitations();
+    await fetchConversations();
+    window.showToast(action === "accept"
+      ? (currentLanguage === "zh" ? "已加入群聊" : "Joined group")
+      : (currentLanguage === "zh" ? "已拒绝邀请" : "Invitation declined"));
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "处理邀请失败" : "Could not update invitation"));
+    await fetchPendingGroupInvitations();
+  }
+}
+
+function startPendingGroupInvitationPolling() {
+  if (pendingGroupInvitationTimer) clearInterval(pendingGroupInvitationTimer);
+  fetchPendingGroupInvitations();
+  pendingGroupInvitationTimer = setInterval(fetchPendingGroupInvitations, 20000);
+}
+
+function handleGroupInvitationNew(data) {
+  var payload = data.data || {};
+  // If the notification is for the current user as invitee, refresh the tray
+  if (payload.invitation_id) {
+    fetchPendingGroupInvitations();
+  }
+  // If the notification is for admins (pending_admin status), refresh the
+  // group manage panel if open
+  if (payload.status === 'pending_admin' && payload.group_id) {
+    var managedGroupId = getManagedGroupId();
+    if (managedGroupId === payload.group_id) {
+      refreshGroupManageAfterMutation();
+    }
+  }
+}
+
+async function respondToKeyVerification(requestId, action) {
+  if (!requestId) return;
+  try {
+    await apiFetch(`/api/keys/verification-requests/${requestId}/respond/`, {
+      method: "POST",
+      body: JSON.stringify({ action })
+    });
+    const request = pendingKeyVerificationRequests.find(function(item) {
+      return Number(item.id) === Number(requestId);
+    });
+    pendingKeyVerificationRequests = pendingKeyVerificationRequests.filter(function(request) {
+      return Number(request.id) !== Number(requestId);
+    });
+    renderPendingGroupInvitations();
+    renderPendingKeyVerifications();
+    await refreshKeyVerificationAfterChange(keyVerificationOtherUserId(request));
+    window.showToast(action === "accept"
+      ? (currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed")
+      : (currentLanguage === "zh" ? "安全验证请求已处理" : "Security request updated"));
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "处理安全验证失败" : "Could not update security verification"));
+    await fetchPendingGroupInvitations();
+  }
+}
+
+function keyVerificationOtherUserId(verification) {
+  if (!verification) return null;
+  if (Number(verification.requester_id) === Number(myUserId)) return verification.responder_id;
+  if (Number(verification.responder_id) === Number(myUserId)) return verification.requester_id;
+  return null;
+}
+
+async function refreshKeyVerificationAfterChange(userId = null) {
+  contactKeyStatusCacheByUserId = {};
+  keyTrustListCache = null;
+  if (userId) {
+    const refreshed = await fetchContactKeyStatus(userId, { force: true });
+    const active = getActiveKeyStatus(refreshed);
+    if (active && window.iChatPrivateE2EE && window.iChatPrivateE2EE.trustPeerKey) {
+      window.iChatPrivateE2EE.trustPeerKey(active);
+    }
+  }
+  const conv = activeChatId ? conversationsById[activeChatId] : null;
+  if (conv && conv.type === "single" && conv.peer_id) {
+    const refreshed = await fetchContactKeyStatus(conv.peer_id, { force: true });
+    const active = getActiveKeyStatus(refreshed);
+    if (active && window.iChatPrivateE2EE && window.iChatPrivateE2EE.trustPeerKey) {
+      window.iChatPrivateE2EE.trustPeerKey(active);
+    }
+    updateDetailsPanel(conv);
+    const modal = document.getElementById("fingerprint-modal");
+    if (modal && !modal.classList.contains("hidden")) {
+      renderFingerprintModalState(conv, active, contactKeyHasChanged(refreshed));
+      setSecurityVerificationModalCopy(conv);
+    }
+  }
+}
+
+function handleKeyVerificationNew(data) {
+  const payload = data.data || {};
+  const verification = payload.verification;
+  if (!verification) return;
+  if (verification.status === "pending") {
+    const idx = pendingKeyVerificationRequests.findIndex(function(item) {
+      return Number(item.id) === Number(verification.id);
+    });
+    if (idx >= 0) pendingKeyVerificationRequests[idx] = verification;
+    else pendingKeyVerificationRequests.unshift(verification);
+  } else {
+    pendingKeyVerificationRequests = pendingKeyVerificationRequests.filter(function(item) {
+      return Number(item.id) !== Number(verification.id);
+    });
+  }
+  renderPendingGroupInvitations();
+  renderPendingKeyVerifications();
+  if (payload.event === "requested" && verification.direction === "incoming") {
+    window.showToast(currentLanguage === "zh" ? "收到安全验证请求" : "Security verification request received");
+  } else if (payload.event === "accepted") {
+    refreshKeyVerificationAfterChange(keyVerificationOtherUserId(verification));
+    window.showToast(currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed");
+  } else if (payload.event === "expired") {
+    refreshKeyVerificationAfterChange(keyVerificationOtherUserId(verification));
+    window.showToast(currentLanguage === "zh" ? "密钥已变化，请重新发起安全验证" : "Keys changed. Start verification again.");
+  }
+}
+
+function groupManageEditAnnouncement() {
+  if (!canManageGroupMembers()) return;
+  const content = document.getElementById("group-announcement-content");
+  const editor = document.getElementById("group-announcement-editor");
+  const textarea = document.getElementById("group-announcement-textarea");
+  if (textarea) textarea.value = groupManageState.announcement ? groupManageState.announcement.content || "" : "";
+  if (content) content.classList.add("hidden");
+  if (editor) editor.classList.remove("hidden");
+  if (textarea) textarea.focus();
+}
+
+function groupManageCancelEditAnnouncement() {
+  const content = document.getElementById("group-announcement-content");
+  const editor = document.getElementById("group-announcement-editor");
+  if (content) content.classList.remove("hidden");
+  if (editor) editor.classList.add("hidden");
+}
+
+async function groupManageSaveAnnouncement() {
+  const groupId = getManagedGroupId();
+  const textarea = document.getElementById("group-announcement-textarea");
+  const content = textarea ? textarea.value.trim() : "";
+  if (!content) {
+    window.showToast(currentLanguage === "zh" ? "公告不能为空" : "Announcement cannot be empty.");
+    return;
+  }
+  try {
+    const data = await apiFetch(`/api/groups/${groupId}/announcement/`, {
+      method: "POST",
+      body: JSON.stringify({ content: content })
+    });
+    groupManageState.announcement = data.announcement || null;
+    groupManageCancelEditAnnouncement();
+    renderGroupManageAnnouncement();
+    window.showToast(currentLanguage === "zh" ? "群公告已更新" : "Announcement updated.");
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "公告保存失败" : "Could not save announcement."));
+  }
+}
+
+async function groupManageRemoveAnnouncement() {
+  const groupId = getManagedGroupId();
+  if (!groupManageState.announcement) return;
+  if (!window.confirm(currentLanguage === "zh" ? "删除当前群公告？" : "Delete the current announcement?")) return;
+  try {
+    await apiFetch(`/api/groups/${groupId}/announcement/`, { method: "DELETE" });
+    groupManageState.announcement = null;
+    renderGroupManageAnnouncement();
+    window.showToast(currentLanguage === "zh" ? "群公告已删除" : "Announcement deleted.");
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "删除失败" : "Delete failed."));
+  }
+}
+
+async function groupManageEditName() {
+  if (!canOwnerManageGroup()) return;
+  const conv = getManagedGroupConv();
+  const value = window.prompt(currentLanguage === "zh" ? "新的群聊名称" : "New group name", conv ? conv.name || "" : "");
+  if (value === null) return;
+  const name = value.trim();
+  if (!name) return;
+  await groupManageUpdateGroup({ name: name });
+}
+
+async function groupManageEditAvatar() {
+  if (!canOwnerManageGroup()) return;
+  const conv = getManagedGroupConv();
+  const value = window.prompt(currentLanguage === "zh" ? "群头像 URL 或 base64" : "Group avatar URL or base64", conv ? conv.avatar_url || "" : "");
+  if (value === null) return;
+  await groupManageUpdateGroup({ avatar: value.trim() });
+}
+
+async function groupManageUpdateGroup(payload) {
+  const groupId = getManagedGroupId();
+  try {
+    const data = await apiFetch(`/api/groups/${groupId}/`, {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
+    if (conversationsById[groupId]) {
+      if (data.name) conversationsById[groupId].name = data.name;
+      if (data.avatar !== undefined) conversationsById[groupId].avatar_url = data.avatar;
+    }
+    await fetchConversations();
+    await refreshGroupManageSidebar();
+    renderChatList();
+    if (activeChatId && conversationsById[activeChatId]) {
+      updateDetailsPanelRich(conversationsById[activeChatId]);
+      updateHeaderPresence(conversationsById[activeChatId]);
+    }
+    window.showToast(currentLanguage === "zh" ? "群资料已更新" : "Group updated.");
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "更新失败" : "Update failed."));
+  }
+}
+
+async function groupManagePromoteMember(userId) {
+  await groupManagePostMemberAction(`/api/groups/${getManagedGroupId()}/promote/${userId}/`, currentLanguage === "zh" ? "已设为管理员" : "Admin added.");
+}
+
+async function groupManageDemoteMember(userId) {
+  await groupManagePostMemberAction(`/api/groups/${getManagedGroupId()}/demote/${userId}/`, currentLanguage === "zh" ? "已取消管理员" : "Admin removed.");
+}
+
+async function groupManageTransferOwner(userId) {
+  if (!window.confirm(currentLanguage === "zh" ? "确认转让群主？" : "Transfer group ownership?")) return;
+  await groupManagePostMemberAction(`/api/groups/${getManagedGroupId()}/transfer/`, currentLanguage === "zh" ? "群主已转让" : "Ownership transferred.", { user_id: Number(userId) });
+}
+
+async function groupManageRemoveMember(userId) {
+  if (!window.confirm(currentLanguage === "zh" ? "移除该成员？" : "Remove this member?")) return;
+  await groupManagePostMemberAction(`/api/groups/${getManagedGroupId()}/remove/`, currentLanguage === "zh" ? "成员已移除" : "Member removed.", { user_id: Number(userId) });
+}
+
+async function groupManagePostMemberAction(url, successMessage, payload) {
+  try {
+    await apiFetch(url, {
+      method: "POST",
+      body: JSON.stringify(payload || {})
+    });
+    window.showToast(successMessage);
+    await refreshGroupManageAfterMutation();
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "操作失败" : "Action failed."));
+  }
+}
+
+async function groupManageMuteGroup() {
+  if (!canManageGroupMembers()) return;
+  const input = window.prompt(currentLanguage === "zh" ? "禁言分钟数" : "Mute duration in minutes", "60");
+  if (input === null) return;
+  const minutes = parseInt(input, 10);
+  if (!Number.isFinite(minutes) || minutes < 1) return;
+  try {
+    await apiFetch(`/api/groups/${getManagedGroupId()}/mute-group/`, {
+      method: "POST",
+      body: JSON.stringify({ duration_minutes: minutes })
+    });
+    window.showToast(currentLanguage === "zh" ? "群聊已禁言" : "Group muted.");
+    await fetchConversations();
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "禁言失败" : "Mute failed."));
+  }
+}
+
+function groupManageAutoDelete() {
+  window.showToast(currentLanguage === "zh" ? "请在会话设置中配置自动删除" : "Use conversation settings to configure auto-delete.");
+}
+
+async function openLeaveGroupModal() {
+  const groupId = getManagedGroupId();
+  if (!groupId) return;
+  if (!window.confirm(currentLanguage === "zh" ? "确认退出该群聊？" : "Leave this group?")) return;
+  try {
+    await apiFetch(`/api/groups/${groupId}/leave/`, { method: "POST" });
+    conversations = conversations.filter(function(conv) { return Number(conv.id) !== Number(groupId); });
+    conversationsById = {};
+    conversations.forEach(function(conv) { conversationsById[conv.id] = conv; });
+    renderChatList();
+    if (Number(activeChatId) === Number(groupId)) {
+      activeChatId = null;
+      const emptyState = document.getElementById("empty-state-window");
+      const activeChatWindow = document.getElementById("active-chat-window");
+      if (emptyState) emptyState.classList.remove("hidden");
+      if (activeChatWindow) activeChatWindow.classList.add("hidden");
+    }
+    closeGroupManagePanel();
+    window.showToast(currentLanguage === "zh" ? "已退出群聊" : "Left group.");
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "退群失败" : "Could not leave group."));
+  }
+}
+
+async function openDisbandGroupModal() {
+  const groupId = getManagedGroupId();
+  if (!groupId) return;
+  if (!window.confirm(currentLanguage === "zh" ? "确认解散该群聊？此操作不可撤销。" : "Disband this group? This cannot be undone.")) return;
+  try {
+    await apiFetch(`/api/groups/${groupId}/disband/`, { method: "POST" });
+    conversations = conversations.filter(function(conv) { return Number(conv.id) !== Number(groupId); });
+    conversationsById = {};
+    conversations.forEach(function(conv) { conversationsById[conv.id] = conv; });
+    renderChatList();
+    if (Number(activeChatId) === Number(groupId)) {
+      activeChatId = null;
+      const emptyState = document.getElementById("empty-state-window");
+      const activeChatWindow = document.getElementById("active-chat-window");
+      if (emptyState) emptyState.classList.remove("hidden");
+      if (activeChatWindow) activeChatWindow.classList.add("hidden");
+    }
+    closeGroupManagePanel();
+    window.showToast(currentLanguage === "zh" ? "群聊已解散" : "Group disbanded.");
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "解散失败" : "Could not disband group."));
   }
 }
 
@@ -3455,6 +4695,7 @@ async function showFingerprintModal() {
       ? `v${activeKey.key_version}: ${formatFingerprint(activeKey.key_fingerprint)}`
       : formatFingerprint(null);
     renderFingerprintModalState(conv, activeKey, keyChanged);
+    setSecurityVerificationModalCopy(conv);
   } else if (keyEl) {
     keyEl.textContent = currentLanguage === 'zh'
       ? '群聊没有单一联系人指纹，请分别验证成员公钥。'
@@ -3552,6 +4793,50 @@ async function untrustActiveFingerprintFromModal() {
     window.showToast(err.message || (currentLanguage === 'zh' ? '撤销失败' : 'Could not remove trust'));
   } finally {
     if (untrustBtn) untrustBtn.disabled = false;
+  }
+}
+
+function setSecurityVerificationModalCopy(conv) {
+  const explainEl = document.getElementById("fp-modal-explain-container");
+  const actionBtn = document.getElementById("fp-modal-trust-btn");
+  const keyEl = document.getElementById("fp-modal-key");
+  if (explainEl) {
+    explainEl.innerHTML = currentLanguage === "zh"
+      ? '向 <strong id="fp-modal-name">' + escapeHtml(conv.name || "联系人") + '</strong> 发送安全验证请求。对方同意后，系统会检查双方当前使用的密钥是否与请求一致。'
+      : 'Send a security verification request to <strong id="fp-modal-name">' + escapeHtml(conv.name || "this contact") + '</strong>. When they accept, the system checks both current keys.';
+  }
+  if (actionBtn && !actionBtn.classList.contains("hidden")) {
+    actionBtn.textContent = currentLanguage === "zh" ? "发送安全验证请求" : "Request security verification";
+  }
+  if (keyEl && keyEl.textContent && !/^(当前密钥|Current key)/.test(keyEl.textContent)) {
+    keyEl.textContent = (currentLanguage === "zh" ? "当前密钥 " : "Current key ") + keyEl.textContent;
+  }
+}
+
+async function trustActiveFingerprintFromModal() {
+  const conv = conversationsById[activeChatId];
+  if (!conv || conv.type !== "single" || !conv.peer_id) return;
+  const actionBtn = document.getElementById("fp-modal-trust-btn");
+  if (actionBtn) actionBtn.disabled = true;
+  try {
+    const data = await apiFetch("/api/keys/verification-requests/", {
+      method: "POST",
+      body: JSON.stringify({ user_id: conv.peer_id })
+    });
+    if (data.request) {
+      const idx = pendingKeyVerificationRequests.findIndex(function(request) {
+        return Number(request.id) === Number(data.request.id);
+      });
+      if (idx >= 0) pendingKeyVerificationRequests[idx] = data.request;
+      else pendingKeyVerificationRequests.unshift(data.request);
+      renderPendingGroupInvitations();
+      renderPendingKeyVerifications();
+    }
+    window.showToast(currentLanguage === "zh" ? "安全验证请求已发送，等待对方同意" : "Security request sent. Waiting for the contact.");
+  } catch (err) {
+    window.showToast(err.message || (currentLanguage === "zh" ? "发送安全验证失败" : "Verification request failed"));
+  } finally {
+    if (actionBtn) actionBtn.disabled = false;
   }
 }
 
@@ -4353,6 +5638,7 @@ function setupEventListeners() {
   const chatInput = document.getElementById("chat-input-textarea");
   if (chatInput) {
     setupFormatToolbar();
+    setupComposerFileDropAndPaste(chatInput);
     chatInput.addEventListener("input", () => {
       if (!activeChatId) return;
       setConversationDraft(activeChatId, chatInput.value);
@@ -4442,26 +5728,30 @@ function setupEventListeners() {
   }
 
   // Right Profile Details Panel Toggles
-  const rightDetailsPanel = document.getElementById("right-panel");
-  const chatHeaderDetails = document.getElementById("chat-header-details");
-  const closeDetailsBtn = document.getElementById("close-details-btn");
-
-  window.toggleRightPanel = function() {
-    if (rightDetailsPanel) {
-      rightDetailsPanel.classList.toggle("collapsed");
-      lucide.createIcons();
+  window.toggleRightPanel = function(e) {
+    if (e) e.stopPropagation();
+    const rightDetailsPanel = document.getElementById("right-panel");
+    if (!rightDetailsPanel) return;
+    rightDetailsPanel.classList.toggle("collapsed");
+    if (window.lucide) {
+      window.lucide.createIcons();
     }
   };
 
-  if (chatHeaderDetails) {
-    chatHeaderDetails.addEventListener("click", window.toggleRightPanel);
-  }
+  const chatHeaderDetails = document.getElementById("chat-header-details");
+  const chatHeaderInfoBtn = document.getElementById("chat-header-info-btn");
+  const closeDetailsBtn = document.querySelector("[data-ichat-onclick='window.toggleRightPanel()'].chat-details-close, #close-details-btn");
+
+  [chatHeaderDetails, chatHeaderInfoBtn].forEach((btn) => {
+    if (btn) btn.addEventListener("click", window.toggleRightPanel);
+  });
   if (closeDetailsBtn) {
-    closeDetailsBtn.addEventListener("click", () => {
-      if (rightDetailsPanel) {
-        rightDetailsPanel.classList.add("collapsed");
-      }
-    });
+    closeDetailsBtn.addEventListener("click", window.toggleRightPanel);
+  }
+
+  const chatHeaderMoreBtn = document.getElementById("chat-header-more-btn");
+  if (chatHeaderMoreBtn) {
+    chatHeaderMoreBtn.addEventListener("click", window.toggleMoreMenu);
   }
 
   // Close dropdowns on outside click
@@ -4799,6 +6089,7 @@ function navigateSidebar(viewName) {
     'settings',
     'settings-profile',
     'contacts',
+    'groups',
     'search',
     'notifications',
     'data-storage',
@@ -4842,6 +6133,9 @@ function navigateSidebar(viewName) {
   // Refresh account switcher list when navigating to it (P2 T11)
   if (viewName === 'accounts-switcher') {
     setTimeout(function() { renderAccountsSwitcher(); }, 50);
+  }
+  if (viewName === 'groups') {
+    setTimeout(function() { renderGroupsSidebar(); }, 50);
   }
   // Re-render lucide icons after view switch
   if (window.lucide) setTimeout(function() { lucide.createIcons(); }, 50);
@@ -5814,6 +7108,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   await fetchConversations();
+  startPendingGroupInvitationPolling();
 
   connectWebSocket();
 
@@ -7193,6 +8488,33 @@ function getRoleTranslation(role) {
   return role;
 }
 
+getRoleTranslation = function(role) {
+  if (!role) return "";
+  const roleStr = String(role).toLowerCase();
+  if (currentLanguage === "zh") {
+    if (roleStr === "creator" || roleStr === "owner") return "群主";
+    if (roleStr === "admin") return "管理员";
+    if (roleStr === "member") return "成员";
+    return role;
+  }
+  if (currentLanguage === "zh-TW") {
+    if (roleStr === "creator" || roleStr === "owner") return "群主";
+    if (roleStr === "admin") return "管理員";
+    if (roleStr === "member") return "成員";
+    return role;
+  }
+  if (currentLanguage === "ja") {
+    if (roleStr === "creator" || roleStr === "owner") return "オーナー";
+    if (roleStr === "admin") return "管理者";
+    if (roleStr === "member") return "メンバー";
+    return role;
+  }
+  if (roleStr === "creator" || roleStr === "owner") return "Owner";
+  if (roleStr === "admin") return "Admin";
+  if (roleStr === "member") return "Member";
+  return role;
+};
+
 function getSystemMessageTranslation(text) {
   if (!text) return "";
   const trimmed = text.trim();
@@ -7289,8 +8611,8 @@ window.toggleMoreMenu = function(e) {
   if (isHidden) {
     dropdown.classList.remove("hidden");
     btn.classList.add("active");
-    if (window.lucide) {
-      window.lucide.createIcons();
+    if (window.lucide && window.lucide.createIcons) {
+      window.lucide.createIcons({ nodes: dropdown.querySelectorAll('[data-lucide]') });
     }
   } else {
     dropdown.classList.add("hidden");
@@ -7308,8 +8630,8 @@ window.toggleSettingsHomeMoreMenu = function(e, forceClose) {
   if (shouldOpen) {
     dropdown.classList.remove("hidden");
     if (btn) btn.classList.add("active");
-    if (window.lucide) {
-      window.lucide.createIcons();
+    if (window.lucide && window.lucide.createIcons) {
+      window.lucide.createIcons({ nodes: dropdown.querySelectorAll('[data-lucide]') });
     }
   } else {
     dropdown.classList.add("hidden");
@@ -7327,8 +8649,8 @@ window.toggleMainMenu = function(e) {
   if (isHidden) {
     dropdown.classList.remove("hidden");
     btn.classList.add("active");
-    if (window.lucide) {
-      window.lucide.createIcons();
+    if (window.lucide && window.lucide.createIcons) {
+      window.lucide.createIcons({ nodes: dropdown.querySelectorAll('[data-lucide]') });
     }
   } else {
     dropdown.classList.add("hidden");
@@ -8254,11 +9576,30 @@ const AI_MODEL_SETTINGS_KEY = 'ichat_ai_model_settings';
 const AI_HISTORY_KEY = 'ichat_ai_history';
 const AI_CONVERSATION_ID = 'ai-assistant';
 const AI_ASSISTANTS_KEY = 'ichat_ai_assistants';
+const AI_ENDPOINT_HISTORY_KEY = 'ichat_ai_endpoint_history';
 const AI_DEFAULT_MODEL_SETTINGS = {
   endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
   apiKey: '',
   model: 'qwen-plus'
 };
+const AI_ENDPOINT_PRESETS = [
+  {
+    label: 'DashScope Qwen',
+    endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+  },
+  {
+    label: 'OpenAI',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+  },
+  {
+    label: 'Anthropic Claude',
+    endpoint: 'https://api.anthropic.com/v1/messages',
+  },
+  {
+    label: '4Router',
+    endpoint: 'https://4router.net/v1/chat/completions',
+  },
+];
 
 function getAiAssistantSessions() {
   let sessions = [];
@@ -8369,6 +9710,8 @@ function renderAiAvatarHtml(className = 'message-avatar', extraClass = '') {
   return `<div class="${classes}" title="${escapeHtml(info.displayName)}">${renderAiAvatarInner(info)}</div>`;
 }
 
+window.renderAiAvatarHtml = renderAiAvatarHtml;
+
 function applyAiAvatarToElement(el, sizeClass) {
   if (!el) return;
   const info = getAiProviderInfo();
@@ -8386,7 +9729,7 @@ function updateAiHeaderModel() {
   if (headerTitle) headerTitle.textContent = info.displayName;
   applyAiAvatarToElement(
     document.getElementById("ai-header-avatar"),
-    "w-10 h-10 rounded-full flex-shrink-0 overflow-hidden"
+    "chat-header-avatar overflow-hidden"
   );
   applyAiAvatarToElement(
     document.getElementById("ai-greeting-avatar"),
@@ -8400,8 +9743,8 @@ function updateAiHeaderModel() {
   if (detailsStatus && activeSpecialChatId === activeAiAssistantId) {
     const settings = getAiModelSettings();
     detailsStatus.textContent = currentLanguage === 'zh'
-      ? `${model} • ${settings.apiKey ? '已配置' : '未配置 API Key'}`
-      : `${model} • ${settings.apiKey ? 'Configured' : 'API key missing'}`;
+      ? `${model} • ${settings.apiKeyConfigured ? '已配置' : '未配置 API Key'}`
+      : `${model} • ${settings.apiKeyConfigured ? 'Configured' : 'API key missing'}`;
   }
 }
 
@@ -8431,6 +9774,12 @@ function getAiConversationListItem(sessionId = activeAiAssistantId) {
   };
 }
 
+window.getAiAssistantForwardTargets = function() {
+  return getAiAssistantSessions().map(function(session) {
+    return getAiConversationListItem(session.id);
+  });
+};
+
 function refreshAiConversationListItem() {
   renderChatList();
 }
@@ -8445,13 +9794,14 @@ function aiTurnToMessage(turn, index) {
     time: formatClockTime(new Date(createdAt)),
     isSelf: turn.role === 'user',
     sender_name: turn.role === 'user' ? (currentLanguage === 'zh' ? '你' : 'You') : getAiProviderInfo().displayName,
+    aiRole: turn.role,
     isAiAssistant: true,
     message_type: 'text',
   };
 }
 
 function syncAiMessagesForActions(history) {
-  messages = (history || getAiHistory()).map(aiTurnToMessage);
+  aiMessages = (history || getAiHistory()).map(aiTurnToMessage);
 }
 
 function findAiTurnById(messageId) {
@@ -8568,7 +9918,7 @@ function bindAiMessageActionHandlers() {
   container.addEventListener("contextmenu", function(e) {
     const bubble = e.target.closest(".message-bubble-custom[data-message-id]");
     if (!bubble || !container.contains(bubble)) return;
-    const msg = messages.find(function(item) {
+    const msg = aiMessages.find(function(item) {
       return String(item.id) === String(bubble.dataset.messageId);
     });
     if (!msg || !window.MessageActions || typeof window.MessageActions.showMenu !== 'function') return;
@@ -8581,7 +9931,14 @@ function bindAiMessageActionHandlers() {
 function getAiModelSettings(sessionId = activeAiAssistantId) {
   try {
     const saved = JSON.parse(localStorage.getItem(getAiModelSettingsKey(sessionId)) || '{}');
-    return Object.assign({}, AI_DEFAULT_MODEL_SETTINGS, saved || {});
+    const result = Object.assign({}, AI_DEFAULT_MODEL_SETTINGS, saved || {});
+    // Migrate legacy plaintext apiKey: if apiKey has a value, mark configured and clear it
+    if (result.apiKey && !result.apiKeyConfigured) {
+      result.apiKeyConfigured = true;
+      result.apiKey = '';
+      localStorage.setItem(getAiModelSettingsKey(sessionId), JSON.stringify(result));
+    }
+    return result;
   } catch (err) {
     return Object.assign({}, AI_DEFAULT_MODEL_SETTINGS);
   }
@@ -8589,8 +9946,142 @@ function getAiModelSettings(sessionId = activeAiAssistantId) {
 
 function setAiModelSettings(settings, sessionId = activeAiAssistantId) {
   const normalized = Object.assign({}, AI_DEFAULT_MODEL_SETTINGS, settings || {});
+  // Never persist the raw API key; use a boolean flag instead.
+  // The actual key is stored server-side (encrypted) via UserLLMConfig.
+  if (normalized.apiKey) {
+    normalized.apiKeyConfigured = true;
+  }
+  normalized.apiKey = '';
   localStorage.setItem(getAiModelSettingsKey(sessionId), JSON.stringify(normalized));
   return normalized;
+}
+
+function normalizeAiEndpoint(value) {
+  return String(value || '').trim();
+}
+
+function getAiEndpointHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AI_ENDPOINT_HISTORY_KEY) || '[]');
+    return Array.isArray(parsed)
+      ? parsed.map(normalizeAiEndpoint).filter(Boolean)
+      : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function setAiEndpointHistory(endpoints) {
+  const unique = [];
+  (endpoints || []).forEach(function(endpoint) {
+    const normalized = normalizeAiEndpoint(endpoint);
+    if (normalized && !unique.some(item => item.toLowerCase() === normalized.toLowerCase())) {
+      unique.push(normalized);
+    }
+  });
+  localStorage.setItem(AI_ENDPOINT_HISTORY_KEY, JSON.stringify(unique.slice(0, 8)));
+  return unique.slice(0, 8);
+}
+
+function rememberAiEndpoint(endpoint) {
+  const normalized = normalizeAiEndpoint(endpoint);
+  if (!normalized) return getAiEndpointHistory();
+  return setAiEndpointHistory([normalized].concat(getAiEndpointHistory()));
+}
+
+function getAiEndpointOptions() {
+  const options = [];
+  getAiEndpointHistory().forEach(function(endpoint) {
+    options.push({
+      label: currentLanguage === 'zh' ? '最近使用' : 'Recent',
+      endpoint,
+      saved: true,
+    });
+  });
+  AI_ENDPOINT_PRESETS.forEach(function(preset) {
+    options.push(Object.assign({ saved: false }, preset));
+  });
+  const unique = [];
+  options.forEach(function(option) {
+    if (option.endpoint && !unique.some(item => item.endpoint.toLowerCase() === option.endpoint.toLowerCase())) {
+      unique.push(option);
+    }
+  });
+  return unique;
+}
+
+function renderAiEndpointMenu() {
+  const menu = document.getElementById("ai-model-endpoint-menu");
+  const input = document.getElementById("ai-model-endpoint");
+  if (!menu) return;
+  const current = normalizeAiEndpoint(input && input.value);
+  menu.innerHTML = getAiEndpointOptions().map(function(option) {
+    const active = current && current.toLowerCase() === option.endpoint.toLowerCase();
+    const label = option.saved
+      ? `${option.label} · ${option.endpoint.replace(/^https?:\/\//, '').split('/')[0]}`
+      : option.label;
+    return `<button type="button" class="ai-endpoint-option${active ? ' is-active' : ''}" data-endpoint="${escapeHtml(option.endpoint)}">
+      <span class="ai-endpoint-option-title">${escapeHtml(label)}</span>
+      <span class="ai-endpoint-option-url">${escapeHtml(option.endpoint)}</span>
+    </button>`;
+  }).join("");
+}
+
+function closeAiEndpointMenu() {
+  const menu = document.getElementById("ai-model-endpoint-menu");
+  const wrapper = menu ? menu.closest(".ai-endpoint-combobox") : null;
+  if (menu) menu.classList.add("hidden");
+  if (wrapper) wrapper.classList.remove("is-open");
+}
+
+function openAiEndpointMenu() {
+  const menu = document.getElementById("ai-model-endpoint-menu");
+  const wrapper = menu ? menu.closest(".ai-endpoint-combobox") : null;
+  if (!menu) return;
+  renderAiEndpointMenu();
+  menu.classList.remove("hidden");
+  if (wrapper) wrapper.classList.add("is-open");
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function toggleAiEndpointMenu() {
+  const menu = document.getElementById("ai-model-endpoint-menu");
+  if (!menu) return;
+  if (menu.classList.contains("hidden")) {
+    openAiEndpointMenu();
+  } else {
+    closeAiEndpointMenu();
+  }
+}
+
+function bindAiEndpointCombobox() {
+  const input = document.getElementById("ai-model-endpoint");
+  const toggle = document.getElementById("ai-model-endpoint-toggle");
+  const menu = document.getElementById("ai-model-endpoint-menu");
+  if (!input || !toggle || !menu || menu.dataset.bound === "1") return;
+  menu.dataset.bound = "1";
+
+  toggle.addEventListener("click", function(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleAiEndpointMenu();
+  });
+  input.addEventListener("focus", function() {
+    renderAiEndpointMenu();
+  });
+  input.addEventListener("input", renderAiEndpointMenu);
+  menu.addEventListener("click", function(event) {
+    const option = event.target.closest(".ai-endpoint-option");
+    if (!option) return;
+    input.value = option.dataset.endpoint || "";
+    closeAiEndpointMenu();
+    input.focus();
+  });
+  document.addEventListener("click", function(event) {
+    if (!menu.closest(".ai-endpoint-combobox").contains(event.target)) {
+      closeAiEndpointMenu();
+    }
+  });
 }
 
 function syncAiModelSettingsForm() {
@@ -8600,8 +10091,15 @@ function syncAiModelSettingsForm() {
   const modelSelect = document.getElementById("ai-model-name");
   const status = document.getElementById("ai-model-settings-status");
 
+  bindAiEndpointCombobox();
   if (endpointInput) endpointInput.value = settings.endpoint || "";
-  if (apiKeyInput) apiKeyInput.value = settings.apiKey || "";
+  renderAiEndpointMenu();
+  if (apiKeyInput) {
+    apiKeyInput.value = settings.apiKeyConfigured ? '••••••••' : '';
+    apiKeyInput.placeholder = settings.apiKeyConfigured
+      ? (currentLanguage === 'zh' ? '已保存（输入新密钥可替换）' : 'Saved (enter new key to replace)')
+      : 'sk-...';
+  }
   if (modelSelect) {
     const hasOption = Array.from(modelSelect.options).some(option => option.value === settings.model);
     if (!hasOption && settings.model) {
@@ -8610,44 +10108,94 @@ function syncAiModelSettingsForm() {
     modelSelect.value = settings.model || AI_DEFAULT_MODEL_SETTINGS.model;
   }
   if (status) {
-    status.textContent = settings.apiKey
+    status.textContent = settings.apiKeyConfigured
       ? (currentLanguage === 'zh' ? '已保存模型设置，发送消息时将使用该配置。' : 'Model settings saved. New messages will use this configuration.')
       : (currentLanguage === 'zh' ? '未保存 API Key 时将使用本地 Mock 响应。' : 'Without an API key, the local mock response is used.');
   }
 }
 
-function saveAiModelSettings() {
+async function saveAiModelSettings() {
   const endpointInput = document.getElementById("ai-model-endpoint");
   const apiKeyInput = document.getElementById("ai-model-api-key");
   const modelSelect = document.getElementById("ai-model-name");
-  const settings = setAiModelSettings({
+  const nextSettings = {
     endpoint: endpointInput ? endpointInput.value.trim() : AI_DEFAULT_MODEL_SETTINGS.endpoint,
     apiKey: apiKeyInput ? apiKeyInput.value.trim() : "",
     model: modelSelect ? modelSelect.value : AI_DEFAULT_MODEL_SETTINGS.model
-  });
-  syncAiModelSettingsForm();
-  updateAiModelSummary(settings);
-  updateAiHeaderModel();
-  refreshAiConversationListItem();
-  window.showToast && window.showToast(currentLanguage === 'zh' ? 'AI 模型设置已保存。' : 'AI model settings saved.');
+  };
+
+  // Sync endpoint + API key to server-side UserLLMConfig first.
+  // Only persist to localStorage after server confirms success.
+  try {
+    const resp = await fetch('/api/ai/config/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken') || ''
+      },
+      body: JSON.stringify({
+        assistant_id: activeAiAssistantId,
+        endpoint: nextSettings.endpoint,
+        api_key: nextSettings.apiKey
+      })
+    });
+    const body = await resp.json().catch(function() { return {}; });
+    if (!resp.ok) {
+      throw new Error(body.error || 'Save failed (' + resp.status + ')');
+    }
+    const settings = setAiModelSettings(Object.assign({}, nextSettings, {
+      endpoint: body.endpoint || nextSettings.endpoint
+    }));
+    rememberAiEndpoint(settings.endpoint);
+    syncAiModelSettingsForm();
+    updateAiModelSummary(settings);
+    updateAiHeaderModel();
+    refreshAiConversationListItem();
+    window.showToast && window.showToast(currentLanguage === 'zh' ? 'AI 模型设置已保存。' : 'AI model settings saved.');
+  } catch (err) {
+    // Keep existing localStorage settings on failure — do not overwrite.
+    window.showToast && window.showToast(
+      (currentLanguage === 'zh' ? '服务端保存失败: ' : 'Server save failed: ') + (err.message || 'Unknown error')
+    );
+  }
 }
 
-function clearAiModelSettings() {
+async function clearAiModelSettings() {
+  // Clear server-side config first so we don't lose sync.
+  let serverCleared = true;
+  try {
+    const resp = await fetch('/api/ai/config/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken') || ''
+      },
+      body: JSON.stringify({ assistant_id: activeAiAssistantId, endpoint: '', api_key: '' })
+    });
+    if (!resp.ok) serverCleared = false;
+  } catch (_) {
+    serverCleared = false;
+  }
+
   localStorage.removeItem(getAiModelSettingsKey(activeAiAssistantId));
   syncAiModelSettingsForm();
   updateAiModelSummary(getAiModelSettings());
   updateAiHeaderModel();
   refreshAiConversationListItem();
-  window.showToast && window.showToast(currentLanguage === 'zh' ? 'AI 模型设置已清空。' : 'AI model settings cleared.');
+
+  const msg = currentLanguage === 'zh'
+    ? (serverCleared ? 'AI 模型设置已清空。' : '本地设置已清空，但服务端清除失败。')
+    : (serverCleared ? 'AI model settings cleared.' : 'Local settings cleared, but server clear failed.');
+  window.showToast && window.showToast(msg);
 }
 
 function getAiRequestConfigForSend() {
   const settings = getAiModelSettings();
-  if (!settings.apiKey) return {};
+  // Only send endpoint + model; API key is resolved server-side from UserLLMConfig.
   return {
-    endpoint: settings.endpoint,
-    api_key: settings.apiKey,
-    model: settings.model
+    assistant_id: activeAiAssistantId,
+    endpoint: settings.endpoint || AI_DEFAULT_MODEL_SETTINGS.endpoint,
+    model: settings.model || AI_DEFAULT_MODEL_SETTINGS.model
   };
 }
 
@@ -8657,8 +10205,8 @@ function updateAiModelSummary(settings) {
   const status = document.getElementById("details-status");
   if (status) {
     status.textContent = currentLanguage === 'zh'
-      ? `${config.model || 'Qwen'} • ${config.apiKey ? '已配置' : '未配置 API Key'}`
-      : `${config.model || 'Qwen'} • ${config.apiKey ? 'Configured' : 'API key missing'}`;
+      ? `${config.model || 'Qwen'} • ${config.apiKeyConfigured ? '已配置' : '未配置 API Key'}`
+      : `${config.model || 'Qwen'} • ${config.apiKeyConfigured ? 'Configured' : 'API key missing'}`;
   }
 }
 
@@ -8705,16 +10253,19 @@ function openAiAssistant(sessionId = AI_CONVERSATION_ID) {
     greetingTime.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
-  // Bind Enter key to textarea
+  // Bind Enter key to textarea (unbind old listener first to avoid duplicates)
   const textarea = document.getElementById("ai-input-textarea");
-  if (textarea && !window.aiInputListenerBound) {
-    window.aiInputListenerBound = true;
-    textarea.addEventListener("keydown", function(e) {
+  if (textarea) {
+    if (window._aiEnterListener) {
+      textarea.removeEventListener("keydown", window._aiEnterListener);
+    }
+    window._aiEnterListener = function(e) {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         sendAiMessage();
       }
-    });
+    };
+    textarea.addEventListener("keydown", window._aiEnterListener);
   }
 
   // Mobile layout responsiveness
@@ -8873,7 +10424,7 @@ async function sendAiMessage() {
       let displayedReply = "";
       if (typingBubble) {
         typingBubble.outerHTML = `
-          <div class="message-row message-row-peer">
+          <div class="message-row message-row-peer" id="${typingId}">
             ${renderAiAvatarHtml('message-avatar')}
             <div class="message-bubble-custom bubble-peer" data-message-id="${replyMsgId}"><div class="message-text-content"></div><div class="message-meta-line"><span>${replyTimeStr}</span></div></div>
           </div>
@@ -8885,11 +10436,11 @@ async function sendAiMessage() {
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
       let done = false;
-      let renderLoopRunning = false;
+      let renderScheduled = false;
 
-      const renderNextCharacters = async () => {
-        if (renderLoopRunning) return;
-        renderLoopRunning = true;
+      const scheduleRender = async () => {
+        if (renderScheduled) return;
+        renderScheduled = true;
         try {
           while (displayedReply.length < reply.length) {
             const remaining = reply.length - displayedReply.length;
@@ -8902,7 +10453,11 @@ async function sendAiMessage() {
             await sleep(18);
           }
         } finally {
-          renderLoopRunning = false;
+          renderScheduled = false;
+          // If new data arrived while we were finishing, re-schedule immediately
+          if (displayedReply.length < reply.length) {
+            scheduleRender();
+          }
         }
       };
 
@@ -8925,13 +10480,13 @@ async function sendAiMessage() {
             }
             if (eventData.delta) {
               reply += eventData.delta;
-              renderNextCharacters();
+              scheduleRender();
             }
           }
         }
       }
 
-      while (displayedReply.length < reply.length || renderLoopRunning) {
+      while (displayedReply.length < reply.length || renderScheduled) {
         await sleep(18);
       }
       if (replyBubble) {
@@ -8987,6 +10542,67 @@ async function sendAiMessage() {
   }
 }
 
+function getAiModelDescription(settings) {
+  const config = settings || getAiModelSettings();
+  const model = config.model || AI_DEFAULT_MODEL_SETTINGS.model;
+  const info = getAiProviderInfo(model);
+  const key = info.key;
+  if (currentLanguage === 'zh') {
+    if (key === 'gpt') {
+      return '基于 GPT 系列模型，适合通用问答、复杂推理、代码辅助、文本润色与结构化内容生成。当前 AI 对话数据独立存储，仅处理您主动提交到此窗口的内容，不读取 E2EE 私密消息。';
+    }
+    if (key === 'claude') {
+      return '基于 Claude 系列模型，擅长长文本理解、稳健推理、写作润色、摘要归纳和安全边界清晰的对话协作。当前 AI 对话数据独立存储，仅处理您主动提交到此窗口的内容，不读取 E2EE 私密消息。';
+    }
+    if (key === 'qwen') {
+      return '基于通义千问 Qwen 系列模型，适合中文场景下的知识问答、文本总结、草稿润色、多轮对话和实用任务处理。当前 AI 对话数据独立存储，仅处理您主动提交到此窗口的内容，不读取 E2EE 私密消息。';
+    }
+    return '基于您配置的大语言模型提供 AI 助理能力，可用于问答、总结、草稿润色和文本处理。当前 AI 对话数据独立存储，仅处理您主动提交到此窗口的内容，不读取 E2EE 私密消息。';
+  }
+  if (key === 'gpt') {
+    return 'Powered by a GPT-series model, suited for general Q&A, complex reasoning, coding help, rewriting, and structured content generation. AI conversations are stored separately and only process text you explicitly submit here; E2EE private messages are not read.';
+  }
+  if (key === 'claude') {
+    return 'Powered by a Claude-series model, strong at long-context understanding, careful reasoning, writing, summarization, and safety-conscious collaboration. AI conversations are stored separately and only process text you explicitly submit here; E2EE private messages are not read.';
+  }
+  if (key === 'qwen') {
+    return 'Powered by a Qwen-series model, well suited for Chinese-language Q&A, summarization, drafting, multi-turn chat, and practical assistant tasks. AI conversations are stored separately and only process text you explicitly submit here; E2EE private messages are not read.';
+  }
+  return 'Powered by your configured large language model for Q&A, summarization, drafting, and text processing. AI conversations are stored separately and only process text you explicitly submit here; E2EE private messages are not read.';
+}
+
+window.forwardMessagesToAiAssistant = async function(items, targetAiId) {
+  const forwardItems = Array.isArray(items) ? items.filter(Boolean) : [items].filter(Boolean);
+  if (!forwardItems.length) return false;
+  const blocks = forwardItems.map(function(msg, index) {
+    const sender = msg.isSelf
+      ? (currentLanguage === 'zh' ? '我' : 'Me')
+      : (msg.sender_name || msg.sender || (msg.isAiAssistant ? getAiProviderInfo().displayName : 'Unknown'));
+    const rawText = msg.text || msg.content || '';
+    const markdownPayload = getMarkdownPayload(rawText);
+    const text = markdownPayload === null ? rawText : markdownPayload;
+    return forwardItems.length > 1
+      ? `### ${index + 1}. ${sender}\n\n${text}`
+      : text;
+  });
+  const prefix = currentLanguage === 'zh'
+    ? '以下是我转发给你的内容，请基于这些内容继续处理：'
+    : 'Here is content I forwarded to you. Please continue based on it:';
+  const forwardedText = forwardItems.length > 1
+    ? `${prefix}\n\n${blocks.join('\n\n---\n\n')}`
+    : blocks[0];
+
+  openAiAssistant(targetAiId || AI_CONVERSATION_ID);
+  await sleep(30);
+  const textarea = document.getElementById("ai-input-textarea");
+  if (!textarea) return false;
+  textarea.value = forwardedText;
+  adjustTextareaHeight(textarea);
+  currentAiMode = 'chat';
+  await sendAiMessage();
+  return true;
+};
+
 // ── AI Assistant Right Panel & Dropdown ──
 
 function toggleAiRightPanel() {
@@ -9029,6 +10645,9 @@ async function updateDetailsPanelForAi() {
   const protocol = document.getElementById("right-panel-protocol");
   const resetKeyBtn = document.getElementById("right-panel-reset-key-btn");
   const verificationStatus = document.getElementById("right-panel-verification-status");
+  const settings = getAiModelSettings();
+  const model = settings.model || AI_DEFAULT_MODEL_SETTINGS.model;
+  const info = getAiProviderInfo(model);
 
   setDetailsText("right-panel-title", currentLanguage === 'zh' ? '模型信息' : 'Model Info');
   setDetailsHidden("right-panel-ai-settings-card", false);
@@ -9039,20 +10658,19 @@ async function updateDetailsPanelForAi() {
   }
 
   if (name) {
-    const info = getAiProviderInfo();
     name.innerHTML = `<span>${escapeHtml(info.displayName)}</span><span class="user-role-badge badge-agent">${escapeHtml(info.providerName)}</span>`;
   }
   if (status) {
-    status.textContent = currentLanguage === 'zh' ? 'Qwen 大语言模型 • 在线' : 'Qwen AI Model • Online';
+    status.textContent = currentLanguage === 'zh'
+      ? `${info.providerName} 大语言模型 • ${settings.apiKeyConfigured ? '已配置' : '未配置 API Key'}`
+      : `${info.providerName} AI Model • ${settings.apiKeyConfigured ? 'Configured' : 'API key missing'}`;
   }
 
   updateAiModelSummary();
   setDetailsText("right-panel-username-label", currentLanguage === 'zh' ? '运行模型' : 'Running Model');
   setDetailsHidden("right-panel-username-row", false);
 
-  setDetailsText("right-panel-bio", currentLanguage === 'zh'
-    ? '基于通义千问大语言模型，为您提供智能文本总结、草稿润色、知识问答服务。所有对话数据在本地独立存储并隔离，不读取 E2EE 私密消息。'
-    : 'Based on Qwen Large Language Model, providing text summarization, drafting, and QA services. All chat data is isolated locally and never reads E2EE private messages.');
+  setDetailsText("right-panel-bio", getAiModelDescription(settings));
   setDetailsText("right-panel-bio-label", currentLanguage === 'zh' ? '模型简介' : 'Model Description');
   setDetailsHidden("right-panel-bio-row", false);
 
@@ -9158,7 +10776,7 @@ function runAiSearch(activateFirst) {
   clearAiSearchHighlight();
   aiSearchIndex = -1;
 
-  const history = JSON.parse(localStorage.getItem('ichat_ai_history') || '[]');
+  const history = getAiHistory();
 
   if (!query) {
     aiSearchResults = [];
@@ -9175,7 +10793,9 @@ function runAiSearch(activateFirst) {
         id: turn.id || `ai-msg-${turn.role}-${index}`,
         role: turn.role,
         content: turn.content,
-        timestamp: turn.timestamp
+        created_at: turn.created_at || turn.timestamp,
+        isSelf: turn.role === 'user',
+        text: turn.content || '',
       });
     }
   });
@@ -9189,23 +10809,40 @@ function runAiSearch(activateFirst) {
 function renderAiSearchResults(query) {
   const els = getAiSearchEls();
   if (!els.results) return;
-  if (!query || !aiSearchResults.length) {
+  const hasQuery = String(query || "").trim().length > 0;
+  if (els.prev) els.prev.classList.toggle("hidden", !hasQuery || aiSearchResults.length < 2);
+  if (els.next) els.next.classList.toggle("hidden", !hasQuery || aiSearchResults.length < 2);
+
+  if (!hasQuery) {
     els.results.classList.add("hidden");
     els.results.innerHTML = "";
-    if (els.prev) els.prev.classList.add("hidden");
-    if (els.next) els.next.classList.add("hidden");
     return;
   }
-  if (els.prev) els.prev.classList.remove("hidden");
-  if (els.next) els.next.classList.remove("hidden");
 
   els.results.classList.remove("hidden");
+  if (!aiSearchResults.length) {
+    els.results.innerHTML = `<div class="chat-search-empty">${_t4("No matching messages", "没有找到匹配消息", "沒有找到符合的訊息", "一致するメッセージはありません")}</div>`;
+    return;
+  }
+
+  const aiInfo = getAiProviderInfo();
   els.results.innerHTML = aiSearchResults.map(function(msg, index) {
-    const sender = msg.role === 'user' ? (currentLanguage === 'zh' ? '我' : 'Me') : 'AI';
-    const cleanText = getSearchableMessageText({ text: msg.content });
-    return `<button type="button" class="chat-search-result-item" data-search-index="${index}">
-      <span class="chat-search-result-sender">${escapeHtml(sender)}</span>
-      <span class="chat-search-result-text">${escapeHtml(cleanText)}</span>
+    const sender = msg.role === 'user'
+      ? (currentLanguage === 'zh' ? '我' : 'You')
+      : aiInfo.displayName;
+    const avatarHtml = msg.role === 'user'
+      ? getSearchResultAvatarHtmlRich({ isSelf: true, text: msg.content, created_at: msg.created_at }, null)
+      : renderAiAvatarHtml('chat-search-result-avatar');
+    const snippet = msg.role === 'assistant'
+      ? renderAiSearchResultSnippet({ text: msg.content })
+      : renderSearchResultSnippet({ text: msg.content });
+    return `<button type="button" class="chat-search-result-item ai-search-result-item${index === aiSearchIndex ? " is-active" : ""}" data-search-index="${index}">
+      ${avatarHtml}
+      <span class="chat-search-result-main">
+        <span class="chat-search-result-title">${escapeHtml(sender)}</span>
+        <span class="chat-search-result-snippet">${snippet}</span>
+      </span>
+      <span class="chat-search-result-date">${escapeHtml(formatSearchResultDate(msg))}</span>
     </button>`;
   }).join("");
 }

@@ -11,6 +11,7 @@ from .models import (
     EncryptedFileChunk,
     EncryptedFileKey,
     EncryptedMessage,
+    GroupInvitation,
     GroupMessage,
     GroupMessageRecipient,
 )
@@ -100,6 +101,22 @@ class ConversationMemberAdmin(admin.ModelAdmin):
     list_filter = ["role", "status"]
     search_fields = ["conversation__id", "user__username"]
     readonly_fields = ["joined_at"]
+
+
+@admin.register(GroupInvitation)
+class GroupInvitationAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "conversation",
+        "inviter",
+        "invitee",
+        "status",
+        "reviewed_by",
+        "created_at",
+    ]
+    list_filter = ["status", "created_at"]
+    search_fields = ["conversation__id", "inviter__username", "invitee__username"]
+    readonly_fields = ["created_at", "updated_at", "reviewed_at", "responded_at"]
 
 
 @admin.register(EncryptedMessage)

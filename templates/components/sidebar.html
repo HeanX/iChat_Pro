@@ -8,14 +8,14 @@
     <div id="sidebar-chat-header" class="px-4 py-3 flex items-center space-x-3.5 flex-shrink-0 border-b border-transparent">
       <!-- Hamburger Menu button -->
       <div class="relative">
-        <button id="drawer-btn" onclick="toggleMainMenu(event)" class="p-2 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none" title="Main Menu" data-i18n-title="main_menu">
+        <button id="drawer-btn" data-ichat-onclick="toggleMainMenu(event)" class="p-2 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none" title="Main Menu" data-i18n-title="main_menu">
           <i data-lucide="menu" class="w-5 h-5"></i>
         </button>
         
         <!-- Main Menu Dropdown Floating Card -->
         <div id="main-menu-dropdown" class="main-menu-dropdown hidden absolute left-0 mt-1.5 bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[22px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
           <!-- User Account info section -->
-          <div onclick="triggerMyProfileFromInfo(event)" class="main-menu-account-area">
+          <div data-ichat-onclick="triggerMyProfileFromInfo(event)" class="main-menu-account-area">
             <div class="main-menu-avatar-wrap w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-base shadow-sm overflow-hidden flex-shrink-0" style="background-color: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
               {% if settings_avatar_url %}
                 <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="w-full h-full object-cover">
@@ -32,33 +32,33 @@
           <!-- Menu Items -->
           <div class="py-1">
             <!-- Add Account -->
-            <button onclick="navigateSidebar('accounts-switcher'); toggleMainMenu(event);" class="main-menu-item-custom">
+            <button data-ichat-onclick="navigateSidebar('accounts-switcher'); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="plus"></i>
               <span data-i18n="menu_add_account">Add Account</span>
             </button>
 
             <!-- Saved Messages -->
-            <button onclick="showToast(currentLanguage === 'zh' ? '暂无收藏消息' : 'No saved messages'); toggleMainMenu(event);" class="main-menu-item-custom">
+            <button data-ichat-onclick="showToast(currentLanguage === 'zh' ? '暂无收藏消息' : 'No saved messages'); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="bookmark"></i>
               <span data-i18n="menu_saved_messages">Saved Messages</span>
             </button>
             <!-- Contacts -->
-            <a href="{% url 'contacts' %}" onclick="navigateSidebar('contacts'); toggleMainMenu(event); return false;" class="main-menu-item-custom">
+            <a href="{% url 'contacts' %}" data-ichat-onclick="navigateSidebar('contacts'); toggleMainMenu(event); return false;" class="main-menu-item-custom">
               <i data-lucide="users"></i>
               <span data-i18n="menu_contacts">Contacts</span>
             </a>
             <!-- Groups -->
-            <a href="{% url 'groups' %}" class="main-menu-item-custom" onclick="toggleMainMenu(event);">
+            <a href="{% url 'groups' %}" class="main-menu-item-custom" data-ichat-onclick="navigateSidebar('groups'); toggleMainMenu(event); return false;">
               <i data-lucide="users-round"></i>
               <span data-i18n="groups">Groups</span>
             </a>
             <!-- AI Assistant -->
-            <button onclick="openAiAssistant(); toggleMainMenu(event);" class="main-menu-item-custom">
+            <button data-ichat-onclick="openAiAssistant(); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="sparkles" class="text-brand-light dark:text-brand-dark animate-pulse"></i>
               <span data-i18n="menu_ai_assistant">AI Assistant</span>
             </button>
             <!-- Settings -->
-            <button id="menu-settings-btn" onclick="navigateSidebar('settings-home'); toggleMainMenu(event);" class="main-menu-item-custom">
+            <button id="menu-settings-btn" data-ichat-onclick="navigateSidebar('settings-home'); toggleMainMenu(event);" class="main-menu-item-custom">
               <i data-lucide="settings"></i>
               <span data-i18n="menu_settings">Settings</span>
             </button>
@@ -68,7 +68,7 @@
             
             <!-- More Submenu (click) -->
             <div class="relative">
-              <button id="menu-more-btn" onclick="toggleMoreSubmenu(event)" class="main-menu-item-custom">
+              <button id="menu-more-btn" data-ichat-onclick="toggleMoreSubmenu(event)" class="main-menu-item-custom">
                 <i data-lucide="more-horizontal"></i>
                 <span data-i18n="menu_more">More</span>
                 <i data-lucide="chevron-right" class="ml-auto w-4 h-4"></i>
@@ -77,22 +77,22 @@
               <!-- Submenu overlay -->
               <div id="main-menu-more-submenu" class="main-menu-more-submenu hidden absolute left-full top-0 ml-1.5 w-[190px] bg-bgSidebar border border-borderColor/60 rounded-[18px] shadow-xl z-50 py-1.5 animate-fadeIn">
                 <!-- New Group -->
-                <button id="menu-new-group-btn" onclick="toggleMainMenu(event);" class="menu-item-custom">
+                <button id="menu-new-group-btn" data-ichat-onclick="toggleMainMenu(event);" class="menu-item-custom">
                   <i data-lucide="users"></i>
                   <span data-i18n="menu_new_group">New Group</span>
                 </button>
                 <!-- About iChat Pro -->
-                <button onclick="showAboutInfo(event)" class="menu-item-custom">
+                <button data-ichat-onclick="showAboutInfo(event)" class="menu-item-custom">
                   <i data-lucide="info"></i>
                   <span data-i18n="menu_about">About iChat Pro</span>
                 </button>
                 <!-- Help & FAQ -->
-                <button onclick="showHelpFeedback(event)" class="menu-item-custom">
+                <button data-ichat-onclick="showHelpFeedback(event)" class="menu-item-custom">
                   <i data-lucide="help-circle"></i>
                   <span data-i18n="menu_help">Help & FAQ</span>
                 </button>
                 <!-- Check Updates -->
-                <button onclick="checkForUpdates(event)" class="menu-item-custom">
+                <button data-ichat-onclick="checkForUpdates(event)" class="menu-item-custom">
                   <i data-lucide="refresh-cw"></i>
                   <span data-i18n="menu_updates">Check Updates</span>
                 </button>
@@ -132,22 +132,22 @@
   <!-- View 2: Settings Home (P2 T02) -->
   <div id="sidebar-view-settings-home" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-home-header px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
-      <button onclick="navigateSidebar('chat')" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+      <button data-ichat-onclick="navigateSidebar('chat')" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="settings">Settings</h2>
       <div class="settings-home-actions flex items-center space-x-1 relative">
-        <button onclick="showQRCodeModal()" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="QR Code">
+        <button data-ichat-onclick="showQRCodeModal()" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="QR Code">
           <i data-lucide="qr-code" class="w-5 h-5"></i>
         </button>
-        <button onclick="navigateSidebar('settings-profile')" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
+        <button data-ichat-onclick="navigateSidebar('settings-profile')" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
           <i data-lucide="edit-3" class="w-5 h-5"></i>
         </button>
-        <button id="settings-home-more-btn" onclick="toggleSettingsHomeMoreMenu(event)" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="More">
+        <button id="settings-home-more-btn" data-ichat-onclick="toggleSettingsHomeMoreMenu(event)" class="settings-home-icon-btn p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="More">
           <i data-lucide="more-vertical" class="w-5 h-5"></i>
         </button>
         <div id="settings-home-more-dropdown" class="hidden absolute right-0 top-full mt-1.5 w-[150px] bg-bgSidebar border border-borderColor/60 rounded-[14px] shadow-xl z-50 py-1 animate-fadeIn select-none">
-          <button type="button" onclick="showLogoutConfirmModal(event); toggleSettingsHomeMoreMenu(event, true);" class="menu-item-custom danger">
+          <button type="button" data-ichat-onclick="showLogoutConfirmModal(event); toggleSettingsHomeMoreMenu(event, true);" class="menu-item-custom danger">
             <i data-lucide="log-out"></i>
             <span data-i18n="menu_logout">Sign Out</span>
           </button>
@@ -162,11 +162,11 @@
   <!-- View 3: Settings Panel (Key Management + Privacy) -->
   <div id="sidebar-view-settings" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
-      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+      <button data-ichat-onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="settings">Settings</h2>
-      <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
+      <button data-ichat-onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Edit Profile" data-i18n-title="menu_profile">
         <i data-lucide="edit-3" class="w-5 h-5"></i>
       </button>
     </div>
@@ -178,7 +178,7 @@
   <!-- View 3: Contacts View (P2 T09) -->
   <div id="sidebar-view-contacts" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar relative">
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
-      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+      <button data-ichat-onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <div class="relative flex-1">
@@ -188,7 +188,7 @@
         <input type="text" id="contacts-header-search"
           class="w-full pl-9 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all"
           placeholder="Search contacts..."
-          oninput="filterContactsInSidebar(this.value)">
+          data-ichat-oninput="filterContactsInSidebar(this.value)">
       </div>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar" id="sidebar-contacts-content">
@@ -197,23 +197,23 @@
 
     <!-- FAB: Quick Create Menu (P2 T09) -->
     <div class="absolute bottom-5 right-5 z-20" id="contacts-fab-container">
-      <button id="contacts-fab-btn" onclick="toggleContactsFab(event)"
+      <button id="contacts-fab-btn" data-ichat-onclick="toggleContactsFab(event)"
         class="w-12 h-12 rounded-full bg-brand-light dark:bg-brand-dark text-white shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 focus:outline-none"
         title="Quick create">
         <i data-lucide="plus" class="w-6 h-6 transition-transform duration-200" id="contacts-fab-icon"></i>
       </button>
       <!-- FAB Menu Dropdown -->
       <div id="contacts-fab-menu" class="hidden absolute bottom-14 right-0 w-52 bg-bgSidebar/95 dark:bg-bgSidebar/98 backdrop-blur-lg border border-borderColor/60 rounded-[18px] shadow-xl z-30 py-1.5 animate-fadeIn">
-        <button onclick="fabNewPrivateChat(event)" class="fab-menu-item">
+        <button data-ichat-onclick="fabNewPrivateChat(event)" class="fab-menu-item">
           <i data-lucide="message-circle" class="w-4 h-4 text-brand-light dark:text-brand-dark"></i>
           <span>New Private Chat</span>
         </button>
-        <button onclick="fabNewGroup(event)" class="fab-menu-item">
+        <button data-ichat-onclick="fabNewGroup(event)" class="fab-menu-item">
           <i data-lucide="users" class="w-4 h-4 text-green-500"></i>
           <span>New Group</span>
         </button>
         <div class="h-px bg-borderColor/40 my-1"></div>
-        <button onclick="fabNewChannel(event)" class="fab-menu-item opacity-50 cursor-not-allowed">
+        <button data-ichat-onclick="fabNewChannel(event)" class="fab-menu-item opacity-50 cursor-not-allowed">
           <i data-lucide="hash" class="w-4 h-4"></i>
           <span>New Channel</span>
           <span class="text-[10px] text-textSecondary ml-auto">Soon</span>
@@ -222,10 +222,31 @@
     </div>
   </div>
 
+  <!-- View 4: Groups View -->
+  <div id="sidebar-view-groups" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
+    <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
+      <button data-ichat-onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+      </button>
+      <div class="relative flex-1">
+        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-textSecondary pointer-events-none">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </span>
+        <input type="text" id="groups-sidebar-search"
+          class="w-full pl-9 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all"
+          placeholder="Search groups..."
+          data-ichat-oninput="renderGroupsSidebar(this.value)">
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">
+      {% include 'pages/groups_sidebar.html' %}
+    </div>
+  </div>
+
   <!-- View 5: Edit Profile (P2 T03) -->
   <div id="sidebar-view-settings-profile" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Settings">
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Settings">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="edit_profile">Edit Profile</h2>
@@ -239,7 +260,7 @@
   <div id="sidebar-view-search" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
     <!-- Header: back + search input + clear -->
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+      <button data-ichat-onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <div class="relative flex-1">
@@ -251,7 +272,7 @@
           placeholder="Search..."
           autocomplete="off">
         <button id="search-sidebar-clear" class="hidden absolute inset-y-0 right-0 pr-2.5 flex items-center text-textSecondary hover:text-textMain"
-          onclick="clearSearchSidebar()">
+          data-ichat-onclick="clearSearchSidebar()">
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
@@ -260,16 +281,16 @@
     <!-- Type tabs: Chats | Channels | Apps | Posts -->
     <div class="px-4 py-2 border-b border-borderColor/60 flex-shrink-0 overflow-x-auto search-type-tabs">
       <div class="flex space-x-1 min-w-max">
-        <button class="search-type-tab active" data-tab="chats" onclick="switchSearchTab('chats')">Chats</button>
-        <button class="search-type-tab" data-tab="channels" onclick="switchSearchTab('channels')">Channels</button>
-        <button class="search-type-tab" data-tab="apps" onclick="switchSearchTab('apps')">Apps</button>
-        <button class="search-type-tab" data-tab="posts" onclick="switchSearchTab('posts')">Posts</button>
+        <button class="search-type-tab active" data-tab="chats" data-ichat-onclick="switchSearchTab('chats')">Chats</button>
+        <button class="search-type-tab" data-tab="channels" data-ichat-onclick="switchSearchTab('channels')">Channels</button>
+        <button class="search-type-tab" data-tab="apps" data-ichat-onclick="switchSearchTab('apps')">Apps</button>
+        <button class="search-type-tab" data-tab="posts" data-ichat-onclick="switchSearchTab('posts')">Posts</button>
       </div>
     </div>
 
     <!-- Scope filter (shown for chats tab, hidden for others) -->
     <div id="search-scope-bar" class="px-4 py-2 border-b border-borderColor/60 flex-shrink-0">
-      <select id="search-scope-select" onchange="onSearchScopeChange()"
+      <select id="search-scope-select" data-ichat-onchange="onSearchScopeChange()"
         class="w-full text-xs bg-bgSearch border border-borderColor rounded-full px-3 py-1.5 text-textMain focus:outline-none focus:ring-1 focus:ring-brand-light dark:focus:ring-brand-dark">
         <option value="all">All Chats</option>
         <option value="private_chats">Private Chats</option>
@@ -294,11 +315,11 @@
   <!-- P2 T11: Multi-Account Switcher -->
   <div id="sidebar-view-accounts-switcher" class="sidebar-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
+      <button data-ichat-onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Chats" data-i18n-title="back_to_sidebar">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="menu_add_account">Accounts</h2>
-      <button onclick="addNewAccount()" class="py-1.5 px-3 text-xs font-semibold rounded-full bg-brand-light dark:bg-brand-dark text-white hover:opacity-90 transition-opacity">
+      <button data-ichat-onclick="addNewAccount()" class="py-1.5 px-3 text-xs font-semibold rounded-full bg-brand-light dark:bg-brand-dark text-white hover:opacity-90 transition-opacity">
         <i data-lucide="plus" class="w-3.5 h-3.5 inline mr-1"></i>Add
       </button>
     </div>
@@ -306,7 +327,7 @@
       <div class="text-xs text-textSecondary text-center py-8">Loading accounts...</div>
     </div>
     <div class="p-4 border-t border-borderColor">
-      <button onclick="addNewAccount()" class="account-add-btn w-full py-2.5 px-4 border-2 border-dashed border-borderColor rounded-xl text-textSecondary hover:text-textMain hover:border-brand-light dark:hover:border-brand-dark hover:bg-bgSearch transition-all text-sm font-medium">
+      <button data-ichat-onclick="addNewAccount()" class="account-add-btn w-full py-2.5 px-4 border-2 border-dashed border-borderColor rounded-xl text-textSecondary hover:text-textMain hover:border-brand-light dark:hover:border-brand-dark hover:bg-bgSearch transition-all text-sm font-medium">
         <i data-lucide="plus" class="w-4 h-4 inline mr-2"></i>Add Another Account
       </button>
     </div>
@@ -315,7 +336,7 @@
   <!-- P2 T04: Notification Settings -->
   <div id="sidebar-view-notifications" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all">
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="notifications_sounds">Notifications and Sounds</h2>
@@ -326,7 +347,7 @@
   <!-- P2 T05: Data & Storage -->
   <div id="sidebar-view-data-storage" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="data_and_storage">Data and Storage</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/data_storage.html' %}</div>
@@ -335,7 +356,7 @@
   <!-- P2 T06: Privacy & Security -->
   <div id="sidebar-view-privacy-security" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="privacy_and_security">Privacy and Security</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/privacy_security.html' %}</div>
@@ -344,7 +365,7 @@
   <!-- P2 T07: General Settings (Appearance) -->
   <div id="sidebar-view-general-settings" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="general_settings">General Settings</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/general_settings.html' %}</div>
@@ -353,7 +374,7 @@
   <!-- P2 T07: Chat Folders, Stickers & Emoji -->
   <div id="sidebar-view-chat-folders" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="chat_folders">Chat Folders</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/chat_folders.html' %}</div>
@@ -362,7 +383,7 @@
   <!-- Stickers & Emoji -->
   <div id="sidebar-view-stickers-emoji" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="stickers_and_emoji">Stickers and Emoji</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/stickers_emoji.html' %}</div>
@@ -371,7 +392,7 @@
   <!-- Language Settings -->
   <div id="sidebar-view-language" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="language">Language</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/language_settings.html' %}</div>
@@ -380,7 +401,7 @@
   <!-- P2 T08: Sessions, Language & Keyboard Shortcuts -->
   <div id="sidebar-view-sessions-shortcuts" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+      <button data-ichat-onclick="navigateSidebar('settings-home')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="devices_and_shortcuts">Devices and Shortcuts</h2>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">{% include 'pages/sessions_shortcuts.html' %}</div>
@@ -389,7 +410,7 @@
   <!-- Birthday Privacy Settings -->
   <div id="sidebar-view-settings-birthday" class="sidebar-view settings-view hidden h-full flex flex-col bg-bgSidebar">
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Edit Profile">
+      <button data-ichat-onclick="navigateSidebar('settings-profile')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back to Edit Profile">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="birthday">Birthday</h2>
@@ -403,7 +424,7 @@
   <div id="sidebar-view-group-add-members" class="sidebar-view settings-view group-creation-view hidden h-full flex flex-col bg-bgSidebar relative">
     <!-- Header -->
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回">
+      <button data-ichat-onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1">添加成员</h2>
@@ -418,7 +439,7 @@
         <input type="text" id="group-add-search-input" 
           class="w-full pl-10 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all"
           placeholder="搜索"
-          oninput="filterGroupAddMembers(this.value)">
+          data-ichat-oninput="filterGroupAddMembers(this.value)">
       </div>
     </div>
 
@@ -430,9 +451,9 @@
           {% for entry in contacts %}
             {% if entry.user == request.user %}
               {% with peer=entry.contact %}
-                <div class="settings-template-row group-add-member-item cursor-pointer" data-user-id="{{ peer.id }}" data-username="{{ peer.username }}" data-nickname="{{ peer.profile.nickname|default:'' }}" onclick="toggleGroupMemberSelection(this, '{{ peer.id }}')">
-                  <div class="flex items-center justify-center" onclick="event.stopPropagation();">
-                    <input type="checkbox" class="group-member-checkbox-custom w-5 h-5 rounded border-borderColor text-brand-light focus:ring-brand-light bg-transparent" value="{{ peer.id }}" onclick="updateGroupMemberCount()">
+                <div class="settings-template-row group-add-member-item cursor-pointer" data-user-id="{{ peer.id }}" data-username="{{ peer.username }}" data-nickname="{{ peer.profile.nickname|default:'' }}" data-ichat-onclick="toggleGroupMemberSelection(this, '{{ peer.id }}')">
+                  <div class="flex items-center justify-center" data-ichat-onclick="event.stopPropagation();">
+                    <input type="checkbox" class="group-member-checkbox-custom w-5 h-5 rounded border-borderColor text-brand-light focus:ring-brand-light bg-transparent" value="{{ peer.id }}" data-ichat-onclick="updateGroupMemberCount()">
                   </div>
                   <!-- Avatar -->
                   <div class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm bg-brand-light flex-shrink-0 overflow-hidden">
@@ -455,9 +476,9 @@
               {% endwith %}
             {% else %}
               {% with peer=entry.user %}
-                <div class="settings-template-row group-add-member-item cursor-pointer" data-user-id="{{ peer.id }}" data-username="{{ peer.username }}" data-nickname="{{ peer.profile.nickname|default:'' }}" onclick="toggleGroupMemberSelection(this, '{{ peer.id }}')">
-                  <div class="flex items-center justify-center" onclick="event.stopPropagation();">
-                    <input type="checkbox" class="group-member-checkbox-custom w-5 h-5 rounded border-borderColor text-brand-light focus:ring-brand-light bg-transparent" value="{{ peer.id }}" onclick="updateGroupMemberCount()">
+                <div class="settings-template-row group-add-member-item cursor-pointer" data-user-id="{{ peer.id }}" data-username="{{ peer.username }}" data-nickname="{{ peer.profile.nickname|default:'' }}" data-ichat-onclick="toggleGroupMemberSelection(this, '{{ peer.id }}')">
+                  <div class="flex items-center justify-center" data-ichat-onclick="event.stopPropagation();">
+                    <input type="checkbox" class="group-member-checkbox-custom w-5 h-5 rounded border-borderColor text-brand-light focus:ring-brand-light bg-transparent" value="{{ peer.id }}" data-ichat-onclick="updateGroupMemberCount()">
                   </div>
                   <!-- Avatar -->
                   <div class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm bg-brand-light flex-shrink-0 overflow-hidden">
@@ -509,7 +530,7 @@
 
     <!-- Floating Action Button -->
     <div class="absolute bottom-5 right-5 z-20">
-      <button id="group-add-next-btn" onclick="goToGroupCreateFinalStep()"
+      <button id="group-add-next-btn" data-ichat-onclick="goToGroupCreateFinalStep()"
         class="w-12 h-12 rounded-full bg-brand-light dark:bg-brand-dark text-white shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 focus:outline-none">
         <i data-lucide="arrow-right" class="w-6 h-6 text-white"></i>
       </button>
@@ -520,7 +541,7 @@
   <div id="sidebar-view-group-create-final" class="sidebar-view settings-view group-creation-view hidden h-full flex flex-col bg-bgSidebar relative">
     <!-- Header -->
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button onclick="navigateSidebar('group-add-members')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回上一步">
+      <button data-ichat-onclick="navigateSidebar('group-add-members')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回上一步">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
       <h2 class="text-lg font-bold text-textMain flex-1">新建群聊</h2>
@@ -531,14 +552,14 @@
       <div class="profile-edit-view p-4">
         <!-- Avatar Uploader -->
         <div class="profile-edit-hero py-4 flex flex-col items-center">
-          <button type="button" class="profile-edit-avatar w-24 h-24 rounded-full relative group overflow-hidden bg-brand-light flex items-center justify-center text-white" onclick="document.getElementById('group-avatar-file-input').click()" title="上传群头像">
+          <button type="button" class="profile-edit-avatar w-24 h-24 rounded-full relative group overflow-hidden bg-brand-light flex items-center justify-center text-white" data-ichat-onclick="document.getElementById('group-avatar-file-input').click()" title="上传群头像">
             <span id="group-avatar-placeholder" class="text-3xl font-bold">G</span>
             <img id="group-avatar-preview" class="hidden w-full h-full object-cover" alt="群头像">
             <span class="profile-edit-avatar-icon absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
               <i data-lucide="camera" class="w-6 h-6 text-white"></i>
             </span>
           </button>
-          <input type="file" id="group-avatar-file-input" accept="image/*" class="hidden" onchange="previewGroupAvatar(this)">
+          <input type="file" id="group-avatar-file-input" accept="image/*" class="hidden" data-ichat-onchange="previewGroupAvatar(this)">
         </div>
 
         <!-- Group Name Input Box (Cards) -->
@@ -564,7 +585,7 @@
 
     <!-- Floating Action Button for creation -->
     <div class="absolute bottom-5 right-5 z-20">
-      <button id="group-create-submit-btn" onclick="submitCreateGroupForm()"
+      <button id="group-create-submit-btn" data-ichat-onclick="submitCreateGroupForm()"
         class="w-12 h-12 rounded-full bg-brand-light dark:bg-brand-dark text-white shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 focus:outline-none">
         <i data-lucide="check" class="w-6 h-6 text-white"></i>
       </button>
@@ -612,7 +633,7 @@
   }
 </style>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   (function() {
     function updateHeaderDivider(view) {
       const header = view.querySelector('.settings-view-header');

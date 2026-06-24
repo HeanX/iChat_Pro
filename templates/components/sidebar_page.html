@@ -3,7 +3,7 @@
 <div id="sidebar-view-{{ page_id }}" class="sidebar-view h-full flex flex-col bg-bgSidebar {% if page_id != 'chat' %}hidden{% endif %}">
   <div class="sidebar-page-header px-4 py-3 border-b border-borderColor flex items-center space-x-3 flex-shrink-0" style="min-height: 57px;">
     {% if back_view %}
-    <button onclick="navigateSidebar('{{ back_view }}')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back" data-i18n-title="back_to_sidebar">
+    <button data-ichat-onclick="navigateSidebar('{{ back_view }}')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="Back" data-i18n-title="back_to_sidebar">
       <i data-lucide="arrow-left" class="w-5 h-5"></i>
     </button>
     {% endif %}

@@ -242,11 +242,14 @@
         });
         if (existingConv && (allowSameConversation || String(existingConv.id) !== String(window.activeChatId))) {
           if (!allItems.some(function (c) { return String(c.id) === String(existingConv.id); })) {
-            allItems.push(existingConv);
+            allItems.push(normalizeForwardTargetAvatar(Object.assign({}, existingConv, {
+              avatar_url: existingConv.avatar_url || user.avatar_url || '',
+              avatar_color: existingConv.avatar_color || user.avatar_color || '#5c6bc0',
+            })));
           }
           return;
         }
-        allItems.push({
+        allItems.push(normalizeForwardTargetAvatar({
           type: 'single',
           is_user_target: true,
           peer_id: user.id,
@@ -254,9 +257,9 @@
           username: user.username,
           peer_user_type: user.user_type || 'user',
           initials: (user.nickname || user.username || '?').slice(0, 2).toUpperCase(),
-          avatar_url: user.avatar_url || '',
-          avatar_color: '#5c6bc0',
-        });
+          avatar_url: firstNonEmpty(user.avatar_url, user.peer_avatar_url, user.profile_avatar_url),
+          avatar_color: user.avatar_color || '#5c6bc0',
+        }));
       });
 
       if (!allItems.length) {
@@ -265,20 +268,35 @@
       }
       if (emptyEl) emptyEl.classList.add('hidden');
 
-      allItems.forEach(function (target) {
+      allItems.map(normalizeForwardTargetAvatar).forEach(function (target) {
         var item = document.createElement('button');
         var color = /^#[0-9a-fA-F]{6}$/.test(target.avatar_color || '') ? target.avatar_color : '#5c6bc0';
         item.className = 'flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-bgSearch transition-colors text-left border-none bg-transparent cursor-pointer';
-        var avatarInner = typeof buildAvatarHtml === 'function'
-          ? buildAvatarHtml(target.avatar_url || '', target.initials || '??', color, '', target.name || '')
-          : escapeForwardText(target.initials || '??');
-        var label = target.type === 'group'
+        var isAiTarget = Boolean(target.is_ai_assistant);
+        var avatarClass = 'w-9 h-9 rounded-full overflow-hidden text-white flex items-center justify-center font-bold text-xs flex-shrink-0';
+        var avatarStyle = 'background-color:' + color;
+        var avatarInner = '';
+        if (target.avatar_url) {
+          if (isAiTarget) {
+            avatarClass += ' ai-model-avatar';
+            avatarStyle = 'background-color:#ffffff';
+            avatarInner = '<img src="' + escapeForwardText(target.avatar_url) + '" class="ai-model-logo-img" alt="">';
+          } else {
+            avatarStyle = 'background-color:transparent';
+            avatarInner = '<img src="' + escapeForwardText(target.avatar_url) + '" class="w-full h-full object-cover rounded-full" alt="">';
+          }
+        } else {
+          avatarInner = escapeForwardText(target.initials || '??');
+        }
+        var label = isAiTarget
+          ? (t('assistantLabel', 'Assistant') || 'Assistant')
+          : target.type === 'group'
           ? t('groupChat', 'Group')
           : (target.peer_user_type === 'bot'
             ? (t('botLabel', 'Bot') || 'Bot')
             : (target.peer_user_type === 'agent' ? (t('agentLabel', 'Agent') || 'Agent') : t('privateChat', 'Private')));
         item.innerHTML =
-          '<div class="w-9 h-9 rounded-full overflow-hidden text-white flex items-center justify-center font-bold text-xs flex-shrink-0" style="background-color:' + color + '">' +
+          '<div class="' + avatarClass + '" style="' + avatarStyle + '">' +
           avatarInner +
           '</div>' +
           '<div class="min-w-0 flex-1">' +
@@ -384,9 +402,70 @@
   }
 
   function getForwardTargets(convs, allowSameConversation) {
-    return (convs || []).filter(function (c) {
+    var targets = (convs || []).filter(function (c) {
       if (!(c.type === 'single' || c.type === 'group')) return false;
       return allowSameConversation || String(c.id) !== String(window.activeChatId);
+    }).map(normalizeForwardTargetAvatar);
+    if (typeof window.getAiAssistantForwardTargets === 'function') {
+      window.getAiAssistantForwardTargets().forEach(function(aiTarget) {
+        if (!targets.some(function(c) { return String(c.id) === String(aiTarget.id); })) {
+          targets.unshift(aiTarget);
+        }
+      });
+    }
+    return targets;
+  }
+
+  function firstNonEmpty() {
+    for (var i = 0; i < arguments.length; i++) {
+      if (arguments[i]) return arguments[i];
+    }
+    return '';
+  }
+
+  function findConversationForForwardTarget(target) {
+    if (!target) return null;
+    if (target.id && window.conversationsById && window.conversationsById[target.id]) {
+      return window.conversationsById[target.id];
+    }
+    var convs = window.conversations || [];
+    if (target.peer_id) {
+      var byPeer = convs.find(function (c) {
+        return c.type === 'single' && String(c.peer_id) === String(target.peer_id);
+      });
+      if (byPeer) return byPeer;
+    }
+    if (target.username) {
+      var byUsername = convs.find(function (c) {
+        return c.type === 'single' && String(c.peer_username || '') === String(target.username);
+      });
+      if (byUsername) return byUsername;
+    }
+    return null;
+  }
+
+  function normalizeForwardTargetAvatar(target) {
+    if (!target) return target;
+    var conv = findConversationForForwardTarget(target);
+    var avatarUrl = firstNonEmpty(
+      target.avatar_url,
+      target.peer_avatar_url,
+      target.profile_avatar_url,
+      target.sender_avatar_url,
+      conv && conv.avatar_url
+    );
+    var avatarColor = firstNonEmpty(
+      target.avatar_color,
+      target.peer_avatar_color,
+      conv && conv.avatar_color,
+      '#5c6bc0'
+    );
+    if (avatarUrl === target.avatar_url && avatarColor === target.avatar_color) {
+      return target;
+    }
+    return Object.assign({}, target, {
+      avatar_url: avatarUrl,
+      avatar_color: avatarColor,
     });
   }
 
@@ -467,6 +546,23 @@
   }
 
   async function doForwardMany(items, targetConv) {
+    if (targetConv && targetConv.is_ai_assistant) {
+      try {
+        if (typeof window.forwardMessagesToAiAssistant !== 'function') {
+          throw new Error('AI forward handler is not available');
+        }
+        await window.forwardMessagesToAiAssistant(items, targetConv.id);
+        if (typeof window.exitSelectMode === 'function') {
+          window.exitSelectMode();
+        }
+        window.showToast(t('msgForwarded', 'Forwarded'));
+      } catch (e) {
+        console.error('Forward selected messages to AI failed:', e);
+        window.showToast(t('msgForwardFailed', 'Forward failed'));
+      }
+      return;
+    }
+
     var ok = 0;
     var failed = 0;
     for (var i = 0; i < items.length; i++) {
@@ -493,6 +589,24 @@
 
   async function doForward(msg, targetConv, options) {
     options = options || {};
+    if (targetConv && targetConv.is_ai_assistant) {
+      try {
+        if (typeof window.forwardMessagesToAiAssistant !== 'function') {
+          throw new Error('AI forward handler is not available');
+        }
+        await window.forwardMessagesToAiAssistant([msg], targetConv.id);
+        if (!options.silent) {
+          window.showToast(t('msgForwarded', 'Forwarded'));
+        }
+        return true;
+      } catch (e) {
+        console.error('Forward to AI failed:', e);
+        if (options.silent) throw e;
+        window.showToast(t('msgForwardFailed', 'Forward failed'));
+        return false;
+      }
+    }
+
     var convId = window.activeChatId;
     var plaintext = msg.text || '';
     var sourceFileId = msg.file_id || (msg.file && msg.file.file_id) || null;
@@ -501,6 +615,9 @@
     if (!plaintext && !isFileForward) {
       window.showToast(t('msgNothingToCopy', 'Nothing to forward'));
       return;
+    }
+    if (msg.isAiAssistant && msg.aiRole !== 'user' && plaintext && !/^\/md(?:[ \t]+|\r?\n|$)/i.test(plaintext)) {
+      plaintext = '/md\n' + plaintext;
     }
 
     try {
@@ -554,12 +671,18 @@
         var memberIds = typeof window.fetchGroupMemberIds === 'function'
           ? await window.fetchGroupMemberIds(targetConv.id)
           : [];
-        var result = await window.iChatGroupE2EE.encryptGroupMessage({
-          plaintext: plaintext,
-          groupId: targetConv.id,
-          membershipVersion: targetConv.membership_version || 1,
-          memberIds: memberIds,
-        });
+        var result = window.encryptGroupMessageWithTrustRetry
+          ? await window.encryptGroupMessageWithTrustRetry({
+              plaintext: plaintext,
+              conv: targetConv,
+              memberIds: memberIds,
+            })
+          : await window.iChatGroupE2EE.encryptGroupMessage({
+              plaintext: plaintext,
+              groupId: targetConv.id,
+              membershipVersion: targetConv.membership_version || 1,
+              memberIds: memberIds,
+            });
         payload.algorithm = result.algorithm;
         payload.sender_key_version = result.sender_key_version;
         payload.membership_version = result.membership_version;
@@ -590,6 +713,7 @@
             ciphertext: r.ciphertext,
             nonce: r.nonce,
             auth_tag: r.auth_tag,
+            sender_ephemeral_public_key: r.sender_ephemeral_public_key,
             algorithm: result.algorithm,
             sender_key_version: result.sender_key_version,
             receiver_key_version: r.receiver_key_version,
@@ -623,6 +747,8 @@
         payload.ciphertext = encResult.ciphertext;
         payload.nonce = encResult.nonce;
         payload.auth_tag = encResult.auth_tag;
+        payload.sender_ephemeral_public_key = encResult.sender_ephemeral_public_key;
+        payload.sender_copy = encResult.sender_copy;
         payload.algorithm = encResult.algorithm;
         payload.sender_key_version = encResult.sender_key_version;
         payload.receiver_key_version = encResult.receiver_key_version;

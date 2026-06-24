@@ -2,7 +2,7 @@
 <div class="settings-template-body">
 
   <section class="settings-template-profile" aria-label="Profile summary">
-    <button type="button" class="settings-template-avatar-wrap" onclick="navigateSidebar('settings-profile')" title="Edit Profile" style="background: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
+    <button type="button" class="settings-template-avatar-wrap" data-ichat-onclick="navigateSidebar('settings-profile')" title="Edit Profile" style="background: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
       {% if settings_avatar_url %}
       <img src="{{ settings_avatar_url }}" alt="{{ settings_display_name }}" class="settings-template-avatar-image">
       {% else %}
@@ -29,7 +29,7 @@
   </section>
 
   <section class="settings-template-card settings-template-menu" aria-label="Settings categories">
-    <button type="button" onclick="navigateSidebar('notifications')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('notifications')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="bell"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="notifications_sounds">Notifications and Sounds</span>
@@ -37,7 +37,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="navigateSidebar('data-storage')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('data-storage')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="database"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="data_and_storage">Data and Storage</span>
@@ -45,7 +45,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="navigateSidebar('privacy-security')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('privacy-security')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="lock"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="privacy_and_security">Privacy and Security</span>
@@ -53,7 +53,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="navigateSidebar('general-settings')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('general-settings')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="settings"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="general_settings">General Settings</span>
@@ -61,7 +61,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="navigateSidebar('chat-folders')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('chat-folders')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="folder"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="chat_folders">Chat Folders</span>
@@ -69,7 +69,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="navigateSidebar('stickers-emoji')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('stickers-emoji')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="sticker"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="stickers_and_emoji">Stickers and Emoji</span>
@@ -77,7 +77,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="showToast('Speakers and camera settings coming in Phase 2')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="showToast('Speakers and camera settings coming in Phase 2')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="video"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="speakers_and_camera">Speakers and Camera</span>
@@ -85,7 +85,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="navigateSidebar('sessions-shortcuts')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('sessions-shortcuts')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="monitor-smartphone"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="devices">Devices</span>
@@ -94,7 +94,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="navigateSidebar('language')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('language')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="languages"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="language">Language / &#35821;&#35328;</span>
@@ -103,7 +103,7 @@
       <i data-lucide="chevron-right" class="settings-template-chevron"></i>
     </button>
 
-    <button type="button" onclick="navigateSidebar('sessions-shortcuts')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('sessions-shortcuts')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="keyboard"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="keyboard_shortcuts">Keyboard Shortcuts</span>
@@ -113,7 +113,7 @@
   </section>
 
   <section class="settings-template-card settings-template-danger" aria-label="Account actions">
-    <button type="button" onclick="navigateSidebar('settings')" class="settings-template-row">
+    <button type="button" data-ichat-onclick="navigateSidebar('settings')" class="settings-template-row">
       <span class="settings-template-row-icon"><i data-lucide="key-round"></i></span>
       <span class="settings-template-row-main">
         <span class="settings-template-row-title" data-i18n="manage_crypto_keys">Manage Cryptographic Keys</span>

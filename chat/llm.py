@@ -1,6 +1,8 @@
 import os
 import json
 import logging
+import ipaddress
+import socket
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse, urlunparse
@@ -9,21 +11,67 @@ from concurrent.futures import ThreadPoolExecutor
 logger = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
 
+DEFAULT_ALLOWED_LLM_HOSTS = {
+    "api.anthropic.com",
+    "api.openai.com",
+    "openrouter.ai",
+    "api.openrouter.ai",
+    "4router.net",
+    "dashscope.aliyuncs.com",
+    "api.deepseek.com",
+    "generativelanguage.googleapis.com",
+}
+
+
+def _allowed_llm_hosts():
+    configured = {
+        host.strip().lower()
+        for host in os.environ.get("LLM_ALLOWED_HOSTS", "").split(",")
+        if host.strip()
+    }
+    return DEFAULT_ALLOWED_LLM_HOSTS | configured
+
+
+def _host_matches_allowed(host, allowed_host):
+    return host == allowed_host or host.endswith(f".{allowed_host}")
+
+
+def validate_llm_endpoint(endpoint: str):
+    parsed = urlparse(endpoint or "")
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("Model request endpoint must be an HTTPS URL.")
+
+    host = parsed.hostname.lower().rstrip(".")
+    allowed = _allowed_llm_hosts()
+    if not any(_host_matches_allowed(host, allowed_host) for allowed_host in allowed):
+        raise ValueError("Model request endpoint host is not allowed.")
+
+    try:
+        addr_infos = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as error:
+        raise ValueError("Model request endpoint host could not be resolved.") from error
+
+    for addr_info in addr_infos:
+        ip = ipaddress.ip_address(addr_info[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError("Model request endpoint resolved to a blocked network address.")
+
 def normalize_chat_completions_endpoint(endpoint: str) -> str:
     endpoint = (endpoint or "").strip()
     parsed = urlparse(endpoint)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError("Invalid model request endpoint.")
 
-    path = parsed.path.rstrip("/")
-    if not path:
-        path = "/v1/chat/completions"
-    elif path.endswith("/v1"):
-        path = f"{path}/chat/completions"
-    elif path.endswith("/api/v1"):
-        path = f"{path}/chat/completions"
-
-    return urlunparse(parsed._replace(path=path, params="", query="", fragment=""))
+    normalized = urlunparse(parsed._replace(params="", query="", fragment=""))
+    validate_llm_endpoint(normalized)
+    return normalized
 
 def normalize_anthropic_messages_endpoint(endpoint: str) -> str:
     endpoint = (endpoint or "").strip()
@@ -31,19 +79,48 @@ def normalize_anthropic_messages_endpoint(endpoint: str) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError("Invalid Anthropic request endpoint.")
 
-    path = parsed.path.rstrip("/")
-    if not path:
-        path = "/v1/messages"
-    elif path.endswith("/v1"):
-        path = f"{path}/messages"
-
-    return urlunparse(parsed._replace(path=path, params="", query="", fragment=""))
+    normalized = urlunparse(parsed._replace(params="", query="", fragment=""))
+    validate_llm_endpoint(normalized)
+    return normalized
 
 def is_anthropic_messages_endpoint(endpoint: str) -> bool:
     parsed = urlparse(endpoint or "")
     host = parsed.netloc.lower()
     path = parsed.path.rstrip("/")
     return "anthropic.com" in host or path.endswith("/v1/messages")
+
+
+def _content_to_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    if isinstance(content, dict):
+        text = content.get("text") or content.get("content")
+        return text if isinstance(text, str) else ""
+    return ""
+
+
+def _openai_choice_text(choice):
+    if not isinstance(choice, dict):
+        return ""
+    delta = choice.get("delta") or {}
+    message = choice.get("message") or {}
+    return (
+        _content_to_text(delta.get("content"))
+        or _content_to_text(delta.get("text"))
+        or _content_to_text(message.get("content"))
+        or _content_to_text(choice.get("text"))
+    )
+
 
 class LlmProvider:
     def complete(self, *, messages, system=None) -> str:
@@ -87,20 +164,33 @@ class OpenAICompatibleProvider(LlmProvider):
             api_messages.append({"role": "system", "content": system})
         api_messages.extend(messages)
 
-        payload = {
+        base_payload = {
             "model": self.model,
             "messages": api_messages,
             "temperature": 0.7,
-            "stream": True,
         }
-        for data in self._stream_request(payload):
-            choices = data.get("choices") or []
-            if not choices:
-                continue
-            delta = choices[0].get("delta") or {}
-            content = delta.get("content")
-            if content:
-                yield content
+        stream_payload = {**base_payload, "stream": True}
+        yielded = False
+        try:
+            for data in self._stream_request(stream_payload):
+                choices = data.get("choices") or []
+                if not choices:
+                    continue
+                content = _openai_choice_text(choices[0])
+                if content:
+                    yielded = True
+                    yield content
+        except Exception:
+            if yielded:
+                raise
+            fallback = self._request(base_payload)
+            if fallback:
+                yield fallback
+            return
+        if not yielded:
+            fallback = self._request(base_payload)
+            if fallback:
+                yield fallback
 
     def _request(self, payload):
         headers = {
@@ -118,12 +208,19 @@ class OpenAICompatibleProvider(LlmProvider):
             with urllib.request.urlopen(req, timeout=30) as response:
                 res_body = response.read().decode("utf-8")
                 data = json.loads(res_body)
-                return data["choices"][0]["message"]["content"]
+                choices = data.get("choices") or []
+                if choices:
+                    content = _openai_choice_text(choices[0])
+                    if content:
+                        return content
+                content = _content_to_text(data.get("content"))
+                if content:
+                    return content
+                raise KeyError("choices[0].message.content")
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8", errors="replace")
             logger.error(f"OpenAI-compatible API HTTP Error {e.code}: {error_body}")
-            detail = error_body[:500] if error_body else ""
-            raise RuntimeError(f"Model API returned error {e.code}. {detail}")
+            raise RuntimeError(f"Model API returned error {e.code}.")
         except urllib.error.URLError as e:
             logger.error(f"OpenAI-compatible API connection failed: {e.reason}")
             raise RuntimeError(f"Failed to connect to model API endpoint: {self.endpoint}")
@@ -165,14 +262,13 @@ class OpenAICompatibleProvider(LlmProvider):
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8", errors="replace")
             logger.error(f"OpenAI-compatible stream HTTP Error {e.code}: {error_body}")
-            detail = error_body[:500] if error_body else ""
-            raise RuntimeError(f"Model API returned error {e.code}. {detail}")
+            raise RuntimeError(f"Model API returned error {e.code}.")
         except urllib.error.URLError as e:
             logger.error(f"OpenAI-compatible stream connection failed: {e.reason}")
             raise RuntimeError(f"Failed to connect to model API endpoint: {self.endpoint}")
 
 class AnthropicMessagesProvider(LlmProvider):
-    def __init__(self, api_key, endpoint="https://api.anthropic.com/v1/messages", model="claude-3-5-sonnet-20241022"):
+    def __init__(self, api_key, endpoint="https://api.anthropic.com/v1/messages", model="claude-sonnet-4-6"):
         self.api_key = api_key
         self.url = normalize_anthropic_messages_endpoint(endpoint)
         self.model = model
@@ -205,12 +301,14 @@ class AnthropicMessagesProvider(LlmProvider):
             with urllib.request.urlopen(req, timeout=20) as response:
                 res_body = response.read().decode("utf-8")
                 data = json.loads(res_body)
-                return data["content"][0]["text"]
+                content = _content_to_text(data.get("content"))
+                if content:
+                    return content
+                raise KeyError("content[0].text")
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8", errors="replace")
             logger.error(f"Anthropic API HTTP Error {e.code}: {error_body}")
-            detail = error_body[:500] if error_body else ""
-            raise RuntimeError(f"Anthropic API returned error {e.code}. {detail}")
+            raise RuntimeError(f"Anthropic API returned error {e.code}.")
         except urllib.error.URLError as e:
             logger.error(f"Anthropic connection failed: {e.reason}")
             raise RuntimeError(f"Failed to connect to Anthropic API endpoint: {self.url}")
@@ -241,6 +339,7 @@ class AnthropicMessagesProvider(LlmProvider):
             method="POST"
         )
 
+        yielded = False
         try:
             with urllib.request.urlopen(req, timeout=60) as response:
                 for raw_line in response:
@@ -256,17 +355,29 @@ class AnthropicMessagesProvider(LlmProvider):
                         delta = data.get("delta") or {}
                         text = delta.get("text")
                         if text:
+                            yielded = True
                             yield text
                     elif data.get("type") == "message_stop":
                         break
+            if not yielded:
+                fallback = self.complete(messages=messages, system=system)
+                if fallback:
+                    yield fallback
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8", errors="replace")
             logger.error(f"Anthropic stream HTTP Error {e.code}: {error_body}")
-            detail = error_body[:500] if error_body else ""
-            raise RuntimeError(f"Anthropic API returned error {e.code}. {detail}")
+            if yielded:
+                raise RuntimeError(f"Anthropic API returned error {e.code}.")
+            fallback = self.complete(messages=messages, system=system)
+            if fallback:
+                yield fallback
         except urllib.error.URLError as e:
             logger.error(f"Anthropic stream connection failed: {e.reason}")
-            raise RuntimeError(f"Failed to connect to Anthropic API endpoint: {self.url}")
+            if yielded:
+                raise RuntimeError(f"Failed to connect to Anthropic API endpoint: {self.url}")
+            fallback = self.complete(messages=messages, system=system)
+            if fallback:
+                yield fallback
 
 def get_llm_provider(model_config=None):
     model_config = model_config or {}
@@ -286,8 +397,23 @@ def get_llm_provider(model_config=None):
             model=configured_model,
         )
 
-    # Automatically switch between Anthropic and Mock based on API key presence
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return MockProvider()
-    return AnthropicMessagesProvider(api_key=api_key)
+    # Fallback: detect provider from environment variables.
+    # Priority: ANTHROPIC_API_KEY > OPENAI_API_KEY (with OPENAI_API_BASE).
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        return AnthropicMessagesProvider(api_key=anthropic_key)
+
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+        openai_base = os.environ.get(
+            "OPENAI_API_BASE",
+            "https://api.openai.com/v1/chat/completions",
+        )
+        openai_model = os.environ.get("OPENAI_MODEL", "gpt-5.4")
+        return OpenAICompatibleProvider(
+            endpoint=openai_base,
+            api_key=openai_key,
+            model=openai_model,
+        )
+
+    return MockProvider()

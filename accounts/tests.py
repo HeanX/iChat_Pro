@@ -2,8 +2,10 @@
 
 import base64
 import hashlib
+import io
 import json
 
+from PIL import Image
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
 from django.test import TestCase
@@ -15,6 +17,8 @@ from .models import (
     Contact,
     FriendRequest,
     UserProfile,
+    UserProfileUpdateLog,
+    UserPrivacySettings,
     UserPublicKey,
 )
 # Group & GroupMember consolidated into chat.Conversation (T22)
@@ -393,7 +397,8 @@ class LoginViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'pages/login.html')
         self.assertContains(response, 'action="/login/"')
-        self.assertContains(response, 'placeholder="输入您的密码"')
+        self.assertContains(response, '输入用户名')
+        self.assertContains(response, 'placeholder="请输入密码"')
         self.assertContains(response, 'href="/register/"')
 
     def test_login_with_valid_credentials(self):
@@ -425,7 +430,7 @@ class LoginViewTests(TestCase):
             'password': 'wrongpassword1',
         })
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Invalid username or password')
+        self.assertContains(response, '用户名或密码错误，请重试。')
 
     def test_login_nonexistent_user(self):
         response = self.client.post(self.LOGIN_URL, {
@@ -433,7 +438,7 @@ class LoginViewTests(TestCase):
             'password': 'whatever1',
         })
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Invalid username or password')
+        self.assertContains(response, '用户名或密码错误，请重试。')
 
     def test_login_disabled_account(self):
         response = self.client.post(self.LOGIN_URL, {
@@ -441,7 +446,7 @@ class LoginViewTests(TestCase):
             'password': 'correctpass1',
         })
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'disabled')
+        self.assertContains(response, '该账号已被禁用，请联系管理员。')
 
     def test_login_redirects_when_authenticated(self):
         self.client.login(username='alice', password='correctpass1')
@@ -478,6 +483,8 @@ class LogoutViewTests(TestCase):
     def test_logout_redirects_to_login(self):
         response = self.client.post(self.LOGOUT_URL)
         self.assertRedirects(response, self.LOGIN_URL)
+        follow = self.client.get(self.LOGIN_URL)
+        self.assertNotContains(follow, 'You have been logged out.')
 
     def test_logout_link_get_redirects_to_login(self):
         response = self.client.get(self.LOGOUT_URL)
@@ -1389,6 +1396,57 @@ class QrCardApiTests(TestCase):
         self.assertIn(resp.status_code, (301, 302))
 
 # ── P2 T35: Multi-account context ────────────────────────────────
+
+class AvatarAndProfilePrivacyTests(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(username='avataralice', password='p')
+        self.bob = User.objects.create_user(username='avatarbob', password='p')
+        self.mallory = User.objects.create_user(username='avatarmallory', password='p')
+        Contact.objects.create(user=self.alice, contact=self.bob)
+        self.client.login(username='avataralice', password='p')
+
+    def test_qr_card_respects_private_profile_fields(self):
+        profile = self.alice.profile
+        profile.bio = 'private bio'
+        profile.phone_number = '123456'
+        profile.save()
+        privacy, _ = UserPrivacySettings.objects.get_or_create(user=self.alice)
+        privacy.bio_visibility = 'nobody'
+        privacy.phone_number_visibility = 'contacts'
+        privacy.save()
+
+        resp = self.client.get('/api/qr-card/')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['bio'], '')
+        self.assertEqual(resp.json()['phone_number'], '')
+
+    def test_avatar_crop_rejects_non_image_payload(self):
+        payload = 'data:image/png;base64,' + base64.b64encode(b'<script>alert(1)</script>').decode()
+        resp = self.client.post('/api/profile/avatar/crop/', {'cropped_data': payload})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'invalid_image')
+
+    def test_avatar_crop_accepts_real_image(self):
+        buffer = io.BytesIO()
+        Image.new('RGB', (4, 4), color='red').save(buffer, format='PNG')
+        payload = 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
+        resp = self.client.post('/api/profile/avatar/crop/', {'cropped_data': payload})
+        self.assertEqual(resp.status_code, 200)
+
+    def test_profile_updates_only_include_self_and_contacts(self):
+        UserProfileUpdateLog.objects.create(user=self.alice)
+        UserProfileUpdateLog.objects.create(user=self.bob)
+        hidden = UserProfileUpdateLog.objects.create(user=self.mallory)
+
+        resp = self.client.get('/api/profile/updates/')
+
+        self.assertEqual(resp.status_code, 200)
+        update_user_ids = {item['user_id'] for item in resp.json()['updates']}
+        self.assertIn(self.alice.id, update_user_ids)
+        self.assertIn(self.bob.id, update_user_ids)
+        self.assertNotIn(hidden.user_id, update_user_ids)
+
 
 class MultiAccountApiTests(TestCase):
     def setUp(self):

@@ -32,8 +32,17 @@ async function identityRecord(userId, keyVersion = 1) {
   };
 }
 
-function loadModule(localRecord, serverKeys) {
+function loadModule(localRecord, serverKeys, privateKeys = null) {
   const storage = new Map();
+  async function importPrivateKey(privateKeyJwk) {
+    return webcrypto.subtle.importKey(
+      'jwk',
+      privateKeyJwk,
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      ['deriveBits']
+    );
+  }
   const context = {
     TextDecoder,
     TextEncoder,
@@ -60,7 +69,18 @@ function loadModule(localRecord, serverKeys) {
     crypto: webcrypto
   };
   context.window = context;
-  context.iChatKeyManager = { loadCurrentRecord: () => localRecord.value };
+  context.iChatKeyManager = {
+    loadCurrentRecord: () => localRecord.value,
+    getCurrentPrivateKey: async keyVersion => {
+      if (privateKeys && keyVersion && privateKeys.has(Number(keyVersion))) {
+        return importPrivateKey(privateKeys.get(Number(keyVersion)));
+      }
+      if (privateKeys && localRecord.value && privateKeys.has(Number(localRecord.value.key_version))) {
+        return importPrivateKey(privateKeys.get(Number(localRecord.value.key_version)));
+      }
+      return null;
+    }
+  };
   const source = fs.readFileSync(path.join(__dirname, '..', 'static', 'js', 'private-chat-e2ee.js'), 'utf8');
   vm.runInNewContext(source, context);
   return context;
@@ -72,8 +92,10 @@ async function run() {
   const serverKeys = new Map([[1, [alice.server]], [2, [bob.server]]]);
   const aliceRecord = { value: alice.local };
   const bobRecord = { value: bob.local };
-  const aliceBrowser = loadModule(aliceRecord, serverKeys);
-  const bobBrowser = loadModule(bobRecord, serverKeys);
+  const alicePrivateKeys = new Map([[1, alice.local.private_key]]);
+  const bobPrivateKeys = new Map([[1, bob.local.private_key]]);
+  const aliceBrowser = loadModule(aliceRecord, serverKeys, alicePrivateKeys);
+  const bobBrowser = loadModule(bobRecord, serverKeys, bobPrivateKeys);
 
   // Alice sends a message to Bob
   const encrypted = await aliceBrowser.iChatPrivateE2EE.encryptPrivateMessage({
@@ -104,7 +126,20 @@ async function run() {
   );
 
   const rotatedBob = await identityRecord(2, 2);
+  bobPrivateKeys.set(2, rotatedBob.local.private_key);
   serverKeys.get(2).push(rotatedBob.server);
+
+  const originalBobRecord = bobRecord.value;
+  bobRecord.value = rotatedBob.local;
+  const encryptedFromRotatedBob = await bobBrowser.iChatPrivateE2EE.encryptPrivateMessage({
+    plaintext: 'hello from bob v2',
+    conversationId: 42,
+    receiverId: 1
+  });
+  assert.equal(encryptedFromRotatedBob.sender_key_version, 2);
+  assert.equal(await aliceBrowser.iChatPrivateE2EE.decryptPrivateMessage(encryptedFromRotatedBob), 'hello from bob v2');
+  bobRecord.value = originalBobRecord;
+
   await assert.rejects(
     () => aliceBrowser.iChatPrivateE2EE.encryptPrivateMessage({
       plaintext: 'blocked until verified',
@@ -126,15 +161,35 @@ async function run() {
   assert.equal(encrypted2.receiver_key_version, 2);
 
   // Bob can decrypt the new message using his v2 key
-  const oldBobRecordValue = bobRecord.value;
   bobRecord.value = rotatedBob.local;
   assert.equal(await bobBrowser.iChatPrivateE2EE.decryptPrivateMessage(encrypted2), 'new message under v2 key');
 
   // Alice can still decrypt the old message from Bob (version 1)
   assert.equal(await aliceBrowser.iChatPrivateE2EE.decryptPrivateMessage(encryptedFromBob), 'hello from bob v1');
 
+  // Alice rotates her own key but keeps versioned private keys locally.
+  const rotatedAlice = await identityRecord(1, 2);
+  alicePrivateKeys.set(2, rotatedAlice.local.private_key);
+  serverKeys.get(1).push(rotatedAlice.server);
+  aliceRecord.value = rotatedAlice.local;
+
+  // Historical messages still decrypt with Alice's old v1 private key.
+  assert.equal(await aliceBrowser.iChatPrivateE2EE.decryptPrivateMessage(encrypted), 'secret hello');
+  assert.equal(await aliceBrowser.iChatPrivateE2EE.decryptPrivateMessage(encryptedFromBob), 'hello from bob v1');
+
+  // Bob trusts Alice's new key and both sides can continue with new messages.
+  bobBrowser.iChatPrivateE2EE.trustPeerKey(rotatedAlice.server);
+  bobRecord.value = rotatedBob.local;
+  const encryptedAfterBothRotated = await bobBrowser.iChatPrivateE2EE.encryptPrivateMessage({
+    plaintext: 'new message after both rotations',
+    conversationId: 42,
+    receiverId: 1
+  });
+  assert.equal(encryptedAfterBothRotated.receiver_key_version, 2);
+  assert.equal(await aliceBrowser.iChatPrivateE2EE.decryptPrivateMessage(encryptedAfterBothRotated), 'new message after both rotations');
+
   // Restore Bob's local key state
-  bobRecord.value = oldBobRecordValue;
+  bobRecord.value = originalBobRecord;
 
   aliceBrowser.localStorage.setItem('ichat_peer_identity:2', '{');
   await assert.rejects(

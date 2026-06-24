@@ -383,6 +383,50 @@ class KeyTrust(models.Model):
         return f"User #{self.user_id} trusts {self.contact.username} key {self.key_fingerprint[:12]}"
 
 
+class KeyVerificationRequest(models.Model):
+    """Two-party confirmation flow for trusting the current E2EE keys."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        DECLINED = "declined", "Declined"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="key_verification_requests_sent",
+    )
+    responder = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="key_verification_requests_received",
+    )
+    requester_key_fingerprint = models.CharField(max_length=64)
+    requester_key_version = models.PositiveIntegerField()
+    responder_key_fingerprint = models.CharField(max_length=64)
+    responder_key_version = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["requester", "responder", "status"]),
+            models.Index(fields=["responder", "status"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Key verification #{self.pk}: {self.requester_id} -> {self.responder_id} ({self.status})"
+
+
 # ── Signal: auto-create UserProfile on user creation (T27) ─────────
 
 

@@ -7,12 +7,12 @@
     <!-- 1. Top Navigation & Status Bar -->
     <div id="chat-header-select-mode" class="hidden h-[60px] border-b border-borderColor px-6 items-center justify-between bg-bgSidebar select-none flex-shrink-0 z-10 w-full animate-fadeIn">
       <div class="flex items-center space-x-3">
-        <button onclick="exitSelectMode()" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none">
+        <button data-ichat-onclick="exitSelectMode()" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none">
           <i data-lucide="x" class="w-5.5 h-5.5"></i>
         </button>
         <span id="select-mode-count" class="text-sm font-bold text-textMain">已选择 0 条消息</span>
       </div>
-      <button onclick="exitSelectMode()" class="px-4 py-1.5 hover:bg-bgSearch text-sm font-bold rounded-custom-md text-brand-light dark:text-brand-dark transition-colors" data-i18n="cancel">取消</button>
+      <button data-ichat-onclick="exitSelectMode()" class="px-4 py-1.5 hover:bg-bgSearch text-sm font-bold rounded-custom-md text-brand-light dark:text-brand-dark transition-colors" data-i18n="cancel">取消</button>
     </div>
 
     <header id="chat-header-normal" class="select-none flex-shrink-0 z-10 w-full">
@@ -20,7 +20,7 @@
         <div class="chat-header-main">
 
           <!-- Back Arrow for Mobile Viewports -->
-          <button onclick="backToSidebar()" class="chat-header-icon-btn md:hidden" title="Back to Chat List" data-i18n-title="back_to_sidebar">
+          <button data-ichat-onclick="backToSidebar()" class="chat-header-icon-btn md:hidden" title="Back to Chat List" data-i18n-title="back_to_sidebar">
             <i data-lucide="arrow-left" class="w-5.5 h-5.5"></i>
           </button>
 
@@ -49,45 +49,45 @@
           <button id="chat-header-search-btn" class="chat-header-icon-btn" title="Search Chat" data-i18n-title="search_chat">
             <i data-lucide="search" class="w-5 h-5"></i>
           </button>
-          <button onclick="window.toggleRightPanel()" class="chat-header-icon-btn" title="Chat Info" data-i18n-title="view_info">
+          <button id="chat-header-info-btn" data-ichat-onclick="window.toggleRightPanel()" class="chat-header-icon-btn" title="Chat Info" data-i18n-title="view_info">
             <i data-lucide="info" class="w-5 h-5"></i>
           </button>
           <div class="relative">
-            <button id="chat-header-more-btn" onclick="toggleMoreMenu(event)" class="chat-header-icon-btn" title="More Operations" data-i18n-title="more_operations">
+            <button id="chat-header-more-btn" data-ichat-onclick="toggleMoreMenu(event)" class="chat-header-icon-btn" title="More Operations" data-i18n-title="more_operations">
               <i data-lucide="more-vertical" class="w-5 h-5"></i>
             </button>
 
             <!-- More Operations Dropdown Menu -->
             <div id="chat-header-more-dropdown" class="hidden absolute right-0 mt-1.5 w-[230px] bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[20px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
               <!-- Group Info (visible only for group chats) -->
-              <button id="menu-group-info-btn" onclick="triggerGroupInfoAction(event)" class="menu-item-custom hidden">
+              <button id="menu-group-info-btn" data-ichat-onclick="triggerGroupInfoAction(event)" class="menu-item-custom hidden">
                 <i data-lucide="users"></i>
                 <span data-i18n="menu_group_info">Group Info</span>
               </button>
               <!-- Block Contact -->
-              <button id="menu-block-contact-btn" onclick="triggerBlockContactAction(event)" class="menu-item-custom">
+              <button id="menu-block-contact-btn" data-ichat-onclick="triggerBlockContactAction(event)" class="menu-item-custom">
                 <i data-lucide="ban"></i>
                 <span id="menu-block-contact-text" data-i18n="menu_block_contact">拉黑</span>
               </button>
               <!-- Mute -->
-              <button onclick="triggerMuteAction(event)" class="menu-item-custom">
+              <button data-ichat-onclick="triggerMuteAction(event)" class="menu-item-custom">
                 <i id="menu-mute-group-icon" data-lucide="bell-off"></i>
                 <span id="menu-mute-group-text" data-i18n="menu_mute_group">Mute...</span>
               </button>
               <!-- Select messages -->
-              <button onclick="triggerSelectMessagesAction(event)" class="menu-item-custom">
+              <button data-ichat-onclick="triggerSelectMessagesAction(event)" class="menu-item-custom">
                 <i data-lucide="check-circle"></i>
                 <span data-i18n="menu_select_messages">Select messages</span>
               </button>
               <!-- Report -->
-              <button onclick="triggerReportAction(event)" class="menu-item-custom">
+              <button data-ichat-onclick="triggerReportAction(event)" class="menu-item-custom">
                 <i data-lucide="flag"></i>
                 <span data-i18n="menu_report">Report</span>
               </button>
               <!-- Divider -->
               <div class="h-px bg-borderColor/50 my-1"></div>
               <!-- Delete Chat -->
-              <button onclick="triggerDeleteChatAction(event)" class="menu-item-custom danger">
+              <button data-ichat-onclick="triggerDeleteChatAction(event)" class="menu-item-custom danger">
                 <i data-lucide="trash-2"></i>
                 <span id="menu-delete-chat-text" data-i18n="menu_delete_chat">Delete Chat</span>
               </button>
@@ -123,16 +123,16 @@
     <div id="emoji-picker" class="hidden absolute bottom-[72px] right-6 p-3 bg-bgSidebar border border-borderColor rounded-custom-lg shadow-xl z-20 w-[240px]">
       <div class="text-xs font-bold text-textSecondary mb-2 border-b border-borderColor/40 pb-1">Quick Emojis</div>
       <div class="grid grid-cols-5 gap-2 text-center text-xl">
-        <button onclick="insertEmoji('😀')" class="hover:scale-125 transition-transform p-1">😀</button>
-        <button onclick="insertEmoji('😂')" class="hover:scale-125 transition-transform p-1">😂</button>
-        <button onclick="insertEmoji('😍')" class="hover:scale-125 transition-transform p-1">😍</button>
-        <button onclick="insertEmoji('👍')" class="hover:scale-125 transition-transform p-1">👍</button>
-        <button onclick="insertEmoji('🔥')" class="hover:scale-125 transition-transform p-1">🔥</button>
-        <button onclick="insertEmoji('🎉')" class="hover:scale-125 transition-transform p-1">🎉</button>
-        <button onclick="insertEmoji('🚀')" class="hover:scale-125 transition-transform p-1">🚀</button>
-        <button onclick="insertEmoji('🔒')" class="hover:scale-125 transition-transform p-1">🔒</button>
-        <button onclick="insertEmoji('🔑')" class="hover:scale-125 transition-transform p-1">🔑</button>
-        <button onclick="insertEmoji('🛡️')" class="hover:scale-125 transition-transform p-1">🛡️</button>
+        <button data-ichat-onclick="insertEmoji('😀')" class="hover:scale-125 transition-transform p-1">😀</button>
+        <button data-ichat-onclick="insertEmoji('😂')" class="hover:scale-125 transition-transform p-1">😂</button>
+        <button data-ichat-onclick="insertEmoji('😍')" class="hover:scale-125 transition-transform p-1">😍</button>
+        <button data-ichat-onclick="insertEmoji('👍')" class="hover:scale-125 transition-transform p-1">👍</button>
+        <button data-ichat-onclick="insertEmoji('🔥')" class="hover:scale-125 transition-transform p-1">🔥</button>
+        <button data-ichat-onclick="insertEmoji('🎉')" class="hover:scale-125 transition-transform p-1">🎉</button>
+        <button data-ichat-onclick="insertEmoji('🚀')" class="hover:scale-125 transition-transform p-1">🚀</button>
+        <button data-ichat-onclick="insertEmoji('🔒')" class="hover:scale-125 transition-transform p-1">🔒</button>
+        <button data-ichat-onclick="insertEmoji('🔑')" class="hover:scale-125 transition-transform p-1">🔑</button>
+        <button data-ichat-onclick="insertEmoji('🛡️')" class="hover:scale-125 transition-transform p-1">🛡️</button>
       </div>
     </div>
 
@@ -145,11 +145,11 @@
       <!-- Selection Mode Footer Actions -->
       <div id="chat-input-select-mode-banner" class="chat-select-footer hidden select-none w-full">
         <div class="chat-select-footer-bar">
-          <button type="button" id="select-mode-delete-btn" class="chat-select-action chat-select-action-danger" onclick="deleteSelectedMessages()" title="Delete selected">
+          <button type="button" id="select-mode-delete-btn" class="chat-select-action chat-select-action-danger" data-ichat-onclick="deleteSelectedMessages()" title="Delete selected">
             <i data-lucide="trash-2"></i>
           </button>
           <div id="select-mode-footer-count" class="chat-select-count">已选择 0 条消息</div>
-          <button type="button" id="select-mode-forward-btn" class="chat-select-action" onclick="forwardSelectedMessages()" title="Forward selected">
+          <button type="button" id="select-mode-forward-btn" class="chat-select-action" data-ichat-onclick="forwardSelectedMessages()" title="Forward selected">
             <i data-lucide="forward"></i>
           </button>
         </div>
@@ -183,19 +183,19 @@
         
         <!-- Auto-Growing Messaging Input Area -->
         <div class="telegram-composer-field flex-1 bg-bgSearch border border-borderColor/50 rounded-custom-lg px-4 py-2 flex items-end space-x-2">
-          <textarea id="chat-input-textarea" rows="1" oninput="adjustTextareaHeight(this)"
+          <textarea id="chat-input-textarea" rows="1" data-ichat-oninput="adjustTextareaHeight(this)"
             class="flex-1 bg-transparent text-textMain placeholder-textSecondary/70 focus:outline-none resize-none max-h-[160px] text-sm py-1 font-sans custom-scrollbar"
             placeholder="Write an encrypted message..."
             data-i18n-placeholder="write_placeholder"></textarea>
           
           <!-- Emoji Trigger Button -->
-          <button onclick="toggleEmojiDropdown()" class="telegram-composer-emoji p-1 rounded-full text-textSecondary hover:text-textMain transition-colors focus:outline-none" title="Insert Emoji" data-i18n-title="insert_emoji">
+          <button data-ichat-onclick="toggleEmojiDropdown()" class="telegram-composer-emoji p-1 rounded-full text-textSecondary hover:text-textMain transition-colors focus:outline-none" title="Insert Emoji" data-i18n-title="insert_emoji">
             <i data-lucide="smile" class="w-5.5 h-5.5"></i>
           </button>
         </div>
 
         <!-- Message Dispatcher Button -->
-        <button onclick="sendMessage()"
+        <button data-ichat-onclick="sendMessage()"
           class="telegram-composer-send p-3 bg-brand-light dark:bg-brand-dark hover:opacity-95 text-white rounded-full shadow-md hover:scale-105 transition-all focus:outline-none flex items-center justify-center flex-shrink-0"
           title="Send Ciphertext">
           <i data-lucide="send" class="w-5 h-5 pl-0.5"></i>
@@ -205,7 +205,7 @@
 
     </footer>
 
-    <!-- 5. E2E Cryptographic Fingerprint Verification Modal (Overlayed inside active chat container) -->
+    <!-- 5. E2E security verification request modal -->
     <div id="fingerprint-modal" class="hidden absolute inset-0 bg-black/55 backdrop-blur-[2px] z-50 items-center justify-center p-4">
       <div class="bg-bgSidebar border border-borderColor rounded-custom-lg shadow-2xl w-full max-w-[420px] p-6 text-center select-none flex flex-col items-center">
         
@@ -214,8 +214,8 @@
           <i data-lucide="shield-check" class="w-6 h-6"></i>
         </div>
         
-        <h3 class="text-base font-bold text-textMain" data-i18n="verify_fp_title">Verify Security Fingerprint</h3>
-        <p class="text-xs text-textSecondary mt-1" data-i18n="verify_fp_desc">Comparing keys prevents potential interception.</p>
+        <h3 class="text-base font-bold text-textMain" data-i18n="verify_fp_title">安全验证邀请</h3>
+        <p class="text-xs text-textSecondary mt-1" data-i18n="verify_fp_desc">向对方发送请求，双方同意后由系统确认当前密钥是否安全。</p>
         <div id="fp-modal-status" class="security-status-chip security-status-loading mt-3">
           Loading trust status
         </div>
@@ -223,43 +223,32 @@
           High risk: this contact active key differs from a previously verified fingerprint.
         </div>
 
-        <!-- Mock QR code pattern -->
-        <div class="my-5 p-2 bg-white rounded-lg border border-gray-200">
-          <svg class="w-36 h-36" viewBox="0 0 100 100" fill="currentColor">
-            <path d="M5,5 h20 v20 h-20 z M9,9 h12 v12 h-12 z" />
-            <path d="M75,5 h20 v20 h-20 z M79,9 h12 v12 h-12 z" />
-            <path d="M5,75 h20 v20 h-20 z M9,79 h12 v12 h-12 z" />
-            <path d="M35,15 h10 v5 h5 v-10 h-15 z" />
-            <path d="M55,10 h10 v15 h-5 v-10 h-5 z" />
-            <path d="M30,35 h5 v5 h-5 z M45,35 h15 v5 h-15 z M70,35 h10 v10 h-10 z" />
-            <path d="M10,45 h15 v5 h-15 z M35,45 h5 v10 h-5 z M50,55 h10 v10 h-10 z" />
-            <path d="M70,60 h15 v5 h-15 z M85,75 h10 v15 h-5 v-10 h-5 z" />
-            <path d="M30,75 h10 v10 h-10 z M45,85 h20 v5 h-20 z" />
-          </svg>
+        <div class="my-5 w-20 h-20 rounded-2xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center justify-center">
+          <i data-lucide="shield-check" class="w-10 h-10"></i>
         </div>
 
         <!-- Explanatory note -->
         <p class="text-[11px] text-textSecondary px-2 leading-relaxed" id="fp-modal-explain-container">
-          Verify with <strong id="fp-modal-name">this contact</strong> that the fingerprints in their security panel match the string below:
+          向 <strong id="fp-modal-name">联系人</strong> 发送安全验证请求。对方同意后，系统会检查双方当前使用的密钥版本是否与请求一致。
         </p>
 
         <!-- Encrypted fingerprint string -->
         <div class="mt-3.5 p-3 bg-bgSearch rounded-custom-md border border-borderColor w-full">
           <code id="fp-modal-key" class="text-xs font-mono font-bold text-textMain break-all tracking-wider block">
-            Loading real fingerprint...
+            等待加载当前密钥版本...
           </code>
         </div>
 
         <!-- Trust controls -->
-        <button id="fp-modal-trust-btn" onclick="trustActiveFingerprintFromModal()"
+        <button id="fp-modal-trust-btn" data-ichat-onclick="trustActiveFingerprintFromModal()"
           class="w-full mt-5 py-2.5 bg-brand-light dark:bg-brand-dark text-white font-semibold text-sm rounded-custom-md hover:opacity-95 focus:outline-none transition-all">
-          Fingerprints Match
+          发送安全验证请求
         </button>
-        <button id="fp-modal-untrust-btn" onclick="untrustActiveFingerprintFromModal()"
+        <button id="fp-modal-untrust-btn" data-ichat-onclick="untrustActiveFingerprintFromModal()"
           class="hidden w-full mt-2 py-2.5 border border-borderColor text-textSecondary hover:text-red-500 hover:border-red-500/40 font-semibold text-sm rounded-custom-md focus:outline-none transition-all">
           Remove Trust
         </button>
-        <button onclick="closeFingerprintModal()"
+        <button data-ichat-onclick="closeFingerprintModal()"
           class="w-full mt-2 py-2 text-textSecondary hover:text-textMain font-semibold text-xs rounded-custom-md hover:bg-bgSearch focus:outline-none transition-all">
           Close
         </button>

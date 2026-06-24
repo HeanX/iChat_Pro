@@ -47,7 +47,7 @@
               placeholder="Search by username, nickname, or user ID..."
               class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain placeholder-textSecondary/60 text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
               required
-              oninput="clearSelectedUserId(); liveSearchContacts(this.value)"
+              data-ichat-oninput="clearSelectedUserId(); liveSearchContacts(this.value)"
               onfocus="liveSearchContacts(this.value)"
             >
             <div id="search-results-dropdown"
@@ -191,7 +191,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ request.csp_nonce }}">
   let searchTimer = null;
 
   function escapeHtml(value) {
@@ -264,7 +264,7 @@
 
       return `
         <button type="button" class="w-full flex items-center justify-between px-4 py-3 hover:bg-bgSearch transition-colors text-left"
-          data-user-id="${userId}" data-username="${username}" onclick="selectContactSearchResult(this)">
+          data-user-id="${userId}" data-username="${username}" data-ichat-onclick="selectContactSearchResult(this)">
           <div class="flex items-center space-x-3">
             <div class="w-8 h-8 rounded-full bg-brand-light dark:bg-brand-dark text-white flex items-center justify-center font-bold text-xs" ${avatarBgStyle}>
               ${avatarInner}

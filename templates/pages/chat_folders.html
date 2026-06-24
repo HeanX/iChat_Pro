@@ -269,7 +269,7 @@
   <div id="folders-toast" class="folders-toast"></div>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   (function() {
     const FOLDER_SETTINGS_URL = '/api/settings/chat-folders/';
     const DEFAULTS = {

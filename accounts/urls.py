@@ -113,6 +113,16 @@ urlpatterns = [
         views.key_trust_list_view,
         name='key-trust-list',
     ),
+    path(
+        'api/keys/verification-requests/',
+        views.key_verification_requests_view,
+        name='key-verification-requests',
+    ),
+    path(
+        'api/keys/verification-requests/<int:request_id>/respond/',
+        views.key_verification_request_respond_view,
+        name='key-verification-request-respond',
+    ),
     # Notification settings (P2 T23)
     path(
         'api/settings/notifications/',

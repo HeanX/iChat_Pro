@@ -27,7 +27,7 @@
           class="flex-1 bg-bgSearch border border-borderColor rounded-custom-md px-3 py-2 text-sm text-textMain placeholder-textSecondary focus:outline-none focus:ring-1 focus:ring-brand-light"
           placeholder="Search by username..."
           autocomplete="off"
-          oninput="liveSearchContacts()">
+          data-ichat-oninput="liveSearchContacts()">
         <button type="submit" class="px-4 py-2 bg-brand-light dark:bg-brand-dark text-white text-sm font-semibold rounded-custom-md hover:opacity-90 transition-opacity">
           Add
         </button>
@@ -144,7 +144,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   // Live search — reuses the same backend search endpoint
   var _searchTimer = null;
   function liveSearchContacts() {

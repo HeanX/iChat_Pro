@@ -22,11 +22,11 @@
         </div>
         <div>
           {% if session.is_current %}
-          <button type="button" onclick="showToast(currentLanguage === 'zh' ? '无法终止当前会话' : 'Cannot terminate current session')" class="session-btn-terminate" data-i18n="terminate">
+          <button type="button" data-ichat-onclick="showToast(currentLanguage === 'zh' ? '无法终止当前会话' : 'Cannot terminate current session')" class="session-btn-terminate" data-i18n="terminate">
             Terminate
           </button>
           {% else %}
-          <button type="button" data-session-id="{{ session.session_index }}" onclick="terminateSession(this.dataset.sessionId)" class="session-btn-terminate" data-i18n="terminate">
+          <button type="button" data-session-id="{{ session.session_index }}" data-ichat-onclick="terminateSession(this.dataset.sessionId)" class="session-btn-terminate" data-i18n="terminate">
             Terminate
           </button>
           {% endif %}
@@ -39,7 +39,7 @@
       {% endfor %}
     </div>
 
-    <button type="button" onclick="terminateOtherSessions()" class="terminate-all-btn">
+    <button type="button" data-ichat-onclick="terminateOtherSessions()" class="terminate-all-btn">
       Terminate All Other Sessions
     </button>
   </section>
@@ -427,7 +427,7 @@
 </style>
 
 {# ── Sessions & Shortcuts JavaScript ── #}
-<script>
+<script nonce="{{ request.csp_nonce }}">
   var SESSION_DEFAULTS = {
     language: (window.currentLanguage || localStorage.getItem('ichat_lang') || 'en'),
     show_translate: true

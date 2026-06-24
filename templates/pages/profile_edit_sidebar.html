@@ -15,13 +15,13 @@
   </div>
   {% endif %}
 
-  <form id="profile-edit-form" method="POST" action="{% url 'api-profile-me' %}" enctype="multipart/form-data" class="profile-edit-form" onsubmit="submitProfileEditForm(event)">
+  <form id="profile-edit-form" method="POST" action="{% url 'api-profile-me' %}" enctype="multipart/form-data" class="profile-edit-form" data-ichat-onsubmit="submitProfileEditForm(event)">
     {% csrf_token %}
     <input type="hidden" name="_sidebar" value="1">
     <input type="hidden" name="nickname" value="{{ form.nickname.value|default:request.user.profile.nickname }}">
 
     <section class="profile-edit-hero">
-      <button type="button" class="profile-edit-avatar" onclick="document.getElementById('profile-avatar-input').click()" title="Change Avatar" data-i18n-title="change_avatar" style="background-color: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
+      <button type="button" class="profile-edit-avatar" data-ichat-onclick="document.getElementById('profile-avatar-input').click()" title="Change Avatar" data-i18n-title="change_avatar" style="background-color: {% if settings_avatar_url %}transparent{% else %}{{ settings_avatar_color|default:'#5c6bc0' }}{% endif %};">
         {% if settings_avatar_url %}
         <img src="{{ settings_avatar_url }}" alt="{{ request.user.username }}">
         {% else %}
@@ -32,7 +32,7 @@
           <i data-lucide="plus" aria-hidden="true"></i>
         </span>
       </button>
-      <input type="file" id="profile-avatar-input" name="avatar" accept="image/*" class="hidden" onchange="openAvatarEditor(this)">
+      <input type="file" id="profile-avatar-input" name="avatar" accept="image/*" class="hidden" data-ichat-onchange="openAvatarEditor(this)">
     </section>
 
     <section class="profile-edit-card">
@@ -55,7 +55,7 @@
       {% if form.bio.errors %}<p class="profile-edit-error">{{ form.bio.errors.0 }}</p>{% endif %}
 
       <input type="date" id="profile-birthday-input" name="birthday" value="{{ request.user.profile.birthday|date:'Y-m-d' }}" class="profile-edit-date-input">
-      <button type="button" class="profile-edit-row" onclick="openProfileBirthdayPicker()">
+      <button type="button" class="profile-edit-row" data-ichat-onclick="openProfileBirthdayPicker()">
         <i data-lucide="gift" aria-hidden="true"></i>
         <span id="profile-birthday-label">{% if request.user.profile.birthday %}{{ request.user.profile.birthday|date:'Y-m-d' }}{% else %}<span data-i18n="add_birthday">Add Birthday</span>{% endif %}</span>
       </button>
@@ -75,7 +75,7 @@
           placeholder="Username (optional)"
           data-i18n-placeholder="username_optional"
           pattern="^[a-zA-Z0-9_]{5,}$"
-          oninput="validateUsername()">
+          data-ichat-oninput="validateUsername()">
       </label>
       <p id="username-error" class="profile-edit-error hidden"></p>
       {% if form.username.errors %}<p class="profile-edit-error">{{ form.username.errors.0 }}</p>{% endif %}
@@ -98,7 +98,7 @@
   </form>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   // ── Avatar Editor Integration ──────────────────────────────────────────
   function openAvatarEditor(input) {
     if (!input.files || !input.files[0]) return;

@@ -21,10 +21,12 @@ from chat.models import (
     EncryptedMessage,
     GroupMessage,
     GroupMessageRecipient,
+    UserLLMConfig,
     UserMessageDeletion,
     UserPresence,
 )
 from chat.consumers import ChatConsumer
+from chat.llm import normalize_chat_completions_endpoint
 from ichat_pro.asgi import application
 from chat.views import RECALL_LIMIT_MINUTES
 from accounts.models import Contact, UserPrivacySettings
@@ -327,6 +329,136 @@ class MessageOperationsAPITests(TestCase):
         )
         # Non-member gets 404 (membership check before permission)
         self.assertEqual(resp.status_code, 404)
+
+    def test_direct_file_message_rejects_private_receiver_outside_conversation(self):
+        outsider = _create_user('mallory')
+        encrypted_file = EncryptedFile.objects.create(
+            upload_id='10000000-0000-0000-0000-000000000001',
+            client_file_id='direct-private-invalid-receiver',
+            owner=self.u1,
+            conversation=self.conv,
+            message_kind=EncryptedFile.MessageKind.FILE,
+            status=EncryptedFile.Status.AVAILABLE,
+            total_size_bytes=32,
+            chunk_count=1,
+        )
+
+        resp = self.client.post(
+            f'/api/files/{encrypted_file.pk}/messages/',
+            data=json.dumps({
+                'conversation_id': self.conv.pk,
+                'conversation_type': 'single',
+                'receiver_id': outsider.pk,
+                'client_message_id': 'direct-file-invalid-receiver',
+                'message_type': 'file',
+                'ciphertext': VALID_CIPHERTEXT,
+                'nonce': VALID_NONCE,
+                'auth_tag': VALID_AUTH_TAG,
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'receiver_key_version': 1,
+                'file_keys': [
+                    {
+                        'holder_id': self.u1.pk,
+                        'encrypted_file_key': 'self-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                    },
+                    {
+                        'holder_id': self.u2.pk,
+                        'encrypted_file_key': 'peer-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                    },
+                ],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(
+            EncryptedMessage.objects.filter(client_message_id='direct-file-invalid-receiver').exists()
+        )
+
+    def test_direct_group_file_message_requires_membership_version(self):
+        group = _create_group(self.u1, name='Files')
+        ConversationMember.objects.create(
+            conversation=group,
+            user=self.u2,
+            role=ConversationMember.Role.MEMBER,
+        )
+        encrypted_file = EncryptedFile.objects.create(
+            upload_id='10000000-0000-0000-0000-000000000002',
+            client_file_id='direct-group-missing-version',
+            owner=self.u1,
+            conversation=group,
+            message_kind=EncryptedFile.MessageKind.FILE,
+            status=EncryptedFile.Status.AVAILABLE,
+            total_size_bytes=32,
+            chunk_count=1,
+        )
+
+        resp = self.client.post(
+            f'/api/files/{encrypted_file.pk}/messages/',
+            data=json.dumps({
+                'conversation_id': group.pk,
+                'conversation_type': 'group',
+                'client_message_id': 'direct-group-missing-version',
+                'message_type': 'file',
+                'recipients': [
+                    {
+                        'receiver_id': self.u1.pk,
+                        'ciphertext': VALID_CIPHERTEXT,
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'receiver_key_version': 1,
+                    },
+                    {
+                        'receiver_id': self.u2.pk,
+                        'ciphertext': VALID_CIPHERTEXT,
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                        'receiver_key_version': 1,
+                    },
+                ],
+                'algorithm': 'AES-256-GCM',
+                'sender_key_version': 1,
+                'file_keys': [
+                    {
+                        'holder_id': self.u1.pk,
+                        'encrypted_file_key': 'self-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                    },
+                    {
+                        'holder_id': self.u2.pk,
+                        'encrypted_file_key': 'peer-key',
+                        'nonce': VALID_NONCE,
+                        'auth_tag': VALID_AUTH_TAG,
+                    },
+                ],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(
+            GroupMessage.objects.filter(client_message_id='direct-group-missing-version').exists()
+        )
+
+    def test_user_llm_config_encrypts_api_key_at_rest(self):
+        config = UserLLMConfig(user=self.u1, api_url='https://api.anthropic.com/v1/messages')
+        config.set_api_key('secret-key')
+        config.save()
+
+        stored = UserLLMConfig.objects.get(pk=config.pk)
+        self.assertNotEqual(stored.api_key, 'secret-key')
+        self.assertTrue(stored.api_key.startswith(UserLLMConfig.ENCRYPTED_PREFIX))
+        self.assertEqual(stored.get_api_key(), 'secret-key')
+
+    def test_llm_endpoint_rejects_localhost(self):
+        with self.assertRaises(ValueError):
+            normalize_chat_completions_endpoint('https://localhost/v1/chat/completions')
 
     def test_forward_private_message_creates_target_message(self):
         u3 = _create_user('carol')
@@ -1022,6 +1154,16 @@ class PrivacySecurityAPITests(TestCase):
         self.assertEqual(settings['who_can_add_me_to_groups'], 'contacts')
         self.assertTrue(settings['passkey_enabled'])
         self.assertEqual(settings['login_email'], 'privacy@example.com')
+
+    def test_unified_search_hides_non_contact_regular_users(self):
+        Contact.objects.create(user=self.alice, contact=self.bob)
+
+        response = self.client.get('/api/search/?q=privacy_&scope=contacts')
+
+        self.assertEqual(response.status_code, 200)
+        usernames = {item['username'] for item in response.json()['results']['contacts']}
+        self.assertIn(self.bob.username, usernames)
+        self.assertNotIn(self.carol.username, usernames)
 
     def test_group_invite_respects_target_privacy(self):
         group = _create_group(self.alice)

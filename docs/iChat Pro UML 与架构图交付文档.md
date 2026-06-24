@@ -69,12 +69,11 @@ graph LR
 ## 2. 数据库 ER 图
 
 ```mermaid
-%%{init: {'flowchart': {'useMaxWidth': false}}}%%
+%%{init: {'flowchart': {'useMaxWidth': false, 'nodeSpacing': 16, 'rankSpacing': 24}}}%%
 flowchart TD
     User[User 用户]
 
     User -->|"1:1"| UP[UserProfile 用户资料]
-    User -->|"1:1"| UPS[UserPrivacySettings 隐私设置]
     User -->|"1:1"| UNS[UserNotificationSettings 通知设置]
     User -->|"1:1"| USS[UserStorageSettings 存储设置]
     User -->|"1:1"| UPr[UserPresence 在线状态]

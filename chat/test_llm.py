@@ -163,3 +163,41 @@ class AiConfigViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(UserLLMConfig.objects.filter(user=self.user).exists())
+
+    @patch("chat.llm.socket.getaddrinfo", return_value=PUBLIC_ADDR_INFO)
+    def test_placeholder_api_key_does_not_replace_existing_key(self, _mock_getaddrinfo):
+        config = UserLLMConfig.objects.create(
+            user=self.user,
+            assistant_id="ai-assistant",
+            api_url="https://api.openai.com/v1/chat/completions",
+        )
+        config.set_api_key("sk-real")
+        config.save(update_fields=["api_key", "updated_at"])
+
+        response = self.client.post(
+            "/api/ai/config/",
+            data=json.dumps({
+                "assistant_id": "ai-assistant",
+                "endpoint": "https://api.openai.com/v1/chat/completions",
+                "api_key": "鈥⑩€⑩€⑩€⑩€",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        config.refresh_from_db()
+        self.assertEqual(config.get_api_key(), "sk-real")
+
+    def test_placeholder_stored_api_key_is_reported_as_missing(self):
+        config = UserLLMConfig.objects.create(
+            user=self.user,
+            assistant_id="ai-assistant",
+            api_url="https://api.openai.com/v1/chat/completions",
+        )
+        config.set_api_key("鈥⑩€⑩€⑩€⑩€")
+        config.save(update_fields=["api_key", "updated_at"])
+
+        response = self.client.get("/api/ai/config/?assistant_id=ai-assistant")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["has_api_key"])

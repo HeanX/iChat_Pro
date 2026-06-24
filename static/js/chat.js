@@ -8687,14 +8687,13 @@ function createAiAssistantSession() {
   const sessions = getAiAssistantSessions();
   const id = `ai-assistant-${Date.now()}`;
   const count = sessions.length + 1;
-  const currentSettings = getAiModelSettings(activeAiAssistantId);
   sessions.push({
     id,
     title: `AI Assistant ${count}`,
     created_at: new Date().toISOString(),
   });
   localStorage.setItem(AI_ASSISTANTS_KEY, JSON.stringify(sessions));
-  setAiModelSettings(currentSettings, id);
+  setAiModelSettings(AI_DEFAULT_MODEL_SETTINGS, id);
   renderChatList();
   openAiAssistant(id);
 }
@@ -8977,13 +8976,53 @@ function syncAiModelSettingsForm() {
   }
 }
 
+async function syncAiServerModelConfig(sessionId = activeAiAssistantId) {
+  const normalizedSessionId = decodeURIComponent(String(sessionId || AI_CONVERSATION_ID));
+  try {
+    const resp = await fetch(`/api/ai/config/?assistant_id=${encodeURIComponent(normalizedSessionId)}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    if (!resp.ok) return getAiModelSettings(normalizedSessionId);
+    const body = await resp.json().catch(function() { return {}; });
+    const current = getAiModelSettings(normalizedSessionId);
+    const next = Object.assign({}, current, {
+      apiKey: '',
+      apiKeyConfigured: Boolean(body.has_api_key)
+    });
+    if (body.endpoint) {
+      next.endpoint = body.endpoint;
+    }
+    const settings = setAiModelSettings(next, normalizedSessionId);
+    if (normalizedSessionId === activeAiAssistantId) {
+      syncAiModelSettingsForm();
+      updateAiModelSummary(settings);
+      updateAiHeaderModel();
+      refreshAiConversationListItem();
+    }
+    return settings;
+  } catch (_) {
+    return getAiModelSettings(normalizedSessionId);
+  }
+}
+
+function normalizeAiApiKeyInput(value) {
+  const apiKey = String(value || '').trim();
+  if (!apiKey) return '';
+  if (/[^\x20-\x7E]/.test(apiKey)) return '';
+  if (/^[*.\-]{6,}$/.test(apiKey)) return '';
+  return apiKey;
+}
+
 async function saveAiModelSettings() {
   const endpointInput = document.getElementById("ai-model-endpoint");
   const apiKeyInput = document.getElementById("ai-model-api-key");
   const modelSelect = document.getElementById("ai-model-name");
   const nextSettings = {
     endpoint: endpointInput ? endpointInput.value.trim() : AI_DEFAULT_MODEL_SETTINGS.endpoint,
-    apiKey: apiKeyInput ? apiKeyInput.value.trim() : "",
+    apiKey: normalizeAiApiKeyInput(apiKeyInput ? apiKeyInput.value : ""),
     model: modelSelect ? modelSelect.value : AI_DEFAULT_MODEL_SETTINGS.model
   };
 
@@ -9108,6 +9147,7 @@ function openAiAssistant(sessionId = AI_CONVERSATION_ID) {
   renderAiHistory(history);
   bindAiMessageActionHandlers();
   updateAiHeaderModel();
+  syncAiServerModelConfig(activeAiAssistantId);
 
   // Set greeting time to current system time
   const greetingTime = document.getElementById("ai-greeting-time");

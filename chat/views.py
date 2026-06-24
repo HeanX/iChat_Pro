@@ -4565,6 +4565,22 @@ def _normalize_ai_assistant_id(value):
     return assistant_id[:80]
 
 
+def _is_placeholder_api_key(value):
+    value = str(value or '').strip()
+    if not value:
+        return False
+    if not value.isascii():
+        return True
+    return len(value) >= 6 and set(value) <= {'*', '.', '-'}
+
+
+def _normalize_ai_api_key(value):
+    api_key = str(value or '').strip()
+    if _is_placeholder_api_key(api_key):
+        return ''
+    return api_key
+
+
 def _configured_ai_model_config(model_config):
     return bool(
         model_config.get('endpoint')
@@ -4586,10 +4602,11 @@ def _trusted_ai_model_config(user, client_model_config):
         user_config = None
 
     model = client_model_config.get('model') or 'qwen-plus'
-    if user_config and (user_config.api_url or '').strip() and user_config.get_api_key():
+    api_key = _normalize_ai_api_key(user_config.get_api_key() if user_config else '')
+    if user_config and (user_config.api_url or '').strip() and api_key:
         return {
             'endpoint': (user_config.api_url or '').strip(),
-            'api_key': user_config.get_api_key(),
+            'api_key': api_key,
             'model': model,
         }
 
@@ -4606,7 +4623,7 @@ def _server_ai_config_status(user, assistant_id='ai-assistant'):
         user_config = None
 
     user_has_endpoint = bool(user_config and (user_config.api_url or '').strip())
-    user_has_api_key = bool(user_config and user_config.get_api_key())
+    user_has_api_key = bool(user_config and _normalize_ai_api_key(user_config.get_api_key()))
     env_has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     return {
@@ -4656,10 +4673,10 @@ def ai_config_view(request):
             user_config = None
 
         return JsonResponse({
-            'configured': bool(user_config and user_config.api_url and user_config.get_api_key()),
+            'configured': bool(user_config and user_config.api_url and _normalize_ai_api_key(user_config.get_api_key())),
             'assistant_id': assistant_id,
             'endpoint': (user_config.api_url or '').strip() if user_config else '',
-            'has_api_key': bool(user_config and user_config.get_api_key()),
+            'has_api_key': bool(user_config and _normalize_ai_api_key(user_config.get_api_key())),
         })
 
     if request.method != 'POST':
@@ -4671,7 +4688,7 @@ def ai_config_view(request):
         return JsonResponse({'error': 'Invalid request body.'}, status=400)
 
     raw_endpoint = str(data.get('endpoint') or '').strip()
-    raw_api_key = str(data.get('api_key') or '').strip()
+    raw_api_key = _normalize_ai_api_key(data.get('api_key'))
     assistant_id = _normalize_ai_assistant_id(data.get('assistant_id'))
 
     # Allow clearing the config by sending empty endpoint and empty api_key
@@ -4713,10 +4730,10 @@ def ai_config_view(request):
         pass
 
     return JsonResponse({
-        'configured': bool(user_config.api_url and user_config.get_api_key()),
+        'configured': bool(user_config.api_url and _normalize_ai_api_key(user_config.get_api_key())),
         'assistant_id': assistant_id,
         'endpoint': (user_config.api_url or '').strip(),
-        'has_api_key': bool(user_config.get_api_key()),
+        'has_api_key': bool(_normalize_ai_api_key(user_config.get_api_key())),
     })
 
 

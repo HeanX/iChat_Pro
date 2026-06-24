@@ -48,6 +48,14 @@
 
           <!-- AI More Operations Dropdown Menu -->
           <div id="ai-header-more-dropdown" class="hidden absolute right-0 mt-1.5 w-[230px] bg-bgSidebar/90 dark:bg-bgSidebar/95 backdrop-blur-lg border border-borderColor/60 rounded-[20px] shadow-xl z-50 py-1.5 animate-fadeIn select-none">
+            <button data-ichat-onclick="createAiAssistantSession(); toggleAiMoreMenu(event);" class="menu-item-custom">
+              <i data-lucide="sparkles"></i>
+              <span>新建 Assistant</span>
+            </button>
+            <button data-ichat-onclick="renameAiAssistantSession(activeAiAssistantId); toggleAiMoreMenu(event);" class="menu-item-custom">
+              <i data-lucide="edit-3"></i>
+              <span>重命名</span>
+            </button>
             <!-- Clear History -->
             <button data-ichat-onclick="clearAiChat(); toggleAiMoreMenu(event);" class="menu-item-custom danger">
               <i data-lucide="trash-2"></i>

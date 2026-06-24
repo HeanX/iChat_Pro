@@ -1,12 +1,12 @@
 # iChat Pro UML 与架构图交付文档
 
-> 版本：v1.0
-> 日期：2026-06-16
+> 版本：v2.0
+> 日期：2026-06-24
 > 作者：ketter1024
-> 关联 Issue：#120 (P3 T08)
-> 渲染引擎：Mermaid （推荐使用 VS Code Mermaid Preview 或 GitHub 原生渲染）
+> 关联 Issue：#120 (P3 T08) · 修复 Issue：#124
+> 渲染引擎：Mermaid（推荐 VS Code Mermaid Preview 或 GitHub 原生渲染）
 
-本文档为 iChat Pro 交付 UML 与架构图，覆盖系统用例、核心数据模型、组件架构、端到端加密时序、AI Assistant 交互边界与业务流程。
+本文档为 iChat Pro 交付 UML 与架构图，覆盖系统用例、数据库 ER 模型、核心类结构、组件架构、端到端加密时序、AI Assistant 交互边界与业务流程。所有图表基于 **2026-06-24 main 分支代码** 绘制。
 
 > **Phase 3 LLM 边界声明**：所有图表中 LLM/AI Assistant 组件**不**读取聊天数据库中的 E2EE 明文，**不**持有或接触任何用户私钥、ECDH 会话密钥或 Key Encryption Key，仅处理用户主动输入的 Prompt 文本。
 
@@ -15,72 +15,177 @@
 ## 1. 系统用例图
 
 ```mermaid
-graph TB
-    subgraph Actors
-        U[👤 普通用户]
-        A[👤 管理员]
-        Q[🤖 Qwen API / LLM Provider]
+graph LR
+    U((普通用户)) --> 账号模块
+    U --> 社交模块
+    U --> 聊天模块
+    U --> 群管理模块
+    U --> AI模块
+
+    Admin((管理员)) --> 管理模块
+
+    Qwen((LLM Provider)) --> AI模块
+
+    subgraph 账号模块
+        UC1[注册]
+        UC2[登录]
+        UC3[退出]
     end
 
-    subgraph "iChat Pro System"
-        subgraph "账号模块"
-            UC1[注册]
-            UC2[登录]
-            UC3[退出]
-        end
-        subgraph "社交模块"
-            UC4[搜索联系人]
-            UC5[发送/接受好友申请]
-            UC6[管理联系人]
-        end
-        subgraph "聊天模块"
-            UC7[私聊 E2EE 收发]
-            UC8[群聊逐成员加密收发]
-            UC9[消息操作 - 撤回/删除/转发/回复]
-        end
-        subgraph "群管理模块"
-            UC10[创建群组]
-            UC11[邀请/移除成员]
-            UC12[群主转让/管理员设置]
-        end
-        subgraph "AI Assistant 模块"
-            UC13[通用问答]
-            UC14[文本摘要]
-            UC15[草稿生成]
-        end
-        subgraph "管理模块"
-            UC16[管理用户/群组]
-            UC17[查看操作日志]
-        end
+    subgraph 社交模块
+        UC4[搜索联系人]
+        UC5[发送/接受好友申请]
+        UC6[管理联系人]
     end
 
-    U --> UC1
-    U --> UC2
-    U --> UC3
-    U --> UC4
-    U --> UC5
-    U --> UC6
-    U --> UC7
-    U --> UC8
-    U --> UC9
-    U --> UC10
-    U --> UC11
-    U --> UC12
-    U --> UC13
-    U --> UC14
-    U --> UC15
-    A --> UC16
-    A --> UC17
-    Q --> UC13
-    Q --> UC14
-    Q --> UC15
+    subgraph 聊天模块
+        UC7[私聊 E2EE 收发]
+        UC8[群聊逐成员加密]
+        UC9[消息撤回/删除/转发/回复]
+    end
+
+    subgraph 群管理模块
+        UC10[创建群组]
+        UC11[邀请/移除成员]
+        UC12[群主转让/管理员设置]
+    end
+
+    subgraph AI模块[AI Assistant 模块]
+        UC13[通用问答]
+        UC14[文本摘要]
+        UC15[草稿生成]
+    end
+
+    subgraph 管理模块
+        UC16[管理用户/群组]
+        UC17[查看操作日志]
+    end
 ```
 
-**说明：** 普通用户覆盖注册到聊天的完整闭环；管理员负责用户/群组管理和审计；Qwen API 是 AI Assistant 的外部 LLM 提供商，仅处理用户主动输入的 Prompt，不接触 E2EE 密钥体系。
+**说明：** 普通用户覆盖注册到聊天的完整闭环；管理员负责用户/群组管理和审计；LLM Provider（Qwen / Anthropic / OpenAI 兼容）是 AI Assistant 的外部 LLM 提供商，仅处理用户主动输入的 Prompt，不接触 E2EE 密钥体系。采用 `graph LR` 水平布局，Actor 在左、用例模块在右。
 
 ---
 
-## 2. 核心类图
+## 2. 数据库 ER 图
+
+```mermaid
+erDiagram
+    User ||--|| UserProfile : has
+    User ||--o{ Contact : initiates
+    User ||--o{ FriendRequest : sends
+    User ||--o{ UserPublicKey : owns
+    User ||--o{ KeyTrust : verifies
+    User ||--o{ KeyVerificationRequest : requests
+    User ||--o{ BlockedUser : blocks
+    User ||--|| UserPrivacySettings : configures
+    User ||--|| UserNotificationSettings : configures
+    User ||--|| UserStorageSettings : configures
+    User ||--|| UserGeneralSettings : configures
+    User ||--|| UserChatFolderSettings : configures
+    User ||--|| MultiAccountContext : has
+    User ||--|| UserPresence : has
+    User ||--o{ UserLLMConfig : configures
+
+    User ||--o{ ConversationMember : belongs_to
+    User ||--o{ EncryptedMessage : sends_receives
+    User ||--o{ GroupMessage : sends
+    User ||--o{ GroupMessageRecipient : receives
+    User ||--o{ GroupInvitation : invited
+    User ||--o{ EncryptedFile : owns
+    User ||--o{ EncryptedFileKey : holds
+
+    Conversation ||--o{ ConversationMember : contains
+    Conversation ||--o{ EncryptedMessage : holds
+    Conversation ||--o{ GroupMessage : holds
+    Conversation ||--o{ GroupInvitation : has
+    Conversation ||--o{ GroupAnnouncement : has
+    Conversation ||--o{ EncryptedFile : contains
+
+    GroupMessage ||--o{ GroupMessageRecipient : per_recipient
+    EncryptedFile ||--o{ EncryptedFileChunk : chunked
+    EncryptedFile ||--o{ EncryptedFileKey : wrapped
+
+    User {
+        int id PK
+        string username
+        string password
+        string email
+    }
+
+    UserProfile {
+        int id PK
+        int user_id FK
+        string nickname
+        string bio
+        string phone_number
+        string location
+        date birthday
+        string user_type
+    }
+
+    Conversation {
+        int id PK
+        string type "single|group"
+        string name
+        string status "active|archived|deleted"
+        int membership_version
+    }
+
+    EncryptedMessage {
+        int id PK
+        int conversation_id FK
+        int sender_id FK
+        int receiver_id FK
+        text ciphertext
+        string nonce
+        string auth_tag
+        string client_message_id
+        string status "sent|delivered|read|recalled"
+    }
+
+    GroupMessage {
+        int id PK
+        int conversation_id FK
+        int sender_id FK
+        string client_message_id
+        string status
+    }
+
+    GroupMessageRecipient {
+        int id PK
+        int group_message_id FK
+        int receiver_id FK
+        text ciphertext
+        string nonce
+        string auth_tag
+        int membership_version
+        string status
+    }
+
+    UserPublicKey {
+        int id PK
+        int user_id FK
+        text identity_public_key
+        string key_fingerprint
+        int key_version
+        bool is_active
+    }
+
+    UserLLMConfig {
+        int id PK
+        int user_id FK
+        string assistant_id
+        string api_url
+        string api_key "Fernet encrypted"
+        string model
+    }
+```
+
+**说明：** ER 图展示了 iChat Pro 数据库核心表及其关系。User 为中枢，向下关联资料、隐私、密钥、联系人等 `accounts` 侧 1:1/1:N 关系；通过 ConversationMember 与会话多对多关联。Conversation 统一承载私聊与群聊，消息密文分别存入 EncryptedMessage（私聊）和 GroupMessage + GroupMessageRecipient（群聊逐成员副本）。UserLLMConfig 存储 LLM API Key（Fernet 加密），与 User 为 N:1 关系。
+
+---
+
+## 3. 核心类图
 
 ```mermaid
 classDiagram
@@ -114,58 +219,6 @@ classDiagram
         +str status
         +datetime created_at
     }
-    class Conversation {
-        +int id
-        +str type
-        +str name
-        +str status
-        +int membership_version
-        +int auto_delete_seconds
-        +datetime muted_until
-    }
-    class ConversationMember {
-        +int id
-        +Conv conversation
-        +User user
-        +str role
-        +str status
-        +int unread_count
-        +bool is_pinned
-        +datetime muted_until
-        +datetime archived_at
-    }
-    class EncryptedMessage {
-        +int id
-        +Conv conversation
-        +User sender
-        +User receiver
-        +str ciphertext
-        +str nonce
-        +str auth_tag
-        +int sender_key_version
-        +int receiver_key_version
-        +str client_message_id
-        +str status
-        +datetime recalled_at
-    }
-    class GroupMessage {
-        +int id
-        +Conv conversation
-        +User sender
-        +str client_message_id
-        +int reply_to_message_id
-        +str status
-    }
-    class GroupMessageRecipient {
-        +int id
-        +GroupMessage group_message
-        +User receiver
-        +str ciphertext
-        +str nonce
-        +str auth_tag
-        +int membership_version
-        +str status
-    }
     class UserPublicKey {
         +int id
         +User user
@@ -182,6 +235,14 @@ classDiagram
         +int key_version
         +str trust_status
     }
+    class KeyVerificationRequest {
+        +int id
+        +User requester
+        +User responder
+        +str requester_key_fingerprint
+        +str responder_key_fingerprint
+        +str status
+    }
     class BlockedUser {
         +int id
         +User blocker
@@ -189,7 +250,6 @@ classDiagram
     }
     class UserPrivacySettings {
         +int id
-        +User user
         +str last_seen_visibility
         +str profile_photo_visibility
         +str who_can_send_messages
@@ -197,15 +257,125 @@ classDiagram
     }
     class UserNotificationSettings {
         +int id
-        +User user
         +bool private_chat_notifications
         +bool group_chat_notifications
         +int volume
     }
     class UserStorageSettings {
         +int id
-        +User user
         +JSONField settings_json
+    }
+    class UserLLMConfig {
+        +int id
+        +User user
+        +str assistant_id
+        +str api_url
+        +str api_key
+        +str model
+    }
+    class Conversation {
+        +int id
+        +str type
+        +str name
+        +str status
+        +int membership_version
+        +int auto_delete_seconds
+    }
+    class ConversationMember {
+        +int id
+        +Conversation conversation
+        +User user
+        +str role
+        +str status
+        +int unread_count
+        +bool is_pinned
+        +datetime muted_until
+    }
+    class GroupInvitation {
+        +int id
+        +Conversation conversation
+        +User inviter
+        +User invitee
+        +str status
+        +User reviewed_by
+    }
+    class EncryptedMessage {
+        +int id
+        +Conversation conversation
+        +User sender
+        +User receiver
+        +str ciphertext
+        +str nonce
+        +str auth_tag
+        +str sender_ephemeral_public_key
+        +str sender_copy_ciphertext
+        +str status
+        +str client_message_id
+    }
+    class GroupMessage {
+        +int id
+        +Conversation conversation
+        +User sender
+        +str client_message_id
+        +str sender_copy_ciphertext
+        +str status
+    }
+    class GroupMessageRecipient {
+        +int id
+        +GroupMessage group_message
+        +User receiver
+        +str ciphertext
+        +str sender_ephemeral_public_key
+        +int membership_version
+        +str status
+    }
+    class GroupAnnouncement {
+        +int id
+        +Conversation conversation
+        +User author
+        +str content
+        +bool is_active
+    }
+    class UserPresence {
+        +int id
+        +User user
+        +bool is_online
+        +datetime last_seen
+        +str status
+    }
+    class EncryptedFile {
+        +int id
+        +str upload_id
+        +User owner
+        +Conversation conversation
+        +str storage_path
+        +int total_size_bytes
+        +str ciphertext_sha256
+    }
+    class EncryptedFileKey {
+        +int id
+        +EncryptedFile file
+        +User holder
+        +str encrypted_file_key
+        +str sender_ephemeral_public_key
+    }
+    class LlmProvider {
+        <<abstract>>
+        +complete(messages, system) str
+        +stream(messages, system) Iterator
+    }
+    class MockProvider {
+        +complete(messages, system) str
+    }
+    class OpenAICompatibleProvider {
+        +str endpoint
+        +str api_key
+        +str model
+    }
+    class AnthropicMessagesProvider {
+        +str api_key
+        +str url
+        +str model
     }
 
     User "1" --> "1" UserProfile : has
@@ -213,52 +383,64 @@ classDiagram
     User "1" --> "*" FriendRequest : sends
     User "1" --> "*" UserPublicKey : owns
     User "1" --> "*" KeyTrust : verifies
+    User "1" --> "*" KeyVerificationRequest : requests
+    User "1" --> "*" BlockedUser : blocks
     User "1" --> "1" UserPrivacySettings : configures
     User "1" --> "1" UserNotificationSettings : configures
     User "1" --> "1" UserStorageSettings : configures
-    User "1" --> "*" BlockedUser : blocks
+    User "1" --> "*" UserLLMConfig : configures
+    User "1" --> "1" UserPresence : has
     Conversation "1" --> "*" ConversationMember : contains
     Conversation "1" --> "*" EncryptedMessage : holds
     Conversation "1" --> "*" GroupMessage : holds
+    Conversation "1" --> "*" GroupInvitation : has
+    Conversation "1" --> "*" GroupAnnouncement : has
     GroupMessage "1" --> "*" GroupMessageRecipient : per_recipient
-    EncryptedMessage "*" --> "1" User : sender
-    EncryptedMessage "*" --> "1" User : receiver
-    GroupMessageRecipient "*" --> "1" User : receiver
+    EncryptedFile "1" --> "*" EncryptedFileKey : wrapped
+    LlmProvider <|-- MockProvider : implements
+    LlmProvider <|-- OpenAICompatibleProvider : implements
+    LlmProvider <|-- AnthropicMessagesProvider : implements
 ```
 
-**说明：** 核心类图覆盖 15 个关键模型。`Conversation` 统一承载私聊与群聊，`EncryptedMessage` 只存密文。`GroupMessage` + `GroupMessageRecipient` 实现逐成员独立密文。`KeyTrust` 追踪用户对联系人密钥的验证状态。Phase 3 LLM 相关类（LLMProvider/QwenProvider/MockProvider）为规划中新增，不在此图主体。
+**说明：** 核心类图覆盖 25 个关键类（含抽象 LLM Provider 及其 3 个实现）。`Conversation` 统一承载私聊与群聊，`EncryptedMessage` 只存密文并新增 `sender_copy_*` 字段支持发送方前向保密。`GroupMessage` + `GroupMessageRecipient` 实现逐成员独立密文。`UserLLMConfig` 以 Fernet 加密存储 API Key。`KeyVerificationRequest` 支持双方密钥验证确认流程。
 
 ---
 
-## 3. 系统组件图
+## 4. 系统组件图
 
 ```mermaid
 graph TB
-    subgraph "Browser / Electron 客户端"
+    subgraph 客户端[Browser / Electron 客户端]
         FE[HTML Templates + Tailwind CSS]
-        JS[Vanilla JavaScript<br/>Web Crypto API<br/>ECDH KeyGen / AES-GCM]
+        JS[Vanilla JavaScript<br/>Web Crypto API<br/>ECDH / AES-GCM]
         LS[(LocalStorage<br/>私钥/会话密钥)]
     end
 
-    subgraph "Django 后端 (Python 3.12+)"
-        subgraph "HTTP Layer"
+    subgraph 后端[Django 后端]
+        subgraph HTTP层[HTTP Layer]
             V[Django Views / REST API]
             MW[CSP Middleware<br/>安全头注入]
         end
-        subgraph "WebSocket Layer"
+        subgraph WebSocket层[WebSocket Layer]
             WS[Django Channels<br/>ChatConsumer<br/>实时消息转发]
         end
-        subgraph "Data Layer"
+        subgraph 数据层[Data Layer]
             M[Django ORM Models]
             DB[(SQLite / PostgreSQL)]
+        end
+        subgraph LLM层[LLM Provider Layer]
+            LLP[chat/llm.py<br/>LlmProvider 抽象]
+            ANTHRO[AnthropicMessagesProvider]
+            OPENAI[OpenAICompatibleProvider]
+            MOCK[MockProvider]
         end
         ADMIN[Django Admin<br/>用户/群组管理<br/>操作日志]
     end
 
-    subgraph "AI Assistant (Phase 3)"
-        LLM[LLM Provider Interface]
-        QWEN[Qwen API]
-        MOCK[Mock Provider]
+    subgraph 外部服务[外部 LLM API]
+        QWEN_API[Qwen / DashScope]
+        ANTHRO_API[Anthropic API]
+        OPENAI_API[OpenAI / 兼容 API]
     end
 
     FE -->|HTTPS POST| V
@@ -269,163 +451,166 @@ graph TB
     MW --> FE
     ADMIN --> M
 
-    FE -.->|用户主动输入 Prompt| LLM
-    LLM --> QWEN
-    LLM --> MOCK
+    FE -.->|用户主动输入 Prompt| V
+    V --> LLP
+    LLP --> ANTHRO
+    LLP --> OPENAI
+    LLP --> MOCK
+    ANTHRO --> ANTHRO_API
+    OPENAI --> OPENAI_API
+    OPENAI --> QWEN_API
 
     JS -->|Web Crypto ECDH| LS
     JS -->|公钥上传| V
     JS -->|密文 + 签名| WS
 ```
 
-**说明：** 前端为 Django Templates + Vanilla JavaScript，使用浏览器 Web Crypto API 在客户端完成密钥生成和 AES-GCM 加密。后端 Django 通过 HTTP API 和 WebSocket 提供服务。CSP 中间件注入安全头。AI Assistant 模块独立于 E2EE 密钥体系，仅接收用户主动输入的 Prompt。
+**说明：** 前端使用浏览器 Web Crypto API 在客户端完成密钥生成和 AES-256-GCM 加密，私钥仅存 LocalStorage。后端 Django + Channels 通过 HTTP REST API 和 WebSocket 提供服务。CSP 中间件注入安全头。LLM Provider 层支持 Anthropic Messages API、OpenAI 兼容 API（含 Qwen/DashScope）和 Mock 降级，IP/域名白名单校验防止 SSRF。AI 模块不连接到消息密文表或密钥表。
 
-> ⚠️ **Phase 3 LLM 边界**：LLM 组件不连接到 `EncryptedMessage`/`GroupMessage` 表，不接触 `UserPublicKey`，不读取 LocalStorage 私钥。箭头 `.->` 表示受控调用路径。
+> ⚠️ **Phase 3 LLM 边界**：LLM 组件不读取 `EncryptedMessage`/`GroupMessage` 表，不接触 `UserPublicKey`，不读取 LocalStorage 私钥。虚线 `.->` 表示受控调用路径。
 
 ---
 
-## 4. 私聊 E2EE 时序图
+## 5. 私聊 E2EE 时序图（含前向保密）
 
 ```mermaid
 sequenceDiagram
-    actor A as Alice (发送方)
+    actor A as Alice（发送方）
     participant AC as Alice 浏览器<br/>Web Crypto
     participant WS as WebSocket Server<br/>Django Channels
     participant DB as 后端数据库
     participant BC as Bob 浏览器<br/>Web Crypto
-    actor B as Bob (接收方)
+    actor B as Bob（接收方）
 
     Note over A,B: 前提：双方已完成 ECDH P-256 密钥对生成并上传公钥
 
-    A->>AC: 输入消息 plaintext
+    A->>AC: 输入消息明文
     AC->>WS: GET /api/keys/{bob_id}/ 获取 Bob 活跃公钥
     WS->>DB: 查询 UserPublicKey(is_active=True)
-    DB-->>WS: Bob 公钥 + key_version
-    WS-->>AC: identity_public_key, key_version, fingerprint
+    DB-->>WS: Bob 公钥 + key_version + fingerprint
+    WS-->>AC: identity_public_key, key_version
 
-    AC->>AC: 生成 ECDH shared secret<br/>AES-256-GCM 加密 plaintext<br/>→ ciphertext + nonce + auth_tag
-    Note over AC: 服务端从未接触 plaintext
+    AC->>AC: 生成临时 ECDH 密钥对 (ephemeral)<br/>ECDH(Alice私钥, Bob公钥) → shared_secret<br/>AES-256-GCM 加密 → ciphertext + nonce + auth_tag
+    AC->>AC: 为发送方副本生成独立临时密钥<br/>ECDH(临时私钥, Alice公钥) → sender_copy<br/>加密明文 → sender_copy_ciphertext
+    Note over AC: 服务端从未接触明文
 
-    AC->>WS: WebSocket: {"type": "message.single.send",<br/>"conversation_id": N,<br/>"ciphertext": "...", "nonce": "...",<br/>"auth_tag": "...", "sender_key_version": V,<br/>"receiver_key_version": W,<br/>"client_message_id": "..."}
-    WS->>DB: INSERT EncryptedMessage(ciphertext, nonce, auth_tag, ...)
+    AC->>WS: WebSocket: message.single.send<br/>ciphertext, nonce, auth_tag,<br/>sender_ephemeral_public_key,<br/>sender_copy_ciphertext,<br/>client_message_id
+    WS->>DB: INSERT EncryptedMessage(全部密文字段)
     DB-->>WS: OK
-    WS-->>AC: {"type": "message.single.accepted",<br/>"message_id": M}
+    WS-->>AC: message.single.accepted
 
-    WS->>BC: WebSocket Push: {"type": "message.single.received",<br/>"message_id": M, "ciphertext": "...", ...}
-    BC->>BC: ECDH shared secret 解密<br/>ciphertext → plaintext
-    BC-->>B: 显示 "Hello Bob!"
+    WS->>BC: Push: message.single.received
+    BC->>BC: ECDH(Bob私钥, Alice公钥) 解密 ciphertext<br/>→ 明文 "Hello Bob!"
+    BC-->>B: 显示消息
 
-    BC->>WS: WebSocket: {"type": "message.receipt.update",<br/>"message_id": M, "status": "read"}
+    BC->>WS: WebSocket: message.receipt.update<br/>status: read
     WS->>DB: UPDATE EncryptedMessage.status = "read"
-    WS-->>AC: {"type": "message.receipt.updated",<br/>"message_id": M, "status": "read"}
-    AC-->>A: 显示 ✓✓ 已读
+    WS-->>AC: message.receipt.updated (已读)
+    AC-->>A: 显示双勾已读
 ```
 
-**说明：** 私聊 E2EE 全流程：获取对方公钥 → 客户端 ECDH → 本地 AES-GCM 加密 → WebSocket 密文传输 → 服务端存转发 → 接收方本地解密。**服务端在任何环节都不接触消息明文**。送达回执（delivered）和已读回执（read）仅标记状态，不传递明文。
+**说明：** 私聊 E2EE 全流程，包含 Phase 3 新增的前向保密（Forward Secrecy）：发送方生成临时 ECDH 密钥对，接收方密文和发送方副本分别使用独立临时密钥加密。`sender_copy_ciphertext` 允许发送方在其他设备解密自己发送的消息。服务端在任何环节不接触明文，已读回执仅标记状态。
 
 ---
 
-## 5. 群聊逐成员加密时序图
+## 6. 群聊逐成员加密时序图（含邀请流程）
 
 ```mermaid
 sequenceDiagram
-    actor S as Sender (Alice)
-    participant SC as Sender 浏览器
+    actor S as Alice（群主/发送方）
+    participant SC as Alice 浏览器
     participant WS as WebSocket Server
     participant DB as Database
     participant RC1 as Bob 浏览器
     participant RC2 as Carol 浏览器
-    actor R1 as Bob
-    actor R2 as Carol
 
-    Note over S,R2: 群聊包含 Alice(群主), Bob(成员), Carol(成员)
+    Note over S,RC2: 群聊成员: Alice(群主), Bob, Carol
 
     S->>SC: 输入群消息 "Team meeting at 3pm"
-    SC->>WS: GET /api/keys/batch/?user_ids=bob,carol 获取所有成员公钥
+    SC->>WS: GET /api/keys/batch/?user_ids=bob,carol
     WS->>DB: 批量查询 UserPublicKey(is_active=True)
-    DB-->>WS: [{Bob: pubKey_B, vB}, {Carol: pubKey_C, vC}]
-    WS-->>SC: 批量公钥 + key_versions
+    DB-->>WS: Bob公钥+Carol公钥 + key_versions
+    WS-->>SC: 批量公钥
 
-    SC->>SC: 对 Bob: ECDH(Bob) → AES-GCM → ciphertext_B<br/>对 Carol: ECDH(Carol) → AES-GCM → ciphertext_C
-    Note over SC: ciphertext_B ≠ ciphertext_C<br/>每成员独立密文
+    SC->>SC: 为 Bob: 生成临时 ECDH → AES-GCM → ciphertext_B<br/>为 Carol: 生成临时 ECDH → AES-GCM → ciphertext_C
+    Note over SC: ciphertext_B ≠ ciphertext_C<br/>每成员独立临时密钥 + 独立密文
 
-    SC->>WS: WebSocket: {"type": "message.group.send",<br/>"conversation_id": G,<br/>"recipients": [<br/>  {"user_id": bob, "ciphertext": "ct_B", ...},<br/>  {"user_id": carol, "ciphertext": "ct_C", ...}<br/>], "membership_version": 1}
+    SC->>WS: WebSocket: message.group.send<br/>recipients: [{bob, ct_B}, {carol, ct_C}],<br/>membership_version: 1
 
     WS->>DB: BEGIN TRANSACTION
     WS->>DB: INSERT GroupMessage (logical)
-    WS->>DB: INSERT GroupMessageRecipient (Bob, ct_B)
-    WS->>DB: INSERT GroupMessageRecipient (Carol, ct_C)
+    WS->>DB: INSERT GroupMessageRecipient(Bob, ct_B, ephemeral_key_B)
+    WS->>DB: INSERT GroupMessageRecipient(Carol, ct_C, ephemeral_key_C)
     WS->>DB: COMMIT
-    WS-->>SC: {"type": "message.group.accepted", "message_id": M}
+    WS-->>SC: message.group.accepted
 
-    WS->>RC1: Push: {"type": "message.group.received", "ciphertext": "ct_B", ...}
-    WS->>RC2: Push: {"type": "message.group.received", "ciphertext": "ct_C", ...}
-
-    RC1->>RC1: 本地 ECDH + AES-GCM 解密 → plaintext
-    RC2->>RC2: 本地 ECDH + AES-GCM 解密 → plaintext
-    RC1-->>R1: "Team meeting at 3pm"
-    RC2-->>R2: "Team meeting at 3pm"
+    WS->>RC1: Push: ct_B + ephemeral_key_B
+    WS->>RC2: Push: ct_C + ephemeral_key_C
+    RC1->>RC1: 本地 ECDH + AES-GCM 解密 → 明文
+    RC2->>RC2: 本地 ECDH + AES-GCM 解密 → 明文
 ```
 
-**说明：** 群聊采用"一个逻辑消息 + 逐成员独立密文副本"模型。发送方为每个在线成员单独加密，`ciphertext_B ≠ ciphertext_C`。服务端存储逻辑消息和按收件人分组的密文副本，新成员无法解密加入前的历史消息。
+**说明：** 群聊采用"一个逻辑消息 + 逐成员独立临时密钥 + 独立密文副本"模型。发送方为每个成员单独生成临时 ECDH 密钥对并加密，`ciphertext_B ≠ ciphertext_C`。`membership_version` 校验确保成员变更后消息只面向当前有效成员。Phase 3 新增 `GroupInvitation` 两步邀请流程（管理员审批 → 受邀者确认）。
 
 ---
 
-## 6. AI Assistant 时序图
+## 7. AI Assistant 时序图
 
 ```mermaid
 sequenceDiagram
-    actor U as User
-    participant FE as Frontend
+    actor U as 用户
+    participant FE as 前端 AI 面板
     participant BE as Django Backend
-    participant LLM as LLM Provider Interface
-    participant QWEN as Qwen API
-    participant MOCK as Mock Provider
+    participant DB as Database
+    participant LLP as LlmProvider
+    participant EXT as 外部 LLM API
 
-    Note over U,MOCK: Phase 3 LLM 边界：LLM 不可读取聊天 E2EE 明文或密钥
+    Note over U,EXT: LLM 不可读取聊天 E2EE 明文或密钥
 
     U->>FE: 打开 AI Assistant 面板
-    FE->>BE: GET /api/llm/status/
-    BE->>BE: 检查 QWEN_API_KEY 配置
-    alt Qwen API Key 已配置
-        BE-->>FE: {"provider": "qwen", "status": "available"}
+    FE->>BE: GET /api/llm/config/
+    BE->>DB: 查询 UserLLMConfig
+    DB-->>BE: api_url, model, encrypted_api_key
+    BE->>BE: Fernet 解密 API Key
+    alt 已配置 API Key
+        BE-->>FE: {"provider": "qwen/anthropic/openai", "status": "available"}
     else 未配置
         BE-->>FE: {"provider": "mock", "status": "fallback"}
     end
 
     U->>FE: 输入 Prompt "帮我总结这段文本..."
-    FE->>BE: POST /api/llm/chat/ {"prompt": "...", "session_id": "S"}
+    FE->>BE: POST /api/llm/chat/ {"prompt": "..."}
     Note over BE: 仅接收用户主动输入的 Prompt<br/>不读取聊天数据库
 
-    BE->>BE: Validate prompt (长度限制、内容过滤)
-    BE->>LLM: route(prompt, session_id)
+    BE->>BE: validate_llm_endpoint(endpoint)<br/>校验 HTTPS + 域名白名单 + 非内网 IP
+    BE->>LLP: get_llm_provider(config)
 
-    alt Qwen 可用
-        LLM->>QWEN: POST /api/v1/services/aigc/text-generation/generation<br/>{"model": "qwen-plus", "input": {"messages": [...]}}
-        QWEN-->>LLM: {"output": {"text": "总结结果..."}}
-    else Mock Fallback
-        LLM->>MOCK: generate(prompt)
-        MOCK-->>LLM: "[Mock] 这是模拟回复。请配置 Qwen API Key 以获取实际 AI 回复。"
+    alt Anthropic / OpenAI 兼容 / Qwen
+        LLP->>EXT: POST /v1/messages 或 /v1/chat/completions
+        EXT-->>LLP: {"content": "..."}
+    else Mock 降级
+        LLP->>LLP: MockProvider.complete()
+        Note over LLP: [Mock] 模拟回复
     end
 
-    LLM-->>BE: response_text
-    BE-->>FE: {"response": "总结结果...", "provider": "qwen"}
+    LLP-->>BE: response_text
+    BE-->>FE: {"response": "...", "provider": "qwen"}
     FE-->>U: 显示 AI 回复
 
     opt 用户将回复复制为草稿
-        U->>FE: 点击 "复制为草稿"
+        U->>FE: 点击"复制为草稿"
         FE->>FE: 填入聊天输入框（本地操作）
-        Note over FE: AI 回复通过用户手动操作<br/>进入 E2EE 加密流程
+        Note over FE: 进入正常 E2EE 加密流程
     end
 ```
 
-**说明：** AI Assistant 的 LLM 组件仅处理用户主动输入的 Prompt，**不**自动读取聊天数据库中的密文或明文。用户如需将 AI 回复用于聊天，需手动复制粘贴——此时内容进入正常的 E2EE 加密流程。Mock Provider 确保在无 API Key 时仍可演示。
+**说明：** AI Assistant 的 LLM 组件仅处理用户主动输入的 Prompt，**不**自动读取聊天密文或明文。API Key 通过 Fernet 加密存储在 `UserLLMConfig`。`validate_llm_endpoint()` 对用户配置的 LLM 端点进行 HTTPS 校验、域名白名单过滤和 SSRF 防护（禁止私有/环回/保留 IP）。MockProvider 确保无 API Key 时仍可演示。
 
-> ⚠️ **Phase 3 LLM 边界**：LLM Provider 不持有 `User` 私钥，不访问 `EncryptedMessage`/`GroupMessage` 表，不解密 Session Key，不参与 ECDH 密钥协商。其职责严格限定为：接收用户 Prompt → 调用外部 API → 返回文本。
+> ⚠️ **安全边界**：LLM Provider 不持有用户私钥，不访问 `EncryptedMessage`/`GroupMessage` 表，不解密 Session Key，不参与 ECDH 密钥协商。
 
 ---
 
-## 7. 活动图：用户从登录到聊天
+## 8. 活动图：用户从登录到聊天
 
 ```mermaid
 stateDiagram-v2
@@ -437,105 +622,120 @@ stateDiagram-v2
     验证身份 --> 聊天主页: 登录成功
 
     聊天主页 --> 检查密钥
-    检查密钥 --> 生成密钥对: 无本地密钥
-    生成密钥对 --> 上传公钥
-    检查密钥 --> 上传公钥: 密钥已存在但未上传
+    检查密钥 --> 生成ECDH密钥对: 无本地密钥
+    生成ECDH密钥对 --> 上传公钥
+    检查密钥 --> 上传公钥: 密钥未上传
     上传公钥 --> 选择操作
 
     选择操作 --> 搜索联系人: 添加联系人
     搜索联系人 --> 发送好友申请
-    发送好友申请 --> 对方同意: 等待响应
-    对方同意 --> 打开私聊
+    发送好友申请 --> 等待对方同意
+    等待对方同意 --> 打开私聊
 
     选择操作 --> 打开私聊: 已有联系人
     打开私聊 --> 获取对方公钥
     获取对方公钥 --> 输入消息
-    输入消息 --> 本地E2EE加密
-    本地E2EE加密 --> WebSocket发送密文
-    WebSocket发送密文 --> 收到送达回执
-    收到送达回执 --> 收到已读回执
+    输入消息 --> 生成临时密钥对
+    生成临时密钥对 --> AES256GCM加密
+    AES256GCM加密 --> WebSocket发送密文
+    WebSocket发送密文 --> 收到已读回执
     收到已读回执 --> 选择操作
 
     选择操作 --> 创建群组
     创建群组 --> 选择初始成员
-    选择初始成员 --> 群聊加密发送
+    选择初始成员 --> 群聊逐成员加密发送
+
+    选择操作 --> 打开AI面板
+    打开AI面板 --> 输入Prompt
+    输入Prompt --> LLM返回结果
+    LLM返回结果 --> 选择操作
 
     选择操作 --> [*]: 退出登录
 ```
 
-**说明：** 从登录开始，经历密钥初始化（如需要）、联系人建立、私聊 E2EE 加密发送的完整活动流程。每条消息在发送前必须完成：获取接收方公钥 → 本地生成 ECDH Shared Secret → AES-256-GCM 加密 → 密文通过 WebSocket 发送。
+**说明：** 从登录开始，经历密钥初始化（如需要）、联系人建立、私聊 E2EE 加密发送（含临时密钥生成）、群聊逐成员加密、AI Assistant 使用的完整活动流程。每条消息发送前生成临时 ECDH 密钥对实现前向保密。
 
 ---
 
-## 8. 活动图：AI Assistant 使用流程
+## 9. 活动图：AI Assistant 使用流程
 
 ```mermaid
 stateDiagram-v2
     [*] --> 打开AI_Assistant面板
-    打开AI_Assistant面板 --> 检查LLM状态
+    打开AI_Assistant面板 --> 检查LLM配置
 
-    检查LLM状态 --> Qwen可用: API Key 已配置
-    检查LLM状态 --> Mock模式: API Key 未配置
-    Mock模式 --> 显示Mock提示
+    检查LLM配置 --> 加载UserLLMConfig: 已配置
+    检查LLM配置 --> 环境变量检测: 未配置数据库
+    环境变量检测 --> Mock降级: 无任何Key
+    环境变量检测 --> 使用环境变量Key: 有Key
+    加载UserLLMConfig --> Fernet解密API_Key
 
-    Qwen可用 --> 显示可用状态
-    显示可用状态 --> 用户输入Prompt
-    显示Mock提示 --> 用户输入Prompt
+    Fernet解密API_Key --> 验证LLM端点
+    验证LLM端点 --> 端点不合法: 非HTTPS/内网IP
+    端点不合法 --> 显示安全错误
+    显示安全错误 --> [*]
+    验证LLM端点 --> 端点合法
+
+    使用环境变量Key --> 端点合法
+    端点合法 --> 用户输入Prompt
+    Mock降级 --> 用户输入Prompt
 
     用户输入Prompt --> 内容校验
     内容校验 --> 校验失败: 过长/违规
     校验失败 --> 显示错误提示
-    显示错误提示 --> 用户输入Prompt
+    显示错误提示 --> 用户输入Prompt: 重试
 
     内容校验 --> 校验通过
-    校验通过 --> 路由Provider
+    校验通过 --> 路由LLM_Provider
 
-    路由Provider --> 调用Qwen_API: Qwen 可用
-    路由Provider --> 调用Mock: Mock 模式
+    路由LLM_Provider --> Anthropic_API: Anthropic端点
+    路由LLM_Provider --> OpenAI兼容API: OpenAI/Qwen端点
+    路由LLM_Provider --> Mock响应: Mock模式
 
-    调用Qwen_API --> 等待API响应
-    等待API响应 --> API错误: 超时/限流
-    API错误 --> 调用Mock: 自动降级
-    等待API响应 --> 返回结果
+    Anthropic_API --> 流式输出结果
+    OpenAI兼容API --> 流式输出结果
+    Mock响应 --> 返回结果
 
-    调用Mock --> 返回结果
-
+    流式输出结果 --> 用户查看回复
     返回结果 --> 用户查看回复
-    用户查看回复 --> 复制为草稿: 需要用到聊天
-    复制为草稿 --> 填入聊天输入框
-    填入聊天输入框 --> E2EE加密流程: 进入正常聊天加密
 
-    用户查看回复 --> 继续提问: 继续对话
+    用户查看回复 --> 复制为草稿: 用于聊天
+    复制为草稿 --> 填入聊天输入框
+    填入聊天输入框 --> E2EE加密流程: 手动操作进入加密
+
+    用户查看回复 --> 继续提问: 多轮对话
     继续提问 --> 用户输入Prompt
 
     用户查看回复 --> 关闭面板
     关闭面板 --> [*]
 ```
 
-**说明：** AI Assistant 使用流程的核心安全约束：用户输入 Prompt 后**不读取聊天数据库**，LLM 回复**不自动进入 E2EE 聊天**——用户需手动复制。Qwen API 调用失败时自动降级到 Mock 模式，确保演示路径不中断。
+**说明：** AI Assistant 使用流程的核心安全约束：配置优先从 `UserLLMConfig`（Fernet 加密）读取，其次检测环境变量。`validate_llm_endpoint()` 校验 HTTPS、域名白名单和 IP 合法性后方可调用。LLM 回复**不自动**进入 E2EE 聊天——用户需手动复制粘贴触发本地加密流程。调用失败时自动降级到 MockProvider。
 
 ---
 
-## 9. 交付总结
+## 10. 交付总结
 
 | # | 图名 | 类型 | 状态 |
 |---|------|------|------|
-| 1 | 系统用例图 | Use Case | ✅ |
-| 2 | 核心类图 | Class Diagram | ✅ |
-| 3 | 系统组件图 | Component Diagram | ✅ |
-| 4 | 私聊 E2EE 时序图 | Sequence Diagram | ✅ |
-| 5 | 群聊逐成员加密时序图 | Sequence Diagram | ✅ |
-| 6 | AI Assistant 时序图 | Sequence Diagram | ✅ |
-| 7 | 用户从登录到聊天活动图 | Activity Diagram | ✅ |
-| 8 | AI Assistant 使用流程活动图 | Activity Diagram | ✅ |
+| 1 | 系统用例图 | Use Case Diagram | ✅ |
+| 2 | 数据库 ER 图 | ER Diagram | ✅ (新增) |
+| 3 | 核心类图 | Class Diagram | ✅ |
+| 4 | 系统组件图 | Component Diagram | ✅ |
+| 5 | 私聊 E2EE 时序图（含前向保密） | Sequence Diagram | ✅ |
+| 6 | 群聊逐成员加密时序图（含邀请流程） | Sequence Diagram | ✅ |
+| 7 | AI Assistant 时序图 | Sequence Diagram | ✅ |
+| 8 | 用户从登录到聊天活动图 | Activity Diagram | ✅ |
+| 9 | AI Assistant 使用流程活动图 | Activity Diagram | ✅ |
 
-**共交付 8 张 Mermaid 图**（最低要求 5 张），覆盖全部核心模块、E2EE 加密链路和 Phase 3 LLM 接入边界。
+**共交付 9 张 Mermaid 图**（最低要求 5 张），新增数据库 ER 图，覆盖全部核心模块、E2EE 加密链路、前向保密机制和 Phase 3 LLM 接入边界。
 
-所有图表可在 GitHub 上直接渲染（Mermaid 原生支持），也可在 VS Code 中安装 Mermaid Preview 插件查看。
+所有图表可在 GitHub 上直接渲染（Mermaid 原生支持）。
 
 ### 当前代码一致性校验
 
-- **类图一致性**：类图覆盖的 15 个模型与 `accounts/models.py` 和 `chat/models.py` 定义一致。LLMProvider/QwenProvider/MockProvider 为 Phase 3 规划新增，尚未在代码中创建。
-- **时序图一致性**：私聊 E2EE 流程与 `static/js/private-chat-e2ee.js` 和 `chat/consumers.py` 实现一致。
-- **组件图一致性**：架构分层与实际部署拓扑一致（Django + Channels + SQLite + Browser Web Crypto + Electron Shell）。
-- **AI Assistant 边界**：所有图表遵从 Phase 3 LLM 不放开 E2EE 明文访问的安全约束。
+- **ER 图一致性**：图中所列表与 `accounts/models.py`（16 个模型）和 `chat/models.py`（17 个模型）完全对应。
+- **类图一致性**：新增 `GroupInvitation`、`KeyVerificationRequest`、`UserLLMConfig`、`LlmProvider` 及 3 个实现类，`EncryptedMessage`/`GroupMessage`/`EncryptedFileKey` 均已加入 `sender_ephemeral_public_key` 和 `sender_copy_*` 前向保密字段。
+- **时序图一致性**：私聊/群聊 E2EE 流程与 `static/js/private-chat-e2ee.js`、`static/js/group-chat-e2ee.js` 和 `chat/consumers.py` 实现一致；AI Assistant 流程与 `chat/llm.py`（`get_llm_provider`、`validate_llm_endpoint`）一致。
+- **组件图一致性**：架构分层与 `ichat_pro/settings.py`（Django + Channels + CSP Middleware）、前端模板结构和 `package.json`（Electron + Tailwind）对应。
+- **LLM 安全边界**：所有图表遵从 `chat/llm.py` 中 `validate_llm_endpoint()` 的 SSRF 防护和 `UserLLMConfig` 的 Fernet 加密方案。

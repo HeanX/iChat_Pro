@@ -616,7 +616,7 @@ function renderGroupsSidebar(query) {
     const members = Number(group.member_count || group.members_count || 0);
     const preview = group.last_message_preview
       ? renderSidebarPreview(group, group.last_message_preview, group.last_message_sender_id)
-      : escapeHtml(currentLanguage === "zh" ? "打开群聊" : "Open group chat");
+      : escapeHtml(_t4("Open group chat", "打开群聊", "打開群聊", "グループチャットを開く"));
     return `<div class="groups-sidebar-row" data-group-id="${Number(group.id)}">
       <button type="button" class="groups-sidebar-main" onclick="openGroupFromSidebar(${Number(group.id)})">
         <span class="groups-sidebar-avatar" style="${avatarStyle}">${avatarInner}</span>
@@ -626,7 +626,7 @@ function renderGroupsSidebar(query) {
         </span>
         <span class="groups-sidebar-meta">${members ? members : ""}</span>
       </button>
-      <button type="button" class="groups-sidebar-action" onclick="openGroupInviteFromSidebar(${Number(group.id)})" title="${currentLanguage === "zh" ? "邀请成员" : "Invite members"}">
+      <button type="button" class="groups-sidebar-action" onclick="openGroupInviteFromSidebar(${Number(group.id)})" title="${_t4("Invite Members", "邀请成员", "邀請成員", "メンバーを招待")}">
         <i data-lucide="user-plus"></i>
       </button>
     </div>`;
@@ -1277,7 +1277,7 @@ function renderRightPanelMembers(conv) {
         </div>
         <div class="chat-details-member-copy">
           <div class="chat-details-member-name">${escapeHtml(member.display_name || member.username || "Unknown")}</div>
-          <div class="chat-details-member-status">${escapeHtml(member.status || member.last_seen || (String(member.username || "").toLowerCase().includes("bot") ? "机器人" : "最近曾上线"))}</div>
+          <div class="chat-details-member-status">${escapeHtml(member.status || member.last_seen || (String(member.username || "").toLowerCase().includes("bot") ? _t4('Bot', '机器人', '機器人', 'ボット') : _t4('Recently online', '最近曾上线', '最近曾上線', '最近オンライン')))}</div>
         </div>
       </div>
       <span class="chat-details-member-role">${escapeHtml(getRoleTranslation(member.role))}</span>
@@ -2036,8 +2036,8 @@ async function selectChat(chatId) {
     const isGroup = conv.type === 'group';
     leaveTextEl.setAttribute("data-i18n", isGroup ? "menu_leave_group" : "menu_delete_chat");
     leaveTextEl.textContent = isGroup
-      ? (currentLanguage === 'zh' ? "退出群聊" : "Leave Group")
-      : (currentLanguage === 'zh' ? "删除聊天" : "Delete Chat");
+      ? _t4("Leave Group", "退出群聊", "離開群組", "退会する")
+      : _t4("Delete Chat", "删除聊天", "刪除聊天", "チャットを削除");
   }
   const blockContactBtn = document.getElementById("menu-block-contact-btn");
   if (blockContactBtn) {
@@ -2045,7 +2045,7 @@ async function selectChat(chatId) {
   }
   const blockContactText = document.getElementById("menu-block-contact-text");
   if (blockContactText) {
-    blockContactText.textContent = currentLanguage === "zh" ? "拉黑" : "Block";
+    blockContactText.textContent = _t4("Block", "拉黑", "封鎖", "ブロック");
   }
   
   // Header status
@@ -3625,14 +3625,14 @@ function updateGroupMemberCount() {
 
 function goToGroupCreateFinalStep() {
   if (selectedMemberIds.size === 0) {
-    window.showToast("请选择至少一位成员");
+    window.showToast(_t4("Please select at least one member", "请选择至少一位成员", "請選擇至少一位成員", "メンバーを少なくとも1人選択してください"));
     return;
   }
   
   navigateSidebar('group-create-final');
   
   const countEl = document.getElementById("group-create-members-count");
-  if (countEl) countEl.textContent = `${selectedMemberIds.size} 人`;
+  if (countEl) countEl.textContent = _t4(selectedMemberIds.size + " people", selectedMemberIds.size + " 人", selectedMemberIds.size + " 人", selectedMemberIds.size + " 人");
   
   const listEl = document.getElementById("group-create-selected-list");
   if (listEl) {
@@ -3701,7 +3701,7 @@ async function submitCreateGroupForm() {
   const nameInput = document.getElementById("group-create-name-input");
   const name = nameInput ? nameInput.value.trim() : "";
   if (!name) {
-    window.showToast("请输入群聊名称");
+    window.showToast(_t4("Please enter group name", "请输入群聊名称", "請輸入群組名稱", "グループ名を入力してください"));
     return;
   }
   
@@ -3722,11 +3722,11 @@ async function submitCreateGroupForm() {
     if (data.id) selectChat(data.id.toString());
     
     navigateSidebar('chat');
-    window.showToast("群组已创建");
+    window.showToast(_t4("Group created", "群组已创建", "群組已建立", "グループが作成されました"));
     resetGroupCreationFlow();
   } catch (err) {
     console.error("Create group failed:", err);
-    window.showToast("创建群组失败，请重试");
+    window.showToast(_t4("Failed to create group, please try again", "创建群组失败，请重试", "建立群組失敗，請重試", "グループの作成に失敗しました。もう一度お試しください"));
   } finally {
     if (submitBtn) submitBtn.disabled = false;
   }
@@ -3897,7 +3897,7 @@ function renderGroupManageSidebar() {
   const canAdmin = canManageGroupMembers();
   const canOwner = canOwnerManageGroup();
   const panelTitle = document.getElementById("group-manage-panel-title");
-  if (panelTitle) panelTitle.textContent = currentLanguage === "zh" ? "群组管理" : "Group Management";
+  if (panelTitle) panelTitle.textContent = _t4('Group Management', '群组管理', '群組管理', 'グループ管理');
 
   const avatar = document.getElementById("group-manage-avatar");
   if (avatar) {
@@ -3909,7 +3909,7 @@ function renderGroupManageSidebar() {
       avatar.style.backgroundColor = conv.avatar_color || "#5c6bc0";
     }
     avatar.classList.toggle("cursor-pointer", canOwner);
-    avatar.title = canOwner ? "Tap to change group avatar" : "";
+    avatar.title = canOwner ? _t4("Tap to change group avatar", "点击修改群头像", "點擊修改群頭像", "タップしてグループアバターを変更") : "";
   }
 
   const name = document.getElementById("group-manage-name");
@@ -3917,10 +3917,10 @@ function renderGroupManageSidebar() {
     name.textContent = group.name || conv.name || "";
     name.classList.toggle("cursor-pointer", canOwner);
     name.classList.toggle("hover:underline", canOwner);
-    name.title = canOwner ? "Tap to edit group name" : "";
+    name.title = canOwner ? _t4("Tap to edit group name", "点击修改群名称", "點擊修改群名稱", "タップしてグループ名を編集") : "";
   }
   const count = document.getElementById("group-manage-member-count");
-  if (count) count.textContent = `${members.length || conv.member_count || 0} ${currentLanguage === "zh" ? "位成员" : "members"}`;
+  if (count) count.textContent = (members.length || conv.member_count || 0) + " " + _t4("members", "位成员", "位成員", "メンバー");
   const myRole = document.getElementById("group-manage-my-role");
   if (myRole) myRole.textContent = me ? getRoleTranslation(me.role) : "";
 
@@ -3957,7 +3957,7 @@ function renderGroupInviteSidebar() {
   const name = document.getElementById("group-invite-name");
   if (name) name.textContent = group.name || conv.name || "";
   const count = document.getElementById("group-invite-member-count");
-  if (count) count.textContent = `${members.length || conv.member_count || 0} ${currentLanguage === "zh" ? "位成员" : "members"}`;
+  if (count) count.textContent = (members.length || conv.member_count || 0) + " " + _t4("members", "位成员", "位成員", "メンバー");
   const myRole = document.getElementById("group-invite-my-role");
   if (myRole) myRole.textContent = me ? getRoleTranslation(me.role) : "";
   renderGroupManageInviteList();
@@ -3969,7 +3969,7 @@ function renderGroupManageAnnouncement() {
   if (!content) return;
   const ann = groupManageState.announcement;
   if (!ann || !ann.content) {
-    content.innerHTML = `<span class="text-textSecondary italic">${currentLanguage === "zh" ? "暂无公告" : "No announcement"}</span>`;
+    content.innerHTML = `<span class="text-textSecondary italic">${_t4("No announcement", "暂无公告", "暫無公告", "公告はありません")}</span>`;
     return;
   }
   content.innerHTML = `<div class="whitespace-pre-wrap leading-relaxed">${escapeHtml(ann.content)}</div>
@@ -3994,11 +3994,11 @@ function renderGroupManagePendingInvitations() {
       ${groupManageMemberAvatarHtml(member)}
       <div class="chat-details-member-copy">
         <div class="chat-details-member-name">${escapeHtml(inv.invitee_display_name || inv.invitee_username || "Unknown")}</div>
-        <div class="chat-details-member-status">${currentLanguage === "zh" ? "由" : "Invited by"} @${escapeHtml(inv.inviter_username || "")}</div>
+        <div class="chat-details-member-status">${_t4("Invited by", "由", "由", "招待者:")} @${escapeHtml(inv.inviter_username || "")}</div>
       </div>
       <div class="group-manage-member-actions">
-        <button onclick="groupManageApproveInvitation(${Number(inv.id)})" title="Approve invitation"><i data-lucide="check" class="w-4 h-4"></i></button>
-        <button onclick="groupManageRejectInvitation(${Number(inv.id)})" title="Reject invitation"><i data-lucide="x" class="w-4 h-4"></i></button>
+        <button onclick="groupManageApproveInvitation(${Number(inv.id)})" title="${_t4("Approve invitation", "同意邀请", "同意邀請", "招待を承認")}"><i data-lucide="check" class="w-4 h-4"></i></button>
+        <button onclick="groupManageRejectInvitation(${Number(inv.id)})" title="${_t4("Reject invitation", "拒绝邀请", "拒絕邀請", "招待を拒否")}"><i data-lucide="x" class="w-4 h-4"></i></button>
       </div>
     </div>`;
   }).join("");
@@ -4060,16 +4060,16 @@ function groupManageMemberActions(member, canAct) {
   const buttons = [];
   if (canOwnerManageGroup()) {
     if (role === "member") {
-      buttons.push(`<button onclick="groupManagePromoteMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-brand-light" title="Set admin"><i data-lucide="shield-plus" class="w-4 h-4"></i></button>`);
+      buttons.push(`<button onclick="groupManagePromoteMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-brand-light" title="${_t4('Set admin', '设为管理员', '設為管理員', '管理者に設定')}"><i data-lucide="shield-plus" class="w-4 h-4"></i></button>`);
     } else if (role === "admin") {
-      buttons.push(`<button onclick="groupManageDemoteMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-amber-500" title="Remove admin"><i data-lucide="shield-minus" class="w-4 h-4"></i></button>`);
+      buttons.push(`<button onclick="groupManageDemoteMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-amber-500" title="${_t4('Remove admin', '撤销管理员', '撤銷管理員', '管理者を削除')}"><i data-lucide="shield-minus" class="w-4 h-4"></i></button>`);
     }
     if (role !== "owner") {
-      buttons.push(`<button onclick="groupManageTransferOwner(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-purple-500" title="Transfer owner"><i data-lucide="crown" class="w-4 h-4"></i></button>`);
+      buttons.push(`<button onclick="groupManageTransferOwner(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-purple-500" title="${_t4('Transfer owner', '转让群主', '轉讓群主', 'オーナー権限を譲渡')}"><i data-lucide="crown" class="w-4 h-4"></i></button>`);
     }
   }
   if (canManageGroupMembers() && role !== "owner" && (canOwnerManageGroup() || role === "member")) {
-    buttons.push(`<button onclick="groupManageRemoveMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-red-500" title="Remove member"><i data-lucide="user-minus" class="w-4 h-4"></i></button>`);
+    buttons.push(`<button onclick="groupManageRemoveMember(${Number(member.user_id)})" class="p-1.5 rounded-full hover:bg-bgSearch text-textSecondary hover:text-red-500" title="${_t4('Remove member', '移出群组', '移出群組', 'メンバーを削除')}"><i data-lucide="user-minus" class="w-4 h-4"></i></button>`);
   }
   return buttons.length ? `<div class="group-manage-member-actions">${buttons.join("")}</div>` : "";
 }
@@ -4156,10 +4156,10 @@ function renderGroupManageInviteList(query) {
   });
   list.innerHTML = candidates.map(function(contact) {
     const canInvite = contact.can_invite !== false;
-    const statusText = contact.reason || (canInvite ? (currentLanguage === "zh" ? "可邀请" : "Available") : "");
+    const statusText = contact.reason || (canInvite ? _t4("Available", "可邀请", "可邀請", "招待可能") : "");
     const statusClass = canInvite ? "group-invite-status is-ready" : "group-invite-status is-disabled";
     const actionHtml = canInvite
-      ? `<button type="button" onclick="groupManageInviteMember(${Number(contact.user_id)})" class="group-invite-check-btn" title="${currentLanguage === "zh" ? "邀请" : "Invite"}"><i data-lucide="check"></i></button>`
+      ? `<button type="button" onclick="groupManageInviteMember(${Number(contact.user_id)})" class="group-invite-check-btn" title="${_t4("Invite", "邀请", "邀請", "招待")}"><i data-lucide="check"></i></button>`
       : `<span class="group-invite-check-btn is-disabled" title="${escapeHtml(statusText)}"><i data-lucide="check"></i></span>`;
     return `<div class="group-manage-invite-row${canInvite ? "" : " is-disabled"}"
         data-search="${escapeHtml((contact.display_name || "") + " " + (contact.username || "") + " " + statusText)}">
@@ -4171,7 +4171,7 @@ function renderGroupManageInviteList(query) {
       </div>
       ${actionHtml}
     </div>`;
-  }).join("") || `<div class="text-xs text-textSecondary text-center py-4">${currentLanguage === "zh" ? "没有匹配的联系人" : "No matching contacts"}</div>`;
+  }).join("") || `<div class="text-xs text-textSecondary text-center py-4">${cleaned ? _t4("No matching contacts", "没有匹配的联系人", "沒有符合的聯絡人", "一致する連絡先はありません") : _t4("No contacts to invite", "没有可邀请的联系人", "獲得可能な連絡先はありません", "招待できる連絡先はありません")}</div>`;
   if (window.lucide) window.lucide.createIcons();
 }
 
@@ -7118,1083 +7118,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 // Translation Dictionary
-const translations = {
-  en: {
-    general_settings: "General Settings",
-    logout_confirm_title: "Sign Out",
-    logout_confirm_desc: "Are you sure you want to sign out?",
-    logout_confirm_btn: "Confirm",
-    account_details: "Account Details",
-    active_sessions: "Active Sessions (3)",
-    active_sessions_desc: "Manage all devices logged into your account",
-    attach_document: "Attach Document",
-    back_to_sidebar: "Back to Chats",
-    blocked_contacts: "Blocked Contacts",
-    blocked_contacts_desc: "No users currently blocked",
-    chat_info_title: "Chat Info",
-    close_panel: "Close Panel",
-    cryptographic_fingerprint: "Cryptographic Fingerprint",
-    dark_theme_mode: "Dark Theme Mode",
-    e2ee_banner: "🔒 Messages are secured with end-to-end encryption.",
-    email_address: "Email Address",
-    empty_desc: "Choose a contact from the sidebar list or search for someone new to initiate an end-to-end encrypted session.",
-    empty_item1: "Messages are encrypted locally with ECDH P-256 key agreement.",
-    empty_item2: "No plain text is ever stored on the server directory.",
-    empty_item3: "Verify encryption status by checking active fingerprints.",
-    empty_title: "No Chat Selected",
-    encryption_details: "Encryption Details",
-    fp_match_btn: "Fingerprints Match",
-    group_members_title: "Group Members",
-    insert_emoji: "Insert Emoji",
-    lang_display: "English",
-    language_mode: "Language / 语言",
-    main_menu: "Main Menu",
-    manage_keys: "Manage Cryptographic Keys",
-    manage_keys_desc: "View and verify Elliptic Curve key pairs",
-    menu_contacts: "Contacts",
-    menu_help: "iChat Pro Help & FAQ",
-    menu_logout: "Sign Out",
-    menu_new_group: "New Group",
-    menu_profile: "My Profile",
-    menu_saved_messages: "Saved Messages",
-    menu_settings: "Settings",
-    menu_theme: "Toggle Theme",
-    more_operations: "More Operations",
-    off: "Off",
-    online: "Online",
-    phone_number: "Phone Number",
-    privacy_security: "Privacy & Security",
-    protocol: "Protocol",
-    search_chat: "Search Chat",
-    search_placeholder: "Search chats or messages...",
-    self_destruct_timer: "Self-Destruct Timer",
-    settings: "Settings",
-    system_preferences: "System Preferences",
-    timer_1h: "1 Hour",
-    username: "Username",
-    verification: "Verification",
-    verified: "Verified",
-    verify_fingerprint_btn: "Verify Fingerprint",
-    verify_fp_desc: "E2EE Encrypted. Click to verify fingerprint.",
-    verify_fp_title: "Verify Security Fingerprint",
-    reset_key_btn: "Reset Key",
-    view_info: "Chat Info",
-    write_placeholder: "Write an encrypted message...",
-    menu_boost_group: "Boost Group",
-    menu_block_contact: "Block",
-    menu_mute_group: "Mute...",
-    menu_select_messages: "Select messages",
-    menu_report: "Report",
-    menu_leave_group: "Leave Group",
-    menu_delete_chat: "Delete Chat",
-    menu_add_account: "Add Account",
-    menu_more: "More",
-    menu_about: "About iChat Pro",
-    menu_updates: "Check Updates",
-    // T12: Conversation actions
-    convPin: "Pin",
-    convUnpin: "Unpin",
-    convPinned: "Pinned",
-    convUnpinned: "Unpinned",
-    convMute: "Mute",
-    convUnmute: "Unmute",
-    convMuted: "Muted",
-    convUnmuted: "Unmuted",
-    convMute1h: "Mute for 1 hour",
-    convMute8h: "Mute for 8 hours",
-    convMute24h: "Mute for 24 hours",
-    convMuteForever: "Mute forever",
-    convArchive: "Archive",
-    convUnarchive: "Unarchive",
-    convArchived: "Archived",
-    convUnarchived: "Unarchived",
-    convClear: "Clear History",
-    convDelete: "Delete Chat",
-    convMarkRead: "Mark as Read",
-    convMarkUnread: "Mark as Unread",
-    convMarkedRead: "Marked as read",
-    convMarkedUnread: "Marked as unread",
-    convCleared: "History cleared",
-    convDeleted: "Conversation deleted",
-    convClearConfirm: "Clear all messages in this chat?",
-    convDeleteConfirm: "Delete this conversation?",
-    convActionFailed: "Action failed",
-    // T13: Message actions
-    msgCopy: "Copy",
-    msgCopied: "Copied",
-    msgCopyFailed: "Copy failed",
-    msgNothingToCopy: "Nothing to copy",
-    msgReply: "Reply",
-    msgForward: "Forward",
-    msgForwardTitle: "Forward to...",
-    msgForwarded: "Forwarded",
-    msgForwardFailed: "Forward failed",
-    msgNoForwardTargets: "No conversations to forward to",
-    msgSelect: "Select",
-    msgDelete: "Delete",
-    msgDeleted: "message deleted",
-    msgDeletedToast: "Message deleted",
-    msgRecall: "Recall",
-    msgRecalled: "message recalled",
-    msgYouRecalled: "You recalled a message",
-    msgRecalledToast: "Message recalled",
-    msgRecallFailed: "Recall failed",
-    msgResend: "Resend",
-    msgCancelReply: "Cancel reply",
-    msgActionFailed: "Action failed",
-    // T14: Status & presence
-    statusSending: "Sending...",
-    statusSent: "Sent",
-    statusDelivered: "Delivered",
-    statusRead: "Read",
-    statusFailed: "Failed to send",
-    connectionConnected: "Connected",
-    connectionReconnecting: "Reconnecting...",
-    connectionDisconnected: "Disconnected",
-    lastSeenJustNow: "Last seen just now",
-    lastSeenMinAgo: "Last seen %d min ago",
-    lastSeenHoursAgo: "Last seen %d hours ago",
-    lastSeenToday: "Last seen today at",
-    lastSeenYesterday: "Last seen yesterday at",
-    lastSeenDate: "Last seen",
-    typingIndicator: "Typing",
-    // Settings categories
-    notifications_sounds: "Notifications and Sounds",
-    data_and_storage: "Data and Storage",
-    privacy_and_security: "Privacy and Security",
-    chat_folders: "Chat Folders",
-    stickers_and_emoji: "Stickers and Emoji",
-    speakers_and_camera: "Speakers and Camera",
-    devices: "Devices",
-    keyboard_shortcuts: "Keyboard Shortcuts",
-    manage_crypto_keys: "Manage Cryptographic Keys",
-    edit_profile: "Edit Profile",
-    language: "Language",
-    birthday: "Birthday",
-    // Notification settings
-    web_notifications: "Web Notifications",
-    display_notifications: "Show Notifications",
-    show_offline_notifications: "Show Offline Notifications",
-    all_accounts: "All Accounts",
-    enable_private_chats: "Enable Private Chats",
-    sound_effects: "Sound Effects",
-    notification_tone: "Notification Tone",
-    message_sent_sound_effect: "Message Sent",
-    private_chat_notifications: "Private Chat Notifications",
-    message_preview: "Message Preview",
-    group_notifications: "Group Notifications",
-    channel_notifications: "Channel Notifications",
-    other_notifications: "Other",
-    contact_joined_telegram: "Contact joined Telegram",
-    // Data & Storage
-    auto_download_media: "Auto-Download Media",
-    reset_auto_download_settings: "Reset Auto-Download Settings",
-    estimated_storage_quota: "Estimated Storage Quota",
-    cached_files: "Cached Files",
-    cached_video_stream_chunks: "Cached Video Stream Chunks",
-    clear_cache_older_than: "Clear Cache Older Than",
-    cache_size_limit: "Maximum Cache Size",
-    clear_all_cache: "Clear All Cache",
-    // Privacy
-    blocked_users: "Blocked Users",
-    auto_delete_messages: "Auto-Delete Messages",
-    passcode_lock: "Passcode Lock",
-    two_step_verification: "Two-Step Verification",
-    login_email: "Login Email",
-    passkey: "Passkey",
-    privacy: "Privacy",
-    who_can_see_my_phone_number: "Who can see my phone number?",
-    who_can_see_my_last_seen: "Who can see my last seen?",
-    who_can_see_my_profile_photo: "Who can see my profile photo?",
-    who_can_see_my_bio: "Who can see my bio?",
-    who_can_call_me: "Who can call me?",
-    who_can_forward_link: "Who can link to my account when forwarding?",
-    who_can_invite_me: "Who can invite me?",
-    who_can_send_messages: "Who can send me messages?",
-    who_can_see_my_birthday: "Who can see my birthday?",
-    who_can_send_me_gifts: "Who can send me gifts?",
-    who_can_see_my_saved_music: "Who can see my saved music?",
-    sensitive_content: "Sensitive Content",
-    disable_filtering: "Disable Filtering",
-    payments: "Payments",
-    clear_payment_shipping_info: "Clear Payment and Shipping Info",
-    delete_cloud_drafts: "Delete All Cloud Drafts",
-    // General settings
-    message_font_size: "Message Font Size",
-    chat_wallpaper: "Chat Wallpaper",
-    power_saving_mode: "Power Saving Mode",
-    theme_color: "Theme Color",
-    time_format: "Time Format",
-    light_theme: "Light",
-    dark_theme_night: "Dark / Night",
-    system_default: "System Default",
-    hour_12: "12-Hour",
-    hour_24: "24-Hour",
-    enabled: "Enabled",
-    disabled: "Disabled",
-    // Stickers & Emoji
-    quick_reactions: "Quick Reactions",
-    suggest_emoji: "Suggest Emoji",
-    loop_animated_stickers: "Loop Animated Stickers",
-    emoji: "Emoji",
-    suggested_emojis: "Suggested Emojis",
-    large_emoji: "Large Emoji",
-    sticker_packs_order: "Sticker Packs Order",
-    dynamic_sticker_order: "Dynamic Sticker Pack Order",
-    sticker_packs: "Sticker Packs",
-    // Folders
-    folders: "Folders",
-    create_folder: "Create Folder",
-    folders_view: "Folders View",
-    folders_sidebar: "Left Sidebar",
-    folders_above_chats: "Folders Above Chats",
-    no_folders: "No Folders",
-    // Sessions & Shortcuts
-    terminate: "Terminate",
-    terminate_all_other_sessions: "Terminate All Other Sessions",
-    current_session: "Current",
-    no_active_sessions: "No Active Sessions",
-    // Profile edit
-    first_name: "First Name",
-    last_name: "Last Name",
-    bio: "Bio (optional)",
-    username_optional: "Username (optional)",
-    save_changes: "Save Changes",
-    add_birthday: "Add Birthday",
-    change_avatar: "Change Avatar",
-    // Birthday
-    never_allow: "Never Allow",
-    always_allow: "Always Allow",
-    add_users: "Add Users",
-    exceptions: "Exceptions",
-    // Misc
-    search_contacts: "Search contacts...",
-    new_private_chat: "New Private Chat",
-    new_channel: "New Channel",
-    soon: "Soon",
-    add_another_account: "Add Another Account",
-    loading_accounts: "Loading accounts...",
-    groups: "Groups",
-    all_chats: "All Chats",
-    private_chats: "Private Chats",
-    group_chats: "Group Chats",
-    channels_label: "Channels",
-    search_for_chats: "Search for chats, contacts, and messages",
-    // Translate section
-    translate_messages: "Translate Messages",
-    show_translate_button: "Show Translate Button",
-    translate_all_chats: "Translate All Chats",
-    do_not_translate: "Do Not Translate",
-    ichat_premium_hint: "Subscribe to iChat Premium to translate entire chats."
-  },
-  zh: {
-    general_settings: "通用设置",
-    logout_confirm_title: "退出登录",
-    logout_confirm_desc: "确定要退出登录吗？",
-    logout_confirm_btn: "确认",
-    account_details: "账号详情",
-    active_sessions: "活跃会话 (3)",
-    active_sessions_desc: "管理所有已登录此账号的设备",
-    attach_document: "附加文件",
-    back_to_sidebar: "返回聊天列表",
-    blocked_contacts: "已屏蔽联系人",
-    blocked_contacts_desc: "目前没有被屏蔽的用户",
-    chat_info_title: "聊天信息",
-    close_panel: "关闭面板",
-    cryptographic_fingerprint: "加密指纹",
-    dark_theme_mode: "暗黑主题模式",
-    e2ee_banner: "🔒 消息已通过端到端加密保护。",
-    email_address: "电子邮箱地址",
-    empty_desc: "从侧边栏列表中选择一个联系人，或搜索新联系人以启动端到端加密会话。",
-    empty_item1: "消息使用 ECDH P-256 密钥协商在本地进行加密。",
-    empty_item2: "服务器目录中绝不存储任何明文消息。",
-    empty_item3: "通过检查当前的安全指纹来验证加密状态。",
-    empty_title: "未选择聊天",
-    encryption_details: "加密详情",
-    fp_match_btn: "指纹匹配",
-    group_members_title: "群组成员",
-    insert_emoji: "插入表情符号",
-    lang_display: "简体中文",
-    language_mode: "语言 / Language",
-    main_menu: "主菜单",
-    manage_keys: "管理加密密钥",
-    manage_keys_desc: "查看并验证椭圆曲线密钥对",
-    menu_contacts: "联系人",
-    menu_help: "iChat Pro 帮助与常见问题",
-    menu_logout: "退出登录",
-    menu_new_group: "新建群组",
-    menu_profile: "个人资料",
-    menu_saved_messages: "收藏夹",
-    menu_settings: "设置",
-    menu_theme: "切换主题",
-    more_operations: "更多操作",
-    off: "关闭",
-    online: "在线",
-    phone_number: "手机号码",
-    privacy_security: "隐私与安全",
-    protocol: "加密协议",
-    search_chat: "搜索聊天记录",
-    search_placeholder: "搜索聊天或消息...",
-    self_destruct_timer: "阅后即焚定时器",
-    settings: "设置",
-    system_preferences: "系统首选项",
-    timer_1h: "1 小时",
-    username: "用户名",
-    verification: "验证状态",
-    verified: "已验证",
-    verify_fingerprint_btn: "验证指纹",
-    verify_fp_desc: "端到端加密。点击以验证安全指纹。",
-    verify_fp_title: "验证安全指纹",
-    reset_key_btn: "重置密钥",
-    view_info: "查看信息",
-    write_placeholder: "编写加密消息...",
-    menu_boost_group: "助力群组",
-    menu_block_contact: "拉黑",
-    menu_mute_group: "静音免打扰",
-    menu_select_messages: "选择消息",
-    menu_report: "举报",
-    menu_leave_group: "退出群聊",
-    menu_delete_chat: "删除聊天",
-    menu_add_account: "添加账号",
-    menu_more: "更多",
-    menu_about: "关于 iChat Pro",
-    menu_updates: "检查更新",
-    // T12: Conversation actions
-    convPin: "置顶",
-    convUnpin: "取消置顶",
-    convPinned: "已置顶",
-    convUnpinned: "已取消置顶",
-    convMute: "静音",
-    convUnmute: "取消静音",
-    convMuted: "已静音",
-    convUnmuted: "已取消静音",
-    convMute1h: "静音1小时",
-    convMute8h: "静音8小时",
-    convMute24h: "静音24小时",
-    convMuteForever: "永久静音",
-    convArchive: "归档",
-    convUnarchive: "取消归档",
-    convArchived: "已归档",
-    convUnarchived: "已取消归档",
-    convClear: "清空聊天记录",
-    convDelete: "删除会话",
-    convMarkRead: "标为已读",
-    convMarkUnread: "标为未读",
-    convMarkedRead: "已标为已读",
-    convMarkedUnread: "已标为未读",
-    convCleared: "聊天记录已清空",
-    convDeleted: "会话已删除",
-    convClearConfirm: "确定清空该会话的所有消息？",
-    convDeleteConfirm: "确定删除该会话？",
-    convActionFailed: "操作失败",
-    // T13: Message actions
-    msgCopy: "复制",
-    msgCopied: "已复制",
-    msgCopyFailed: "复制失败",
-    msgNothingToCopy: "无可复制内容",
-    msgReply: "回复",
-    msgForward: "转发",
-    msgForwardTitle: "转发到...",
-    msgForwarded: "已转发",
-    msgForwardFailed: "转发失败",
-    msgNoForwardTargets: "没有可转发的会话",
-    msgSelect: "选择",
-    msgDelete: "删除",
-    msgDeleted: "消息已删除",
-    msgDeletedToast: "消息已删除",
-    msgRecall: "撤回",
-    msgRecalled: "消息已撤回",
-    msgYouRecalled: "你撤回了一条消息",
-    msgRecalledToast: "消息已撤回",
-    msgRecallFailed: "撤回失败",
-    msgResend: "重发",
-    msgCancelReply: "取消回复",
-    msgActionFailed: "操作失败",
-    // T14: Status & presence
-    statusSending: "发送中...",
-    statusSent: "已发送",
-    statusDelivered: "已送达",
-    statusRead: "已读",
-    statusFailed: "发送失败",
-    connectionConnected: "已连接",
-    connectionReconnecting: "重连中...",
-    connectionDisconnected: "已断开",
-    lastSeenJustNow: "刚刚在线",
-    lastSeenMinAgo: "最后上线 %d 分钟前",
-    lastSeenHoursAgo: "最后上线 %d 小时前",
-    lastSeenToday: "最后上线今天",
-    lastSeenYesterday: "最后上线昨天",
-    lastSeenDate: "最后上线",
-    typingIndicator: "正在输入",
-    // Settings categories
-    notifications_sounds: "通知与声音",
-    data_and_storage: "数据和存储",
-    privacy_and_security: "隐私和安全",
-    chat_folders: "聊天文件夹",
-    stickers_and_emoji: "贴纸与表情",
-    speakers_and_camera: "扬声器和摄像头",
-    devices: "设备",
-    keyboard_shortcuts: "快捷键",
-    manage_crypto_keys: "管理加密密钥",
-    edit_profile: "编辑资料",
-    language: "语言",
-    birthday: "生日",
-    // Notification settings
-    web_notifications: "网页通知",
-    display_notifications: "显示通知",
-    show_offline_notifications: "显示线下通知",
-    all_accounts: "全部账号",
-    enable_private_chats: "启用私聊",
-    sound_effects: "声音特效",
-    notification_tone: "通知音",
-    message_sent_sound_effect: "消息已发送",
-    private_chat_notifications: "私聊通知",
-    message_preview: "消息预览",
-    group_notifications: "群组通知",
-    channel_notifications: "频道通知",
-    other_notifications: "其它",
-    contact_joined_telegram: "联系人已加入 Telegram",
-    // Data & Storage
-    auto_download_media: "自动下载媒体文件",
-    reset_auto_download_settings: "重置自动下载设置",
-    estimated_storage_quota: "预估存储空间",
-    cached_files: "缓存文件",
-    cached_video_stream_chunks: "缓存的视频流片段",
-    clear_cache_older_than: "清除早于以下时间的缓存",
-    cache_size_limit: "最大缓存大小",
-    clear_all_cache: "清除所有缓存",
-    // Privacy
-    blocked_users: "已拉黑用户",
-    auto_delete_messages: "自动删除消息",
-    passcode_lock: "密码锁",
-    two_step_verification: "两步验证",
-    login_email: "登录邮箱",
-    passkey: "通行密钥",
-    privacy: "隐私",
-    who_can_see_my_phone_number: "谁可以看见我的手机号码？",
-    who_can_see_my_last_seen: "谁可以看到我最后上线的时间？",
-    who_can_see_my_profile_photo: "谁能看见我的头像？",
-    who_can_see_my_bio: "谁可以看到我的个人简介？",
-    who_can_call_me: "谁可以给我打电话？",
-    who_can_forward_link: "转发我的消息时，谁可以链接至我的账号？",
-    who_can_invite_me: "谁可以邀请我？",
-    who_can_send_messages: "谁可以给我发消息？",
-    who_can_see_my_birthday: "谁可以看到我的生日？",
-    who_can_send_me_gifts: "谁可以给我送礼物？",
-    who_can_see_my_saved_music: "谁可以看到我的已收藏音乐？",
-    sensitive_content: "敏感内容",
-    disable_filtering: "停用过滤",
-    payments: "付款",
-    clear_payment_shipping_info: "清除付款和配送信息",
-    delete_cloud_drafts: "删除所有的云草稿",
-    // General settings
-    message_font_size: "消息字号",
-    chat_wallpaper: "聊天壁纸",
-    power_saving_mode: "省电模式",
-    theme_color: "主题颜色",
-    time_format: "时间格式",
-    light_theme: "日光白",
-    dark_theme_night: "夜间",
-    system_default: "系统默认",
-    hour_12: "12小时制",
-    hour_24: "24小时制",
-    enabled: "已启用",
-    disabled: "已停用",
-    // Stickers & Emoji
-    quick_reactions: "快速回应",
-    suggest_emoji: "根据 Emoji 联想表情",
-    loop_animated_stickers: "循环播放动态贴纸",
-    emoji: "Emoji",
-    suggested_emojis: "推荐的表情",
-    large_emoji: "大号表情",
-    sticker_packs_order: "贴纸包动态顺序",
-    dynamic_sticker_order: "贴纸包动态顺序",
-    sticker_packs: "表情",
-    // Folders
-    folders: "文件夹",
-    create_folder: "创建文件夹",
-    folders_view: "文件夹视图",
-    folders_sidebar: "左侧文件夹",
-    folders_above_chats: "聊天上方显示文件夹",
-    no_folders: "暂无文件夹",
-    // Sessions & Shortcuts
-    terminate: "终止",
-    terminate_all_other_sessions: "终止其他所有会话",
-    current_session: "当前",
-    no_active_sessions: "未找到活跃会话",
-    // Profile edit
-    first_name: "名字",
-    last_name: "姓氏",
-    bio: "个人简介（可选）",
-    username_optional: "用户名（可选）",
-    save_changes: "保存修改",
-    add_birthday: "添加生日",
-    change_avatar: "更换头像",
-    // Birthday
-    never_allow: "永不允许",
-    always_allow: "总是允许",
-    add_users: "添加用户",
-    exceptions: "例外",
-    // Misc
-    search_contacts: "搜索联系人...",
-    new_private_chat: "新建私聊",
-    new_channel: "新建频道",
-    soon: "即将推出",
-    add_another_account: "添加其他账号",
-    loading_accounts: "正在加载账号...",
-    groups: "群组",
-    all_chats: "全部聊天",
-    private_chats: "私聊",
-    group_chats: "群聊",
-    channels_label: "频道",
-    search_for_chats: "搜索聊天、联系人和消息",
-    // Translate section
-    translate_messages: "翻译消息",
-    show_translate_button: "显示“翻译”按钮",
-    translate_all_chats: "翻译全部聊天记录",
-    do_not_translate: "无需翻译",
-    ichat_premium_hint: "订阅 iChat 高级版 以翻译所有聊天。"
-  },
-  'zh-TW': {
-    general_settings: "一般設定",
-    logout_confirm_title: "登出",
-    logout_confirm_desc: "確定要登出嗎？",
-    logout_confirm_btn: "確認",
-    account_details: "帳號詳情",
-    active_sessions: "活躍工作階段 (3)",
-    active_sessions_desc: "管理所有已登入此帳號的裝置",
-    attach_document: "附加檔案",
-    back_to_sidebar: "返回聊天列表",
-    blocked_contacts: "已封鎖聯絡人",
-    blocked_contacts_desc: "目前沒有被封鎖的使用者",
-    chat_info_title: "聊天資訊",
-    close_panel: "關閉面板",
-    cryptographic_fingerprint: "加密指紋",
-    dark_theme_mode: "深色主題模式",
-    e2ee_banner: "🔒 訊息已透過端對端加密保護。",
-    email_address: "電子郵件地址",
-    empty_desc: "從側邊欄列表中選擇一個聯絡人，或搜尋新聯絡人以啟動端對端加密工作階段。",
-    empty_item1: "訊息使用 ECDH P-256 金鑰協商在本地進行加密。",
-    empty_item2: "伺服器目錄中絕不儲存任何明文訊息。",
-    empty_item3: "透過檢查目前的安全指紋來驗證加密狀態。",
-    empty_title: "未選擇聊天",
-    encryption_details: "加密詳情",
-    fp_match_btn: "指紋相符",
-    group_members_title: "群組成員",
-    insert_emoji: "插入表情符號",
-    lang_display: "繁體中文",
-    language_mode: "語言 / Language",
-    main_menu: "主選單",
-    manage_keys: "管理加密金鑰",
-    manage_keys_desc: "檢視並驗證橢圓曲線金鑰對",
-    menu_contacts: "聯絡人",
-    menu_help: "iChat Pro 說明與常見問題",
-    menu_logout: "登出",
-    menu_new_group: "新增群組",
-    menu_profile: "個人檔案",
-    menu_saved_messages: "收藏",
-    menu_settings: "設定",
-    menu_theme: "切換主題",
-    more_operations: "更多操作",
-    off: "關閉",
-    online: "線上",
-    phone_number: "手機號碼",
-    privacy_security: "隱私與安全",
-    protocol: "加密協定",
-    search_chat: "搜尋聊天記錄",
-    search_placeholder: "搜尋聊天或訊息...",
-    self_destruct_timer: "閱後即焚計時器",
-    settings: "設定",
-    system_preferences: "系統偏好設定",
-    timer_1h: "1 小時",
-    username: "使用者名稱",
-    verification: "驗證狀態",
-    verified: "已驗證",
-    verify_fingerprint_btn: "驗證指紋",
-    verify_fp_desc: "端對端加密。點選以驗證安全指紋。",
-    verify_fp_title: "驗證安全指紋",
-    reset_key_btn: "重設金鑰",
-    view_info: "檢視資訊",
-    write_placeholder: "撰寫加密訊息...",
-    menu_boost_group: "強化群組",
-    menu_block_contact: "封鎖",
-    menu_mute_group: "靜音免打擾",
-    menu_select_messages: "選取訊息",
-    menu_report: "檢舉",
-    menu_leave_group: "離開群組",
-    menu_delete_chat: "刪除聊天",
-    menu_add_account: "新增帳號",
-    menu_more: "更多",
-    menu_about: "關於 iChat Pro",
-    menu_updates: "檢查更新",
-    // T12: Conversation actions
-    convPin: "置頂",
-    convUnpin: "取消置頂",
-    convPinned: "已置頂",
-    convUnpinned: "已取消置頂",
-    convMute: "靜音",
-    convUnmute: "取消靜音",
-    convMuted: "已靜音",
-    convUnmuted: "已取消靜音",
-    convMute1h: "靜音 1 小時",
-    convMute8h: "靜音 8 小時",
-    convMute24h: "靜音 24 小時",
-    convMuteForever: "永久靜音",
-    convArchive: "封存",
-    convUnarchive: "取消封存",
-    convArchived: "已封存",
-    convUnarchived: "已取消封存",
-    convClear: "清除聊天記錄",
-    convDelete: "刪除會話",
-    convMarkRead: "標示為已讀",
-    convMarkUnread: "標示為未讀",
-    convMarkedRead: "已標示為已讀",
-    convMarkedUnread: "已標示為未讀",
-    convCleared: "聊天記錄已清除",
-    convDeleted: "會話已刪除",
-    convClearConfirm: "確定清除此會話的所有訊息？",
-    convDeleteConfirm: "確定刪除此會話？",
-    convActionFailed: "操作失敗",
-    // T13: Message actions
-    msgCopy: "複製",
-    msgCopied: "已複製",
-    msgCopyFailed: "複製失敗",
-    msgNothingToCopy: "無可複製內容",
-    msgReply: "回覆",
-    msgForward: "轉寄",
-    msgForwardTitle: "轉寄到...",
-    msgForwarded: "已轉寄",
-    msgForwardFailed: "轉寄失敗",
-    msgNoForwardTargets: "沒有可轉寄的會話",
-    msgSelect: "選取",
-    msgDelete: "刪除",
-    msgDeleted: "訊息已刪除",
-    msgDeletedToast: "訊息已刪除",
-    msgRecall: "收回",
-    msgRecalled: "訊息已收回",
-    msgYouRecalled: "你收回了一條訊息",
-    msgRecalledToast: "訊息已收回",
-    msgRecallFailed: "收回失敗",
-    msgResend: "重發",
-    msgCancelReply: "取消回覆",
-    msgActionFailed: "操作失敗",
-    // T14: Status & presence
-    statusSending: "傳送中...",
-    statusSent: "已傳送",
-    statusDelivered: "已送達",
-    statusRead: "已讀",
-    statusFailed: "傳送失敗",
-    connectionConnected: "已連線",
-    connectionReconnecting: "重新連線中...",
-    connectionDisconnected: "已中斷連線",
-    lastSeenJustNow: "剛剛上線",
-    lastSeenMinAgo: "最後上線 %d 分鐘前",
-    lastSeenHoursAgo: "最後上線 %d 小時前",
-    lastSeenToday: "最後上線今天",
-    lastSeenYesterday: "最後上線昨天",
-    lastSeenDate: "最後上線",
-    typingIndicator: "正在輸入",
-    // Settings categories
-    notifications_sounds: "通知與音效",
-    data_and_storage: "資料與儲存",
-    privacy_and_security: "隱私與安全",
-    chat_folders: "聊天資料夾",
-    stickers_and_emoji: "貼圖與表情",
-    speakers_and_camera: "喇叭與相機",
-    devices: "裝置",
-    keyboard_shortcuts: "鍵盤快速鍵",
-    manage_crypto_keys: "管理加密金鑰",
-    edit_profile: "編輯個人檔案",
-    language: "語言",
-    birthday: "生日",
-    // Notification settings
-    web_notifications: "網頁通知",
-    display_notifications: "顯示通知",
-    show_offline_notifications: "顯示離線通知",
-    all_accounts: "全部帳號",
-    enable_private_chats: "啟用私聊",
-    sound_effects: "音效",
-    notification_tone: "通知音",
-    message_sent_sound_effect: "訊息已傳送",
-    private_chat_notifications: "私聊通知",
-    message_preview: "訊息預覽",
-    group_notifications: "群組通知",
-    channel_notifications: "頻道通知",
-    other_notifications: "其他",
-    contact_joined_telegram: "聯絡人已加入 Telegram",
-    // Data & Storage
-    auto_download_media: "自動下載媒體檔案",
-    reset_auto_download_settings: "重設自動下載設定",
-    estimated_storage_quota: "預估儲存空間",
-    cached_files: "快取檔案",
-    cached_video_stream_chunks: "快取的視訊串流片段",
-    clear_cache_older_than: "清除早於以下時間的快取",
-    cache_size_limit: "最大快取大小",
-    clear_all_cache: "清除所有快取",
-    // Privacy
-    blocked_users: "已封鎖使用者",
-    auto_delete_messages: "自動刪除訊息",
-    passcode_lock: "密碼鎖定",
-    two_step_verification: "雙步驟驗證",
-    login_email: "登入電子郵件",
-    passkey: "通行金鑰",
-    privacy: "隱私",
-    who_can_see_my_phone_number: "誰可以看到我的電話號碼？",
-    who_can_see_my_last_seen: "誰可以看到我最後上線的時間？",
-    who_can_see_my_profile_photo: "誰可以看到我的大頭貼？",
-    who_can_see_my_bio: "誰可以看到我的個人簡介？",
-    who_can_call_me: "誰可以打電話給我？",
-    who_can_forward_link: "轉寄我的訊息時，誰可以連結至我的帳號？",
-    who_can_invite_me: "誰可以邀請我？",
-    who_can_send_messages: "誰可以傳訊息給我？",
-    who_can_see_my_birthday: "誰可以看到我的生日？",
-    who_can_send_me_gifts: "誰可以送禮物給我？",
-    who_can_see_my_saved_music: "誰可以看到我收藏的音樂？",
-    sensitive_content: "敏感內容",
-    disable_filtering: "停用過濾",
-    payments: "付款",
-    clear_payment_shipping_info: "清除付款與配送資訊",
-    delete_cloud_drafts: "刪除所有雲端草稿",
-    // General settings
-    message_font_size: "訊息字型大小",
-    chat_wallpaper: "聊天背景",
-    power_saving_mode: "省電模式",
-    theme_color: "主題色彩",
-    time_format: "時間格式",
-    light_theme: "日間模式",
-    dark_theme_night: "夜間模式",
-    system_default: "跟隨系統",
-    hour_12: "12 小時制",
-    hour_24: "24 小時制",
-    enabled: "已啟用",
-    disabled: "已停用",
-    // Stickers & Emoji
-    quick_reactions: "快速回應",
-    suggest_emoji: "根據 Emoji 聯想表情",
-    loop_animated_stickers: "循環播放動態貼圖",
-    emoji: "Emoji",
-    suggested_emojis: "推薦的表情",
-    large_emoji: "大型表情",
-    sticker_packs_order: "貼圖包順序",
-    dynamic_sticker_order: "動態貼圖包順序",
-    sticker_packs: "貼圖",
-    // Folders
-    folders: "資料夾",
-    create_folder: "建立資料夾",
-    folders_view: "資料夾檢視",
-    folders_sidebar: "左側資料夾",
-    folders_above_chats: "聊天上方顯示資料夾",
-    no_folders: "尚無資料夾",
-    // Sessions & Shortcuts
-    terminate: "終止",
-    terminate_all_other_sessions: "終止其他所有工作階段",
-    current_session: "目前",
-    no_active_sessions: "找不到活躍工作階段",
-    // Profile edit
-    first_name: "名字",
-    last_name: "姓氏",
-    bio: "個人簡介（選填）",
-    username_optional: "使用者名稱（選填）",
-    save_changes: "儲存變更",
-    add_birthday: "新增生日",
-    change_avatar: "更換大頭貼",
-    // Birthday
-    never_allow: "永不允許",
-    always_allow: "總是允許",
-    add_users: "新增使用者",
-    exceptions: "例外",
-    // Misc
-    search_contacts: "搜尋聯絡人...",
-    new_private_chat: "新增私聊",
-    new_channel: "新增頻道",
-    soon: "即將推出",
-    add_another_account: "新增其他帳號",
-    loading_accounts: "正在載入帳號...",
-    groups: "群組",
-    all_chats: "所有聊天",
-    private_chats: "私聊",
-    group_chats: "群組聊天",
-    channels_label: "頻道",
-    search_for_chats: "搜尋聊天、聯絡人和訊息",
-    // Translate section
-    translate_messages: "翻譯訊息",
-    show_translate_button: "顯示「翻譯」按鈕",
-    translate_all_chats: "翻譯所有聊天記錄",
-    do_not_translate: "無需翻譯",
-    ichat_premium_hint: "訂閱 iChat 進階版 以翻譯所有聊天。"
-  },
-  ja: {
-    general_settings: "一般設定",
-    logout_confirm_title: "ログアウト",
-    logout_confirm_desc: "ログアウトしてもよろしいですか？",
-    logout_confirm_btn: "確認",
-    account_details: "アカウント詳細",
-    active_sessions: "アクティブセッション (3)",
-    active_sessions_desc: "アカウントにログインしているすべてのデバイスを管理",
-    attach_document: "ファイルを添付",
-    back_to_sidebar: "チャット一覧に戻る",
-    blocked_contacts: "ブロックした連絡先",
-    blocked_contacts_desc: "現在ブロックしているユーザーはいません",
-    chat_info_title: "チャット情報",
-    close_panel: "パネルを閉じる",
-    cryptographic_fingerprint: "暗号指紋",
-    dark_theme_mode: "ダークテーマモード",
-    e2ee_banner: "🔒 メッセージはエンドツーエンド暗号化で保護されています。",
-    email_address: "メールアドレス",
-    empty_desc: "サイドバーリストから連絡先を選択するか、新しい相手を検索してエンドツーエンド暗号化セッションを開始します。",
-    empty_item1: "メッセージは ECDH P-256 鍵共有でローカルに暗号化されます。",
-    empty_item2: "平文がサーバーディレクトリに保存されることはありません。",
-    empty_item3: "アクティブな指紋を確認して暗号化状態を検証します。",
-    empty_title: "チャットが選択されていません",
-    encryption_details: "暗号化の詳細",
-    fp_match_btn: "指紋が一致",
-    group_members_title: "グループメンバー",
-    insert_emoji: "絵文字を挿入",
-    lang_display: "日本語",
-    language_mode: "言語 / Language",
-    main_menu: "メインメニュー",
-    manage_keys: "暗号鍵の管理",
-    manage_keys_desc: "楕円曲線鍵ペアの表示と検証",
-    menu_contacts: "連絡先",
-    menu_help: "iChat Pro ヘルプ & FAQ",
-    menu_logout: "ログアウト",
-    menu_new_group: "新規グループ",
-    menu_profile: "マイプロフィール",
-    menu_saved_messages: "保存済みメッセージ",
-    menu_settings: "設定",
-    menu_theme: "テーマ切り替え",
-    more_operations: "その他の操作",
-    off: "オフ",
-    online: "オンライン",
-    phone_number: "電話番号",
-    privacy_security: "プライバシーとセキュリティ",
-    protocol: "プロトコル",
-    search_chat: "チャットを検索",
-    search_placeholder: "チャットまたはメッセージを検索...",
-    self_destruct_timer: "自動消滅タイマー",
-    settings: "設定",
-    system_preferences: "システム設定",
-    timer_1h: "1 時間",
-    username: "ユーザー名",
-    verification: "検証",
-    verified: "検証済み",
-    verify_fingerprint_btn: "指紋を検証",
-    verify_fp_desc: "E2EE 暗号化。クリックして指紋を検証。",
-    verify_fp_title: "セキュリティ指紋の検証",
-    reset_key_btn: "鍵をリセット",
-    view_info: "情報を見る",
-    write_placeholder: "暗号化メッセージを入力...",
-    menu_boost_group: "グループをブースト",
-    menu_block_contact: "ブロック",
-    menu_mute_group: "ミュート...",
-    menu_select_messages: "メッセージを選択",
-    menu_report: "報告",
-    menu_leave_group: "グループを退出",
-    menu_delete_chat: "チャットを削除",
-    menu_add_account: "アカウントを追加",
-    menu_more: "もっと見る",
-    menu_about: "iChat Pro について",
-    menu_updates: "アップデートを確認",
-    // T12: Conversation actions
-    convPin: "ピン留め",
-    convUnpin: "ピン留め解除",
-    convPinned: "ピン留め済み",
-    convUnpinned: "ピン留め解除済み",
-    convMute: "ミュート",
-    convUnmute: "ミュート解除",
-    convMuted: "ミュート済み",
-    convUnmuted: "ミュート解除済み",
-    convMute1h: "1 時間ミュート",
-    convMute8h: "8 時間ミュート",
-    convMute24h: "24 時間ミュート",
-    convMuteForever: "永久にミュート",
-    convArchive: "アーカイブ",
-    convUnarchive: "アーカイブ解除",
-    convArchived: "アーカイブ済み",
-    convUnarchived: "アーカイブ解除済み",
-    convClear: "履歴を消去",
-    convDelete: "会話を削除",
-    convMarkRead: "既読にする",
-    convMarkUnread: "未読にする",
-    convMarkedRead: "既読にしました",
-    convMarkedUnread: "未読にしました",
-    convCleared: "履歴を消去しました",
-    convDeleted: "会話を削除しました",
-    convClearConfirm: "このチャットのすべてのメッセージを消去しますか？",
-    convDeleteConfirm: "この会話を削除しますか？",
-    convActionFailed: "操作に失敗しました",
-    // T13: Message actions
-    msgCopy: "コピー",
-    msgCopied: "コピーしました",
-    msgCopyFailed: "コピーに失敗しました",
-    msgNothingToCopy: "コピーする内容がありません",
-    msgReply: "返信",
-    msgForward: "転送",
-    msgForwardTitle: "転送先...",
-    msgForwarded: "転送しました",
-    msgForwardFailed: "転送に失敗しました",
-    msgNoForwardTargets: "転送先の会話がありません",
-    msgSelect: "選択",
-    msgDelete: "削除",
-    msgDeleted: "メッセージが削除されました",
-    msgDeletedToast: "メッセージを削除しました",
-    msgRecall: "取り消し",
-    msgRecalled: "メッセージが取り消されました",
-    msgYouRecalled: "メッセージを取り消しました",
-    msgRecalledToast: "メッセージを取り消しました",
-    msgRecallFailed: "取り消しに失敗しました",
-    msgResend: "再送",
-    msgCancelReply: "返信をキャンセル",
-    msgActionFailed: "操作に失敗しました",
-    // T14: Status & presence
-    statusSending: "送信中...",
-    statusSent: "送信済み",
-    statusDelivered: "配信済み",
-    statusRead: "既読",
-    statusFailed: "送信失敗",
-    connectionConnected: "接続済み",
-    connectionReconnecting: "再接続中...",
-    connectionDisconnected: "切断されました",
-    lastSeenJustNow: "たった今オンライン",
-    lastSeenMinAgo: "最終オンライン %d 分前",
-    lastSeenHoursAgo: "最終オンライン %d 時間前",
-    lastSeenToday: "本日最終オンライン",
-    lastSeenYesterday: "昨日最終オンライン",
-    lastSeenDate: "最終オンライン",
-    typingIndicator: "入力中",
-    // Settings categories
-    notifications_sounds: "通知とサウンド",
-    data_and_storage: "データとストレージ",
-    privacy_and_security: "プライバシーとセキュリティ",
-    chat_folders: "チャットフォルダー",
-    stickers_and_emoji: "スタンプと絵文字",
-    speakers_and_camera: "スピーカーとカメラ",
-    devices: "デバイス",
-    keyboard_shortcuts: "キーボードショートカット",
-    manage_crypto_keys: "暗号鍵の管理",
-    edit_profile: "プロフィール編集",
-    language: "言語",
-    birthday: "誕生日",
-    // Notification settings
-    web_notifications: "ウェブ通知",
-    display_notifications: "通知を表示",
-    show_offline_notifications: "オフライン通知を表示",
-    all_accounts: "すべてのアカウント",
-    enable_private_chats: "プライベートチャットを有効化",
-    sound_effects: "サウンドエフェクト",
-    notification_tone: "通知音",
-    message_sent_sound_effect: "メッセージ送信音",
-    private_chat_notifications: "プライベートチャット通知",
-    message_preview: "メッセージプレビュー",
-    group_notifications: "グループ通知",
-    channel_notifications: "チャンネル通知",
-    other_notifications: "その他",
-    contact_joined_telegram: "連絡先が Telegram に参加しました",
-    // Data & Storage
-    auto_download_media: "メディアの自動ダウンロード",
-    reset_auto_download_settings: "自動ダウンロード設定をリセット",
-    estimated_storage_quota: "推定ストレージ使用量",
-    cached_files: "キャッシュファイル",
-    cached_video_stream_chunks: "キャッシュされた動画ストリーム",
-    clear_cache_older_than: "指定期間より古いキャッシュを削除",
-    cache_size_limit: "最大キャッシュサイズ",
-    clear_all_cache: "すべてのキャッシュを削除",
-    // Privacy
-    blocked_users: "ブロックしたユーザー",
-    auto_delete_messages: "メッセージの自動削除",
-    passcode_lock: "パスコードロック",
-    two_step_verification: "2 段階認証",
-    login_email: "ログインメール",
-    passkey: "パスキー",
-    privacy: "プライバシー",
-    who_can_see_my_phone_number: "電話番号を表示できるユーザー",
-    who_can_see_my_last_seen: "最終オンラインを表示できるユーザー",
-    who_can_see_my_profile_photo: "プロフィール写真を表示できるユーザー",
-    who_can_see_my_bio: "自己紹介を表示できるユーザー",
-    who_can_call_me: "通話を許可するユーザー",
-    who_can_forward_link: "転送時にアカウントにリンクできるユーザー",
-    who_can_invite_me: "招待を許可するユーザー",
-    who_can_send_messages: "メッセージ送信を許可するユーザー",
-    who_can_see_my_birthday: "誕生日を表示できるユーザー",
-    who_can_send_me_gifts: "ギフトを送信できるユーザー",
-    who_can_see_my_saved_music: "保存した音楽を表示できるユーザー",
-    sensitive_content: "センシティブなコンテンツ",
-    disable_filtering: "フィルタリングを無効化",
-    payments: "支払い",
-    clear_payment_shipping_info: "支払い・配送情報を消去",
-    delete_cloud_drafts: "すべてのクラウド下書きを削除",
-    // General settings
-    message_font_size: "メッセージのフォントサイズ",
-    chat_wallpaper: "チャット壁紙",
-    power_saving_mode: "省電力モード",
-    theme_color: "テーマカラー",
-    time_format: "時刻形式",
-    light_theme: "ライト",
-    dark_theme_night: "ダーク",
-    system_default: "システムデフォルト",
-    hour_12: "12 時間表示",
-    hour_24: "24 時間表示",
-    enabled: "有効",
-    disabled: "無効",
-    // Stickers & Emoji
-    quick_reactions: "クイックリアクション",
-    suggest_emoji: "絵文字を提案",
-    loop_animated_stickers: "アニメーションスタンプをループ再生",
-    emoji: "絵文字",
-    suggested_emojis: "おすすめ絵文字",
-    large_emoji: "大きな絵文字",
-    sticker_packs_order: "スタンプパックの順序",
-    dynamic_sticker_order: "スタンプパックの動的順序",
-    sticker_packs: "スタンプ",
-    // Folders
-    folders: "フォルダー",
-    create_folder: "フォルダーを作成",
-    folders_view: "フォルダー表示",
-    folders_sidebar: "左サイドバー",
-    folders_above_chats: "チャット上部に表示",
-    no_folders: "フォルダーがありません",
-    // Sessions & Shortcuts
-    terminate: "終了",
-    terminate_all_other_sessions: "他のすべてのセッションを終了",
-    current_session: "現在",
-    no_active_sessions: "アクティブなセッションはありません",
-    // Profile edit
-    first_name: "名",
-    last_name: "姓",
-    bio: "自己紹介（任意）",
-    username_optional: "ユーザー名（任意）",
-    save_changes: "変更を保存",
-    add_birthday: "誕生日を追加",
-    change_avatar: "アバターを変更",
-    // Birthday
-    never_allow: "許可しない",
-    always_allow: "常に許可",
-    add_users: "ユーザーを追加",
-    exceptions: "例外",
-    // Misc
-    search_contacts: "連絡先を検索...",
-    new_private_chat: "新しいプライベートチャット",
-    new_channel: "新しいチャンネル",
-    soon: "近日公開",
-    add_another_account: "別のアカウントを追加",
-    loading_accounts: "アカウントを読み込み中...",
-    groups: "グループ",
-    all_chats: "すべてのチャット",
-    private_chats: "プライベートチャット",
-    group_chats: "グループチャット",
-    channels_label: "チャンネル",
-    search_for_chats: "チャット、連絡先、メッセージを検索",
-    // Translate section
-    translate_messages: "メッセージを翻訳",
-    show_translate_button: "「翻訳」ボタンを表示",
-    translate_all_chats: "すべてのチャットを翻訳",
-    do_not_translate: "翻訳しない",
-    ichat_premium_hint: "iChat プレミアム に登録して全チャットを翻訳。"
-  }
-};
-
-// Expose translations globally so T12/T13 modules can use t()
-window.translations = translations;
+// translations dictionary is loaded globally from translations_data.js
 
 // Literal text translations: canonical_key → { en, zh, zh-TW, ja }
 // Used by TreeWalker to translate hardcoded text in templates
@@ -8366,68 +7290,7 @@ function applyLiteralTextTranslations() {
   });
 }
 
-const LANG_DISPLAY_NAMES = {
-  'en': 'English',
-  'zh': '简体中文',
-  'zh-TW': '繁體中文',
-  'ja': '日本語'
-};
 
-function applyLanguage() {
-  const langDisplay = document.getElementById("lang-display-val");
-  if (langDisplay) {
-    langDisplay.textContent = LANG_DISPLAY_NAMES[currentLanguage] || 'English';
-  }
-
-  // Translate all text content using data-i18n
-  document.querySelectorAll("[data-i18n]").forEach(el => {
-    const key = el.getAttribute("data-i18n");
-    if (translations[currentLanguage] && translations[currentLanguage][key]) {
-      const icon = el.querySelector("i, svg");
-      if (icon) {
-        const iconClone = icon.cloneNode(true);
-        el.innerHTML = "";
-        el.appendChild(iconClone);
-        el.appendChild(document.createTextNode(" " + translations[currentLanguage][key]));
-      } else {
-        el.textContent = translations[currentLanguage][key];
-      }
-    }
-  });
-
-  // Translate placeholder attributes using data-i18n-placeholder
-  document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
-    const key = el.getAttribute("data-i18n-placeholder");
-    if (translations[currentLanguage] && translations[currentLanguage][key]) {
-      el.setAttribute("placeholder", translations[currentLanguage][key]);
-    }
-  });
-
-  // Translate title attributes using data-i18n-title
-  document.querySelectorAll("[data-i18n-title]").forEach(el => {
-    const key = el.getAttribute("data-i18n-title");
-    if (translations[currentLanguage] && translations[currentLanguage][key]) {
-      el.setAttribute("title", translations[currentLanguage][key]);
-    }
-  });
-
-  applyLiteralTextTranslations();
-
-  // Re-render sidebar previews and selected chat UI
-  if (activeChatId && conversationsById[activeChatId]) {
-    const conv = conversationsById[activeChatId];
-    selectChat(activeChatId.toString());
-    updateDetailsPanel(conv);
-  }
-
-  // Also update self-destruct slider labels if they exist
-  const destructSlider = document.querySelector('input[type="range"][oninput*="updateSelfDestructLabel"]');
-  if (destructSlider) {
-    if (typeof updateSelfDestructLabel === "function") {
-      updateSelfDestructLabel(destructSlider.value);
-    }
-  }
-}
 
 const LANG_CYCLE = ['en', 'zh', 'zh-TW', 'ja'];
 

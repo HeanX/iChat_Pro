@@ -6929,3 +6929,13 @@ input:checked + .slider:before {
 .file-attachment-preview .remove-attachment:hover {
   color: #ef5350;
 }
+
+/* Standalone pages redesign styles */
+.standalone-content-card {
+  background-color: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--color-border);
+}
+[data-theme="dark"] .standalone-content-card {
+  background-color: rgba(33, 33, 33, 0.85);
+  border: 1px solid var(--color-border);
+}

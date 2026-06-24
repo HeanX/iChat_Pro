@@ -222,6 +222,103 @@ def logout_view(request):
 # ── Contact & Friend-request views ──────────────────────────────────
 
 
+def _sidebar_conversations_context(request):
+    user = request.user
+    status_filter = models.Q(
+        user=user,
+        status=ChatMember.Status.ACTIVE,
+        conversation__status=Conversation.Status.ACTIVE,
+        archived_at__isnull=True,
+        hidden_at__isnull=True,
+    )
+    memberships = (
+        ChatMember.objects
+        .filter(status_filter)
+        .select_related('conversation', 'conversation__created_by')
+        .order_by('-is_pinned', '-conversation__last_message_at', '-conversation__updated_at')
+    )
+    
+    conversations = []
+    for membership in memberships:
+        conversation = membership.conversation
+        is_muted = (
+            membership.muted_until is not None
+            and membership.muted_until > timezone.now()
+        )
+        
+        last_message_preview = ''
+        last_msg_at = conversation.last_message_at
+        if last_msg_at:
+            last_message_preview = 'Encrypted message'
+        
+        if conversation.type == Conversation.Type.SINGLE:
+            peer_member = (
+                ChatMember.objects
+                .filter(conversation=conversation, status=ChatMember.Status.ACTIVE)
+                .exclude(user=user)
+                .select_related('user__profile')
+                .first()
+            )
+            if not peer_member:
+                name = 'Unknown User'
+                initials = '??'
+                avatar_color = '#5c6bc0'
+                avatar_url = ''
+                peer_id = None
+                is_secure = False
+            else:
+                peer = peer_member.user
+                from chat.views import _display_name, _initials, _avatar_color, _avatar_url
+                name = _display_name(peer)
+                initials = _initials(name)
+                avatar_color = _avatar_color(name)
+                avatar_url = _avatar_url(request, peer)
+                is_secure = peer.public_keys.filter(is_active=True).exists()
+                peer_id = peer.id
+            
+            conversations.append({
+                'id': conversation.id,
+                'type': 'single',
+                'name': name,
+                'initials': initials,
+                'avatar_color': avatar_color,
+                'avatar_url': avatar_url,
+                'peer_id': peer_id,
+                'is_secure': is_secure,
+                'unread': membership.unread_count,
+                'is_pinned': membership.is_pinned,
+                'is_muted': is_muted,
+                'last_message_preview': last_message_preview,
+                'last_message_at': last_msg_at,
+            })
+        else:
+            name = conversation.name or f'Group #{conversation.id}'
+            from chat.views import _initials, _avatar_color
+            initials = _initials(name)
+            avatar_color = _avatar_color(name)
+            if not last_message_preview:
+                last_message_preview = 'Open group chat'
+            
+            conversations.append({
+                'id': conversation.id,
+                'type': 'group',
+                'name': name,
+                'initials': initials,
+                'avatar_color': avatar_color,
+                'avatar_url': '',
+                'is_secure': True,
+                'unread': membership.unread_count,
+                'is_pinned': membership.is_pinned,
+                'is_muted': is_muted,
+                'last_message_preview': last_message_preview,
+                'last_message_at': last_msg_at,
+            })
+            
+    return {
+        'sidebar_conversations': conversations,
+    }
+
+
 @login_required(login_url='login')
 def contact_list_view(request):
     """Show the user's contacts and pending incoming friend requests."""
@@ -241,11 +338,13 @@ def contact_list_view(request):
     ).select_related('receiver__profile')
 
     context = {
+        'open_settings': False,
+        'open_contacts': True,
         'contacts': contacts,
         'incoming_requests': incoming,
         'outgoing_requests': outgoing,
     }
-    return render(request, 'pages/contacts.html', context)
+    return render(request, 'pages/chat.html', context)
 
 
 def _avatar_url(request, user):
@@ -787,8 +886,12 @@ def group_list_view(request):
         conversation__type=Conversation.Type.GROUP,
         status=ChatMember.Status.ACTIVE,
     ).select_related('conversation')
-    conversations = [m.conversation for m in memberships]
-    return render(request, 'pages/groups.html', {'groups': conversations})
+    group_list = [m.conversation for m in memberships]
+    return render(request, 'pages/chat.html', {
+        'open_settings': False,
+        'open_groups': True,
+        'groups': group_list,
+    })
 
 
 @login_required(login_url='login')
@@ -814,7 +917,18 @@ def group_create_view(request):
         messages.success(request, f'Group "{name}" created.')
         return redirect('group_detail', group_id=conversation.id)
 
-    return render(request, 'pages/groups.html', {'show_create': True})
+    memberships = ChatMember.objects.filter(
+        user=request.user,
+        conversation__type=Conversation.Type.GROUP,
+        status=ChatMember.Status.ACTIVE,
+    ).select_related('conversation')
+    group_list = [m.conversation for m in memberships]
+    return render(request, 'pages/chat.html', {
+        'open_settings': False,
+        'open_groups': True,
+        'show_create': True,
+        'groups': group_list,
+    })
 
 
 @login_required(login_url='login')
@@ -830,7 +944,9 @@ def group_detail_view(request, group_id):
         messages.error(request, 'You are not a member of this group.')
         return redirect('groups')
 
-    return render(request, 'pages/group_detail.html', {
+    return render(request, 'pages/chat.html', {
+        'open_settings': False,
+        'open_group_detail': True,
         'group': conversation,
         'members': members,
         'is_admin': current.role in (ChatMember.Role.OWNER, ChatMember.Role.ADMIN),

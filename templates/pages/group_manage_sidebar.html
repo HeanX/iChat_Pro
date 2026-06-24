@@ -5,17 +5,17 @@
 
   <div id="group-manage-loaded" class="hidden group-manage-scroll custom-scrollbar">
     <section class="group-manage-topbar">
-      <button type="button" data-ichat-onclick="closeGroupManagePanel()" class="chat-details-icon-btn" title="Back">
+      <button type="button" data-ichat-onclick="closeGroupManagePanel()" class="chat-details-icon-btn" title="Back" data-i18n-title="back_step_title">
         <i data-lucide="arrow-left"></i>
       </button>
-      <h3 id="group-manage-panel-title">群组管理</h3>
+      <h3 id="group-manage-panel-title" data-i18n="group_management_title">群组管理</h3>
       <span></span>
     </section>
 
     <section class="chat-details-card group-manage-hero-card">
-      <div id="group-manage-avatar" class="chat-details-avatar group-manage-avatar" data-ichat-onclick="groupManageEditAvatar()" title="Tap to change group avatar">G</div>
+      <div id="group-manage-avatar" class="chat-details-avatar group-manage-avatar" data-ichat-onclick="groupManageEditAvatar()" title="Tap to change group avatar" data-i18n-title="upload_group_avatar">G</div>
       <div class="group-manage-hero-copy">
-        <h4 id="group-manage-name" data-ichat-onclick="groupManageEditName()" title="Tap to edit group name"></h4>
+        <h4 id="group-manage-name" data-ichat-onclick="groupManageEditName()"></h4>
         <div class="group-manage-meta">
           <span id="group-manage-member-count"></span>
           <span id="group-manage-my-role"></span>
@@ -25,42 +25,42 @@
 
     <section class="chat-details-card group-manage-card">
       <div class="chat-details-card-header">
-        <h5>群公告</h5>
+        <h5 data-i18n="group_announcement_label">群公告</h5>
         <div id="group-announcement-actions" class="group-manage-inline-actions hidden">
-          <button type="button" data-ichat-onclick="groupManageEditAnnouncement()" title="Edit announcement">
+          <button type="button" data-ichat-onclick="groupManageEditAnnouncement()" title="Edit announcement" data-i18n-title="edit_announcement_title">
             <i data-lucide="edit-3"></i>
           </button>
-          <button type="button" data-ichat-onclick="groupManageRemoveAnnouncement()" title="Remove announcement">
+          <button type="button" data-ichat-onclick="groupManageRemoveAnnouncement()" title="Remove announcement" data-i18n-title="remove_announcement_title">
             <i data-lucide="x"></i>
           </button>
         </div>
       </div>
       <div id="group-announcement-content" class="group-manage-note">
-        <span>暂无公告</span>
+        <span data-i18n="group_no_announcement">暂无公告</span>
       </div>
       <div id="group-announcement-editor" class="hidden group-manage-editor">
-        <textarea id="group-announcement-textarea" rows="4" placeholder="输入群公告..."></textarea>
+        <textarea id="group-announcement-textarea" rows="4" placeholder="输入群公告..." data-i18n-placeholder="group_announcement_placeholder"></textarea>
         <div class="group-manage-editor-actions">
-          <button type="button" data-ichat-onclick="groupManageCancelEditAnnouncement()">取消</button>
-          <button type="button" data-ichat-onclick="groupManageSaveAnnouncement()">保存</button>
+          <button type="button" data-ichat-onclick="groupManageCancelEditAnnouncement()" data-i18n="cancel_btn">取消</button>
+          <button type="button" data-ichat-onclick="groupManageSaveAnnouncement()" data-i18n="save_btn">保存</button>
         </div>
       </div>
     </section>
 
     <section id="group-manage-pending-section" class="hidden chat-details-card group-manage-card">
       <div class="chat-details-card-header">
-        <h5>待审核邀请</h5>
+        <h5 data-i18n="group_pending_invites">待审核邀请</h5>
       </div>
       <div id="group-manage-pending-list" class="group-manage-list"></div>
     </section>
 
     <section class="chat-details-card group-manage-card">
       <div class="chat-details-card-header">
-        <h5 id="group-manage-members-header">成员</h5>
+        <h5 id="group-manage-members-header" data-i18n="group_members_title">成员</h5>
       </div>
       <div class="group-manage-search">
         <i data-lucide="search"></i>
-        <input id="group-manage-member-search" type="text" placeholder="搜索成员..."
+        <input id="group-manage-member-search" type="text" placeholder="搜索成员..." data-i18n-placeholder="search_members_placeholder"
           data-ichat-oninput="groupManageFilterMembers(this.value)">
       </div>
       <div id="group-manage-members-list" class="group-manage-list"></div>
@@ -68,24 +68,24 @@
 
     <section id="group-manage-settings-section" class="hidden chat-details-card group-manage-card">
       <div class="chat-details-card-header">
-        <h5>群设置</h5>
+        <h5 data-i18n="group_settings_label">群设置</h5>
       </div>
       <button type="button" data-ichat-onclick="groupManageMuteGroup()" class="group-manage-menu-row">
-        <span><i data-lucide="bell-off"></i>群禁言</span>
+        <span data-i18n="group_mute_label"><i data-lucide="bell-off"></i>群禁言</span>
         <i data-lucide="chevron-right"></i>
       </button>
       <button type="button" data-ichat-onclick="groupManageAutoDelete()" class="group-manage-menu-row">
-        <span><i data-lucide="clock"></i>自动删除消息</span>
+        <span data-i18n="group_auto_delete_label"><i data-lucide="clock"></i>自动删除消息</span>
         <i data-lucide="chevron-right"></i>
       </button>
     </section>
 
     <section class="chat-details-card group-manage-card group-manage-danger">
       <button id="group-manage-leave-btn" type="button" data-ichat-onclick="openLeaveGroupModal()" class="group-manage-danger-row">
-        <span><i data-lucide="log-out"></i>退出群聊</span>
+        <span data-i18n="menu_leave_group"><i data-lucide="log-out"></i>退出群聊</span>
       </button>
       <button id="group-manage-disband-btn" type="button" data-ichat-onclick="openDisbandGroupModal()" class="group-manage-danger-row strong">
-        <span><i data-lucide="trash-2"></i>解散群聊</span>
+        <span data-i18n="group_disband_label"><i data-lucide="trash-2"></i>解散群聊</span>
       </button>
     </section>
   </div>

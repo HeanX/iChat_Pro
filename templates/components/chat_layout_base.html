@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% block layout_title %}iChat Pro{% endblock %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260624-drawer-btn-fix">
+{% block extra_layout_css %}{% endblock %}
+{% endblock %}
+
+{% block content %}
+<script nonce="{{ request.csp_nonce }}">
+  (function() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ichat_general') || '{}');
+      const wallpaper = saved.wallpaper || 'default';
+      const WALLPAPER_COLORS = {
+        default: '#deecf9',
+        green: '#d4e6c9',
+        blue: '#d7ebff',
+        purple: '#ebdcf9',
+        pink: '#fce7f3',
+        orange: '#ffedd5',
+        cyan: '#e0f7fa',
+        yellow: '#fef9c3'
+      };
+      let color = WALLPAPER_COLORS[wallpaper] || '';
+      
+      // Determine if dark theme is active
+      let isDark = saved.theme === 'dark';
+      if (saved.theme === 'system' || !saved.theme) {
+        isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+      
+      if (isDark && color) {
+        const darkWallpapers = {
+          '#deecf9': '#0f1218', // Default Dark Solid
+          '#d4e6c9': '#1b2a1c', // Green
+          '#d7ebff': '#1c2536', // Blue
+          '#ebdcf9': '#231c2d', // Purple
+          '#fce7f3': '#2d1c25', // Pink
+          '#ffedd5': '#2d221c', // Orange
+          '#e0f7fa': '#1c2d2f', // Cyan
+          '#fef9c3': '#2a281c'  // Yellow
+        };
+        color = darkWallpapers[color] || color;
+      }
+      
+      if (color) {
+        document.documentElement.style.setProperty('--chat-layout-bg', color);
+        document.documentElement.style.setProperty('--chat-footer-bg', color);
+        const clean = color.replace('#', '');
+        const r = parseInt(clean.slice(0, 2), 16);
+        const g = parseInt(clean.slice(2, 4), 16);
+        const b = parseInt(clean.slice(4, 6), 16);
+        document.documentElement.style.setProperty('--chat-footer-bg-rgba', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.88)');
+      }
+      
+      // Set early data-wallpaper attribute on documentElement
+      document.documentElement.setAttribute('data-wallpaper', wallpaper);
+    } catch (e) {}
+  })();
+</script>
+
+<div class="chat-layout flex h-screen w-screen overflow-hidden bg-bgMain text-textMain relative select-none">
+  <!-- Left Side: Collapsible Search, Contacts & Settings Sidebar -->
+  {% include 'components/sidebar.html' %}
+  
+  <!-- Right Side: Content Area -->
+  <div class="flex-1 flex flex-col h-full overflow-hidden relative bg-transparent">
+    {% block layout_content %}{% endblock %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script nonce="{{ request.csp_nonce }}">
+  // Navigation & Toggle stubs for standalone pages where chat.js is not loaded
+  window.navigateSidebar = function(view) {
+    if (view === 'contacts') {
+      window.location.href = '{% url "contacts" %}';
+    } else if (view === 'groups') {
+      window.location.href = '{% url "groups" %}';
+    } else if (view === 'settings-home' || view === 'settings-profile' || view === 'settings-notifications' || view === 'settings-storage' || view === 'settings-privacy' || view === 'settings-security') {
+      window.location.href = '{% url "settings" %}';
+    } else if (view === 'chat') {
+      window.location.href = '{% url "index" %}';
+    } else {
+      window.location.href = '{% url "index" %}';
+    }
+  };
+
+  window.triggerMyProfileFromInfo = function(e) {
+    window.location.href = '{% url "settings" %}';
+  };
+
+  window.openAiAssistant = function() {
+    window.location.href = '{% url "index" %}';
+  };
+
+  window.showToast = function(msg) {
+    alert(msg);
+  };
+
+  window.toggleMainMenu = function(e) {
+    if (e) e.stopPropagation();
+    const dropdown = document.getElementById("main-menu-dropdown");
+    const btn = document.getElementById("drawer-btn");
+    if (!dropdown) return;
+    const isHidden = dropdown.classList.contains("hidden");
+    if (isHidden) {
+      dropdown.classList.remove("hidden");
+      if (btn) btn.classList.add("active");
+    } else {
+      dropdown.classList.add("hidden");
+      if (btn) btn.classList.remove("active");
+      const submenu = document.getElementById("main-menu-more-submenu");
+      if (submenu) submenu.classList.add("hidden");
+    }
+  };
+
+  window.toggleMoreSubmenu = function(e) {
+    if (e) e.stopPropagation();
+    const submenu = document.getElementById("main-menu-more-submenu");
+    if (!submenu) return;
+    submenu.classList.toggle("hidden");
+  };
+
+  window.toggleSettingsHomeMoreMenu = function(e) {
+    if (e) e.stopPropagation();
+    const dropdown = document.getElementById("settings-home-more-dropdown");
+    if (dropdown) dropdown.classList.toggle("hidden");
+  };
+
+  window.toggleContactsFab = function(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById("contacts-fab-menu");
+    if (menu) menu.classList.toggle("hidden");
+  };
+
+  window.fabNewPrivateChat = function(e) {
+    window.location.href = '{% url "contacts" %}';
+  };
+
+  window.fabNewGroup = function(e) {
+    window.location.href = '{% url "groups" %}';
+  };
+
+  // Close menus when clicking outside
+  document.addEventListener('click', function() {
+    const dropdown = document.getElementById("main-menu-dropdown");
+    if (dropdown) dropdown.classList.add("hidden");
+    const submenu = document.getElementById("main-menu-more-submenu");
+    if (submenu) submenu.classList.add("hidden");
+    const shDropdown = document.getElementById("settings-home-more-dropdown");
+    if (shDropdown) shDropdown.classList.add("hidden");
+    const contactsFabMenu = document.getElementById("contacts-fab-menu");
+    if (contactsFabMenu) contactsFabMenu.classList.add("hidden");
+  });
+</script>
+{% block extra_layout_js %}{% endblock %}
+{% endblock %}

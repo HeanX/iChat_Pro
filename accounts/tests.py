@@ -573,9 +573,9 @@ class ContactViewTests(TestCase):
     def test_contacts_page_loads(self):
         response = self.client.get(self.CONTACTS_URL)
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'pages/contacts.html')
+        self.assertTemplateUsed(response, 'pages/chat.html')
         self.assertContains(response, 'action="/contacts/request/send/"')
-        self.assertContains(response, 'id="contact-search-user-id"')
+        self.assertContains(response, 'id="contact-search-user-id-sp"')
         self.assertContains(response, 'My Contacts')
 
     def test_contacts_page_shows_no_contacts_initially(self):
@@ -1096,7 +1096,7 @@ class GroupViewTests(TestCase):
     def test_groups_page_loads(self):
         response = self.client.get(self.GROUPS_URL)
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'pages/groups.html')
+        self.assertTemplateUsed(response, 'pages/chat.html')
 
     def test_groups_requires_login(self):
         self.client.post(reverse('logout'))

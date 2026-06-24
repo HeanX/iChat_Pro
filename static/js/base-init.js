@@ -6,6 +6,9 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    if (window.applyLanguage) {
+      window.applyLanguage();
+    }
     if (window.lucide) {
       window.lucide.createIcons();
     }

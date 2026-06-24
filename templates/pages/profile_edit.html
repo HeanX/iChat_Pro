@@ -26,7 +26,7 @@
     </div>
     {% endif %}
 
-    <form method="POST" enctype="multipart/form-data" class="space-y-6">
+    <form method="POST" enctype="multipart/form-data" class="space-y-6" autocomplete="off">
       {% csrf_token %}
 
       <div class="flex flex-col items-center">
@@ -41,7 +41,8 @@
         <input type="text" name="first_name" id="{{ form.first_name.id_for_label }}"
           value="{{ form.first_name.value|default:'' }}"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
-          placeholder="Your first name">
+          placeholder="Your first name"
+          autocomplete="off">
         {% if form.first_name.errors %}<p class="text-xs text-red-500">{{ form.first_name.errors.0 }}</p>{% endif %}
       </div>
 
@@ -50,7 +51,8 @@
         <input type="text" name="last_name" id="{{ form.last_name.id_for_label }}"
           value="{{ form.last_name.value|default:'' }}"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
-          placeholder="Your last name">
+          placeholder="Your last name"
+          autocomplete="off">
         {% if form.last_name.errors %}<p class="text-xs text-red-500">{{ form.last_name.errors.0 }}</p>{% endif %}
       </div>
 
@@ -60,7 +62,8 @@
           value="{{ form.username.value|default:'' }}"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
           placeholder="a-zA-Z, 0-9, underscores (min. 5 chars)"
-          pattern="^[a-zA-Z0-9_]{5,}$">
+          pattern="^[a-zA-Z0-9_]{5,}$"
+          autocomplete="off">
         <p class="text-xs text-textSecondary">You can use a–z, A–Z, 0–9 and underscores. Minimum length is 5 characters.</p>
         {% if form.username.errors %}<p class="text-xs text-red-500">{{ form.username.errors.0 }}</p>{% endif %}
       </div>
@@ -70,7 +73,8 @@
         <input type="text" name="nickname" id="{{ form.nickname.id_for_label }}"
           value="{{ form.nickname.value|default:'' }}"
           class="w-full px-4 py-2.5 rounded-custom-md border border-borderColor bg-bgSearch text-textMain text-sm focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark transition-all"
-          placeholder="How others see you">
+          placeholder="How others see you"
+          autocomplete="off">
         {% if form.nickname.errors %}<p class="text-xs text-red-500">{{ form.nickname.errors.0 }}</p>{% endif %}
       </div>
 

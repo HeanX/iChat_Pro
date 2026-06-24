@@ -126,6 +126,49 @@
     <!-- Scrollable Conversations List -->
     <div class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-borderColor/30" id="sidebar-chat-list">
       <!-- Dynamically populated by chat.js -->
+      {% if sidebar_conversations %}
+        {% for conv in sidebar_conversations %}
+          <a href="{% url 'index' %}#chat-{{ conv.id }}" class="w-full block">
+            <div class="chat-item-btn telegram-chat-item w-full text-left focus:outline-none relative group select-none hover:bg-bgSearch transition-colors">
+              
+              <div class="telegram-chat-avatar-wrap">
+                <div class="telegram-chat-avatar flex items-center justify-center text-white font-bold" 
+                     style="{% if conv.avatar_url %}background-color: transparent;{% else %}background-color: {{ conv.avatar_color }};{% endif %} overflow: hidden; width: 52px; height: 52px; border-radius: 999px;">
+                  {% if conv.avatar_url %}
+                    <img src="{{ conv.avatar_url }}" class="w-full h-full object-cover rounded-full">
+                  {% else %}
+                    {{ conv.initials }}
+                  {% endif %}
+                </div>
+              </div>
+              
+              <div class="telegram-chat-content">
+                <div class="telegram-chat-topline">
+                  <h3 class="telegram-chat-title">
+                    <span>{{ conv.name }}</span>
+                    {% if conv.is_secure %}
+                      <i data-lucide="lock" class="w-3.5 h-3.5 text-brand-light dark:text-brand-dark inline-block flex-shrink-0" title="End-to-End Encrypted" data-i18n-title="e2ee_badge"></i>
+                    {% endif %}
+                  </h3>
+                  {% if conv.last_message_at %}
+                    <span class="chat-item-time telegram-chat-time">{{ conv.last_message_at|date:"H:i" }}</span>
+                  {% endif %}
+                </div>
+                
+                <div class="telegram-chat-bottomline">
+                  <p class="telegram-chat-preview">
+                    {{ conv.last_message_preview }}
+                  </p>
+                  
+                  <span class="unread-badge telegram-chat-unread {% if conv.unread == 0 %}hidden{% endif %}">
+                    {{ conv.unread }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </a>
+        {% endfor %}
+      {% endif %}
     </div>
   </div>
 
@@ -206,17 +249,17 @@
       <div id="contacts-fab-menu" class="hidden absolute bottom-14 right-0 w-52 bg-bgSidebar/95 dark:bg-bgSidebar/98 backdrop-blur-lg border border-borderColor/60 rounded-[18px] shadow-xl z-30 py-1.5 animate-fadeIn">
         <button data-ichat-onclick="fabNewPrivateChat(event)" class="fab-menu-item">
           <i data-lucide="message-circle" class="w-4 h-4 text-brand-light dark:text-brand-dark"></i>
-          <span>New Private Chat</span>
+          <span data-i18n="new_private_chat_menu">New Private Chat</span>
         </button>
         <button data-ichat-onclick="fabNewGroup(event)" class="fab-menu-item">
           <i data-lucide="users" class="w-4 h-4 text-green-500"></i>
-          <span>New Group</span>
+          <span data-i18n="new_group_menu">New Group</span>
         </button>
         <div class="h-px bg-borderColor/40 my-1"></div>
         <button data-ichat-onclick="fabNewChannel(event)" class="fab-menu-item opacity-50 cursor-not-allowed">
           <i data-lucide="hash" class="w-4 h-4"></i>
-          <span>New Channel</span>
-          <span class="text-[10px] text-textSecondary ml-auto">Soon</span>
+          <span data-i18n="new_channel_menu">New Channel</span>
+          <span class="text-[10px] text-textSecondary ml-auto" data-i18n="soon_label">Soon</span>
         </button>
       </div>
     </div>
@@ -424,10 +467,10 @@
   <div id="sidebar-view-group-add-members" class="sidebar-view settings-view group-creation-view hidden h-full flex flex-col bg-bgSidebar relative">
     <!-- Header -->
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button data-ichat-onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回">
+      <button data-ichat-onclick="navigateSidebar('chat')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回" data-i18n-title="back_step_title">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
-      <h2 class="text-lg font-bold text-textMain flex-1">添加成员</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="add_members_title">添加成员</h2>
     </div>
 
     <!-- Search Input -->
@@ -439,6 +482,7 @@
         <input type="text" id="group-add-search-input" 
           class="w-full pl-10 pr-4 py-2 rounded-full bg-bgSearch text-textMain border border-transparent placeholder-textSecondary/65 focus:outline-none focus:ring-2 focus:ring-brand-light dark:focus:ring-brand-dark focus:bg-bgMain text-sm transition-all"
           placeholder="搜索"
+          data-i18n-placeholder="search_placeholder_short"
           data-ichat-oninput="filterGroupAddMembers(this.value)">
       </div>
     </div>
@@ -468,7 +512,7 @@
                     <span class="settings-template-row-title">
                       {% if peer.profile.nickname %}{{ peer.profile.nickname }}{% else %}{{ peer.username }}{% endif %}
                     </span>
-                    <span class="settings-template-row-subtitle">
+                    <span class="settings-template-row-subtitle" {% if "bot" in peer.username|lower %}data-i18n="bot_label"{% else %}data-i18n="offline_label"{% endif %}>
                       {% if "bot" in peer.username|lower %}机器人{% else %}离线{% endif %}
                     </span>
                   </div>
@@ -493,7 +537,7 @@
                     <span class="settings-template-row-title">
                       {% if peer.profile.nickname %}{{ peer.profile.nickname }}{% else %}{{ peer.username }}{% endif %}
                     </span>
-                    <span class="settings-template-row-subtitle">
+                    <span class="settings-template-row-subtitle" {% if "bot" in peer.username|lower %}data-i18n="bot_label"{% else %}data-i18n="offline_label"{% endif %}>
                       {% if "bot" in peer.username|lower %}机器人{% else %}离线{% endif %}
                     </span>
                   </div>
@@ -502,7 +546,7 @@
             {% endif %}
           {% endfor %}
         {% else %}
-          <div class="p-6 text-center text-sm text-textSecondary">暂无联系人</div>
+          <div class="p-6 text-center text-sm text-textSecondary" data-i18n="no_contacts">暂无联系人</div>
         {% endif %}
       </div>
 
@@ -523,8 +567,8 @@
             <path d="M 21 57 A 7 7 0 0 1 29 53" fill="none" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round"/>
           </svg>
         </div>
-        <div class="text-sm font-bold text-textMain">无结果</div>
-        <div class="text-xs text-textSecondary mt-1">Try searching.</div>
+        <div class="text-sm font-bold text-textMain" data-i18n="no_results">无结果</div>
+        <div class="text-xs text-textSecondary mt-1" data-i18n="try_searching">Try searching.</div>
       </div>
     </div>
 
@@ -541,10 +585,10 @@
   <div id="sidebar-view-group-create-final" class="sidebar-view settings-view group-creation-view hidden h-full flex flex-col bg-bgSidebar relative">
     <!-- Header -->
     <div class="settings-view-header px-4 py-3 flex items-center space-x-3 flex-shrink-0" style="min-height:57px">
-      <button data-ichat-onclick="navigateSidebar('group-add-members')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回上一步">
+      <button data-ichat-onclick="navigateSidebar('group-add-members')" class="p-1.5 rounded-full hover:bg-bgSearch text-textMain transition-all" title="返回上一步" data-i18n-title="back_step_title">
         <i data-lucide="arrow-left" class="w-5 h-5"></i>
       </button>
-      <h2 class="text-lg font-bold text-textMain flex-1">新建群聊</h2>
+      <h2 class="text-lg font-bold text-textMain flex-1" data-i18n="new_group_title">新建群聊</h2>
     </div>
 
     <!-- Body / Form -->
@@ -552,7 +596,7 @@
       <div class="profile-edit-view p-4">
         <!-- Avatar Uploader -->
         <div class="profile-edit-hero py-4 flex flex-col items-center">
-          <button type="button" class="profile-edit-avatar w-24 h-24 rounded-full relative group overflow-hidden bg-brand-light flex items-center justify-center text-white" data-ichat-onclick="document.getElementById('group-avatar-file-input').click()" title="上传群头像">
+          <button type="button" class="profile-edit-avatar w-24 h-24 rounded-full relative group overflow-hidden bg-brand-light flex items-center justify-center text-white" data-ichat-onclick="document.getElementById('group-avatar-file-input').click()" title="上传群头像" data-i18n-title="upload_group_avatar">
             <span id="group-avatar-placeholder" class="text-3xl font-bold">G</span>
             <img id="group-avatar-preview" class="hidden w-full h-full object-cover" alt="群头像">
             <span class="profile-edit-avatar-icon absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -565,15 +609,15 @@
         <!-- Group Name Input Box (Cards) -->
         <section class="profile-edit-card">
           <label class="profile-edit-field flex flex-col">
-            <span class="text-xs text-brand-light font-bold mb-1">群聊名称</span>
-            <input type="text" id="group-create-name-input" class="w-full bg-transparent border-0 outline-none text-sm text-textMain focus:ring-0" placeholder="请输入群聊名称" required>
+            <span class="text-xs text-brand-light font-bold mb-1" data-i18n="group_name_label">群聊名称</span>
+            <input type="text" id="group-create-name-input" class="w-full bg-transparent border-0 outline-none text-sm text-textMain focus:ring-0" placeholder="请输入群聊名称" data-i18n-placeholder="group_name_placeholder" required>
           </label>
         </section>
 
         <!-- Selected Members Preview -->
         <section class="profile-edit-card mt-4">
           <div class="px-4 py-3 border-b border-borderColor/40 flex justify-between items-center">
-            <span class="text-xs font-semibold text-textSecondary uppercase tracking-wide">已选择成员</span>
+            <span class="text-xs font-semibold text-textSecondary uppercase tracking-wide" data-i18n="selected_members_label">已选择成员</span>
             <span id="group-create-members-count" class="text-xs text-brand-light font-bold">0 人</span>
           </div>
           <div id="group-create-selected-list" class="divide-y divide-borderColor/30">

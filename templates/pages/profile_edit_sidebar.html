@@ -15,7 +15,7 @@
   </div>
   {% endif %}
 
-  <form id="profile-edit-form" method="POST" action="{% url 'api-profile-me' %}" enctype="multipart/form-data" class="profile-edit-form" data-ichat-onsubmit="submitProfileEditForm(event)">
+  <form id="profile-edit-form" method="POST" action="{% url 'api-profile-me' %}" enctype="multipart/form-data" class="profile-edit-form" data-ichat-onsubmit="submitProfileEditForm(event)" autocomplete="off">
     {% csrf_token %}
     <input type="hidden" name="_sidebar" value="1">
     <input type="hidden" name="nickname" value="{{ form.nickname.value|default:request.user.profile.nickname }}">
@@ -38,13 +38,13 @@
     <section class="profile-edit-card">
       <label class="profile-edit-field">
         <span data-i18n="first_name">First Name</span>
-        <input type="text" name="first_name" value="{{ form.first_name.value|default:request.user.first_name }}" placeholder="First Name" data-i18n-placeholder="first_name">
+        <input type="text" name="first_name" value="{{ form.first_name.value|default:request.user.first_name }}" placeholder="First Name" data-i18n-placeholder="first_name" autocomplete="off">
       </label>
       {% if form.first_name.errors %}<p class="profile-edit-error">{{ form.first_name.errors.0 }}</p>{% endif %}
 
       <label class="profile-edit-field">
         <span data-i18n="last_name">Last Name</span>
-        <input type="text" name="last_name" value="{{ form.last_name.value|default:request.user.last_name }}" placeholder="Last Name" data-i18n-placeholder="last_name">
+        <input type="text" name="last_name" value="{{ form.last_name.value|default:request.user.last_name }}" placeholder="Last Name" data-i18n-placeholder="last_name" autocomplete="off">
       </label>
       {% if form.last_name.errors %}<p class="profile-edit-error">{{ form.last_name.errors.0 }}</p>{% endif %}
 
@@ -75,7 +75,8 @@
           placeholder="Username (optional)"
           data-i18n-placeholder="username_optional"
           pattern="^[a-zA-Z0-9_]{5,}$"
-          data-ichat-oninput="validateUsername()">
+          data-ichat-oninput="validateUsername()"
+          autocomplete="off">
       </label>
       <p id="username-error" class="profile-edit-error hidden"></p>
       {% if form.username.errors %}<p class="profile-edit-error">{{ form.username.errors.0 }}</p>{% endif %}
@@ -376,7 +377,7 @@
 
   async function submitProfileEditForm(event) {
     event.preventDefault();
-    var form = event.currentTarget;
+    var form = event.target;
     var button = form.querySelector('.profile-edit-save');
     if (button) button.disabled = true;
     try {

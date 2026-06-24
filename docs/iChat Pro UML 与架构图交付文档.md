@@ -69,32 +69,40 @@ graph LR
 ## 2. 数据库 ER 图
 
 ```mermaid
-erDiagram
-    User ||--|| UserProfile : "1:1 资料"
-    User ||--o{ Contact : "1:N 联系人"
-    User ||--o{ FriendRequest : "1:N 好友申请"
-    User ||--o{ UserPublicKey : "1:N 公钥"
-    User ||--o{ KeyTrust : "1:N 密钥信任"
-    User ||--o{ BlockedUser : "1:N 拉黑"
-    User ||--|| UserPrivacySettings : "1:1 隐私设置"
-    User ||--|| UserNotificationSettings : "1:1 通知设置"
-    User ||--|| UserStorageSettings : "1:1 存储设置"
-    User ||--|| UserPresence : "1:1 在线状态"
-    User ||--o{ UserLLMConfig : "1:N LLM配置"
-    User ||--o{ ConversationMember : "1:N 会话成员"
-    User ||--o{ EncryptedMessage : "1:N 私聊消息"
-    User ||--o{ GroupMessageRecipient : "1:N 群聊副本"
-    User ||--o{ EncryptedFileKey : "1:N 文件密钥"
+flowchart TD
+    User[User 用户]
 
-    Conversation ||--o{ ConversationMember : "1:N 成员"
-    Conversation ||--o{ EncryptedMessage : "1:N 私聊密文"
-    Conversation ||--o{ GroupMessage : "1:N 群聊逻辑消息"
-    Conversation ||--o{ GroupAnnouncement : "1:N 群公告"
-    Conversation ||--o{ EncryptedFile : "1:N 加密文件"
+    User -->|"1:1"| UP[UserProfile 用户资料]
+    User -->|"1:1"| UPS[UserPrivacySettings 隐私设置]
+    User -->|"1:1"| UNS[UserNotificationSettings 通知设置]
+    User -->|"1:1"| USS[UserStorageSettings 存储设置]
+    User -->|"1:1"| UPr[UserPresence 在线状态]
 
-    GroupMessage ||--o{ GroupMessageRecipient : "1:N 逐成员密文"
-    EncryptedFile ||--o{ EncryptedFileChunk : "1:N 分块"
-    EncryptedFile ||--o{ EncryptedFileKey : "1:N 密钥包裹"
+    User -->|"1:N"| CT[Contact 联系人]
+    User -->|"1:N"| FR[FriendRequest 好友申请]
+    User -->|"1:N"| PK[UserPublicKey 公钥]
+    User -->|"1:N"| KT[KeyTrust 密钥信任]
+    User -->|"1:N"| BU[BlockedUser 拉黑]
+    User -->|"1:N"| LLC[UserLLMConfig LLM配置]
+
+    User -->|"1:N"| CM[ConversationMember 会话成员]
+
+    Conv[Conversation 会话] -->|"1:N"| CM
+    Conv -->|"1:N"| EM[EncryptedMessage 私聊密文]
+    Conv -->|"1:N"| GM[GroupMessage 群聊逻辑消息]
+    Conv -->|"1:N"| GA[GroupAnnouncement 群公告]
+    Conv -->|"1:N"| EF[EncryptedFile 加密文件]
+
+    GM -->|"1:N"| GMR[GroupMessageRecipient 逐成员密文副本]
+    EF -->|"1:N"| EFC[EncryptedFileChunk 文件分块]
+    EF -->|"1:N"| EFK[EncryptedFileKey 文件密钥包裹]
+
+    EM -->|"FK"| User
+    GMR -->|"FK"| User
+    CM -->|"FK"| User
+    FR -->|"FK"| User
+    CT -->|"FK"| User
+    EFK -->|"FK"| User
 ```
 
 **核心实体字段说明：**
@@ -110,7 +118,7 @@ erDiagram
 | UserPublicKey | user_id(FK), identity_public_key, key_fingerprint, key_version, is_active |
 | UserLLMConfig | user_id(FK), api_url, api_key(Fernet加密), model |
 
-**说明：** ER 图展示 iChat Pro 核心表关系（仅连线，字段见下方表格）。User 为中枢，关联 15 张子表；Conversation 统一承载私聊与群聊，消息密文分别存入 EncryptedMessage 和 GroupMessage + GroupMessageRecipient（逐成员副本）。UserLLMConfig 以 Fernet 加密存 LLM API Key。
+**说明：** ER 图采用 `flowchart TD` 纵向布局，从上到下依次为 User → 1:1 设置表 → 1:N 关系表 → Conversation → 消息密文表。User 为中枢，Conversation 统一承载私聊与群聊。消息密文分别存入 EncryptedMessage 和 GroupMessage → GroupMessageRecipient（逐成员副本）。UserLLMConfig 以 Fernet 加密存 LLM API Key。
 
 ---
 

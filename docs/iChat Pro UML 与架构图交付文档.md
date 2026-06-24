@@ -69,6 +69,7 @@ graph LR
 ## 2. 数据库 ER 图
 
 ```mermaid
+%%{init: {'flowchart': {'useMaxWidth': false}}}%%
 flowchart TD
     User[User 用户]
 
@@ -80,8 +81,6 @@ flowchart TD
 
     User -->|"1:N"| CT[Contact 联系人]
     User -->|"1:N"| FR[FriendRequest 好友申请]
-    User -->|"1:N"| PK[UserPublicKey 公钥]
-    User -->|"1:N"| KT[KeyTrust 密钥信任]
     User -->|"1:N"| BU[BlockedUser 拉黑]
     User -->|"1:N"| LLC[UserLLMConfig LLM配置]
 
@@ -115,10 +114,9 @@ flowchart TD
 | EncryptedMessage | conversation_id(FK), sender_id(FK), receiver_id(FK), ciphertext, nonce, auth_tag, client_message_id, status |
 | GroupMessage | conversation_id(FK), sender_id(FK), client_message_id, status |
 | GroupMessageRecipient | group_message_id(FK), receiver_id(FK), ciphertext, nonce, auth_tag, membership_version |
-| UserPublicKey | user_id(FK), identity_public_key, key_fingerprint, key_version, is_active |
 | UserLLMConfig | user_id(FK), api_url, api_key(Fernet加密), model |
 
-**说明：** ER 图采用 `flowchart TD` 纵向布局，从上到下依次为 User → 1:1 设置表 → 1:N 关系表 → Conversation → 消息密文表。User 为中枢，Conversation 统一承载私聊与群聊。消息密文分别存入 EncryptedMessage 和 GroupMessage → GroupMessageRecipient（逐成员副本）。UserLLMConfig 以 Fernet 加密存 LLM API Key。
+**说明：** ER 图采用 `flowchart TD` 纵向布局，从上到下依次为 User → 设置表 → 关系表 → Conversation → 消息密文表。User 为中枢，Conversation 统一承载私聊与群聊。`%%{init}%%` 指令解除 Mermaid 最大宽度限制。密钥相关实体（UserPublicKey、KeyTrust 等）和详细字段参见类图。
 
 ---
 

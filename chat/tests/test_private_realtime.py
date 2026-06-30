@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TransactionTestCase
 
 from ichat_pro.asgi import application
-from .models import Conversation, ConversationMember, EncryptedMessage
+from chat.models import Conversation, ConversationMember, EncryptedMessage
 
 
 class PrivateRealtimeMessageTests(TransactionTestCase):

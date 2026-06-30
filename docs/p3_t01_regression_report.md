@@ -12,7 +12,7 @@
 | Django 系统检查 | `python manage.py check` | ✅ 0 issues |
 | 迁移一致性 | `python manage.py makemigrations --check --dry-run` | ✅ No changes detected |
 | 自动化测试 | `python manage.py test` | ✅ 313 tests OK |
-| E2EE JS 测试 | `node chat/test_private_chat_e2ee.js` | ✅ all tests passed |
+| E2EE JS 测试 | `npm run test:e2ee` | ✅ all tests passed |
 | 演示账号创建 | `python demo_setup.py` | ✅ alice/bob/carol 创建成功 |
 | Django 部署检查 | `python manage.py check --deploy` | ⚠️ 6 warnings (expected dev-mode) |
 
@@ -58,17 +58,17 @@
 - 隐私字段：根据 `UserPrivacySettings` 可见性规则过滤
 - Token 隔离：所有 API 从 `request.user` 获取当前用户，不接受前端传入 `user_id`
 
-全部权限路径在自动化测试中覆盖（`accounts/tests.py`，`chat/tests.py`，`chat/test_p2_backend.py`，`chat/test_p2_issues.py`）。
+全部权限路径在自动化测试中覆盖（`accounts/tests.py`，`chat/tests/test_core.py`，`chat/tests/test_phase2_backend.py`，`chat/tests/test_phase2_issues.py`）。
 
 ## 自动化测试覆盖统计
 
 ```
 accounts/tests.py          — 账号、资料、联系人、隐私、密钥测试
-chat/tests.py              — 基础聊天、WebSocket、消息测试
-chat/test_p2_backend.py    — P2 会话管理、消息操作、状态、搜索测试
-chat/test_p2_issues.py     — P2 群管理、自动删除、安全指纹测试
-chat/test_t20_integration.py — T20 端到端集成测试
-chat/test_t11.py           — 多账号切换测试
+chat/tests/test_core.py              — 基础聊天、WebSocket、消息测试
+chat/tests/test_phase2_backend.py    — P2 会话管理、消息操作、状态、搜索测试
+chat/tests/test_phase2_issues.py     — P2 群管理、自动删除、安全指纹测试
+chat/tests/test_integration.py — T20 端到端集成测试
+chat/tests/test_private_realtime.py           — 多账号切换测试
 ```
 
 ## 结论

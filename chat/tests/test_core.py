@@ -12,7 +12,7 @@ from django.test import TestCase, TransactionTestCase
 from ichat_pro.asgi import application
 from accounts.models import Contact, UserPrivacySettings
 
-from .models import (
+from chat.models import (
     AdminOperationLog,
     Conversation,
     ConversationMember,
@@ -1090,7 +1090,7 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.test import TestCase
 
-from .models import Conversation, ConversationMember, EncryptedMessage
+from chat.models import Conversation, ConversationMember, EncryptedMessage
 
 
 class ConversationModelTests(TestCase):

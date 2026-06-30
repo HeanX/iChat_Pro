@@ -195,7 +195,7 @@ python manage.py makemigrations --check --dry-run
 python manage.py test
 
 # E2EE JavaScript 测试
-node chat/test_private_chat_e2ee.js
+npm run test:e2ee
 ```
 
 预期全部通过：
@@ -205,7 +205,7 @@ node chat/test_private_chat_e2ee.js
 | 系统检查 | `python manage.py check` | `System check identified no issues` |
 | 迁移检查 | `python manage.py makemigrations --check --dry-run` | `No changes detected` |
 | 自动化测试 | `python manage.py test` | `OK` (313 tests) |
-| E2EE JS 测试 | `node chat/test_private_chat_e2ee.js` | `all tests passed` |
+| E2EE JS 测试 | `npm run test:e2ee` | `all tests passed` |
 
 ### 当前检查结果（2026-06-16）
 
@@ -213,7 +213,7 @@ node chat/test_private_chat_e2ee.js
 ✅ python manage.py check          → System check identified no issues (0 silenced).
 ✅ python manage.py makemigrations --check --dry-run → No changes detected
 ✅ python manage.py test           → Ran 313 tests in 238.771s — OK
-✅ node chat/test_private_chat_e2ee.js → private-chat-e2ee: all tests passed
+✅ npm run test:e2ee → private-chat-e2ee / group-chat-e2ee: all tests passed
 ```
 
 ---
@@ -258,14 +258,14 @@ node chat/test_private_chat_e2ee.js
 python manage.py test
 
 # 仅运行 P2 后端测试
-python manage.py test chat.test_p2_backend
-python manage.py test chat.test_p2_issues
+python manage.py test chat.tests.test_phase2_backend
+python manage.py test chat.tests.test_phase2_issues
 
 # 仅运行 accounts 测试
 python manage.py test accounts
 
 # E2EE JavaScript 模块测试
-node chat/test_private_chat_e2ee.js
+npm run test:e2ee
 ```
 
 ### 最新测试结果

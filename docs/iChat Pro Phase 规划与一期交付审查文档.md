@@ -2,7 +2,7 @@
 
 > 状态：Review v1.0
 > 审查日期：2026-06-03
-> 审查对象：需求文档、TODO、设计文档、当前代码、自动化测试与开放 GitHub Issues
+> 审查对象：需求文档、历史任务清单、设计文档、当前代码、自动化测试与开放 GitHub Issues
 > 结论：Phase 1 尚未达到可验收状态；完成现有开放 Issue 后仍需补充若干基础软件收口任务
 
 ## 1. 文档目的
@@ -89,7 +89,7 @@ docs/iChat Pro Bot、LLM Agent 与 Channel 扩展方案文档.md
 python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test
-node chat/test_private_chat_e2ee.js
+npm run test:e2ee
 ```
 
 结果：
@@ -168,7 +168,7 @@ username__icontains
 
 ### 7.2 [T27：补齐用户资料自动初始化](https://github.com/HeanX/iChat_Pro/issues/37)
 
-TODO 的 T03 验收标准要求注册后自动创建资料。当前资料对象主要在进入编辑页时通过 `get_or_create` 创建。
+历史任务清单中的 T03 验收标准要求注册后自动创建资料。当前资料对象主要在进入编辑页时通过 `get_or_create` 创建。
 
 需要：
 
@@ -239,7 +239,7 @@ T11 文档和验收标准要求非联系人不能发送私聊消息。当前 Web
 | 前端文档描述图片、文件、语音入口 | 标注为视觉预留或 Phase 2 |
 | 技术栈文档写 HTMX | 明确当前实现以 Django Templates + 原生 JavaScript 为主，HTMX 仅为可选 |
 | 协议文档仍引用旧版 `static/js/websocket.js` | 在 `#34` 后更新为唯一支持实现 |
-| TODO 复选框落后于 GitHub 状态 | GitHub Issue 与已合并 PR 作为实际状态来源 |
+| 历史任务复选框落后于 GitHub 状态 | GitHub Issue 与已合并 PR 作为实际状态来源 |
 | ER 图、类图和实际模型可能不一致 | 在 `#22` 中重新导出 |
 
 ------

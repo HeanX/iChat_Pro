@@ -373,7 +373,7 @@ group.invitation.new
 | `chat/urls.py` | 群邀请相关 API 路由 |
 | `chat/consumers.py` | `group.invitation.new` 实时通知 |
 | `chat/admin.py` | 后台注册 `GroupInvitation` |
-| `chat/tests.py` | 群邀请流程测试 |
+| `chat/tests/test_core.py` | 群邀请流程测试 |
 | `templates/components/right_panel.html` | 群信息右侧入口 |
 | `templates/pages/group_invite_sidebar.html` | 邀请成员右侧面板 |
 | `templates/pages/group_manage_sidebar.html` | 群组管理右侧面板 |

@@ -81,7 +81,7 @@ function loadModule(localRecord, serverKeys, privateKeys = null) {
       return null;
     }
   };
-  const source = fs.readFileSync(path.join(__dirname, '..', 'static', 'js', 'private-chat-e2ee.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'static', 'js', 'private-chat-e2ee.js'), 'utf8');
   vm.runInNewContext(source, context);
   return context;
 }

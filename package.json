@@ -5,7 +5,8 @@
   "description": "iChat Pro — End-to-End Encrypted Secure Messaging",
   "scripts": {
     "build:css": "npx @tailwindcss/cli -i ./static/css/tailwind-input.css -o ./static/css/tailwind.css --minify",
-    "watch:css": "npx @tailwindcss/cli -i ./static/css/tailwind-input.css -o ./static/css/tailwind.css --watch"
+    "watch:css": "npx @tailwindcss/cli -i ./static/css/tailwind-input.css -o ./static/css/tailwind.css --watch",
+    "test:e2ee": "node ./chat/tests/js/private_chat_e2ee.test.js && node ./chat/tests/js/group_chat_e2ee.test.js"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.0",

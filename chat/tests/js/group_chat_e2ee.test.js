@@ -115,7 +115,7 @@ function loadGroupModule(localRecord, serverKeys, privateKeys) {
       return null;
     }
   };
-  const source = fs.readFileSync(path.join(__dirname, '..', 'static', 'js', 'group-chat-e2ee.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'static', 'js', 'group-chat-e2ee.js'), 'utf8');
   vm.runInNewContext(source, context);
   return context;
 }

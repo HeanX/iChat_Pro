@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TransactionTestCase
 
 from ichat_pro.asgi import application
-from .models import (
+from chat.models import (
     Conversation,
     ConversationMember,
     GroupMessage,

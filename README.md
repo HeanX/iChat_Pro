@@ -1,16 +1,32 @@
 # iChat Pro
 
-iChat Pro is a Django-based secure chat project. The repository is organized for team development through Issues, feature branches, and Pull Requests.
+iChat Pro 是一个基于 Django 的轻量级安全即时通信项目，面向课程小组作业交付。项目实现了账号体系、联系人、私聊、群聊、端到端加密消息、文件转发、会话管理、基础设置页、AI Assistant 面板和 Electron 桌面端包装。
 
-> 项目状态：目前仍在开发中，暂未完成。
+## 功能概览
 
-## Requirements
+- 用户注册、登录、登出和个人资料管理
+- 联系人关系、私聊会话创建和会话列表
+- 群聊创建、成员管理、邀请、公告和静音
+- WebSocket 实时消息收发
+- 私聊和群聊端到端加密消息流程
+- 文件传输、加密文件密钥分发和转发
+- 消息已送达、已读、撤回、删除和自动清理
+- 搜索、通知、隐私与安全、数据与存储等设置页面
+- AI Assistant 配置与对话面板
+- Electron 桌面客户端包装
+
+## 技术栈
 
 - Python 3.13+
-- Git
-- pip
+- Django
+- Django Channels
+- SQLite
+- HTML / CSS / JavaScript
+- Tailwind CSS
+- Node.js
+- Electron
 
-## Installation
+## 快速开始
 
 ```powershell
 python -m venv .venv
@@ -18,115 +34,57 @@ python -m venv .venv
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 Copy-Item .env.example .env
-```
-
-The current development settings read `DJANGO_SECRET_KEY` from the environment when it is available. Never commit real secrets or local `.env` files.
-
-## Run Locally
-
-```powershell
 python manage.py migrate
 python manage.py runserver 127.0.0.1:8000
 ```
 
-Open http://127.0.0.1:8000/ in your browser.
+启动后访问：
 
-## Local Checks
+```text
+http://127.0.0.1:8000/
+```
 
-Run the same Django checks used by CI before opening a Pull Request:
+## 演示账号
+
+可以运行演示数据脚本创建 3 个测试账号：
 
 ```powershell
-python manage.py check
-python manage.py makemigrations --check --dry-run
+python demo_setup.py
+```
+
+| 用户名 | 密码 |
+| --- | --- |
+| `alice` | `demo1234` |
+| `bob` | `demo1234` |
+| `carol` | `demo1234` |
+
+## 测试
+
+后端测试：
+
+```powershell
 python manage.py test
 ```
 
-## Project Structure
-
-- `ichat_pro/`: project settings and root URL routing
-- `accounts/`: login, registration, logout, and future account features
-- `chat/`: chat pages and future conversation/message features
-- `templates/`: shared Django templates
-- `static/`: CSS, JavaScript, and image assets
-- `docs/`: product and technical design documents
-
-## Branch Rules
-
-- `main` is the protected integration branch.
-- Do not push directly to `main`.
-- Create a branch from the latest `main` for every task.
-- Use a clear branch name:
-
-```text
-feature/<issue-number>-short-name
-fix/<issue-number>-short-name
-docs/<issue-number>-short-name
-```
-
-Example:
+只运行 chat 应用测试：
 
 ```powershell
-git switch main
-git pull origin main
-git switch -c feature/12-chat-message-model
+python manage.py test chat
 ```
 
-## Issue Workflow
+前端端到端加密逻辑测试：
 
-Use GitHub Issues to manage work.
+```powershell
+npm run test:e2ee
+```
 
-1. Create one Issue per task.
-2. Assign the Issue to the person who owns the work.
-3. Move the work into a feature branch.
-4. Link the Issue in the Pull Request with `Closes #<issue-number>`.
-5. Merge only after review and required checks pass.
+测试代码已统一整理到：
 
-Suggested initial Issues:
+```text
+chat/tests/
+```
 
-- Build account profile model and settings page persistence
-- Build chat conversation and message models
-- Implement real authentication form validation states
-- Add WebSocket room routing and message delivery
-- Add tests for accounts and chat views
-
-## Pull Request Rules
-
-- Open PRs into `main`.
-- Keep each PR focused on one Issue.
-- Include a short summary, linked Issue, screenshots for UI changes, and local test results.
-- Request at least one teammate review before merge.
-- Prefer squash merge to keep `main` history readable.
-
-## Recommended GitHub Branch Protection
-
-In GitHub, enable branch protection for `main`:
-
-- Require a pull request before merging
-- Require approvals before merge
-- Require status checks to pass before merge, once CI is configured
-- Require branches to be up to date before merging
-- Restrict force pushes
-- Restrict deletions
-
-## Apps
-
-This project now contains two Django apps:
-
-- `accounts`
-- `chat`
-
-## Desktop Client (Electron)
-
-iChat Pro includes a lightweight Electron wrapper for Phase 1 desktop delivery.
-The desktop app loads the local Django web client and can either start Django
-for you or connect to an already running backend.
-
-### Prerequisites
-
-- Node.js 18+ and npm
-- Python virtual environment with the Django dependencies installed
-
-### Quick Start
+## Electron 桌面端
 
 ```powershell
 cd desktop
@@ -134,29 +92,20 @@ npm install
 npm start
 ```
 
-By default, Electron starts Django with:
-
-```text
-python manage.py runserver 127.0.0.1:8000
-```
-
-The launcher prefers the project virtual environment when present:
-
-- Windows: `.venv\Scripts\python.exe`
-- macOS/Linux: `.venv/bin/python`
-
-### Development Mode
+开发模式：
 
 ```powershell
 cd desktop
 npm run dev
 ```
 
-This opens Chromium DevTools next to the app window.
+默认情况下，桌面端会加载本地 Django 服务：
 
-### Use an Existing Django Server
+```text
+http://127.0.0.1:8000/
+```
 
-If Django is already running, skip Electron's backend launcher:
+也可以通过环境变量跳过自动启动 Django：
 
 ```powershell
 $env:ICHAT_SKIP_DJANGO = "1"
@@ -164,50 +113,57 @@ cd desktop
 npm start
 ```
 
-### Configuration
+## 目录结构
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `ICHAT_HOST` | `127.0.0.1` | Django host loaded by Electron |
-| `ICHAT_PORT` | `8000` | Django port loaded by Electron |
-| `ICHAT_PYTHON` | auto-detect | Python executable used to start Django |
-| `ICHAT_SKIP_DJANGO` | unset | Set to `1` to connect to an already running backend |
-
-## Demo
-
-Quick demo setup with three pre-configured users:
-
-```powershell
-python demo_setup.py
+```text
+accounts/      用户、资料、联系人、密钥信任相关功能
+chat/          聊天、会话、消息、群组、AI Assistant 相关功能
+chat/tests/    后端与加密逻辑测试
+desktop/       Electron 桌面端
+docs/          项目文档、设计文档和验收材料
+ichat_pro/     Django 项目配置
+static/        CSS、JavaScript、图片资源
+templates/     Django 页面模板
 ```
 
-Demo accounts after running the script:
+## 重要文档
 
-| Username | Password |
-|----------|----------|
-| `alice` | `demo1234` |
-| `bob` | `demo1234` |
-| `carol` | `demo1234` |
+| 文档 | 说明 |
+| --- | --- |
+| `docs/README.md` | 文档目录总览和推荐阅读顺序 |
+| `docs/iChat Pro 系统性介绍文档.md` | 系统目标、架构、模块、流程和交付边界 |
+| `docs/iChat Pro 需求文档_修订版.md` | 项目需求说明 |
+| `docs/iChat Pro API 接口文档.md` | API 接口说明 |
+| `docs/iChat Pro 数据库设计规范文档.md` | 数据库设计 |
+| `docs/iChat Pro 实时通信与端到端加密消息协议设计文档.md` | 实时通信与 E2EE 协议 |
+| `docs/iChat Pro UML 与架构图交付文档.md` | UML 与架构图说明 |
+| `docs/iChat Pro 演示指南.md` | 演示流程 |
 
-All three are mutual contacts, ready for private and group chat testing.
+## 环境变量
 
-See [docs/iChat Pro 演示指南.md](docs/iChat%20Pro%20演示指南.md) for a full walkthrough.
+| 变量 | 说明 |
+| --- | --- |
+| `DJANGO_SECRET_KEY` | Django 密钥，生产或正式演示环境建议配置 |
+| `DEBUG` | 是否启用调试模式 |
+| `QWEN_API_KEY` | AI Assistant 使用的 API Key |
+| `QWEN_MODEL` | AI Assistant 使用的模型名称 |
+| `ICHAT_HOST` | Electron 加载的 Django 主机，默认 `127.0.0.1` |
+| `ICHAT_PORT` | Electron 加载的 Django 端口，默认 `8000` |
+| `ICHAT_SKIP_DJANGO` | 设置为 `1` 时 Electron 不自动启动 Django |
 
-## Documentation
+## 交付说明
 
-| Document | Description |
-|----------|-------------|
-| [Phase 2 Acceptance Manual](docs/iChat%20Pro%20Phase%202%20验收手册.md) | Phase 2 frontend acceptance checklist |
-| [Phase 3 Demo Script](docs/iChat%20Pro%20Phase%203%20演示脚本与验收文档.md) | Phase 3 demo steps and acceptance guide |
-| [UML & Architecture Diagrams](docs/iChat%20Pro%20UML%20与架构图交付文档.md) | System use case, class, component, E2EE sequence diagrams |
-| [Phase 2 Test Coverage](docs/phase2_test_coverage.md) | Backend test coverage report |
-| [Design Docs](docs/) | Full technical documentation (API, database, E2EE protocol, security) |
+提交或打包项目时建议排除以下本地文件和目录：
 
-## AI Assistant (Phase 3)
+```text
+.venv/
+node_modules/
+desktop/node_modules/
+.idea/
+.claude/
+db.sqlite3
+media/
+outputs/
+```
 
-Phase 3 introduces an AI Assistant panel powered by Qwen (阿里云百炼). The assistant:
-
-- Handles general Q&A, text summarization, and draft generation
-- **Does not** read E2EE chat plaintext or access user private keys
-- Falls back to Mock mode when no API key is configured
-- Configure via `QWEN_API_KEY` and `QWEN_MODEL` environment variables
+这些内容属于本地依赖、运行数据或生成产物，不是项目源码的必要组成部分。

@@ -5,8 +5,8 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 
-from .llm import OpenAICompatibleProvider, _content_to_text, normalize_chat_completions_endpoint
-from .models import UserLLMConfig
+from chat.llm import OpenAICompatibleProvider, _content_to_text, normalize_chat_completions_endpoint
+from chat.models import UserLLMConfig
 
 
 PUBLIC_ADDR_INFO = [
@@ -179,7 +179,7 @@ class AiConfigViewTests(TestCase):
             data=json.dumps({
                 "assistant_id": "ai-assistant",
                 "endpoint": "https://api.openai.com/v1/chat/completions",
-                "api_key": "鈥⑩€⑩€⑩€⑩€",
+                "api_key": "********",
             }),
             content_type="application/json",
         )
@@ -194,7 +194,7 @@ class AiConfigViewTests(TestCase):
             assistant_id="ai-assistant",
             api_url="https://api.openai.com/v1/chat/completions",
         )
-        config.set_api_key("鈥⑩€⑩€⑩€⑩€")
+        config.set_api_key("********")
         config.save(update_fields=["api_key", "updated_at"])
 
         response = self.client.get("/api/ai/config/?assistant_id=ai-assistant")

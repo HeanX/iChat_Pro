@@ -271,6 +271,11 @@ if not DEBUG:
     # and only Nginx can reach it, so X-Forwarded-Proto is trustworthy here.
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
+    # Deployment/restore tooling probes http://127.0.0.1:8000/health/ready/
+    # directly (with the production Host header) and parses the body to gate
+    # releases; don't bounce health paths to HTTPS.
+    SECURE_REDIRECT_EXEMPT = [r'^health/']
+
     # Force HTTPS
     SECURE_SSL_REDIRECT = True
     SECURE_HSTS_SECONDS = 31536000  # 1 year

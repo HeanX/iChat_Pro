@@ -36,12 +36,13 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 6. 配置：把 `deploy/env.production.example` 填好放到 `/opt/ichat/.env`（owner ichat，chmod 600）；`deploy/systemd/ichat.service` 复制到 `/etc/systemd/system/`。
 7. 首次拉取与迁移：`sudo bash deploy/deploy.sh`（脚本自动 clone main、建 venv、migrate、collectstatic、启动）。
 8. Nginx：把 `deploy/nginx/ichat.conf` 中的 `__PLACEHOLDER__` 替换后放到 `/etc/nginx/conf.d/ichat.conf`；先用临时自签证书起 8443，或先开 80 完成签发再配 8443。`sudo nginx -t && sudo systemctl enable --now nginx`。
-9. 签发证书：`sudo certbot certonly --webroot -w /var/www/acme -d sub.20060810.xyz`，随后把 8443 server 块指向 `/etc/letsencrypt/live/.../fullchain.pem`，`sudo nginx -s reload`。续期由 certbot systemd timer 自动完成（用 `certbot renew --dry-run` 验证）。
+9. 签发证书：`sudo certbot certonly --webroot -w /var/www/acme -d sub.20060810.xyz`，随后把 8443 server 块指向 `/etc/letsencrypt/live/.../fullchain.pem`，`sudo nginx -s reload`。把 `deploy/nginx/reload-nginx.sh` 安装到 `/etc/letsencrypt/renewal-hooks/deploy/ichat-reload-nginx.sh`（chmod 755）：`certbot renew` 成功续期后自动 `nginx -t` + reload，避免 Nginx 继续使用旧证书。用 `sudo certbot renew --force-renewal` 一次性验证整条链路（受 LE 每周重复证书限额约束，勿频繁执行）。
 
-## 3. 日常发布（T50 回滚路径）
+## 3. 日常发布与回滚（T50 路径）
 
-- 发布：`sudo bash /opt/ichat/repo/deploy/deploy.sh`（校验配置 → migrate → collectstatic → restart → readiness 探针）。
-- 回滚应用：`git -C /opt/ichat/repo checkout <上一个 tag/commit>` 后重跑 deploy.sh。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
+- 发布：`sudo bash /opt/ichat/repo/deploy/deploy.sh`（校验配置 → migrate → collectstatic → restart → readiness 门禁：带生产 Host 头请求 `/health/ready/` 并校验 JSON body，301/400 不会误判成功）。
+- **每次部署都会把 `<UTC时间> <commit SHA> <目标>` 追加到 `/opt/ichat/DEPLOYMENTS.log`**；服务器实际运行的 SHA 以该文件和 `git -C /opt/ichat/repo rev-parse HEAD` 为准，可能与仓库 main 不同（回滚期间）。
+- **回滚应用**：`sudo bash /opt/ichat/repo/deploy/deploy.sh --commit <上一个SHA>`——脚本 checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记录日志。恢复新版本：重跑 `deploy.sh`（不带 --commit）。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
 - 失败排查：`journalctl -u ichat -n 100`、`tail -50 /var/log/nginx/ichat.error.log`。
 
 ## 4. 备份与恢复（T13）

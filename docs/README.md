@@ -20,6 +20,8 @@
 
 | 分类 | 文档 |
 | --- | --- |
+| Phase4 开发交接 | [开发入口](phase4/README.md)、[需求与验收](phase4/requirements.md)、[技术方案与代码入口](phase4/technical-design.md)、[Agent 工作包](phase4/agent-handoff.md)、[78 项任务](phase4/tasks.md) |
+| 软件测试课程 | `course-testing/iChat Pro 软件需求规格说明书.md`、`course-testing/第一次实验-需求分析与任务拆解报告.md`、`course-testing/第二次实验-软件工程全链路与AI实践报告.md`、`course-testing/代码规范、版本管理与测试工具说明.md`、`course-testing/AI实践记录.md`、`course-testing/小组分工表.md` |
 | 总览与需求 | `iChat Pro 系统性介绍文档.md`、`iChat Pro 需求文档_修订版.md`、`iChat Pro Phase 规划与一期交付审查文档.md` |
 | 架构与设计 | `iChat Pro 技术栈.md`、`iChat Pro 后端设计规范文档.md`、`iChat Pro 前端设计规范文档.md`、`iChat Pro UML 与架构图交付文档.md` |
 | 数据与接口 | `iChat Pro API 接口文档.md`、`iChat Pro 数据库设计规范文档.md` |
@@ -30,10 +32,12 @@
 
 ## 当前交付口径
 
-- 当前项目定位为课程小组作业交付版本，重点展示可运行的轻量级安全聊天系统。
-- 主要交付能力包括账号、联系人、私聊、群聊、实时通信、端到端加密消息、文件转发、设置页、AI Assistant 面板和 Electron 桌面端包装。
-- Channel、完整 Bot、Agent Gateway、移动端、语音/视频通话、正式多设备同步和高级 Signal Protocol 能力作为后续扩展方向。
+- 上学期版本作为本学期的回归基线，已有能力包括账号、联系人、私聊、群聊、实时通信、端到端加密消息、文件转发、设置页、AI Assistant 面板和 Electron 桌面端原型。
+- 本学期软件测试实践的新增交付重点为可安装的 Windows App、Android App、公网云部署、E2EE 与消息可靠性增强，以及覆盖黑盒、白盒、安全、性能和兼容性的测试体系。
+- Channel、完整 Bot、Agent Gateway、语音/视频通话和高级 Signal Protocol 不属于本学期必须完成的核心范围；若核心任务提前完成，再作为扩展项评估。
 - 测试代码已统一整理到 `chat/tests/`，JS 加密测试位于 `chat/tests/js/`。
+
+需要交给其他 Agent 开发本学期 Phase4 时，从 [Phase4 开发交接入口](phase4/README.md) 开始。该目录采用最新课程的跨平台/云端/可靠性/测试范围，并明确区分早期 Channel、Bot 与 Agent 生态规划。
 
 ## 常用验证命令
 

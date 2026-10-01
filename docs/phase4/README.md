@@ -23,6 +23,13 @@
 
 `technical-design.md` 中“现状”是代码核对结果；“建议/拟新增”是待实现的方案。开发 Agent 应在对应任务中固化接口与 ADR，不能把草案写成已经上线的接口。
 
+## 2.1 WP00 已有产出（2026-10-01）
+
+- [风险与缺陷登记](risk-register.md)：technical-design §2.1 的 7 个风险点已全部确认并附代码行号证据。
+- [需求追踪矩阵](traceability-matrix.md)：SRS V2.0 全部 114 条 NEW-* 与任务的映射（P0 共 71 条）。
+- [基线验证报告](baseline-report.md)：main 基线复跑结果；**npm 启动器已恢复可用**，修正了 technical-design §12 的环境问题记录。
+- 第一轮 P0 任务已建为 GitHub Issues #207–#249（Android T22–T30 及依赖 Android 的验收项暂缓，启动时另建）；[tasks.md](tasks.md) 状态列已回填 Issue 编号。
+
 ## 3. 来源与冲突处理
 
 | 资料 | 用法 |

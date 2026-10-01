@@ -795,6 +795,8 @@ def _client_payload_error_response(error, status=400):
     return JsonResponse({'error': error.code, 'detail': error.message}, status=status)
 
 
+@login_required(login_url='login')
+@require_POST
 def forward_message_view(request, conversation_id):
     """Forward an encrypted message using the same validation as WebSocket sends."""
     data = _json_body(request)

@@ -551,3 +551,102 @@ class GroupSenderCopyDigestTests(ReviewFixtures):
         second = client.post(url, data=json.dumps(payload), content_type="application/json")
         self.assertEqual(second.status_code, 200, second.content)
         self.assertFalse(second.json()["created"])
+
+
+class ForwardMethodGuardTests(ReviewFixtures):
+    """Review round 3: the positional helper deletion silently dropped the
+    forward view decorators - a GET with a JSON body used to create messages."""
+
+    def test_forward_rejects_get_with_body(self):
+        client = self._client(self.alice)
+        body = {
+            "peer_id": self.bob.pk,
+            "client_message_id": "get-forward-1",
+            "message_type": "text",
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "receiver_key_version": 1,
+            "ciphertext": CT,
+            "nonce": B64_12,
+            "auth_tag": B64_16,
+        }
+        response = client.get(
+            f"/api/conversations/{self.conv_ab.pk}/messages/forward/",
+            data=body,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 405)
+        self.assertFalse(EncryptedMessage.objects.filter(client_message_id="get-forward-1").exists())
+
+
+class StrictFileKeyValidationTests(ReviewFixtures):
+    """Review round 3: key material is validated strictly before anything is
+    written - holder-only entries used to overwrite existing wrapped keys."""
+
+    def _post_file(self, ef, file_keys):
+        client = self._client(self.alice)
+        body = {
+            "conversation_id": self.conv_ab.pk,
+            "conversation_type": "single",
+            "receiver_id": self.bob.pk,
+            "client_message_id": "strict-keys-1",
+            "message_type": "file",
+            "ciphertext": CT,
+            "nonce": B64_12,
+            "auth_tag": B64_16,
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "receiver_key_version": 1,
+            "file_keys": file_keys,
+        }
+        return client.post(f"/api/files/{ef.pk}/messages/", data=json.dumps(body), content_type="application/json")
+
+    def _valid_keys(self):
+        return [
+            {"holder_id": self.alice.pk, "encrypted_file_key": "k-a", "nonce": B64_12, "auth_tag": B64_16},
+            {"holder_id": self.bob.pk, "encrypted_file_key": "k-b", "nonce": B64_12, "auth_tag": B64_16},
+        ]
+
+    def test_missing_key_material_is_rejected(self):
+        ef = self._create_file("strict-keys-missing")
+        keys = self._valid_keys()
+        keys[1] = {"holder_id": self.bob.pk}  # holder-only entry
+        response = self._post_file(ef, keys)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "invalid_file_metadata")
+        self.assertFalse(EncryptedMessage.objects.filter(client_message_id="strict-keys-1").exists())
+        # nothing was written, let alone existing key material cleared
+        self.assertFalse(EncryptedFileKey.objects.filter(file=ef).exists())
+
+    def test_unsupported_key_algorithm_is_rejected(self):
+        ef = self._create_file("strict-keys-alg")
+        keys = self._valid_keys()
+        keys[1]["algorithm"] = "RSA-OAEP-256"
+        response = self._post_file(ef, keys)
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(EncryptedFileKey.objects.filter(file=ef).exists())
+
+    def test_malformed_version_fields_are_rejected(self):
+        ef = self._create_file("strict-keys-ver")
+        keys = self._valid_keys()
+        keys[1]["receiver_key_version"] = "abc"
+        response = self._post_file(ef, keys)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "invalid_file_metadata")
+        self.assertFalse(EncryptedMessage.objects.filter(client_message_id="strict-keys-1").exists())
+
+    def test_wrong_nonce_length_is_rejected(self):
+        ef = self._create_file("strict-keys-nonce")
+        keys = self._valid_keys()
+        keys[1]["nonce"] = "AAAAAAAA"  # 6 bytes, must be 12
+        response = self._post_file(ef, keys)
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(EncryptedFileKey.objects.filter(file=ef).exists())
+
+    def test_valid_keys_still_pass(self):
+        ef = self._create_file("strict-keys-ok")
+        response = self._post_file(ef, self._valid_keys())
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            EncryptedFileKey.objects.filter(file=ef, holder_id=self.bob.pk, encrypted_file_key="k-b").exists()
+        )

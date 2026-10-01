@@ -364,10 +364,23 @@ def _group_stored_payload(group_message):
     }
 
 
+def _positive_int_or_none(value, field):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise PayloadError("invalid_file_metadata", f"{field} must be a positive integer.")
+    return value
+
+
 def normalize_pending_file_keys(raw):
-    """Shape-check client-supplied wrapped keys. Member targeting and
+    """Validate client-supplied wrapped keys strictly.
+
+    Missing or malformed key material is rejected (review round 3: the
+    lenient rewrite used to accept holder-only entries and then OVERWRITE
+    existing wrapped keys via update_or_create). Member targeting and
     coverage are enforced on the CREATED path only, so an ACK-lost retry
-    after a membership change can still replay (review round 2, gap 2)."""
+    after a membership change can still replay.
+    """
     if not raw:
         return []
     if not isinstance(raw, list):
@@ -382,16 +395,29 @@ def normalize_pending_file_keys(raw):
         if holder_id in seen:
             continue
         seen.add(holder_id)
+
+        encrypted_file_key = fk.get("encrypted_file_key")
+        if not isinstance(encrypted_file_key, str) or not encrypted_file_key:
+            raise PayloadError("invalid_file_metadata", "encrypted_file_key is required.")
+        require_base64(fk, "nonce", decoded_length=12)
+        require_base64(fk, "auth_tag", decoded_length=16)
+        algorithm = fk.get("algorithm", "AES-256-GCM")
+        if algorithm != "AES-256-GCM":
+            raise PayloadError("unsupported_algorithm", "Unsupported file key algorithm.")
+        sender_ephemeral_public_key = fk.get("sender_ephemeral_public_key")
+        if sender_ephemeral_public_key is not None:
+            require_base64(fk, "sender_ephemeral_public_key", max_decoded_length=256)
+
         out.append({
             "holder_id": holder_id,
-            "encrypted_file_key": str(fk.get("encrypted_file_key", "") or ""),
-            "nonce": str(fk.get("nonce", "") or ""),
-            "auth_tag": str(fk.get("auth_tag", "") or ""),
-            "algorithm": str(fk.get("algorithm", "") or "AES-256-GCM"),
-            "sender_key_version": fk.get("sender_key_version"),
-            "receiver_key_version": fk.get("receiver_key_version"),
-            "membership_version": fk.get("membership_version"),
-            "sender_ephemeral_public_key": fk.get("sender_ephemeral_public_key"),
+            "encrypted_file_key": encrypted_file_key,
+            "nonce": fk["nonce"],
+            "auth_tag": fk["auth_tag"],
+            "algorithm": algorithm,
+            "sender_key_version": _positive_int_or_none(fk.get("sender_key_version"), "sender_key_version"),
+            "receiver_key_version": _positive_int_or_none(fk.get("receiver_key_version"), "receiver_key_version"),
+            "membership_version": _positive_int_or_none(fk.get("membership_version"), "membership_version"),
+            "sender_ephemeral_public_key": sender_ephemeral_public_key,
         })
     return out
 

@@ -93,7 +93,7 @@ check "  group recipient ciphertext" \
     "$(psql_live "SELECT md5(string_agg(ciphertext, '' ORDER BY group_message_id, receiver_id)) FROM chat_groupmessagerecipient")"
 
 DIG=$(psql_rest "SELECT ciphertext_sha256 FROM chat_encryptedfile WHERE client_file_id='p4drill-file-001'")
-REAL=$(sha256sum "$SCRATCH_MEDIA/media/uploads/files/p4drill.enc" | cut -d' ' -f1)
+REAL=$(sha256sum "$SCRATCH_MEDIA/uploads/files/p4drill.enc" | cut -d' ' -f1)
 check "encrypted-file digest (restored bytes vs stored ciphertext_sha256)" "$REAL" "$DIG"
 
 echo "== 5. cleanup =="

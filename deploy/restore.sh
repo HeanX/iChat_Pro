@@ -47,8 +47,8 @@ echo "==> restoring media (existing media/ is moved aside)"
 if [[ -d "$MEDIA_DIR" ]]; then
     mv "$MEDIA_DIR" "${MEDIA_DIR}.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)"
 fi
-mkdir -p "$(dirname "$MEDIA_DIR")"
-tar -C "$(dirname "$MEDIA_DIR")" -xzf "$STAMP_DIR/media.tar.gz"
+mkdir -p "$MEDIA_DIR"
+tar -C "$MEDIA_DIR" -xzf "$STAMP_DIR/media.tar.gz"
 
 if [[ "${ICHAT_SKIP_SERVICE:-0}" == "1" ]]; then
     echo "==> drill mode: service untouched; verify the restored data out of band"

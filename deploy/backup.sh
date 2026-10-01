@@ -21,7 +21,11 @@ echo "==> pg_dump"
 pg_dump --no-owner --no-privileges --file "$DEST/db.sql" "$DB_URL"
 
 echo "==> media archive (avatars + encrypted uploads)"
-tar -C "$(dirname "$MEDIA_DIR")" -czf "$DEST/media.tar.gz" "$(basename "$MEDIA_DIR")"
+# Archive the CONTENTS of MEDIA_ROOT (paths relative to it), so restore is
+# independent of where the media root lives (persistent volume vs drill dir).
+# NOTE: archive layout changed 2026-10-01; backups taken before this date
+# carry a parent-dir prefix and need manual extraction.
+tar -C "$MEDIA_DIR" -czf "$DEST/media.tar.gz" .
 
 # Checksum with RELATIVE names so a copied/moved backup directory can be
 # verified on its own (absolute paths would keep validating the original

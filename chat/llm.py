@@ -5,6 +5,7 @@ import ipaddress
 import socket
 import urllib.request
 import urllib.error
+from socket import getaddrinfo as _resolve_host
 from urllib.parse import urlparse, urlunparse
 from concurrent.futures import ThreadPoolExecutor
 
@@ -47,7 +48,10 @@ def validate_llm_endpoint(endpoint: str):
         raise ValueError("Model request endpoint host is not allowed.")
 
     try:
-        addr_infos = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+        # Module-level seam: tests patch chat.llm._resolve_host instead of the
+        # global socket.getaddrinfo, which would also hijack unrelated
+        # connections (e.g. Redis) made while the patch is active.
+        addr_infos = _resolve_host(host, parsed.port or 443, type=socket.SOCK_STREAM)
     except socket.gaierror as error:
         raise ValueError("Model request endpoint host could not be resolved.") from error
 

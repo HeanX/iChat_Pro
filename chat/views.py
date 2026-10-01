@@ -3777,6 +3777,7 @@ def conversation_sync_view(request, conversation_id):
     member = _get_active_member(conversation_id, request.user)
     if not member:
         return JsonResponse({'error': 'conversation_not_found', 'detail': 'Conversation not found or not a member.'}, status=404)
+    _apply_auto_delete_for_member(member)
     conversation = member.conversation
     if conversation.status != Conversation.Status.ACTIVE:
         return JsonResponse({'error': 'conversation_not_found', 'detail': 'Conversation is not active.'}, status=404)
@@ -3811,29 +3812,50 @@ def conversation_sync_view(request, conversation_id):
         ).order_by('sequence')[:limit]
     )
 
+    # Read projections mirror the history endpoints EXACTLY (review fix):
+    # cleared_at, auto-delete cutoff, personal deletions and the private
+    # block rule all apply to sync — a cursor can never widen visibility.
+    if conversation.type == Conversation.Type.SINGLE:
+        peer = (
+            ConversationMember.objects
+            .filter(conversation_id=conversation.pk, status=ConversationMember.Status.ACTIVE)
+            .exclude(user=request.user)
+            .select_related("user")
+            .first()
+        )
+        if peer and (_is_blocked_by(request.user, peer.user) or _is_blocked_by(peer.user, request.user)):
+            return JsonResponse(
+                {'error': 'conversation_forbidden', 'detail': 'This conversation is blocked.'},
+                status=403,
+            )
+
+    event_message_ids = [e.message_id for e in events]
+    if conversation.type == Conversation.Type.SINGLE:
+        visible = {
+            m.pk: m
+            for m in _visible_private_messages_queryset(member)
+            .filter(pk__in=event_message_ids)
+            .select_related('sender__profile', 'receiver__profile', 'file_id')
+        }
+    else:
+        visible = {
+            r.group_message_id: r
+            for r in _visible_group_recipients_queryset(member)
+            .filter(group_message_id__in=event_message_ids)
+            .select_related('group_message__sender__profile')
+        }
+
     items = []
     for event in events:
+        visible_item = visible.get(event.message_id)
+        if visible_item is None:
+            # filtered out by cleared_at / auto-delete / personal deletion,
+            # or (group) not distributed to this member
+            continue
         if conversation.type == Conversation.Type.SINGLE:
-            message = (
-                EncryptedMessage.objects.select_related('sender__profile', 'receiver__profile')
-                .filter(pk=event.message_id)
-                .first()
-            )
-            if message is None:
-                continue
-            payload = ChatConsumer.serialize_private_message(message, viewer_id=request.user.pk)
+            payload = ChatConsumer.serialize_private_message(visible_item, viewer_id=request.user.pk)
         else:
-            recipient = (
-                GroupMessageRecipient.objects.filter(
-                    group_message_id=event.message_id, receiver_id=request.user.pk
-                )
-                .select_related('group_message__sender__profile')
-                .first()
-            )
-            if recipient is None:
-                # e.g. the requester joined after this message was distributed
-                continue
-            payload = ChatConsumer.serialize_group_recipient(recipient, viewer_id=request.user.pk)
+            payload = ChatConsumer.serialize_group_recipient(visible_item, viewer_id=request.user.pk)
         items.append({
             'sequence': event.sequence,
             'kind': event.kind,

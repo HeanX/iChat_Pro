@@ -14,6 +14,8 @@ from chat.models import (
     ConversationMember,
     EncryptedFile,
     EncryptedFileKey,
+    EncryptedMessage,
+    UserMessageDeletion,
 )
 from chat.services.sync import CURSOR_TTL_SECONDS, make_sync_cursor
 
@@ -358,3 +360,99 @@ class WritePathEventCoverageTests(SyncApiTestBase):
         self.assertEqual(
             [i["message"]["message_type"] for i in private_data["items"]], ["file"]
         )
+
+
+class SyncVisibilityParityTests(SyncApiTestBase):
+    """Review round on T34: sync must apply the exact same read projections
+    as the history endpoints (cleared_at, personal deletion, block rule)."""
+
+    def setUp(self):
+        super().setUp()
+        self.conv = Conversation.objects.create(type=Conversation.Type.SINGLE, created_by=self.alice)
+        ConversationMember.objects.create(conversation=self.conv, user=self.alice)
+        ConversationMember.objects.create(conversation=self.conv, user=self.bob)
+        for i in range(3):
+            self._post_private(self.conv.pk, self.bob.pk, f"vis-{i}")
+
+    def test_sync_hides_personally_deleted_messages(self):
+        from chat.models import UserMessageDeletion
+
+        m2 = EncryptedMessage.objects.get(client_message_id="vis-1")
+        UserMessageDeletion.objects.create(
+            user=self.alice, conversation=self.conv,
+            message_type=UserMessageDeletion.MessageType.PRIVATE, message_id=m2.pk,
+        )
+        data = self._sync(self.conv.pk).json()
+        self.assertEqual([i["sequence"] for i in data["items"]], [1, 3])
+
+    def test_sync_respects_cleared_at(self):
+        from datetime import timedelta
+
+        member = ConversationMember.objects.get(conversation=self.conv, user=self.alice)
+        m2 = EncryptedMessage.objects.get(client_message_id="vis-1")
+        member.cleared_at = m2.created_at + timedelta(milliseconds=1)
+        member.save(update_fields=["cleared_at"])
+        data = self._sync(self.conv.pk).json()
+        self.assertEqual([i["sequence"] for i in data["items"]], [3])
+
+    def test_private_sync_blocked_returns_403(self):
+        from accounts.models import BlockedUser
+
+        BlockedUser.objects.create(blocker=self.alice, blocked=self.bob)
+        response = self._sync(self.conv.pk)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "conversation_forbidden")
+
+    def test_group_sync_hides_personally_deleted(self):
+        group = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name="vis-group", created_by=self.alice, membership_version=1,
+        )
+        for user in (self.alice, self.bob):
+            ConversationMember.objects.create(conversation=group, user=user)
+        client_b = Client()
+        client_b.force_login(self.bob)
+        members = list(group.members.values_list("user_id", flat=True))
+        payload = {
+            "client_message_id": "vis-g1",
+            "group_id": group.pk,
+            "membership_version": 1,
+            "message_type": "text",
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "recipients": [
+                {"receiver_id": uid, "receiver_key_version": 1,
+                 "ciphertext": _b64(f"ct-{uid}"), "nonce": B64_12, "auth_tag": B64_16}
+                for uid in members
+            ],
+        }
+        response = self.client_a.post(
+            f"/api/conversations/{group.pk}/messages/send-group/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        message_id = response.json()["message_id"]
+
+        UserMessageDeletion.objects.create(
+            user=self.alice, conversation=group,
+            message_type=UserMessageDeletion.MessageType.GROUP, message_id=message_id,
+        )
+        alice_view = self._sync(group.pk).json()
+        self.assertEqual(alice_view["items"], [])
+        bob_view = self._sync(group.pk, client=client_b).json()
+        self.assertEqual(len(bob_view["items"]), 1)
+
+
+class CursorNonAsciiTests(SyncApiTestBase):
+    def setUp(self):
+        super().setUp()
+        self.conv = Conversation.objects.create(type=Conversation.Type.SINGLE, created_by=self.alice)
+        ConversationMember.objects.create(conversation=self.conv, user=self.alice)
+        ConversationMember.objects.create(conversation=self.conv, user=self.bob)
+        self._post_private(self.conv.pk, self.bob.pk, "na-1")
+
+    def test_non_ascii_signature_returns_invalid_not_500(self):
+        response = self._sync(self.conv.pk, cursor="ascii.中")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "sync_cursor_invalid")
+

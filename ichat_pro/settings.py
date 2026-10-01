@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -152,6 +153,17 @@ else:
             'OPTIONS': _SQLITE_OPTIONS,
         }
     }
+
+# Under the Django test runner, TestCase holds one process-wide connection
+# inside an atomic block, and channels' database_sync_to_async runs
+# close_old_connections() on that same thread — with the default
+# CONN_MAX_AGE=0 it closes the connection mid-transaction, which psycopg
+# then reports as "the connection is closed" for every later test.
+# Persistent connections during tests avoid this; production keeps
+# per-request connections.
+if 'test' in sys.argv:
+    for _db_config in DATABASES.values():
+        _db_config['CONN_MAX_AGE'] = None
 
 # Channel layer
 # In production, set REDIS_URL=redis://[:password@]host:port/db

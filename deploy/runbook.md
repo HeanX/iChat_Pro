@@ -34,9 +34,10 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
    `sudo useradd -r -d /opt/ichat -s /sbin/nologin ichat`
    `sudo install -d -o ichat -g ichat /opt/ichat /var/lib/ichat/media /var/www/acme`
 6. 配置：把 `deploy/env.production.example` 填好放到 `/opt/ichat/.env`（owner ichat，chmod 600）；`deploy/systemd/ichat.service` 复制到 `/etc/systemd/system/`。
-7. 首次拉取与迁移：`sudo bash deploy/deploy.sh`（脚本自动 clone main、建 venv、migrate、collectstatic、启动）。
-8. Nginx：把 `deploy/nginx/ichat.conf` 中的 `__PLACEHOLDER__` 替换后放到 `/etc/nginx/conf.d/ichat.conf`；先用临时自签证书起 8443，或先开 80 完成签发再配 8443。`sudo nginx -t && sudo systemctl enable --now nginx`。
-9. 签发证书：`sudo certbot certonly --webroot -w /var/www/acme -d sub.20060810.xyz`，随后把 8443 server 块指向 `/etc/letsencrypt/live/.../fullchain.pem`，`sudo nginx -s reload`。把 `deploy/nginx/reload-nginx.sh` 安装到 `/etc/letsencrypt/renewal-hooks/deploy/ichat-reload-nginx.sh`（chmod 755）：`certbot renew` 成功续期后自动 `nginx -t` + reload，避免 Nginx 继续使用旧证书。用 `sudo certbot renew --force-renewal` 一次性验证整条链路（受 LE 每周重复证书限额约束，勿频繁执行）。
+7. **首次引导仓库**：`sudo git clone --branch main https://github.com/HeanX/iChat_Pro.git /opt/ichat/repo`（deploy.sh 在仓库内，首次需手动克隆；之后 deploy.sh 会自行 fetch/重置）。
+8. **Nginx 必须先于首次部署**：替换 `deploy/nginx/ichat.conf` 中的 `__PLACEHOLDER__` 放到 `/etc/nginx/conf.d/`，用临时自签证书起 8443——因为 deploy.sh 的 readiness 门禁默认经 `https://127.0.0.1:8443` 全前门路径（Nginx 不可达时自动回退 loopback http，仅对带 health 免跳转的版本有效）。`sudo nginx -t && sudo systemctl enable --now nginx`。
+9. **首次部署**：`sudo bash /opt/ichat/repo/deploy/deploy.sh`（自动 clone 兜底、建 venv、migrate、collectstatic、启动、探针；并安装稳定副本到 `/opt/ichat/bin/deploy.sh`，此后统一用该入口）。
+10. 签发正式证书：`sudo certbot certonly --webroot -w /var/www/acme -d sub.20060810.xyz`，把 8443 server 块指向 `/etc/letsencrypt/live/.../fullchain.pem`，`sudo nginx -s reload`。把 `deploy/nginx/reload-nginx.sh` 安装到 `/etc/letsencrypt/renewal-hooks/deploy/ichat-reload-nginx.sh`（chmod 755）：`certbot renew` 成功续期后自动 `nginx -t` + reload，避免 Nginx 继续使用旧证书。用 `sudo certbot renew --force-renewal` 一次性验证整条链路（受 LE 每周重复证书限额约束，勿频繁执行）。
 
 ## 3. 日常发布与回滚（T50 路径）
 
@@ -51,8 +52,8 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 
 - 每日备份（root crontab）：`30 17 * * * /opt/ichat/repo/deploy/backup.sh`（UTC 17:30 = 东京 02:30）。
 - 备份内容：`pg_dump` 全库 + `media/` 打包 + SHA256 + 来源 commit，保留 14 天，目录权限 700。
-- 恢复演练要求：在**独立实例**上恢复，核对用户/会话/消息数量、文件抽样与客户端解密（详见 requirements.md §3.3）。
-- 恢复命令：`sudo bash deploy/restore.sh /var/backups/ichat/<STAMP>`（需要二次输入数据库名确认；恢复前自动停服、旧 media 移至 `.pre-restore-*`）。
+- 恢复演练要求：在**独立实例**上恢复，核对用户/关系/会话/消息数量、文件抽样与客户端解密（详见 requirements.md §3.3）。可复跑演练：`sudo bash deploy/restore_drill.sh`——seed 业务数据（用户/联系人/私聊/群聊/加密文件+逐持有者密钥）→ backup → **运行真实 restore.sh**（drill 参数注入独立库与独立媒体目录，不碰在线服务）→ 校验行数 parity、关系完整性、密文逐字节 parity、文件摘要；同主机独立库口径，跨独立实例完整演练属 P1。
+- 恢复命令：`sudo bash deploy/restore.sh /var/backups/ichat/<STAMP>`（需要二次输入数据库名确认；恢复前自动停服、旧 media 移至 `.pre-restore-*`）。演练可用环境变量注入目标：`RESTORE_ENV_FILE`、`ICHAT_DB_URL`、`ICHAT_MEDIA_DIR`、`ICHAT_SKIP_SERVICE=1`、`ICHAT_ASSUME_YES=1`。
 
 ## 5. 共存服务红线
 

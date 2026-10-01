@@ -1,28 +1,42 @@
 #!/usr/bin/env bash
-# Restore PostgreSQL + media from a backup made by backup.sh.
-# Restores into the CURRENT database named by .env — verify the target first.
-# Usage: sudo ./restore.sh /var/backups/ichat/<STAMP>
+# Restore PostgreSQL + media from a backup made by backup.sh, using the
+# ACTUAL restore procedure (schema drop + psql replay + media swap).
+#
+# Production usage (stops the service, restores into the database named by
+# /opt/ichat/.env — verify the target first):
+#   sudo ./restore.sh /var/backups/ichat/<STAMP>
+#
+# Drill overrides (used by deploy/restore_drill.sh to exercise this tool
+# without touching the running service or live media):
+#   RESTORE_ENV_FILE=/path/env   env file to source (default /opt/ichat/.env)
+#   ICHAT_DB_URL=postgres://...  target database URL (default $DATABASE_URL)
+#   ICHAT_MEDIA_DIR=/path        media root to swap (default /var/lib/ichat/media)
+#   ICHAT_SKIP_SERVICE=1         do not stop/start/probe the systemd service
+#   ICHAT_ASSUME_YES=1           skip the interactive target confirmation
 set -euo pipefail
 
 APP_DIR=/opt/ichat
-MEDIA_DIR=/var/lib/ichat/media
 STAMP_DIR=${1:?usage: restore.sh /var/backups/ichat/<STAMP>}
-
 [[ -d "$STAMP_DIR" ]] || { echo "ERROR: backup dir not found: $STAMP_DIR" >&2; exit 1; }
 
 echo "==> verifying checksums"
 (cd "$STAMP_DIR" && sha256sum -c SHA256SUMS)
 
-set -a; source "$APP_DIR/.env"; set +a
-DB_URL=${DATABASE_URL:?DATABASE_URL not set}
-DB_NAME=$(python3 -c "import sys,urllib.parse as u; p=u.urlparse('$DB_URL'); print(u.unquote(p.path.lstrip('/')))")
+set -a; source "${RESTORE_ENV_FILE:-$APP_DIR/.env}"; set +a
+DB_URL=${ICHAT_DB_URL:-${DATABASE_URL:?DATABASE_URL not set}}
+MEDIA_DIR=${ICHAT_MEDIA_DIR:-/var/lib/ichat/media}
+DB_NAME=$(python3 -c "import urllib.parse as u; p=u.urlparse('$DB_URL'); print(u.unquote(p.path.lstrip('/')))")
 
-echo "==> target database: $DB_NAME (from .env)"
-read -r -p "Type the database name to confirm restore: " confirm
-[[ "$confirm" == "$DB_NAME" ]] || { echo "aborted"; exit 1; }
+echo "==> target database: $DB_NAME (from $DB_URL)"
+if [[ "${ICHAT_ASSUME_YES:-0}" != "1" ]]; then
+    read -r -p "Type the database name to confirm restore: " confirm
+    [[ "$confirm" == "$DB_NAME" ]] || { echo "aborted"; exit 1; }
+fi
 
-echo "==> stopping app service"
-systemctl stop ichat.service
+if [[ "${ICHAT_SKIP_SERVICE:-0}" != "1" ]]; then
+    echo "==> stopping app service"
+    systemctl stop ichat.service
+fi
 
 echo "==> restoring database"
 psql "$DB_URL" -c 'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid();'
@@ -33,16 +47,23 @@ echo "==> restoring media (existing media/ is moved aside)"
 if [[ -d "$MEDIA_DIR" ]]; then
     mv "$MEDIA_DIR" "${MEDIA_DIR}.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)"
 fi
+mkdir -p "$(dirname "$MEDIA_DIR")"
 tar -C "$(dirname "$MEDIA_DIR")" -xzf "$STAMP_DIR/media.tar.gz"
+
+if [[ "${ICHAT_SKIP_SERVICE:-0}" == "1" ]]; then
+    echo "==> drill mode: service untouched; verify the restored data out of band"
+    echo "==> Restore (drill) OK"
+    exit 0
+fi
 
 echo "==> starting app service and probing"
 systemctl start ichat.service
 ALLOWED_HOST=${DJANGO_ALLOWED_HOSTS%%,*}
 BODY=""
 for i in $(seq 1 30); do
-    BODY=$(curl -fsS --max-time 5 \
+    BODY=$(curl -fkS --max-time 5 \
         -H "Host: $ALLOWED_HOST" \
-        http://127.0.0.1:8000/health/ready/ 2>/dev/null || true)
+        https://127.0.0.1:8443/health/ready/ 2>/dev/null || true)
     if [[ "$BODY" == *'"status": "ok"'* ]]; then
         echo "==> Restore OK (readiness: db+cache ok)"
         exit 0

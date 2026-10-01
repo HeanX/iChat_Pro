@@ -53,7 +53,11 @@ if [[ ! -f "$APP_DIR/.env" ]]; then
     exit 1
 fi
 
-# --- code ---
+# --- code (bootstrap clone on first deploy, then fetch/pin) ---
+if [[ ! -d "$REPO_DIR/.git" ]]; then
+    echo "==> First deploy: cloning repository into $REPO_DIR"
+    git clone --quiet --branch "$BRANCH" https://github.com/HeanX/iChat_Pro.git "$REPO_DIR"
+fi
 git -C "$REPO_DIR" fetch --quiet origin "$BRANCH"
 if [[ -n "$COMMIT" ]]; then
     git -C "$REPO_DIR" checkout --quiet --force "$COMMIT"
@@ -85,19 +89,27 @@ systemctl restart ichat.service
 systemctl enable ichat.service >/dev/null 2>&1 || true
 
 # --- readiness gate ---
-# Probe through the local Nginx TLS front door: this works for ANY deployed
-# version (old versions redirect plain http to https, which would defeat a
-# loopback-http probe) and exercises the full request path (TLS, proxy,
-# app, DB, Redis). Assert the readiness JSON body — never trust a bare
-# connection success (a 301/400 body would pass a plain `curl -f`).
+# Primary: probe through the local Nginx TLS front door — works for ANY
+# deployed version (old versions redirect plain http to https) and exercises
+# the full request path (TLS, proxy, app, DB, Redis).
+# Fallback: when nothing listens on 8443 (fresh host before Nginx is set up),
+# probe Daphne over loopback http with the production Host header; this is
+# only valid on versions that exempt health paths from the SSL redirect.
+# Both paths assert the readiness JSON body — never trust a bare connection
+# success (a 301/400 body would pass a plain `curl -f`).
 ALLOWED_HOST=${DJANGO_ALLOWED_HOSTS%%,*}
 BODY=""
 for i in $(seq 1 30); do
     BODY=$(curl -fkS --max-time 5 \
         -H "Host: $ALLOWED_HOST" \
         https://127.0.0.1:8443/health/ready/ 2>/dev/null || true)
+    if [[ "$BODY" != *'"status": "ok"'* ]]; then
+        BODY=$(curl -fsS --max-time 5 \
+            -H "Host: $ALLOWED_HOST" \
+            http://127.0.0.1:8000/health/ready/ 2>/dev/null || true)
+    fi
     if [[ "$BODY" == *'"status": "ok"'* ]]; then
-        echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness via nginx TLS: db+cache ok)"
+        echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness: db+cache ok)"
         printf '%s  %s  %s\n' "$(date -u +%FT%TZ)" "$DEPLOYED_SHA" "$TARGET" >> "$LOG_FILE"
         exit 0
     fi

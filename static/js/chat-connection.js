@@ -333,6 +333,7 @@
         fetchPage: function () {},
         applyItem: function () { return true; },
         storage: { get: function () { return ""; }, set: function () {}, remove: function () {} },
+        applyQueue: null,
         maxPages: 100,
       },
       opts || {}
@@ -374,7 +375,10 @@
                   return applyNext();
                 });
             }
-            return applyNext().then(function (allApplied) {
+            // The WHOLE page runs as one queue task: realtime pushes
+            // enqueued meanwhile cannot interleave mid-page.
+            var runPage = o.applyQueue ? o.applyQueue.enqueue(applyNext) : applyNext();
+            return runPage.then(function (allApplied) {
               if (!allApplied) {
                 // Keep the PREVIOUS cursor: the failing item is re-fetched
                 // and re-applied on the next run (at-least-once).

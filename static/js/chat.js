@@ -48,6 +48,7 @@ function retryFailedDecrypt(existing, payload) {
           membership_version: payload.membership_version,
           sender_id: payload.sender_id,
           receiver_id: payload.receiver_id,
+          sender_ephemeral_public_key: payload.sender_ephemeral_public_key,
           sender_key_version: payload.sender_key_version,
           receiver_key_version: payload.receiver_key_version,
         })
@@ -1447,6 +1448,7 @@ async function syncCatchUp() {
   try {
     const walker = ChatConnection.createSyncWalker({
       maxPages: 100,
+      applyQueue: msgApplyQueue,
       storage: {
         get: () => localStorage.getItem(storageKey) || "",
         set: (v) => localStorage.setItem(storageKey, v || ""),
@@ -1485,14 +1487,11 @@ async function syncCatchUp() {
           event: payload.group_id !== undefined ? "message.group.new" : "message.single.new",
           data: payload,
         };
-        const task = () =>
-          synthetic.event === "message.group.new"
-            ? handleGroupMessageReceived(synthetic)
-            : handlePrivateMessageReceived(synthetic);
-        if (msgApplyQueue) {
-          return !!(await msgApplyQueue.enqueue(task));
-        }
-        return !!(await task());
+        // Called INSIDE the walker's page task, which already runs on the
+        // shared apply queue (realtime pushes cannot interleave mid-page).
+        return synthetic.event === "message.group.new"
+          ? !!(await handleGroupMessageReceived(synthetic))
+          : !!(await handlePrivateMessageReceived(synthetic));
       },
     });
     const result = await walker.run();
@@ -1662,7 +1661,10 @@ async function handlePrivateMessageReceived(data) {
     file_id: payload.file_id || (fileData ? fileData.file_id : null),
   };
 
-  if (messages.some(msg => msg.id === payload.message_id)) return true;
+  // `messages` holds the ACTIVE conversation only; a global id check
+  // would collide across conversations (review round 2).
+  if (parseInt(payload.conversation_id) === Number(activeChatId) &&
+      messages.some(msg => msg.id === payload.message_id)) return true;
 
   if (conv) {
     updateSidebarPreview(
@@ -1753,7 +1755,8 @@ async function handleGroupMessageReceived(data) {
       file_id: payload.file_id || (fileData ? fileData.file_id : null),
     };
 
-    if (messages.some(msg => msg.id === payload.message_id)) return true;
+    if (Number(convId) === Number(activeChatId) &&
+        messages.some(msg => msg.id === payload.message_id)) return true;
 
     if (activeChatId === convId) {
       messages.push(newMsg);

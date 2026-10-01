@@ -508,7 +508,74 @@ function test_shared_queue_keeps_page_ahead_of_realtime() {
   });
 }
 
+
+function test_whole_walk_is_one_queue_task() {
+  const h = createHarness();
+  const queue = ChatConnection.createApplyQueue();
+  const order = [];
+  const storage = { data: "" };
+  const walker = ChatConnection.createSyncWalker({
+    applyQueue: queue,
+    storage: {
+      get: () => storage.data,
+      set: (v) => { storage.data = v; },
+      remove: () => {},
+    },
+    maxPages: 10,
+    fetchPage(cursor) {
+      // Two pages of the SAME snapshot; applying page 2 waits so a realtime
+      // 301 can arrive between the page tasks.
+      if (!cursor) {
+        return Promise.resolve({
+          items: [{ message: { message_id: 199 } }, { message: { message_id: 200 } }],
+          nextCursor: "p2",
+          hasMore: true,
+        });
+      }
+      return new Promise((resolve) => setTimeout(() => {
+        resolve({
+          items: [{ message: { message_id: 201 } }, { message: { message_id: 202 } }],
+          nextCursor: "done",
+          hasMore: false,
+        });
+      }, 30));
+    },
+    applyItem(item) {
+      if (item.message.message_id === 201) {
+        return new Promise((resolve) => setTimeout(() => { order.push(201); resolve(true); }, 20));
+      }
+      order.push(item.message.message_id);
+      return Promise.resolve(true);
+    },
+  });
+  const walk = walker.run();
+  // Realtime 301 arrives while the walk is still applying page 2.
+  setTimeout(() => {
+    queue.enqueue(() => { order.push(301); });
+  }, 10);
+  return walk.then(() => h.timers.advance(100)).then(() => {
+    // The whole walk is one queue task: a newer realtime message cannot
+    // slip BETWEEN the pages of the same snapshot.
+    assert(order.join(",") === "199,200,201,202,301", "order: " + order.join(","));
+    assert(storage.data === "done", "final cursor stored");
+  });
+}
+
+function test_seen_registry_scopes_by_conversation_and_dedupes() {
+  const registry = ChatConnection.createSeenRegistry(500);
+  assert(!registry.seen(1, 5), "unknown not seen");
+  registry.mark(1, 5);
+  registry.mark(1, 5);
+  assert(registry.seen(1, 5), "marked after first apply");
+  assert(!registry.seen(2, 5), "same id in ANOTHER conversation is independent");
+  for (let i = 0; i < 600; i++) registry.mark(9, i);
+  assert(!registry.seen(9, 0), "cap trims the oldest entries");
+  assert(registry.seen(9, 599), "recent entries survive the trim");
+}
+
 const tests = [
+  test_whole_walk_is_one_queue_task,
+  test_seen_registry_scopes_by_conversation_and_dedupes,
   test_shared_queue_keeps_page_ahead_of_realtime,
   test_apply_queue_preserves_enqueue_order,
   test_sync_walker_resumes_after_stopped_run,

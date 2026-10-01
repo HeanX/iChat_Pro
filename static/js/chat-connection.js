@@ -327,6 +327,29 @@
   // walk with the PREVIOUS cursor intact (at-least-once); an expired-cursor
   // error clears storage and re-snapshots once; pages with no visible items
   // still advance the walk while the server reports has_more.
+  // Per-conversation seen-message registry shared by the sync walker and
+  // the realtime handlers, so a message delivered on BOTH channels is only
+  // counted once for background conversations (unread badges).
+  function createSeenRegistry(maxPerConversation) {
+    var byConv = {};
+    var cap = maxPerConversation || 500;
+    return {
+      seen: function (convId, messageId) {
+        var set = byConv[convId];
+        return !!(set && set.has(messageId));
+      },
+      mark: function (convId, messageId) {
+        var set = byConv[convId];
+        if (!set) { set = new Set(); byConv[convId] = set; }
+        if (set.size >= cap) {
+          var first = set.values().next().value;
+          set.delete(first);
+        }
+        set.add(messageId);
+      },
+    };
+  }
+
   function createSyncWalker(opts) {
     var o = Object.assign(
       {
@@ -340,7 +363,15 @@
     );
 
     function run() {
-      var cursor = o.storage.get() || "";
+      // The ENTIRE walk runs as one apply-queue task: pages of the same
+      // snapshot can never be interleaved with realtime pushes (review
+      // round 3: a newer realtime message used to slip between pages).
+      var start = function () { return walkFrom(o.storage.get() || ""); };
+      return o.applyQueue ? o.applyQueue.enqueue(start) : start();
+    }
+
+    function walkFrom(initialCursor) {
+      var cursor = initialCursor;
       var pages = 0;
       var expiredRetry = false;
 
@@ -406,5 +437,6 @@
     createOutbox: createOutbox,
     createSyncWalker: createSyncWalker,
     createApplyQueue: createApplyQueue,
+    createSeenRegistry: createSeenRegistry,
   };
 });

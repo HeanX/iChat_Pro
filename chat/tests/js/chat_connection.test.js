@@ -462,7 +462,54 @@ function test_sync_walker_resumes_after_stopped_run() {
   });
 }
 
+
+function test_shared_queue_keeps_page_ahead_of_realtime() {
+  const h = createHarness();
+  const queue = ChatConnection.createApplyQueue();
+  const order = [];
+  const storage = { data: "" };
+  const walker = ChatConnection.createSyncWalker({
+    applyQueue: queue,
+    storage: {
+      get: () => storage.data,
+      set: (v) => { storage.data = v; },
+      remove: () => {},
+    },
+    maxPages: 10,
+    fetchPage() {
+      // Page contains 101 and 102; applying 101 blocks (slow decrypt).
+      return Promise.resolve({
+        items: [
+          { message: { message_id: 101 } },
+          { message: { message_id: 102 } },
+        ],
+        nextCursor: "done",
+        hasMore: false,
+      });
+    },
+    applyItem(item) {
+      if (item.message.message_id === 101) {
+        return new Promise((resolve) => setTimeout(() => { order.push(101); resolve(true); }, 30));
+      }
+      order.push(item.message.message_id);
+      return Promise.resolve(true);
+    },
+  });
+  const walk = walker.run();
+  // Realtime 103 arrives while 101 is still decrypting.
+  setTimeout(() => {
+    queue.enqueue(() => { order.push(103); });
+  }, 10);
+  return walk.then(() => h.timers.advance(100)).then(() => {
+    // The whole sync page is one queue task: 103 cannot interleave between
+    // 101 and 102.
+    assert(order.join(",") === "101,102,103", "order: " + order.join(","));
+    assert(storage.data === "done", "cursor stored");
+  });
+}
+
 const tests = [
+  test_shared_queue_keeps_page_ahead_of_realtime,
   test_apply_queue_preserves_enqueue_order,
   test_sync_walker_resumes_after_stopped_run,
   ...walkerTests,

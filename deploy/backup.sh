@@ -23,7 +23,13 @@ pg_dump --no-owner --no-privileges --file "$DEST/db.sql" "$DB_URL"
 echo "==> media archive (avatars + encrypted uploads)"
 tar -C "$(dirname "$MEDIA_DIR")" -czf "$DEST/media.tar.gz" "$(basename "$MEDIA_DIR")"
 
-sha256sum "$DEST/db.sql" "$DEST/media.tar.gz" > "$DEST/SHA256SUMS"
+# Checksum with RELATIVE names so a copied/moved backup directory can be
+# verified on its own (absolute paths would keep validating the original
+# files instead of the copy).
+(
+    cd "$DEST"
+    sha256sum db.sql media.tar.gz > SHA256SUMS
+)
 printf 'commit=%s\ncreated=%s\n' \
     "$(git -C "$APP_DIR/repo" rev-parse HEAD 2>/dev/null || echo unknown)" \
     "$STAMP" > "$DEST/META"

@@ -31,3 +31,59 @@ jobs:
 
       - name: Run tests
         run: python manage.py test
+
+  # P4 Test T14: real-dependency integration (NEW-TST-012/013) — the SQLite /
+  # in-memory job above must not be the only validation of migrations and
+  # transactional behaviour.
+  integration:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ichat
+          POSTGRES_PASSWORD: ichat-ci
+          POSTGRES_DB: ichat
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ichat"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://ichat:ichat-ci@127.0.0.1:5432/ichat
+      REDIS_URL: redis://127.0.0.1:6379/0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Check Django configuration against real services
+        run: python manage.py check
+
+      - name: Apply migrations to PostgreSQL
+        run: python manage.py migrate --noinput
+
+      - name: Run tests against PostgreSQL and Redis
+        run: python manage.py test --parallel 1

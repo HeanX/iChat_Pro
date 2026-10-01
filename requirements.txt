@@ -1,8 +1,10 @@
 Django==6.0.5
 Pillow==11.3.0
 channels[daphne]==4.3.2
+channels-redis==4.3.0
 asgiref==3.11.1
 sqlparse==0.5.5
 tzdata==2026.2
 cryptography==48.0.0
-redis==6.4.0
+psycopg[binary]==3.3.6
+redis==8.1.0

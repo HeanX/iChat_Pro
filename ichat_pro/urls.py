@@ -19,8 +19,12 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from . import health
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('health/live/', health.health_live, name='health_live'),
+    path('health/ready/', health.health_ready, name='health_ready'),
     path('', include('chat.urls')),
     path('', include('accounts.urls')),
 ]

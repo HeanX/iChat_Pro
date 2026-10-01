@@ -91,6 +91,8 @@ ASGI_APPLICATION = 'ichat_pro.asgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 # In production, set DATABASE_URL=postgres://USER:PASSWORD@HOST:PORT/NAME
+# A malformed DATABASE_URL is a fatal configuration error: the production
+# database must never be silently replaced by SQLite (P4 T11).
 _DATABASE_URL = os.environ.get('DATABASE_URL', '')
 _SQLITE_OPTIONS = {
     # WebSocket read receipts can trigger several short writes at once during
@@ -98,35 +100,48 @@ _SQLITE_OPTIONS = {
     'timeout': 20,
 }
 if _DATABASE_URL:
-    import re as _re
-    _m = _re.match(
-        r'^(?P<engine>postgres|postgresql|mysql)://'
-        r'(?P<user>[^:]+):(?P<password>[^@]+)@'
-        r'(?P<host>[^:/]+):?(?P<port>\d+)?/(?P<name>.+)$',
-        _DATABASE_URL,
-    )
-    if _m:
-        _engine_map = {
-            'postgres': 'django.db.backends.postgresql',
-            'postgresql': 'django.db.backends.postgresql',
-            'mysql': 'django.db.backends.mysql',
-        }
+    from urllib.parse import parse_qsl, unquote, urlparse
+
+    _url = urlparse(_DATABASE_URL)
+    _engine_map = {
+        'postgres': 'django.db.backends.postgresql',
+        'postgresql': 'django.db.backends.postgresql',
+        'mysql': 'django.db.backends.mysql',
+        'sqlite': 'django.db.backends.sqlite3',
+    }
+    _engine = _engine_map.get(_url.scheme)
+    if _engine is None:
+        raise ImproperlyConfigured(
+            f"DATABASE_URL has unsupported scheme '{_url.scheme}'. "
+            "Supported schemes: postgres, postgresql, mysql, sqlite."
+        )
+    if _engine == 'django.db.backends.sqlite3':
         DATABASES = {
             'default': {
-                'ENGINE': _engine_map[_m.group('engine')],
-                'NAME': _m.group('name'),
-                'USER': _m.group('user'),
-                'PASSWORD': _m.group('password'),
-                'HOST': _m.group('host'),
-                'PORT': _m.group('port') or '',
+                'ENGINE': _engine,
+                'NAME': unquote(_url.path.lstrip('/')) or str(BASE_DIR / 'db.sqlite3'),
+                'OPTIONS': _SQLITE_OPTIONS,
             }
         }
     else:
+        try:
+            _port = _url.port
+        except ValueError as error:
+            raise ImproperlyConfigured(f'DATABASE_URL has an invalid port: {error}') from error
+        if not _url.hostname or not _url.path.lstrip('/'):
+            raise ImproperlyConfigured(
+                'DATABASE_URL must include host and database name, '
+                'e.g. postgres://user:pass@host:5432/dbname.'
+            )
         DATABASES = {
             'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': BASE_DIR / 'db.sqlite3',
-                'OPTIONS': _SQLITE_OPTIONS,
+                'ENGINE': _engine,
+                'NAME': unquote(_url.path.lstrip('/')),
+                'USER': unquote(_url.username or ''),
+                'PASSWORD': unquote(_url.password or ''),
+                'HOST': _url.hostname,
+                'PORT': str(_port or ''),
+                'OPTIONS': dict(parse_qsl(_url.query)),
             }
         }
 else:
@@ -142,6 +157,10 @@ else:
 # In production, set REDIS_URL=redis://[:password@]host:port/db
 _REDIS_URL = os.environ.get('REDIS_URL', '')
 if _REDIS_URL:
+    if not _REDIS_URL.startswith(('redis://', 'rediss://', 'unix://')):
+        raise ImproperlyConfigured(
+            "REDIS_URL must start with redis://, rediss:// or unix://."
+        )
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -208,12 +227,21 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+# collectstatic target for production (nginx serves this directory directly).
+STATIC_ROOT = Path(os.environ.get('DJANGO_STATIC_ROOT') or (BASE_DIR / 'staticfiles'))
 
 LOGIN_URL = 'login'
 
-# Media files (user uploads like avatars)
+# Media files (user uploads like avatars).
+# In production point DJANGO_MEDIA_ROOT at a persistent volume; nginx serves
+# only MEDIA_ROOT/avatars/ while encrypted uploads stay behind authed views.
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = Path(os.environ.get('DJANGO_MEDIA_ROOT') or (BASE_DIR / 'media'))
+
+# Cross-origin HTTPS origins allowed for POST (scheme required, e.g.
+# https://sub.example.com:8443). Required when TLS terminates at a proxy.
+_CSRF_ORIGINS_RAW = os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '')
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _CSRF_ORIGINS_RAW.split(',') if o.strip()]
 
 
 # Tailwind CSS: use Play CDN in dev, static build in production
@@ -237,6 +265,10 @@ CSP_ALLOW_UNSAFE_INLINE_STYLE = os.environ.get('CSP_ALLOW_UNSAFE_INLINE_STYLE', 
 # See docs/iChat Pro 部署安全说明.md for full deployment guide.
 # =============================================================================
 if not DEBUG:
+    # Trust the local reverse proxy only: Daphne binds to a loopback address
+    # and only Nginx can reach it, so X-Forwarded-Proto is trustworthy here.
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
     # Force HTTPS
     SECURE_SSL_REDIRECT = True
     SECURE_HSTS_SECONDS = 31536000  # 1 year

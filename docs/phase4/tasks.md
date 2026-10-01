@@ -20,8 +20,8 @@
 | P4 T02 | WP00 | 建立 Git 工作流和任务模板 | 分支、提交、PR、Issue 规范 | 提交和缺陷可关联任务编号 | P0 | P4 T01 | 已完成（Issue #129） |
 | P4 T03 | WP00 | 制定迭代计划和风险清单 | 里程碑、风险登记表 | 范围、负责人、时间和降级方案明确 | P1 | P4 T01 | 未核对 |
 | P4 T04 | WP01 | 设计云端部署架构 | 架构图、端口和数据流说明 | Web、ASGI、PostgreSQL、Redis、存储边界明确 | P0 | P4 T01 | 已完成（Issue #131，2026-10-01） |
-| P4 T05 | WP01 | 准备云服务器和域名 | 服务器、DNS 和防火墙配置 | 公网域名可解析，只有必要端口开放 | P0 | P4 T04 | 进行中（Issue #132，待 SG 放行 80/8443） |
-| P4 T06 | WP01 | 配置 Nginx、HTTPS 和 WSS | TLS 与反向代理配置 | HTTP 跳转 HTTPS，WebSocket 正常升级 | P0 | P4 T05 | 进行中（Issue #133，待 Let's Encrypt 证书） |
+| P4 T05 | WP01 | 准备云服务器和域名 | 服务器、DNS 和防火墙配置 | 公网域名可解析，只有必要端口开放 | P0 | P4 T04 | 已完成（Issue #132，2026-10-01 公网取证） |
+| P4 T06 | WP01 | 配置 Nginx、HTTPS 和 WSS | TLS 与反向代理配置 | HTTP 跳转 HTTPS，WebSocket 正常升级 | P0 | P4 T05 | 已完成（Issue #133，Let's Encrypt 正式证书上线） |
 | P4 T07 | WP01 | 部署 Django ASGI 服务 | 可托管应用服务 | 不使用开发服务器，异常退出后可自动恢复 | P0 | P4 T06 | 已完成（Issue #134，2026-10-01） |
 | P4 T08 | WP01 | 接入 PostgreSQL | 数据库配置和迁移记录 | 所有 migrations 成功，核心数据可读写 | P0 | P4 T07 | 已完成（Issue #135，2026-10-01） |
 | P4 T09 | WP01 | 接入 Redis Channel Layer | Redis 与实时通信配置 | 多客户端消息可正确分发，Redis 不开放公网 | P0 | P4 T07 | 已完成（Issue #136，2026-10-01） |
@@ -88,7 +88,7 @@
 | P4 Test T11 | WP06 | 设计白盒测试 | 白盒用例与路径说明 | 覆盖关键条件、分支、循环和异常路径 | P0 | P4 Test T09 | Issue #192 |
 | P4 Test T12 | WP06 | 建立覆盖率统计 | coverage 配置和报告 | 语句/分支覆盖率可重复生成并达到评审目标 | P0 | P4 Test T01、P4 Test T11 | Issue #193 |
 | P4 Test T13 | WP06 | 完善 HTTP/WebSocket 集成测试 | 自动化测试集 | P0 接口成功、异常、边界和越权场景有覆盖 | P0 | P4 T31～P4 T36 | Issue #194 |
-| P4 Test T14 | WP06 | 建立 PostgreSQL/Redis 集成测试 | 测试环境与结果 | 不以 SQLite/内存通道完全替代正式依赖验证 | P0 | P4 T08、P4 T09 | Issue #195 |
+| P4 Test T14 | WP06 | 建立 PostgreSQL/Redis 集成测试 | 测试环境与结果 | 不以 SQLite/内存通道完全替代正式依赖验证 | P0 | P4 T08、P4 T09 | 已完成（Issue #195，CI PG/Redis 350 条 + 服务器实测） |
 | P4 Test T15 | WP06 | 建立浏览器/Electron E2E | Playwright 等脚本 | 失败保留截图、日志或跟踪文件 | P1 | P4 Test T03 | 未核对 |
 | P4 Test T16 | WP06 | 建立 Android UI 自动化 | Appium 等脚本 | 安装、权限、登录、聊天和生命周期可执行 | P1 | P4 Test T04 | 未核对 |
 | P4 Test T17 | WP06 | 执行安全测试 | SAST、DAST、依赖和手工安全报告 | 高危缺陷清零，中危缺陷有处理结论 | P0 | 相关功能完成 | Issue #198 |

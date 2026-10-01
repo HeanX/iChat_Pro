@@ -57,7 +57,8 @@ def verify_sync_cursor(cursor, *, conversation_id, user_id):
             raise ValueError("bad signature")
         padding = b"=" * (-len(body) % 4)
         payload = json.loads(base64.urlsafe_b64decode(body + padding))
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+    except (ValueError, UnicodeDecodeError, TypeError, json.JSONDecodeError):
+        # TypeError covers hmac.compare_digest on non-ASCII signatures.
         raise PayloadError("sync_cursor_invalid", "同步游标不合法") from None
 
     if (

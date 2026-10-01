@@ -405,7 +405,66 @@ const walkerTests = [
   test_backoff_cap_after_jitter,
 ];
 
+
+function test_apply_queue_preserves_enqueue_order() {
+  const queue = ChatConnection.createApplyQueue();
+  const order = [];
+  const slow = queue.enqueue(() => new Promise((resolve) => setTimeout(() => { order.push(101); resolve(); }, 30)));
+  const fast = queue.enqueue(() => { order.push(102); });
+  return Promise.all([slow, fast]).then(() => {
+    // 101 was enqueued first (sync apply in flight), 102 (realtime) second:
+    // the queue serializes them so the display order matches arrival order.
+    assert(order.join(",") === "101,102", "queue order: " + order.join(","));
+  });
+}
+
+function test_sync_walker_resumes_after_stopped_run() {
+  const storage = { data: "" };
+  let firstRun = true;
+  const applied = [];
+  const walkerFactory = () => ChatConnection.createSyncWalker({
+    storage: {
+      get: () => storage.data,
+      set: (v) => { storage.data = v; },
+      remove: () => {},
+    },
+    maxPages: 10,
+    fetchPage() {
+      return Promise.resolve({
+        items: [
+          { message: { message_id: 1 } },
+          { message: { message_id: 2, fail: firstRun } },
+          { message: { message_id: 3 } },
+        ],
+        nextCursor: "c1",
+        hasMore: false,
+      });
+    },
+    applyItem(item) {
+      if (item.message.fail) return Promise.resolve(false);
+      applied.push(item.message.message_id);
+      return Promise.resolve(true);
+    },
+  });
+  return walkerFactory().run().then((r1) => {
+    assert(r1.status === "stopped", "first run stops on the failing item");
+    assert(applied.join(",") === "1", "only item 1 applied");
+    assert(storage.data === "", "cursor NOT advanced past the failure");
+    firstRun = false; // key material recovered
+    return walkerFactory().run().then((r2) => {
+      assert(r2.status === "caught-up", "second run completes");
+      // At-least-once: the resumed run re-applies item 1 (the walker never
+      // assumes dedupe — chat.js dedupes by message id) and now also gets
+      // item 2 (key recovered) and item 3, in order.
+      assert(applied.join(",") === "1,1,2,3", "resume applies 1,2,3: " + applied.join(","));
+      assert(storage.data === "c1", "cursor stored after completion");
+    });
+  });
+}
+
 const tests = [
+  test_apply_queue_preserves_enqueue_order,
+  test_sync_walker_resumes_after_stopped_run,
   ...walkerTests,
   test_backoff_progression_and_jitter_bounds,
   test_terminal_close_codes_stop_reconnect,

@@ -28,6 +28,64 @@ let wsClient = null;             // v1 /ws/chat/ client
 let chatConn = null;             // T33: ChatConnection instance
 let chatOutbox = null;           // T33: message status/outbox instance
 let chatSyncInFlight = {};       // per-conversation sync catch-up guard
+let msgApplyQueue = null;        // T33: serialized message application
+
+function retryFailedDecrypt(existing, payload) {
+  // Re-attempt decryption for a placeholder created when the key material
+  // was not yet available. Returns true when the placeholder was upgraded
+  // to real content (or already carries a usable file placeholder).
+  if (payload.file_id || (payload.file && payload.file.file_id)) return true;
+  try {
+    const isGroup = payload.group_id !== undefined;
+    if (isGroup && window.iChatGroupE2EE) {
+      return window.iChatGroupE2EE
+        .decryptGroupMessage({
+          algorithm: payload.algorithm,
+          ciphertext: payload.ciphertext,
+          nonce: payload.nonce,
+          auth_tag: payload.auth_tag,
+          group_id: payload.group_id,
+          membership_version: payload.membership_version,
+          sender_id: payload.sender_id,
+          receiver_id: payload.receiver_id,
+          sender_key_version: payload.sender_key_version,
+          receiver_key_version: payload.receiver_key_version,
+        })
+        .then((plaintext) => {
+          existing.text = plaintext;
+          existing.decryptError = false;
+          patchMessageRowInPlace(existing);
+          return true;
+        })
+        .catch(() => false);
+    }
+    if (!isGroup && window.iChatPrivateE2EE) {
+      return window.iChatPrivateE2EE
+        .decryptPrivateMessage({
+          algorithm: payload.algorithm,
+          ciphertext: payload.ciphertext,
+          nonce: payload.nonce,
+          auth_tag: payload.auth_tag,
+          sender_ephemeral_public_key: payload.sender_ephemeral_public_key,
+          conversation_id: payload.conversation_id,
+          sender_id: payload.sender_id,
+          receiver_id: payload.receiver_id,
+          sender_key_version: payload.sender_key_version,
+          receiver_key_version: payload.receiver_key_version,
+        })
+        .then((plaintext) => {
+          existing.text = plaintext;
+          existing.decryptError = false;
+          patchMessageRowInPlace(existing);
+          return true;
+        })
+        .catch(() => false);
+    }
+  } catch (err) {
+    return false;
+  }
+  return false;
+}
 let e2eeKeyReady = true;
 let e2eeKeyError = null;
 let groupMembersByConversation = {};
@@ -1308,6 +1366,7 @@ function connectWebSocket() {
   const url = `${protocol}://${window.location.host}/ws/chat/`;
 
   // T33: message outbox — ACK timeout, late-ACK revival, same-ID resend.
+  msgApplyQueue = ChatConnection.createApplyQueue();
   chatOutbox = ChatConnection.createOutbox({
     ackTimeout: 10000,
     maxAttempts: 5,
@@ -1409,15 +1468,31 @@ async function syncCatchUp() {
       applyItem: async (item) => {
         const payload = item && item.message;
         if (!payload || payload.message_id == null) return true;
-        if (messages.some((m) => m.id === payload.message_id)) return true;
+        // Dedupe within the ITEM's own conversation: `messages` holds the
+        // ACTIVE conversation only, so a cross-conversation id collision
+        // must not hide a real message (review round 2).
+        const itemConvId = payload.group_id !== undefined ? payload.group_id : payload.conversation_id;
+        if (itemConvId === Number(activeChatId)) {
+          const existing = messages.find((m) => m.id === payload.message_id);
+          if (existing) {
+            if (!existing.decryptError) return true; // genuinely applied
+            // Placeholder from an earlier failed decrypt: retry directly;
+            // failure keeps the placeholder AND stops the cursor.
+            return !!(await retryFailedDecrypt(existing, payload));
+          }
+        }
         const synthetic = {
           event: payload.group_id !== undefined ? "message.group.new" : "message.single.new",
           data: payload,
         };
-        if (synthetic.event === "message.group.new") {
-          return !!(await handleGroupMessageReceived(synthetic));
+        const task = () =>
+          synthetic.event === "message.group.new"
+            ? handleGroupMessageReceived(synthetic)
+            : handlePrivateMessageReceived(synthetic);
+        if (msgApplyQueue) {
+          return !!(await msgApplyQueue.enqueue(task));
         }
-        return !!(await handlePrivateMessageReceived(synthetic));
+        return !!(await task());
       },
     });
     const result = await walker.run();
@@ -1440,13 +1515,21 @@ function handleIncomingMessage(data) {
     logToCryptoConsole(`[WebSocket] Ready for user ${data.data?.user_id || myUserId}`);
     updateConnectionBadge('connected');
   } else if (event === 'message.single.new') {
-    handlePrivateMessageReceived(data);
+    if (msgApplyQueue) {
+      msgApplyQueue.enqueue(() => handlePrivateMessageReceived(data));
+    } else {
+      handlePrivateMessageReceived(data);
+    }
   } else if (event === 'message.single.accepted') {
     handleMessageAccepted(data);
   } else if (event === 'message.receipt.updated') {
     handleMessageStatusUpdate(data);
   } else if (event === 'message.group.new') {
-    handleGroupMessageReceived(data);
+    if (msgApplyQueue) {
+      msgApplyQueue.enqueue(() => handleGroupMessageReceived(data));
+    } else {
+      handleGroupMessageReceived(data);
+    }
   } else if (event === 'message.group.accepted') {
     handleMessageAccepted(data);
   } else if (event === 'group.members.changed') {

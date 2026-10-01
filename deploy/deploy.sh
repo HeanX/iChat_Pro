@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # iChat Pro server-side deploy script (run on the server as root or via sudo).
+#
+# Canonical entry point: /opt/ichat/bin/deploy.sh (a copy OUTSIDE the repo
+# checkout). Invoking the repo copy re-execs the stable copy first, so a
+# rollback to an older commit (which rewinds deploy/deploy.sh inside the
+# repo) can never break or downgrade the deployment tooling mid-run.
+#
 # Usage:
-#   sudo ./deploy.sh                     # deploy origin/main
-#   sudo ./deploy.sh --branch main       # deploy a branch head
-#   sudo ./deploy.sh --commit <sha>      # ROLLBACK: deploy an exact commit,
-#                                        #   stays pinned (no reset to origin)
-# Every deploy appends "<utc> <sha> <target>" to /opt/ichat/DEPLOYMENTS.log.
+#   sudo /opt/ichat/bin/deploy.sh                     # deploy origin/main
+#   sudo /opt/ichat/bin/deploy.sh --branch main
+#   sudo /opt/ichat/bin/deploy.sh --commit <sha>      # ROLLBACK: deploys an
+#       exact commit and stays pinned (no reset back to origin/main)
+#
+# Every successful deploy appends "<utc> <sha> <target>" to
+# /opt/ichat/DEPLOYMENTS.log — the server-side deployed SHA is recorded
+# there, independently of the repository's main branch.
 set -euo pipefail
 
 APP_DIR=/opt/ichat
@@ -13,6 +22,15 @@ REPO_DIR=$APP_DIR/repo
 VENV_DIR=$APP_DIR/.venv
 MEDIA_DIR=/var/lib/ichat/media
 LOG_FILE=$APP_DIR/DEPLOYMENTS.log
+BIN_COPY=$APP_DIR/bin/deploy.sh
+
+# Re-exec from the stable copy (except when we ARE the stable copy).
+if [[ "$0" != "$BIN_COPY" ]]; then
+    mkdir -p "$(dirname "$BIN_COPY")"
+    install -m 755 "$0" "$BIN_COPY"
+    exec bash "$BIN_COPY" "$@"
+fi
+
 BRANCH=main
 COMMIT=
 while [[ $# -gt 0 ]]; do
@@ -22,8 +40,13 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
+if [[ -n "$COMMIT" ]]; then
+    TARGET="$BRANCH@$COMMIT"
+else
+    TARGET="$BRANCH"
+fi
 
-echo "==> Deploying iChat Pro target=${COMMIT:+$BRANCH@$COMMIT}${COMMIT:-$BRANCH}"
+echo "==> Deploying iChat Pro target=$TARGET"
 
 if [[ ! -f "$APP_DIR/.env" ]]; then
     echo "ERROR: $APP_DIR/.env missing. Create it from deploy/env.production.example first." >&2
@@ -62,20 +85,20 @@ systemctl restart ichat.service
 systemctl enable ichat.service >/dev/null 2>&1 || true
 
 # --- readiness gate ---
-# Production rejects unknown Host headers and (without an exemption) redirects
-# http->https, so probe with the real production Host, expect the readiness
-# JSON body, and never trust a bare connection success (a 301/400 body would
-# pass a plain `curl -f`).
+# Probe through the local Nginx TLS front door: this works for ANY deployed
+# version (old versions redirect plain http to https, which would defeat a
+# loopback-http probe) and exercises the full request path (TLS, proxy,
+# app, DB, Redis). Assert the readiness JSON body — never trust a bare
+# connection success (a 301/400 body would pass a plain `curl -f`).
 ALLOWED_HOST=${DJANGO_ALLOWED_HOSTS%%,*}
 BODY=""
 for i in $(seq 1 30); do
-    BODY=$(curl -fsS --max-time 5 \
+    BODY=$(curl -fkS --max-time 5 \
         -H "Host: $ALLOWED_HOST" \
-        http://127.0.0.1:8000/health/ready/ 2>/dev/null || true)
+        https://127.0.0.1:8443/health/ready/ 2>/dev/null || true)
     if [[ "$BODY" == *'"status": "ok"'* ]]; then
-        echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness: db+cache ok)"
-        printf '%s  %s  %s\n' "$(date -u +%FT%TZ)" "$DEPLOYED_SHA" \
-            "${COMMIT:+$BRANCH@$COMMIT}" "${COMMIT:-$BRANCH}" >> "$LOG_FILE"
+        echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness via nginx TLS: db+cache ok)"
+        printf '%s  %s  %s\n' "$(date -u +%FT%TZ)" "$DEPLOYED_SHA" "$TARGET" >> "$LOG_FILE"
         exit 0
     fi
     sleep 1

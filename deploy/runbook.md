@@ -40,9 +40,11 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 
 ## 3. 日常发布与回滚（T50 路径）
 
-- 发布：`sudo bash /opt/ichat/repo/deploy/deploy.sh`（校验配置 → migrate → collectstatic → restart → readiness 门禁：带生产 Host 头请求 `/health/ready/` 并校验 JSON body，301/400 不会误判成功）。
-- **每次部署都会把 `<UTC时间> <commit SHA> <目标>` 追加到 `/opt/ichat/DEPLOYMENTS.log`**；服务器实际运行的 SHA 以该文件和 `git -C /opt/ichat/repo rev-parse HEAD` 为准，可能与仓库 main 不同（回滚期间）。
-- **回滚应用**：`sudo bash /opt/ichat/repo/deploy/deploy.sh --commit <上一个SHA>`——脚本 checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记录日志。恢复新版本：重跑 `deploy.sh`（不带 --commit）。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
+- **统一入口：`/opt/ichat/bin/deploy.sh`**（仓库 checkout 之外的稳定副本）。调用仓库内副本时脚本会自动 `install` 自身到该路径并 re-exec——回滚到旧 commit 会把仓库里的 deploy.sh 一并回退，稳定副本保证工具行为不受影响。
+- 发布：`sudo /opt/ichat/bin/deploy.sh`（校验配置 → migrate → collectstatic → restart → readiness 门禁）。
+- **readiness 门禁**：带生产 Host 头经本机 Nginx TLS（`https://127.0.0.1:8443`）请求 `/health/ready/` 并校验 JSON body——对任意被部署版本都有效（旧版本会把 http 探测 301 到 https），301/400 不会误判成功。
+- **每次部署把 `<UTC时间> <commit SHA> <目标>` 追加到 `/opt/ichat/DEPLOYMENTS.log`**；服务器实际运行的 SHA 以该文件和 `git -C /opt/ichat/repo rev-parse HEAD` 为准，可能与仓库 main 不同（回滚期间）。
+- **回滚应用**：`sudo /opt/ichat/bin/deploy.sh --commit <上一个SHA>`——checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记录日志。恢复新版本：重跑 `deploy.sh`（不带 --commit）。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
 - 失败排查：`journalctl -u ichat -n 100`、`tail -50 /var/log/nginx/ichat.error.log`。
 
 ## 4. 备份与恢复（T13）

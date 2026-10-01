@@ -44,6 +44,7 @@ set -a; source "$APP_DIR/.env"; set +a
 
 echo "==> Restarting service"
 systemctl restart ichat.service
+systemctl enable ichat.service >/dev/null 2>&1 || true
 systemctl --no-pager --lines=5 status ichat.service || true
 
 for i in $(seq 1 20); do

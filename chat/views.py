@@ -14,7 +14,7 @@ from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.paginator import Paginator
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import F, Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.http.multipartparser import MultiPartParser, MultiPartParserError
@@ -24,6 +24,8 @@ from django.views.decorators.http import require_POST, require_GET
 
 from accounts.models import BlockedUser, Contact, FriendRequest, UserPrivacySettings, UserStorageSettings
 from .consumers import ChatConsumer, ClientPayloadError
+from .errors import PayloadError, get_error
+from .services import messaging
 from .models import (
     Conversation,
     ConversationMember,
@@ -2455,26 +2457,38 @@ def send_private_message_view(request, conversation_id):
             return JsonResponse({'error': 'conversation_forbidden', 'detail': 'You have blocked this user. Unblock them first.'}, status=403)
 
     try:
-        message = async_to_sync(ChatConsumer.create_private_message)(request.user.pk, data)
-    except Exception as error:
-        code = getattr(error, 'code', 'invalid_payload')
-        detail = getattr(error, 'message', str(error))
-        status = 404 if code == 'conversation_not_found' else 400
-        if code == 'conversation_forbidden':
-            status = 403
-        return JsonResponse({'error': code, 'detail': detail}, status=status)
+        result = messaging.send_private_message(request.user.pk, data)
+    except PayloadError as error:
+        return JsonResponse(
+            {'error': error.code, 'detail': error.message},
+            status=get_error(error.code).http_status,
+        )
+    except OperationalError:
+        return JsonResponse(
+            {'error': 'storage_unavailable', 'detail': 'Database is busy. Please retry shortly.'},
+            status=get_error('storage_unavailable').http_status,
+        )
 
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        ChatConsumer.user_group(message['receiver_id']),
-        {'type': 'message.single.new', 'data': message},
-    )
+    # T36/R-03/R-04: same projection rules as the WebSocket path — the
+    # receiver gets their own viewer-serialized copy of NEW messages only,
+    # the sender gets the sender-view response plus created/replayed.
+    if result.created:
+        receiver_message = ChatConsumer.serialize_private_message_by_id(
+            result.message.pk,
+            viewer_id=result.message.receiver_id,
+        )
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            ChatConsumer.user_group(result.message.receiver_id),
+            {'type': 'message.single.new', 'data': receiver_message},
+        )
 
     sender_message = ChatConsumer.serialize_private_message_by_id(
-        message['message_id'],
+        result.message.pk,
         viewer_id=request.user.pk,
     )
-    return JsonResponse(sender_message, status=201)
+    sender_message['created'] = result.created
+    return JsonResponse(sender_message, status=201 if result.created else 200)
 
 
 @login_required(login_url='login')
@@ -2490,27 +2504,41 @@ def send_group_message_view(request, conversation_id):
     data['group_id'] = conversation_id
 
     try:
-        accepted, recipients = async_to_sync(ChatConsumer.create_group_message)(
-            request.user.pk, data,
+        result = messaging.send_group_message(request.user.pk, data)
+    except PayloadError as error:
+        return JsonResponse(
+            {'error': error.code, 'detail': error.message},
+            status=get_error(error.code).http_status,
         )
-    except Exception as error:
-        code = getattr(error, 'code', 'invalid_payload')
-        detail = getattr(error, 'message', str(error))
-        status = 404 if code == 'conversation_not_found' else 400
-        if code == 'conversation_forbidden':
-            status = 403
-        return JsonResponse({'error': code, 'detail': detail}, status=status)
-
-    channel_layer = get_channel_layer()
-    for recipient_data in recipients:
-        if recipient_data['receiver_id'] == request.user.pk:
-            continue
-        async_to_sync(channel_layer.group_send)(
-            ChatConsumer.user_group(recipient_data['receiver_id']),
-            {'type': 'message.group.new', 'data': recipient_data},
+    except OperationalError:
+        return JsonResponse(
+            {'error': 'storage_unavailable', 'detail': 'Database is busy. Please retry shortly.'},
+            status=get_error('storage_unavailable').http_status,
         )
 
-    return JsonResponse(accepted, status=201)
+    accepted = {
+        'client_message_id': result.message.client_message_id,
+        'message_id': result.message.pk,
+        'group_id': result.message.conversation_id,
+        'membership_version': data.get('membership_version'),
+        'status': 'sent',
+        'created_at': result.message.created_at.isoformat(),
+        'created': result.created,
+    }
+
+    # T36/R-04: push viewer-projected copies to recipients for NEW messages
+    # only; replays just re-confirm to the sender.
+    if result.created:
+        channel_layer = get_channel_layer()
+        for recipient_data in ChatConsumer._build_recipients_payload(result.message, conversation=None):
+            if recipient_data['receiver_id'] == request.user.pk:
+                continue
+            async_to_sync(channel_layer.group_send)(
+                ChatConsumer.user_group(recipient_data['receiver_id']),
+                {'type': 'message.group.new', 'data': recipient_data},
+            )
+
+    return JsonResponse(accepted, status=201 if result.created else 200)
 
 
 # ---------------------------------------------------------------------------

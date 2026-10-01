@@ -11,6 +11,20 @@ is a bug — unknown codes fall back to 400/non-retryable defensively.
 from dataclasses import dataclass
 
 
+class PayloadError(Exception):
+    """A request failed with a registered protocol error code.
+
+    Carries ``code`` (registry key) and ``message`` (client-facing detail).
+    Formerly ``chat.consumers.ClientPayloadError``; the old name remains
+    available as an alias on the consumer module.
+    """
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 @dataclass(frozen=True)
 class ProtocolError:
     code: str

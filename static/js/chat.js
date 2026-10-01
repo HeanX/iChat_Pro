@@ -554,6 +554,13 @@ async function apiFetch(url, options = {}) {
     ...(options.headers || {}),
   };
   const resp = await fetch(url, { ...options, headers });
+  // P4 T31 / R-06: an expired session now returns 401 JSON from /api/
+  // instead of the HTML login redirect. Send the user to the login page.
+  if (resp.status === 401) {
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.href = `/login/?next=${next}`;
+    throw new Error('登录状态已失效，请重新登录');
+  }
   if (!resp.ok) {
     let detail = resp.statusText;
     try { const body = await resp.json(); detail = body.error || body.detail || detail; } catch (_) {}
@@ -1297,12 +1304,17 @@ function connectWebSocket() {
   let reconnectTimer = null;
 
   wsClient = {
+    // P4 T31: every request envelope carries the protocol version; the
+    // server rejects unsupported versions with error code
+    // 'unsupported_protocol_version' and close code 4003.
+    PROTOCOL_VERSION: '1.0',
     sendPayload(payload) {
       if (!socket || socket.readyState !== WebSocket.OPEN) {
         logToCryptoConsole('[WebSocket] Cannot send: socket is not connected.');
         return false;
       }
-      socket.send(JSON.stringify(payload));
+      const envelope = { protocol_version: wsClient.PROTOCOL_VERSION, ...payload };
+      socket.send(JSON.stringify(envelope));
       return true;
     },
     connect() {
@@ -1322,6 +1334,13 @@ function connectWebSocket() {
         updateConnectionBadge('disconnected');
         logToCryptoConsole(`[WebSocket] Disconnected: ${event.reason || event.code}`);
         window.clearTimeout(reconnectTimer);
+        // P4 T31: 4003 = unsupported protocol version. Retrying with the
+        // same version cannot succeed; surface it and stop the loop.
+        if (event.code === 4003) {
+          updateConnectionBadge('unsupported');
+          console.error('[WebSocket] Protocol version rejected by server; stop reconnecting.');
+          return;
+        }
         reconnectTimer = window.setTimeout(() => wsClient.connect(), 1500);
       });
       socket.addEventListener('error', (event) => {
@@ -1385,6 +1404,17 @@ async function handleWebSocketError(data) {
   const code = payload.code || data.code || 'error';
   const message = payload.message || data.message || 'Unknown error';
   logToCryptoConsole(`[WebSocket Error] ${code}: ${message}`);
+
+  // P4 T31: protocol-level failures are not tied to a pending message.
+  if (code === 'unsupported_protocol_version') {
+    updateConnectionBadge('unsupported');
+    return;
+  }
+  if (code === 'authentication_required') {
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.href = `/login/?next=${next}`;
+    return;
+  }
 
   if (requestId && pendingOutgoingMessages[requestId]) {
     const pending = pendingOutgoingMessages[requestId];

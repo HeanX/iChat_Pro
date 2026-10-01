@@ -351,11 +351,13 @@ class GroupIdempotencyTests(IdempotencyTestBase):
         self.assertEqual(self._unread(self.group, self.alice), 0)
 
 
-class ConcurrentSameIdTests(TestCase):
+class ConcurrentSameIdTests(TransactionTestCase):
     """Concurrent duplicate inserts (R-01 hardening).
 
     Only meaningful under PostgreSQL's real concurrency; SQLite serializes
-    writers, so this runs in the CI integration job.
+    writers, so this runs in the CI integration job. TransactionTestCase is
+    required: the worker threads use their own connections and must see the
+    seeded rows, which a TestCase-wrapped (uncommitted) transaction hides.
     """
 
     @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL concurrency")

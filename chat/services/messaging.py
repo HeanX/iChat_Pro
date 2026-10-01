@@ -33,6 +33,7 @@ from django.utils import timezone
 from ..errors import PayloadError
 from ..models import (
     Conversation,
+    ConversationEvent,
     ConversationMember,
     EncryptedFile,
     EncryptedFileKey,
@@ -567,9 +568,21 @@ def send_private_message(sender_id, data, *, enforce_file_conversation=True,
         # rewrites key material or re-bumps)
         if data.get("file_id") and pending_keys:
             _write_pending_file_keys(message.file_id, pending_keys, sender_id)
+        # T34: durable sync event; the dense sequence is allocated while the
+        # conversation row is locked, so concurrent sends can never collide.
+        conversation.sync_sequence += 1
+        ConversationEvent.objects.create(
+            conversation=conversation,
+            sequence=conversation.sync_sequence,
+            kind=ConversationEvent.Kind.MESSAGE,
+            message_type=message.message_type,
+            message_id=message.pk,
+        )
         conversation.last_message_id = message.pk
         conversation.last_message_at = message.created_at
-        conversation.save(update_fields=["last_message_id", "last_message_at", "updated_at"])
+        conversation.save(
+            update_fields=["last_message_id", "last_message_at", "updated_at", "sync_sequence"]
+        )
         active_members.filter(user_id=data["receiver_id"]).update(
             unread_count=F("unread_count") + 1
         )
@@ -704,9 +717,20 @@ def send_group_message(sender_id, data, *, enforce_file_conversation=True,
         if data.get("file_id") and pending_keys:
             _write_pending_file_keys(group_message.file_id, pending_keys, sender_id)
 
+        # T34: durable sync event (same lock-protected allocation).
+        conversation.sync_sequence += 1
+        ConversationEvent.objects.create(
+            conversation=conversation,
+            sequence=conversation.sync_sequence,
+            kind=ConversationEvent.Kind.MESSAGE,
+            message_type=group_message.message_type,
+            message_id=group_message.pk,
+        )
         conversation.last_message_id = group_message.pk
         conversation.last_message_at = group_message.created_at
-        conversation.save(update_fields=["last_message_id", "last_message_at", "updated_at"])
+        conversation.save(
+            update_fields=["last_message_id", "last_message_at", "updated_at", "sync_sequence"]
+        )
         active_members.exclude(user_id=sender_id).update(unread_count=F("unread_count") + 1)
 
     return SendResult(created=True, message=group_message)

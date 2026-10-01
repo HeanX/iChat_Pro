@@ -78,6 +78,12 @@ REGISTRY = {
     "idempotency_conflict": ProtocolError(
         "idempotency_conflict", 409, False, "消息 ID 已被其他内容使用"
     ),
+    "sync_cursor_invalid": ProtocolError(
+        "sync_cursor_invalid", 400, False, "同步游标不合法"
+    ),
+    "sync_cursor_expired": ProtocolError(
+        "sync_cursor_expired", 410, False, "同步游标已过期，请重新快照"
+    ),
     # ── files ─────────────────────────────────────────────────────────
     "file_not_found": ProtocolError("file_not_found", 404, False, "附件不存在"),
     "file_forbidden": ProtocolError("file_forbidden", 403, False, "无权访问该附件"),

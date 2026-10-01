@@ -80,6 +80,11 @@ urlpatterns = [
         views.conversation_messages_view,
         name='api_conversation_messages',
     ),
+    path(
+        'api/conversations/<int:conversation_id>/sync/',
+        views.conversation_sync_view,
+        name='api_conversation_sync',
+    ),
     # T22: Presence
     path(
         'api/users/<int:user_id>/presence/',

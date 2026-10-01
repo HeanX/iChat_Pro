@@ -63,3 +63,30 @@ WS `error` 事件 data 形状：`{code, message, retryable}`；`retryable` 自�
 - 服务端接受**缺省版本**的请求直至协议 2.0 引入；Web 客户端自 T31 起总是发送 `protocol_version: "1.0"`。
 - `database_busy` 更名为 `storage_unavailable`：旧码保留注册，服务端代码已全部使用新码。
 - T31 交付物：本 ADR、`chat/errors.py`、WS 版本门禁、API 401 中间件、R-05 计数器、Web 客户端处置逻辑、测试（`chat/tests/test_protocol.py`）。
+
+
+## 6. 遗漏消息补取（T34/T35 落地，2026-10-01）
+
+### 6.1 持久事件模型
+
+- `Conversation.sync_sequence`：会话内单调致密序号，在发送事务内（持会话行锁时）分配——并发不会产生重复或空洞。
+- `ConversationEvent(conversation, sequence, kind, message_type, message_id, created_at)`：唯一约束 `(conversation, sequence)`，只存引用与元数据。**P0 范围**：仅 message 创建事件（文本/文件/转发，全部经统一服务层埋点）；撤回/删除/成员变更事件属 P1，实现前不得宣传。
+
+### 6.2 补取接口
+
+```
+GET /api/conversations/{id}/sync/?cursor=&limit=100
+→ 200 {items: [{sequence, kind, created_at, message: <viewer投影>}],
+       next_cursor, has_more, high_water}
+```
+
+- `limit` 1..200；`items` 按 `sequence` 升序。
+- **空 cursor**：快照新 high_water，从 sequence 0 起全量补取（首次进入会话用）。
+- **游标语义**：`next_cursor` **恒返回**——walk 未完成时指向下一页（快照冻结，范围不含 high_water 之后的新事件）；walk 完成时绑定 high_water 并**释放快照**（`hw=null`），客户端下一次携带该游标即只取增量。客户端必须持久化 `next_cursor`（按服务 Origin + user + conversation 隔离），分页失败从上一游标重试，不得先存 high_water。
+- 游标为 HMAC-SHA256 签名（绑定会话+用户，T34 P0；设备绑定 P1），TTL 7 天——过期返回 **410 `sync_cursor_expired`**（客户端重新快照），篡改/跨会话复用返回 **400 `sync_cursor_invalid`**。
+- 读取时重做当前权限投影：成员资格、群聊 **pre-join 过滤**（新成员拿不到加入前事件——与 E2EE 密钥边界一致）、逐 viewer 密文投影（sender_copy 语义与实时推送一致）。个人删除/清空/撤回的投影细化随 P1 状态事件一并落地。
+
+### 6.3 边界（P0 如实声明）
+
+- **不回填历史**：事件日志自部署起累积；部署前的旧历史仍走分页接口（其排序已加 `(created_at, id)` 稳定 tiebreaker，T35）。
+- 客户端仍以实时推送为主通道，sync 用于断线补取与对账；`group_send` 成功不代表持久送达（见 technical-design §1）。

@@ -26,8 +26,10 @@ from accounts.models import BlockedUser, Contact, FriendRequest, UserPrivacySett
 from .consumers import ChatConsumer, ClientPayloadError
 from .errors import PayloadError, get_error
 from .services import messaging
+from .services.sync import make_sync_cursor, verify_sync_cursor
 from .models import (
     Conversation,
+    ConversationEvent,
     ConversationMember,
     ChatReport,
     EncryptedFile,
@@ -471,7 +473,7 @@ def conversations_list_view(request):
 
         last_message_data = None
         if conversation.type == Conversation.Type.SINGLE:
-            last_msg = _visible_private_messages_queryset(membership).order_by('-created_at').first()
+            last_msg = _visible_private_messages_queryset(membership).order_by('-created_at', '-id').first()
             if last_msg:
                 last_message_data = _private_message_payload_for_viewer(last_msg, request.user.pk)
         else:
@@ -1961,7 +1963,7 @@ def group_messages_view(request, conversation_id):
     recipient_queryset = (
         _visible_group_recipients_queryset(member)
         .select_related("group_message", "group_message__sender__profile")
-        .order_by("-group_message__created_at")
+        .order_by("-group_message__created_at", "-group_message__id")
     )
 
     paginator = Paginator(recipient_queryset, per_page)
@@ -2072,7 +2074,7 @@ def conversation_messages_view(request, conversation_id):
     queryset = (
         _visible_private_messages_queryset(member)
         .select_related('sender', 'sender__profile', 'file_id')
-        .order_by("-created_at")
+        .order_by("-created_at", "-id")
     )
 
     paginator = Paginator(queryset, per_page)
@@ -3747,6 +3749,114 @@ def complete_upload_view(request, upload_id):
         'client_file_id': ef.client_file_id,
         'status': 'available',
         'created_at': ef.created_at.isoformat(),
+    })
+
+
+# ── 5.4  Conversation sync (missed-message catch-up, P4 T34/T35) ─────────
+
+
+def _sync_cursor_response_error(error):
+    return JsonResponse(
+        {'error': error.code, 'detail': error.message},
+        status=get_error(error.code).http_status,
+    )
+
+
+@login_required(login_url='login')
+@require_GET
+def conversation_sync_view(request, conversation_id):
+    """Return durable conversation events after the client's cursor.
+
+    Events are ordered by the conversation's dense ``sequence``. An empty
+    cursor snapshots a new high-water mark; a cursor pages through that same
+    snapshot so messages committed mid-page are delivered next round. Group
+    events are projected only after the requester joined (E2EE: a new member
+    holds no pre-join keys, so pre-join metadata is withheld too). P0 scope:
+    message-creation events; recall/delete events land with P1.
+    """
+    member = _get_active_member(conversation_id, request.user)
+    if not member:
+        return JsonResponse({'error': 'conversation_not_found', 'detail': 'Conversation not found or not a member.'}, status=404)
+    conversation = member.conversation
+    if conversation.status != Conversation.Status.ACTIVE:
+        return JsonResponse({'error': 'conversation_not_found', 'detail': 'Conversation is not active.'}, status=404)
+
+    try:
+        limit = int(request.GET.get('limit', 100) or 100)
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'invalid_payload', 'detail': 'limit must be an integer.'}, status=400)
+    limit = max(1, min(limit, 200))
+
+    cursor_raw = request.GET.get('cursor', '')
+    try:
+        if cursor_raw:
+            after, high_water = verify_sync_cursor(
+                cursor_raw, conversation_id=conversation.pk, user_id=request.user.pk,
+            )
+            if high_water is None:
+                # The previous walk completed and released its snapshot:
+                # re-snapshot so the client receives the delta since then.
+                high_water = conversation.sync_sequence
+        else:
+            high_water = conversation.sync_sequence
+            after = 0
+    except PayloadError as error:
+        return _sync_cursor_response_error(error)
+
+    events = list(
+        ConversationEvent.objects.filter(
+            conversation=conversation,
+            sequence__gt=after,
+            sequence__lte=high_water,
+        ).order_by('sequence')[:limit]
+    )
+
+    items = []
+    for event in events:
+        if conversation.type == Conversation.Type.SINGLE:
+            message = (
+                EncryptedMessage.objects.select_related('sender__profile', 'receiver__profile')
+                .filter(pk=event.message_id)
+                .first()
+            )
+            if message is None:
+                continue
+            payload = ChatConsumer.serialize_private_message(message, viewer_id=request.user.pk)
+        else:
+            recipient = (
+                GroupMessageRecipient.objects.filter(
+                    group_message_id=event.message_id, receiver_id=request.user.pk
+                )
+                .select_related('group_message__sender__profile')
+                .first()
+            )
+            if recipient is None:
+                # e.g. the requester joined after this message was distributed
+                continue
+            payload = ChatConsumer.serialize_group_recipient(recipient, viewer_id=request.user.pk)
+        items.append({
+            'sequence': event.sequence,
+            'kind': event.kind,
+            'created_at': event.created_at.isoformat(),
+            'message': payload,
+        })
+
+    last_sequence = events[-1].sequence if events else after
+    has_more = last_sequence < high_water
+    # The cursor is ALWAYS returned: while the walk is incomplete it points
+    # at the next page; once the walk reaches the high-water mark it binds
+    # to that mark so the client's next sync receives only the delta.
+    next_cursor = make_sync_cursor(
+        conversation_id=conversation.pk,
+        user_id=request.user.pk,
+        last_sequence=last_sequence if has_more else high_water,
+        high_water=high_water if has_more else None,
+    )
+    return JsonResponse({
+        'items': items,
+        'next_cursor': next_cursor,
+        'has_more': has_more,
+        'high_water': high_water,
     })
 
 

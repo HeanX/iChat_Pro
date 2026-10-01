@@ -40,6 +40,10 @@ class Conversation(models.Model):
     )
     # T37: Group mute
     muted_until = models.DateTimeField(null=True, blank=True)
+    # T34: monotonically increasing per-conversation sync sequence. Allocated
+    # inside the send transaction while the conversation row is locked, so
+    # sequences are dense and gap-free per conversation.
+    sync_sequence = models.PositiveBigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -51,6 +55,44 @@ class Conversation(models.Model):
 
     def __str__(self):
         return f"Conversation #{self.id} ({self.get_type_display()})"
+
+
+class ConversationEvent(models.Model):
+    """Durable per-conversation sync event (P4 T34).
+
+    One row per committed conversation mutation that clients must learn
+    about. P0 records message creations only (recalls/deletes are P1).
+    Stores references and metadata — never plaintext or ciphertext.
+
+    ``sequence`` is unique per conversation and allocated by the messaging
+    service under the conversation row lock.
+    """
+
+    class Kind(models.TextChoices):
+        MESSAGE = "message", "Message"
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="events"
+    )
+    sequence = models.PositiveBigIntegerField()
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.MESSAGE)
+    message_type = models.CharField(max_length=20, null=True, blank=True)
+    message_id = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "sequence"],
+                name="unique_conversation_event_sequence",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["conversation", "sequence"]),
+        ]
+
+    def __str__(self):
+        return f"Event #{self.sequence} of Conversation #{self.conversation_id} ({self.kind})"
 
 
 class ConversationMember(models.Model):

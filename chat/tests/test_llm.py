@@ -15,13 +15,13 @@ PUBLIC_ADDR_INFO = [
 
 
 class LlmEndpointNormalizationTests(SimpleTestCase):
-    @patch("chat.llm.socket.getaddrinfo", return_value=PUBLIC_ADDR_INFO)
+    @patch("chat.llm._resolve_host", return_value=PUBLIC_ADDR_INFO)
     def test_4router_preset_endpoint_is_allowed(self, _mock_getaddrinfo):
         endpoint = "https://4router.net/v1/chat/completions"
 
         self.assertEqual(normalize_chat_completions_endpoint(endpoint), endpoint)
 
-    @patch("chat.llm.socket.getaddrinfo", return_value=PUBLIC_ADDR_INFO)
+    @patch("chat.llm._resolve_host", return_value=PUBLIC_ADDR_INFO)
     def test_openai_compatible_endpoint_path_is_preserved(self, _mock_getaddrinfo):
         endpoint = normalize_chat_completions_endpoint(
             "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -65,7 +65,7 @@ class AiConfigViewTests(TestCase):
         )
         self.client.login(username="llm-user", password="test-pass")
 
-    @patch("chat.llm.socket.getaddrinfo", return_value=PUBLIC_ADDR_INFO)
+    @patch("chat.llm._resolve_host", return_value=PUBLIC_ADDR_INFO)
     def test_save_config_stores_endpoint_without_changing_path(self, _mock_getaddrinfo):
         response = self.client.post(
             "/api/ai/config/",
@@ -89,7 +89,7 @@ class AiConfigViewTests(TestCase):
         self.assertEqual(config.assistant_id, "ai-assistant")
         self.assertEqual(config.get_api_key(), "sk-test")
 
-    @patch("chat.llm.socket.getaddrinfo", return_value=PUBLIC_ADDR_INFO)
+    @patch("chat.llm._resolve_host", return_value=PUBLIC_ADDR_INFO)
     def test_configs_are_scoped_per_assistant(self, _mock_getaddrinfo):
         first = self.client.post(
             "/api/ai/config/",
@@ -164,7 +164,7 @@ class AiConfigViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(UserLLMConfig.objects.filter(user=self.user).exists())
 
-    @patch("chat.llm.socket.getaddrinfo", return_value=PUBLIC_ADDR_INFO)
+    @patch("chat.llm._resolve_host", return_value=PUBLIC_ADDR_INFO)
     def test_placeholder_api_key_does_not_replace_existing_key(self, _mock_getaddrinfo):
         config = UserLLMConfig.objects.create(
             user=self.user,

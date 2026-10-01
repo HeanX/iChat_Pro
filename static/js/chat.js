@@ -25,6 +25,9 @@ let currentUserProfile = { username: "", initials: "", avatarUrl: "", avatarColo
 let sessionKeys = {};            // Cache: conversationId → derived CryptoKey
 let myUserId = null;             // Current authenticated user PK
 let wsClient = null;             // v1 /ws/chat/ client
+let chatConn = null;             // T33: ChatConnection instance
+let chatOutbox = null;           // T33: message status/outbox instance
+let chatSyncInFlight = {};       // per-conversation sync catch-up guard
 let e2eeKeyReady = true;
 let e2eeKeyError = null;
 let groupMembersByConversation = {};
@@ -1298,58 +1301,111 @@ function renderRightPanelMembers(conv) {
 // ============================================================================
 
 function connectWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${protocol}://${window.location.host}/ws/chat/`;
-  let socket = null;
-  let reconnectTimer = null;
 
-  wsClient = {
-    // P4 T31: every request envelope carries the protocol version; the
-    // server rejects unsupported versions with error code
-    // 'unsupported_protocol_version' and close code 4003.
-    PROTOCOL_VERSION: '1.0',
-    sendPayload(payload) {
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        logToCryptoConsole('[WebSocket] Cannot send: socket is not connected.');
-        return false;
-      }
-      const envelope = { protocol_version: wsClient.PROTOCOL_VERSION, ...payload };
-      socket.send(JSON.stringify(envelope));
+  // T33: message outbox — ACK timeout, late-ACK revival, same-ID resend.
+  chatOutbox = ChatConnection.createOutbox({
+    ackTimeout: 10000,
+    maxAttempts: 5,
+    onDeliver(envelope) {
+      const socket = chatConn && chatConn.socket();
+      if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+      socket.send(JSON.stringify(Object.assign({ protocol_version: "1.0" }, envelope)));
       return true;
     },
-    connect() {
-      socket = new WebSocket(url);
-      socket.addEventListener('open', () => {
-        logToCryptoConsole('[WebSocket] Connected');
-        updateConnectionBadge('connected');
-      });
-      socket.addEventListener('message', (event) => {
-        try {
-          handleIncomingMessage(JSON.parse(event.data));
-        } catch (err) {
-          console.error('[WebSocket] Invalid JSON payload:', err);
-        }
-      });
-      socket.addEventListener('close', (event) => {
-        updateConnectionBadge('disconnected');
-        logToCryptoConsole(`[WebSocket] Disconnected: ${event.reason || event.code}`);
-        window.clearTimeout(reconnectTimer);
-        // P4 T31: 4003 = unsupported protocol version. Retrying with the
-        // same version cannot succeed; surface it and stop the loop.
-        if (event.code === 4003) {
-          updateConnectionBadge('unsupported');
-          console.error('[WebSocket] Protocol version rejected by server; stop reconnecting.');
-          return;
-        }
-        reconnectTimer = window.setTimeout(() => wsClient.connect(), 1500);
-      });
-      socket.addEventListener('error', (event) => {
-        console.error('[WebSocket] Error:', event);
-      });
+    onStatus(entry, status) {
+      const msg = messages.find((m) => m.id === entry.id);
+      if (msg) {
+        msg.status = status;
+        patchMessageStatusInPlace(msg);
+      }
     },
-  };
+  });
 
-  wsClient.connect();
+  chatConn = ChatConnection.createConnection({
+    url,
+    heartbeatInterval: 25000,
+    pongTimeout: 10000,
+    baseBackoff: 500,
+    maxBackoff: 25000,
+    onState(state) {
+      if (state === "online") {
+        updateConnectionBadge("connected");
+        // T33: resend unconfirmed sends with the SAME client_message_id,
+        // then pull anything missed while offline.
+        chatOutbox.resendPending();
+        syncCatchUp();
+        return;
+      }
+      if (state === "auth_required" || state === "unsupported") {
+        updateConnectionBadge(state === "auth_required" ? "auth_required" : "unsupported");
+        return;
+      }
+      if (state === "connecting" || state === "reconnecting") {
+        updateConnectionBadge("connecting");
+        return;
+      }
+      updateConnectionBadge("disconnected");
+    },
+    onSendPing(ping) {
+      return Object.assign({ protocol_version: "1.0" }, ping);
+    },
+    onEvent(envelope) {
+      handleIncomingMessage(envelope);
+    },
+  });
+  chatConn.connect();
+
+  // T33: immediate retry when the network or the tab comes back.
+  window.addEventListener("online", () => chatConn.networkUp());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") chatConn.networkUp();
+  });
+
+  wsClient = {
+    PROTOCOL_VERSION: "1.0",
+    sendPayload(payload) {
+      return chatConn.send(Object.assign({ protocol_version: wsClient.PROTOCOL_VERSION }, payload));
+    },
+    outbox: chatOutbox,
+    disconnect() { chatConn.disconnect(); },
+    connect() { chatConn.connect(); },
+  };
+}
+
+// T34/T33: catch up on missed messages for the active conversation using the
+// server-signed sync cursor. Items are fed through the regular realtime
+// handlers (which decrypt and render), deduped by message id.
+async function syncCatchUp() {
+  const convId = Number(activeChatId);
+  if (!convId || !myUserId || chatSyncInFlight[convId]) return;
+  const storageKey = `ichat:syncCursor:${myUserId}:${convId}`;
+  chatSyncInFlight[convId] = true;
+  try {
+    let cursor = localStorage.getItem(storageKey) || "";
+    for (let page = 0; page < 5; page++) {
+      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      const data = await apiFetch(`/api/conversations/${convId}/sync/${query}`);
+      for (const item of data.items || []) {
+        const payload = item.message;
+        if (!payload || messages.find((m) => m.id === payload.message_id)) continue;
+        if (payload.sender_id === myUserId) continue; // own messages arrive via accepted/local echo
+        if (payload.group_id || payload.membership_version !== undefined) {
+          handleIncomingMessage({ event: "message.group.new", data: payload });
+        } else {
+          handleIncomingMessage({ event: "message.single.new", data: payload });
+        }
+      }
+      localStorage.setItem(storageKey, data.next_cursor || "");
+      if (!data.has_more) break;
+      cursor = data.next_cursor;
+    }
+  } catch (err) {
+    console.warn("[Sync] catch-up failed:", err && err.message);
+  } finally {
+    delete chatSyncInFlight[convId];
+  }
 }
 
 function handleIncomingMessage(data) {
@@ -1421,9 +1477,13 @@ async function handleWebSocketError(data) {
     delete pendingOutgoingMessages[requestId];
     const msg = messages.find(m => m.id === requestId);
     if (msg) {
-      msg.status = 'failed';
-      msg.error = message;
-      patchMessageStatusInPlace(msg);
+      // T33: only a message that never reached persistence may fail; the
+      // outbox keeps the envelope for a same-ID retry after reconnect.
+      if (chatOutbox && chatOutbox.failed(requestId, message)) {
+        msg.status = 'failed';
+        msg.error = message;
+        patchMessageStatusInPlace(msg);
+      }
     }
     if (pending.conversationId && (code === 'membership_conflict' || code === 'recipients_mismatch')) {
       try {
@@ -1609,8 +1669,13 @@ function handleMessageStatusUpdate(data) {
   const payload = data.data || data;
   const msg = messages.find(m => m.id === payload.message_id);
   if (msg) {
-    msg.status = payload.status;
-    patchMessageStatusInPlace(msg);
+    // T33: receipts are forward-only (sending/sent/delivered/read never
+    // downgrade; failed is not reachable after server persistence).
+    const next = payload.status;
+    if (!chatOutbox || chatOutbox.canTransitionMessage(msg.status, next)) {
+      msg.status = next;
+      patchMessageStatusInPlace(msg);
+    }
   }
 }
 
@@ -1644,6 +1709,7 @@ function handleMessageAccepted(data) {
   const tempId = payload.client_message_id;
   if (!tempId) return;
   delete pendingOutgoingMessages[tempId];
+  if (chatOutbox) chatOutbox.accepted(tempId); // T33: revive timed-out entries
   const msg = messages.find(m => m.id === tempId);
   if (msg) {
     var oldId = msg.id;
@@ -3422,6 +3488,12 @@ async function sendMessage() {
         conversationType: conv.type,
         text
       };
+      // T33: ACK-timeout tracking — the envelope is retried with the SAME
+      // client_message_id until confirmed.
+      chatOutbox.track(clientMsgId, { event: wsEvent, request_id: clientMsgId, data: wsData }, {
+        conversationId: conv.id,
+        conversationType: conv.type,
+      });
       // WebSocket accepted — response arrives async via handleMessageAccepted
       return;
     }

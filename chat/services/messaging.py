@@ -208,7 +208,8 @@ def require_base64(data, field, *, decoded_length=None, max_decoded_length=None)
 
 
 def validate_attached_file(*, file_id, sender_id, conversation, message_type,
-                           required_holder_ids, enforce_conversation=True):
+                           required_holder_ids, enforce_conversation=True,
+                           pending_keys=None):
     try:
         attached_file = EncryptedFile.objects.get(pk=file_id)
     except EncryptedFile.DoesNotExist as error:
@@ -232,8 +233,14 @@ def validate_attached_file(*, file_id, sender_id, conversation, message_type,
     holder_ids = set(
         EncryptedFileKey.objects.filter(file=attached_file).values_list("holder_id", flat=True)
     )
+    pending = pending_keys or []
+    # Keys supplied with THIS request count towards coverage; they are only
+    # persisted after the message is actually created.
+    holder_ids |= {k["holder_id"] for k in pending}
     if set(required_holder_ids) - holder_ids:
         raise PayloadError("file_forbidden", "Attached file keys do not cover all active members.")
+    if {k["holder_id"] for k in pending} - set(required_holder_ids):
+        raise PayloadError("file_forbidden", "File keys may only target active members of the conversation.")
 
 
 # ── idempotency digests ───────────────────────────────────────────────────
@@ -318,7 +325,7 @@ def _group_digest_payload(data):
         "algorithm": data.get("algorithm"),
         "reply_to_message_id": data.get("reply_to_message_id"),
         "file_id": data.get("file_id"),
-        "sender_copy": data.get("sender_copy"),
+        "sender_copy": _normalized_sender_copy(data.get("sender_copy")),
         "recipients": sorted(data.get("recipients") or [], key=lambda r: r["receiver_id"]),
     }
 
@@ -357,6 +364,57 @@ def _group_stored_payload(group_message):
     }
 
 
+def normalize_pending_file_keys(raw):
+    """Shape-check client-supplied wrapped keys. Member targeting and
+    coverage are enforced on the CREATED path only, so an ACK-lost retry
+    after a membership change can still replay (review round 2, gap 2)."""
+    if not raw:
+        return []
+    if not isinstance(raw, list):
+        raise PayloadError("invalid_file_metadata", "file_keys must be a list.")
+    out, seen = [], set()
+    for fk in raw:
+        if not isinstance(fk, dict):
+            raise PayloadError("invalid_file_metadata", "Each file_key must be an object.")
+        holder_id = fk.get("holder_id")
+        if isinstance(holder_id, bool) or not isinstance(holder_id, int) or holder_id <= 0:
+            raise PayloadError("invalid_file_metadata", "Each file_key must have a valid holder_id.")
+        if holder_id in seen:
+            continue
+        seen.add(holder_id)
+        out.append({
+            "holder_id": holder_id,
+            "encrypted_file_key": str(fk.get("encrypted_file_key", "") or ""),
+            "nonce": str(fk.get("nonce", "") or ""),
+            "auth_tag": str(fk.get("auth_tag", "") or ""),
+            "algorithm": str(fk.get("algorithm", "") or "AES-256-GCM"),
+            "sender_key_version": fk.get("sender_key_version"),
+            "receiver_key_version": fk.get("receiver_key_version"),
+            "membership_version": fk.get("membership_version"),
+            "sender_ephemeral_public_key": fk.get("sender_ephemeral_public_key"),
+        })
+    return out
+
+
+def _write_pending_file_keys(file, pending, sender_id):
+    for fk in pending:
+        EncryptedFileKey.objects.update_or_create(
+            file=file,
+            holder_id=fk["holder_id"],
+            defaults={
+                "sender_id": sender_id,
+                "encrypted_file_key": fk["encrypted_file_key"],
+                "nonce": fk["nonce"],
+                "auth_tag": fk["auth_tag"],
+                "algorithm": fk["algorithm"],
+                "sender_key_version": fk["sender_key_version"],
+                "receiver_key_version": fk["receiver_key_version"],
+                "membership_version": fk["membership_version"],
+                "sender_ephemeral_public_key": fk["sender_ephemeral_public_key"],
+            },
+        )
+
+
 def _replay_or_conflict(existing, incoming_digest, stored_payload):
     """Return a replay result, or raise 409 when the request content differs."""
     if _canonical_digest(stored_payload) != incoming_digest:
@@ -370,10 +428,12 @@ def _replay_or_conflict(existing, incoming_digest, stored_payload):
 # ── private send ──────────────────────────────────────────────────────────
 
 
-def send_private_message(sender_id, data, *, enforce_file_conversation=True):
+def send_private_message(sender_id, data, *, enforce_file_conversation=True,
+                         pending_file_keys=None):
     """Persist one private encrypted message. Returns SendResult."""
     data = validate_private_message(data)
     client_message_id = data["client_message_id"]
+    pending_keys = normalize_pending_file_keys(pending_file_keys)
     incoming_digest = _canonical_digest(_private_digest_payload(data))
 
     with transaction.atomic():
@@ -435,6 +495,7 @@ def send_private_message(sender_id, data, *, enforce_file_conversation=True):
                 message_type=data["message_type"],
                 required_holder_ids=set(active_members.values_list("user_id", flat=True)),
                 enforce_conversation=enforce_file_conversation,
+                pending_keys=pending_keys,
             )
 
         sender_copy = data.get("sender_copy") or {}
@@ -476,7 +537,10 @@ def send_private_message(sender_id, data, *, enforce_file_conversation=True):
                 existing, incoming_digest, _private_stored_payload(existing)
             )
 
-        # 5. counters (created path only — replay never re-bumps)
+        # 5. wrapped keys + counters (created path only — replay never
+        # rewrites key material or re-bumps)
+        if data.get("file_id") and pending_keys:
+            _write_pending_file_keys(message.file_id, pending_keys, sender_id)
         conversation.last_message_id = message.pk
         conversation.last_message_at = message.created_at
         conversation.save(update_fields=["last_message_id", "last_message_at", "updated_at"])
@@ -490,10 +554,12 @@ def send_private_message(sender_id, data, *, enforce_file_conversation=True):
 # ── group send ────────────────────────────────────────────────────────────
 
 
-def send_group_message(sender_id, data, *, enforce_file_conversation=True):
+def send_group_message(sender_id, data, *, enforce_file_conversation=True,
+                       pending_file_keys=None):
     """Persist one group encrypted message with per-recipient copies."""
     data = validate_group_message(data)
     client_message_id = data["client_message_id"]
+    pending_keys = normalize_pending_file_keys(pending_file_keys)
     incoming_digest = _canonical_digest(_group_digest_payload(data))
 
     with transaction.atomic():
@@ -558,6 +624,7 @@ def send_group_message(sender_id, data, *, enforce_file_conversation=True):
                 message_type=data["message_type"],
                 required_holder_ids=active_member_ids,
                 enforce_conversation=enforce_file_conversation,
+                pending_keys=pending_keys,
             )
 
         sender_copy = data.get("sender_copy") or {}
@@ -607,6 +674,9 @@ def send_group_message(sender_id, data, *, enforce_file_conversation=True):
                 for r in data["recipients"]
             ]
         )
+
+        if data.get("file_id") and pending_keys:
+            _write_pending_file_keys(group_message.file_id, pending_keys, sender_id)
 
         conversation.last_message_id = group_message.pk
         conversation.last_message_at = group_message.created_at

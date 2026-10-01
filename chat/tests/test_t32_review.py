@@ -23,7 +23,13 @@ from django.db import connection
 from django.test import Client, TestCase, TransactionTestCase
 from unittest import skipUnless
 
-from chat.models import Conversation, ConversationMember, EncryptedFile, EncryptedMessage
+from chat.models import (
+    Conversation,
+    ConversationMember,
+    EncryptedFile,
+    EncryptedFileKey,
+    EncryptedMessage,
+)
 from chat.services import messaging
 from chat.errors import PayloadError
 from ichat_pro.asgi import application
@@ -319,3 +325,229 @@ class SenderCopyDigestTests(ReviewFixtures):
         self.assertEqual(second.status_code, 200)
         self.assertFalse(second.json()["created"])
         self.assertEqual(EncryptedMessage.objects.count(), 1)
+
+
+class FileKeyWriteTimingTests(ReviewFixtures):
+    """Review round 2: wrapped keys are written on the CREATED path only."""
+
+    def _file_body(self, ef, client_message_id):
+        return {
+            "conversation_id": self.conv_ab.pk,
+            "conversation_type": "single",
+            "receiver_id": self.bob.pk,
+            "client_message_id": client_message_id,
+            "message_type": "file",
+            "ciphertext": CT,
+            "nonce": B64_12,
+            "auth_tag": B64_16,
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "receiver_key_version": 1,
+            "file_keys": [
+                {"holder_id": self.alice.pk, "encrypted_file_key": "k-a", "nonce": B64_12, "auth_tag": B64_16},
+                {"holder_id": self.bob.pk, "encrypted_file_key": "k-b", "nonce": B64_12, "auth_tag": B64_16},
+            ],
+        }
+
+    def test_rejected_forward_does_not_write_file_keys(self):
+        # carol must NOT gain access when the forward is rejected (409).
+        original = self._post_private(self.conv_ab.pk, _private_payload(
+            self.conv_ab.pk, self.bob.pk, "fk-timing-used"))
+        self.assertEqual(original.status_code, 201)
+
+        ef = self._create_file("rev-file-fwd-timing")
+        body = {
+            "peer_id": self.carol.pk,
+            "client_message_id": "fk-timing-used",  # foreign id -> 409
+            "message_type": "file",
+            "file_id": ef.pk,
+            "ciphertext": CT,
+            "nonce": B64_12,
+            "auth_tag": B64_16,
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "receiver_key_version": 1,
+            "file_keys": [
+                {"holder_id": self.alice.pk, "encrypted_file_key": "k-a", "nonce": B64_12, "auth_tag": B64_16},
+                {"holder_id": self.carol.pk, "encrypted_file_key": "k-carol", "nonce": B64_12, "auth_tag": B64_16},
+            ],
+        }
+        response = self._client(self.alice).post(
+            f"/api/conversations/{self.conv_ac.pk}/messages/forward/",
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(
+            EncryptedFileKey.objects.filter(file=ef, holder_id=self.carol.pk).exists()
+        )
+        self.assertEqual(
+            EncryptedMessage.objects.filter(client_message_id="fk-timing-used").count(), 1
+        )
+
+    def test_replay_does_not_overwrite_existing_keys(self):
+        ef = self._create_file("rev-file-replay-keys")
+        url = f"/api/files/{ef.pk}/messages/"
+        body = self._file_body(ef, "fk-replay-1")
+        first = self._client(self.alice).post(url, data=json.dumps(body), content_type="application/json")
+        self.assertEqual(first.status_code, 201)
+        keys_before = list(
+            EncryptedFileKey.objects.filter(file=ef).order_by("holder_id").values_list(
+                "holder_id", "encrypted_file_key"
+            )
+        )
+
+        tampered = self._file_body(ef, "fk-replay-1")
+        for fk in tampered["file_keys"]:
+            fk["encrypted_file_key"] = "overwritten-" + fk["encrypted_file_key"]
+        second = self._client(self.alice).post(url, data=json.dumps(tampered), content_type="application/json")
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(second.json()["created"])
+        keys_after = list(
+            EncryptedFileKey.objects.filter(file=ef).order_by("holder_id").values_list(
+                "holder_id", "encrypted_file_key"
+            )
+        )
+        self.assertEqual(keys_after, keys_before)
+
+
+class GroupFileReplayTests(ReviewFixtures):
+    """Review round 2, gap 2: group file sends/forwards replay after a
+    membership change just like text messages."""
+
+    def setUp(self):
+        super().setUp()
+        self.group = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name="rev2-group", created_by=self.alice, membership_version=1,
+        )
+        for user in (self.alice, self.bob, self.carol):
+            ConversationMember.objects.create(conversation=self.group, user=user)
+        self.ef = self._create_file("rev-file-group")
+        self.ef.conversation = self.group
+        self.ef.save(update_fields=["conversation"])
+
+    def _group_file_body(self, client_message_id):
+        return {
+            "conversation_id": self.group.pk,
+            "conversation_type": "group",
+            "client_message_id": client_message_id,
+            "message_type": "file",
+            "membership_version": 1,
+            "ciphertext": CT,
+            "nonce": B64_12,
+            "auth_tag": B64_16,
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "recipients": [
+                {"receiver_id": self.alice.pk, "receiver_key_version": 1,
+                 "ciphertext": _b64("ct-a"), "nonce": B64_12, "auth_tag": B64_16},
+                {"receiver_id": self.bob.pk, "receiver_key_version": 1,
+                 "ciphertext": _b64("ct-b"), "nonce": B64_12, "auth_tag": B64_16},
+                {"receiver_id": self.carol.pk, "receiver_key_version": 1,
+                 "ciphertext": _b64("ct-c"), "nonce": B64_12, "auth_tag": B64_16},
+            ],
+            "file_keys": [
+                {"holder_id": self.alice.pk, "encrypted_file_key": "k-a", "nonce": B64_12, "auth_tag": B64_16},
+                {"holder_id": self.bob.pk, "encrypted_file_key": "k-b", "nonce": B64_12, "auth_tag": B64_16},
+                {"holder_id": self.carol.pk, "encrypted_file_key": "k-c", "nonce": B64_12, "auth_tag": B64_16},
+            ],
+        }
+
+    def _bump_membership(self):
+        dave = get_user_model().objects.create_user("rev2dave", password="pass1234")
+        ConversationMember.objects.create(conversation=self.group, user=dave)
+        self.group.membership_version = 2
+        self.group.save(update_fields=["membership_version", "updated_at"])
+
+    def test_group_file_send_replays_after_membership_change(self):
+        url = f"/api/files/{self.ef.pk}/messages/"
+        client = self._client(self.alice)
+        body = self._group_file_body("gf-replay-1")
+        first = client.post(url, data=json.dumps(body), content_type="application/json")
+        self.assertEqual(first.status_code, 201, first.content)
+
+        self._bump_membership()
+        retry = client.post(url, data=json.dumps(body), content_type="application/json")
+        self.assertEqual(retry.status_code, 200, retry.content)
+        self.assertFalse(retry.json()["created"])
+        self.assertEqual(retry.json()["message_id"], first.json()["message_id"])
+
+    def test_group_file_forward_replays_after_membership_change(self):
+        body = {
+            "client_message_id": "gff-replay-1",
+            "membership_version": 1,
+            "message_type": "file",
+            "file_id": self.ef.pk,
+            "ciphertext": CT,
+            "nonce": B64_12,
+            "auth_tag": B64_16,
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "recipients": [
+                {"receiver_id": self.alice.pk, "receiver_key_version": 1,
+                 "ciphertext": _b64("ct-a"), "nonce": B64_12, "auth_tag": B64_16},
+                {"receiver_id": self.bob.pk, "receiver_key_version": 1,
+                 "ciphertext": _b64("ct-b"), "nonce": B64_12, "auth_tag": B64_16},
+                {"receiver_id": self.carol.pk, "receiver_key_version": 1,
+                 "ciphertext": _b64("ct-c"), "nonce": B64_12, "auth_tag": B64_16},
+            ],
+            "file_keys": [
+                {"holder_id": self.alice.pk, "encrypted_file_key": "k-a", "nonce": B64_12, "auth_tag": B64_16},
+                {"holder_id": self.bob.pk, "encrypted_file_key": "k-b", "nonce": B64_12, "auth_tag": B64_16},
+                {"holder_id": self.carol.pk, "encrypted_file_key": "k-c", "nonce": B64_12, "auth_tag": B64_16},
+            ],
+        }
+        client = self._client(self.alice)
+        first = client.post(
+            f"/api/conversations/{self.group.pk}/messages/forward/",
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+        self.assertEqual(first.status_code, 201, first.content)
+
+        self._bump_membership()
+        retry = client.post(
+            f"/api/conversations/{self.group.pk}/messages/forward/",
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+        self.assertEqual(retry.status_code, 200, retry.content)
+        self.assertFalse(retry.json()["created"])
+
+
+class GroupSenderCopyDigestTests(ReviewFixtures):
+    def test_group_sender_copy_extra_fields_do_not_break_replay(self):
+        group = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name="rev2-sc", created_by=self.alice, membership_version=1,
+        )
+        for user in (self.alice, self.bob):
+            ConversationMember.objects.create(conversation=group, user=user)
+        client = self._client(self.alice)
+        payload = {
+            "client_message_id": "g-sc-1",
+            "group_id": group.pk,
+            "membership_version": 1,
+            "message_type": "text",
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "recipients": [
+                {"receiver_id": self.alice.pk, "receiver_key_version": 1,
+                 "ciphertext": _b64("ct-a"), "nonce": B64_12, "auth_tag": B64_16},
+                {"receiver_id": self.bob.pk, "receiver_key_version": 1,
+                 "ciphertext": _b64("ct-b"), "nonce": B64_12, "auth_tag": B64_16},
+            ],
+            "sender_copy": {
+                "ciphertext": _b64("sender-copy"),
+                "nonce": B64_12,
+                "auth_tag": B64_16,
+                "sender_ephemeral_public_key": _b64("ephemeral"),
+                "algorithm": "AES-256-GCM",  # echoed extra field
+            },
+        }
+        url = f"/api/conversations/{group.pk}/messages/send-group/"
+        first = client.post(url, data=json.dumps(payload), content_type="application/json")
+        self.assertEqual(first.status_code, 201, first.content)
+
+        second = client.post(url, data=json.dumps(payload), content_type="application/json")
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertFalse(second.json()["created"])

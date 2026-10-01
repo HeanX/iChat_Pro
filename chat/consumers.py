@@ -2,12 +2,19 @@ import base64
 import binascii
 from datetime import UTC, datetime
 
+from asgiref.sync import sync_to_async
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import F
 from django.utils import timezone
 
+from .errors import (
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    UNSUPPORTED_PROTOCOL_CLOSE_CODE,
+    get_error,
+)
 from .models import (
     Conversation,
     ConversationMember,
@@ -42,20 +49,27 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
         self.user_group_name = self.user_group(user.pk)
 
-        # T22: Mark user online and broadcast presence BEFORE adding self
-        # to group so the connecting client doesn't receive its own event.
-        await self._set_presence_online(user.pk)
-        await self.channel_layer.group_send(
-            self.user_group_name,
-            {
-                'type': 'presence.updated',
-                'data': {
-                    'user_id': user.pk,
-                    'is_online': True,
-                    'status': 'online',
+        # R-05 fix: track per-user live connections in the shared cache
+        # (Redis across Daphne workers in production, LocMem in single-process
+        # dev/tests) instead of the channel layer's non-standard group_channels.
+        # Presence flips and broadcasts only on the FIRST connect / LAST
+        # disconnect, so extra tabs no longer fake each other offline.
+        connection_count = await self._bump_connection_count(user.pk, +1)
+        if connection_count == 1:
+            # T22: mark online and broadcast BEFORE adding self to the group
+            # so the connecting client doesn't receive its own event.
+            await self._set_presence_online(user.pk)
+            await self.channel_layer.group_send(
+                self.user_group_name,
+                {
+                    'type': 'presence.updated',
+                    'data': {
+                        'user_id': user.pk,
+                        'is_online': True,
+                        'status': 'online',
+                    },
                 },
-            },
-        )
+            )
 
         await self.channel_layer.group_add(self.user_group_name, self.channel_name)
         await self.accept()
@@ -75,29 +89,62 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             await self.channel_layer.group_discard(user_group_name, self.channel_name)
 
         if user and not user.is_anonymous:
-            # Only set offline if user has NO remaining connections.
-            has_other_sessions = False
-            try:
-                remaining = await self.channel_layer.group_channels(user_group_name or self.user_group(user.pk))
-                has_other_sessions = bool(remaining)
-            except (AttributeError, Exception):
-                pass  # in-memory backend; skip multi-connection detection
-
-            if not has_other_sessions:
+            remaining = await self._bump_connection_count(user.pk, -1)
+            if remaining == 0:
                 await self._set_presence_offline(user.pk)
-
-            await self.channel_layer.group_send(
-                user_group_name or self.user_group(user.pk),
-                {
-                    'type': 'presence.updated',
-                    'data': {
-                        'user_id': user.pk,
-                        'is_online': False,
-                        'status': 'offline',
-                        'last_seen': timezone.now().isoformat(),
+                await self.channel_layer.group_send(
+                    user_group_name or self.user_group(user.pk),
+                    {
+                        'type': 'presence.updated',
+                        'data': {
+                            'user_id': user.pk,
+                            'is_online': False,
+                            'status': 'offline',
+                            'last_seen': timezone.now().isoformat(),
+                        },
                     },
-                },
-            )
+                )
+
+    @staticmethod
+    def _connection_count_key(user_id):
+        return f"ws:connections:{user_id}"
+
+    @classmethod
+    async def _bump_connection_count(cls, user_id, delta):
+        """Atomically adjust the per-user live-connection counter (R-05 fix).
+
+        Returns the counter value after the bump, or None when the cache is
+        unavailable (callers then fall back to the legacy always-on/alway-
+        offline presence behaviour).
+
+        @sync_to_async is used (not database_sync_to_async) because the cache
+        is not the ORM; thread_sensitive=False keeps it off the test main
+        thread where the TestCase connection lives.
+        """
+
+        @sync_to_async
+        def bump():
+            from django.core.cache import cache
+
+            key = cls._connection_count_key(user_id)
+            try:
+                if delta > 0:
+                    cache.add(key, 0, timeout=None)
+                    try:
+                        return cache.incr(key)
+                    except ValueError:
+                        return 1
+                value = cache.decr(key)
+                if value <= 0:
+                    cache.delete(key)
+                    return 0
+                return value
+            except ValueError:
+                return 0 if delta < 0 else 1
+            except Exception:
+                return None
+
+        return await bump()
 
     async def receive(self, text_data=None, bytes_data=None, **kwargs):
         try:
@@ -111,6 +158,21 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             return
 
         request_id = content.get('request_id')
+
+        # T31: protocol version gate (ADR-P4-02). Requests SHOULD carry
+        # protocol_version at the envelope top level; omitting it is accepted
+        # as "1.0" during the legacy compat window. Unsupported versions get
+        # the registered error and a documented close code.
+        version = content.get('protocol_version', PROTOCOL_VERSION)
+        if version not in SUPPORTED_PROTOCOL_VERSIONS:
+            await self.send_error(
+                request_id=request_id,
+                code='unsupported_protocol_version',
+                message=f'不支持的协议版本: {version}',
+            )
+            await self.close(code=UNSUPPORTED_PROTOCOL_CLOSE_CODE)
+            return
+
         event = content.get('event')
         if event == 'connection.ping':
             await self.send_event('connection.pong', request_id=request_id, data={})
@@ -241,7 +303,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             if 'database is locked' in str(error).lower():
                 await self.send_error(
                     request_id=request_id,
-                    code='database_busy',
+                    code='storage_unavailable',
                     message='Database is busy. Please retry shortly.',
                 )
                 return
@@ -294,10 +356,11 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     # ──── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     async def send_error(self, *, request_id, code, message):
+        error = get_error(code)
         await self.send_event(
             'error',
             request_id=request_id,
-            data={'code': code, 'message': message, 'retryable': False},
+            data={'code': code, 'message': message, 'retryable': error.retryable},
         )
 
     async def send_event(self, event, *, data, request_id=None):
@@ -444,7 +507,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             ):
                 raise ClientPayloadError('conversation_forbidden', 'Cannot send in this private conversation.')
 
-            # Block/contact enforcement (P1 fix 鈥?matches HTTP fallback).
+            # Block/contact enforcement (P1 fix - matches HTTP fallback).
             from accounts.models import BlockedUser
             receiver_id = data['receiver_id']
             blocked = (
@@ -857,7 +920,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             if sender_id not in active_member_ids:
                 raise ClientPayloadError('conversation_forbidden', 'Cannot send in this group conversation.')
 
-            # Mute enforcement (P1 fix 鈥?match HTTP fallback in views.py).
+            # Mute enforcement (P1 fix - match HTTP fallback in views.py).
             if conversation.muted_until and conversation.muted_until > timezone.now():
                 sender_role = active_members.filter(user_id=sender_id).values_list('role', flat=True).first()
                 if sender_role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):

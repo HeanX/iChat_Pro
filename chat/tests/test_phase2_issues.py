@@ -388,7 +388,7 @@ class ComprehensiveTests(TestCase):
     def test_search_permission_required(self):
         c = Client()
         resp = c.get('/api/search/?q=test')
-        self.assertEqual(resp.status_code, 302)  # redirects to login
+        self.assertEqual(resp.status_code, 401)  # T31/R-06: 401 JSON, not redirect
 
     def test_key_trust_model_str(self):
         import base64, hashlib

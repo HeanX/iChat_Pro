@@ -152,8 +152,8 @@ class UserPublicKeyApiTests(TestCase):
 
         response = self.client.get(reverse('public-key', args=[self.user.pk]))
 
-        self.assertEqual(response.status_code, 302)
-        self.assertIn(reverse('login'), response.url)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "authentication_required")
 
 
 class UserPublicKeyModelTests(TestCase):
@@ -1313,8 +1313,8 @@ class GeneralAndChatFolderSettingsApiTests(TestCase):
         self.client.logout()
         general = self.client.get('/api/settings/general/')
         folders = self.client.get('/api/settings/chat-folders/')
-        self.assertIn(general.status_code, (301, 302))
-        self.assertIn(folders.status_code, (301, 302))
+        self.assertEqual(general.status_code, 401)
+        self.assertEqual(folders.status_code, 401)
 
 
 class NotificationSettingsApiTests(TestCase):
@@ -1361,7 +1361,7 @@ class NotificationSettingsApiTests(TestCase):
             data=json.dumps({'volume': 10}),
             content_type='application/json',
         )
-        self.assertIn(resp.status_code, (301, 302))
+        self.assertEqual(resp.status_code, 401)
 
     def test_get_is_idempotent(self):
         first = self._get()
@@ -1393,7 +1393,7 @@ class QrCardApiTests(TestCase):
 
     def test_qr_card_requires_login(self):
         resp = self.client.get('/api/qr-card/')
-        self.assertIn(resp.status_code, (301, 302))
+        self.assertEqual(resp.status_code, 401)
 
 # ── P2 T35: Multi-account context ────────────────────────────────
 
@@ -1476,7 +1476,7 @@ class SessionApiTests(TestCase):
 
     def test_session_list_requires_login(self):
         resp = self.client.get('/api/sessions/')
-        self.assertIn(resp.status_code, (301, 302))
+        self.assertEqual(resp.status_code, 401)
 
     def test_logged_in_user_has_sessions(self):
         self.client.login(username='sestest', password='p')

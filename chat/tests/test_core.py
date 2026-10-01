@@ -577,7 +577,7 @@ class GroupAPITests(TestCase):
             data=json.dumps({"name": "X"}),
             content_type="application/json",
         )
-        self.assertIn(resp.status_code, [302, 301])
+        self.assertEqual(resp.status_code, 401)  # T31/R-06: 401 JSON, not redirect
 
 
 class GroupMessageModelTests(TestCase):
@@ -853,11 +853,12 @@ class ConversationMessagesAPITests(TestCase):
         self.assertEqual(len(data["messages"]), 2)
         self.assertFalse(data["has_next"])
 
-    def test_unauthenticated_redirects_to_login(self):
+    def test_unauthenticated_gets_401_json(self):
+        """R-06/T31: API paths answer 401 JSON instead of the HTML redirect."""
         url = f"/api/conversations/{self.conv.id}/messages/"
         response = self.client.get(url)
-        self.assertIn(response.status_code, [302, 301])
-        self.assertIn("login", response.url)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "authentication_required")
 
     # ── T29: contact enforcement ───────────────────────────────────
 

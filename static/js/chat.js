@@ -29,6 +29,17 @@ let chatConn = null;             // T33: ChatConnection instance
 let chatOutbox = null;           // T33: message status/outbox instance
 let chatSyncInFlight = {};       // per-conversation sync catch-up guard
 let msgApplyQueue = null;        // T33: serialized message application
+const backgroundSeenRegistry = ChatConnection.createSeenRegistry(500);
+
+// Cross-channel dedupe for BACKGROUND conversations (sync + realtime can
+// both deliver the same message); the active conversation dedupes via the
+// `messages` array instead.
+function backgroundSeen(convId, messageId) {
+  return backgroundSeenRegistry.seen(convId, messageId);
+}
+function backgroundMark(convId, messageId) {
+  backgroundSeenRegistry.mark(convId, messageId);
+}
 
 function retryFailedDecrypt(existing, payload) {
   // Re-attempt decryption for a placeholder created when the key material
@@ -1470,10 +1481,16 @@ async function syncCatchUp() {
       applyItem: async (item) => {
         const payload = item && item.message;
         if (!payload || payload.message_id == null) return true;
+        const itemConvId = payload.group_id !== undefined ? payload.group_id : payload.conversation_id;
+        // Non-active conversations share the background registry with the
+        // realtime handlers, so a message delivered on BOTH channels is
+        // only counted once.
+        if (itemConvId !== Number(activeChatId) && backgroundSeen(itemConvId, payload.message_id)) {
+          return true; // already applied via the other channel
+        }
         // Dedupe within the ITEM's own conversation: `messages` holds the
         // ACTIVE conversation only, so a cross-conversation id collision
         // must not hide a real message (review round 2).
-        const itemConvId = payload.group_id !== undefined ? payload.group_id : payload.conversation_id;
         if (itemConvId === Number(activeChatId)) {
           const existing = messages.find((m) => m.id === payload.message_id);
           if (existing) {
@@ -1665,6 +1682,10 @@ async function handlePrivateMessageReceived(data) {
   // would collide across conversations (review round 2).
   if (parseInt(payload.conversation_id) === Number(activeChatId) &&
       messages.some(msg => msg.id === payload.message_id)) return true;
+  if (parseInt(payload.conversation_id) !== Number(activeChatId) &&
+      backgroundSeen(parseInt(payload.conversation_id), payload.message_id)) {
+    return true; // already applied via the other channel
+  }
 
   if (conv) {
     updateSidebarPreview(
@@ -1695,6 +1716,7 @@ async function handlePrivateMessageReceived(data) {
   } else {
     // Increment unread badge
     if (conv) {
+      backgroundMark(parseInt(payload.conversation_id), payload.message_id);
       conv.unread = (conv.unread || 0) + 1;
       const badge = document.getElementById(`unread-badge-${convId}`);
       if (badge) {
@@ -1755,8 +1777,10 @@ async function handleGroupMessageReceived(data) {
       file_id: payload.file_id || (fileData ? fileData.file_id : null),
     };
 
-    if (Number(convId) === Number(activeChatId) &&
-        messages.some(msg => msg.id === payload.message_id)) return true;
+    if (Number(convId) !== Number(activeChatId) &&
+        backgroundSeen(Number(convId), payload.message_id)) {
+      return true; // already applied via the other channel
+    }
 
     if (activeChatId === convId) {
       messages.push(newMsg);
@@ -1764,6 +1788,7 @@ async function handleGroupMessageReceived(data) {
       scrollToBottom();
     } else {
       if (conv) {
+        backgroundMark(Number(convId), payload.message_id);
         conv.unread = (conv.unread || 0) + 1;
         const badge = document.getElementById(`unread-badge-${convId}`);
         if (badge) {

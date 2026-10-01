@@ -55,6 +55,9 @@ REGISTRY = {
     "conversation_not_found": ProtocolError(
         "conversation_not_found", 404, False, "会话不存在或不可用"
     ),
+    "receiver_not_found": ProtocolError(
+        "receiver_not_found", 404, False, "接收者不存在或已停用"
+    ),
     "conversation_forbidden": ProtocolError(
         "conversation_forbidden", 403, False, "无法在该会话中发送消息"
     ),

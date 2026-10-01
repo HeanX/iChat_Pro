@@ -37,6 +37,7 @@ REGISTRY = {
     # ── payload / protocol ────────────────────────────────────────────
     "invalid_payload": ProtocolError("invalid_payload", 400, False, "消息数据格式错误"),
     "unsupported_algorithm": ProtocolError("unsupported_algorithm", 400, False, "不支持的加密算法"),
+    "invalid_file_metadata": ProtocolError("invalid_file_metadata", 400, False, "文件密钥元数据不合法"),
     "unsupported_protocol_version": ProtocolError(
         "unsupported_protocol_version", 400, False, "协议版本不受支持，请升级客户端"
     ),

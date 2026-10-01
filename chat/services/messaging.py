@@ -25,6 +25,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import F
 from django.utils import timezone
@@ -206,17 +207,24 @@ def require_base64(data, field, *, decoded_length=None, max_decoded_length=None)
         raise PayloadError("invalid_payload", f"{field} exceeds maximum length.")
 
 
-def validate_attached_file(*, file_id, sender_id, conversation, message_type, required_holder_ids):
+def validate_attached_file(*, file_id, sender_id, conversation, message_type,
+                           required_holder_ids, enforce_conversation=True):
     try:
         attached_file = EncryptedFile.objects.get(pk=file_id)
     except EncryptedFile.DoesNotExist as error:
         raise PayloadError("file_not_found", "Attached file not found.") from error
 
-    if attached_file.owner_id != sender_id:
+    # The sender must be the file owner OR a key holder (forwarding lets a
+    # recipient re-share a file they can decrypt into their own conversations).
+    holds_key = EncryptedFileKey.objects.filter(file=attached_file, holder_id=sender_id).exists()
+    if attached_file.owner_id != sender_id and not holds_key:
         raise PayloadError("file_forbidden", "Attached file is not owned by the sender.")
     if attached_file.status != EncryptedFile.Status.AVAILABLE:
         raise PayloadError("file_unavailable", "Attached file is not available.")
-    if attached_file.conversation_id != conversation.pk:
+    # Direct sends require the file to live in the message's conversation;
+    # forwards intentionally carry a file from another conversation (the
+    # re-wrapped per-member keys below remain mandatory either way).
+    if enforce_conversation and attached_file.conversation_id != conversation.pk:
         raise PayloadError("file_forbidden", "Attached file does not belong to this conversation.")
     if attached_file.message_kind != message_type:
         raise PayloadError("file_type_mismatch", "Attached file type does not match message type.")
@@ -241,6 +249,19 @@ def _canonical_digest(payload):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _normalized_sender_copy(sender_copy):
+    """Keep only the persisted fields so extra client keys (e.g. an echoed
+    ``algorithm``) cannot change the request digest (P2 review fix)."""
+    if not sender_copy:
+        return None
+    return {
+        "ciphertext": sender_copy.get("ciphertext"),
+        "nonce": sender_copy.get("nonce"),
+        "auth_tag": sender_copy.get("auth_tag"),
+        "sender_ephemeral_public_key": sender_copy.get("sender_ephemeral_public_key"),
+    }
+
+
 def _private_digest_payload(data):
     return {
         "kind": "private",
@@ -254,7 +275,7 @@ def _private_digest_payload(data):
         "nonce": data.get("nonce"),
         "auth_tag": data.get("auth_tag"),
         "sender_ephemeral_public_key": data.get("sender_ephemeral_public_key"),
-        "sender_copy": data.get("sender_copy"),
+        "sender_copy": _normalized_sender_copy(data.get("sender_copy")),
         "reply_to_message_id": data.get("reply_to_message_id"),
         "file_id": data.get("file_id"),
     }
@@ -305,14 +326,6 @@ def _group_digest_payload(data):
 def _group_stored_payload(group_message):
     recipients = sorted(group_message.recipients.all(), key=lambda r: r.receiver_id)
     first = recipients[0] if recipients else None
-    sender_copy = None
-    if group_message.sender_copy_ciphertext and group_message.sender_copy_nonce and group_message.sender_copy_auth_tag:
-        sender_copy = {
-            "ciphertext": group_message.sender_copy_ciphertext,
-            "nonce": group_message.sender_copy_nonce,
-            "auth_tag": group_message.sender_copy_auth_tag,
-            "sender_ephemeral_public_key": group_message.sender_copy_ephemeral_public_key,
-        }
     return {
         "kind": "group",
         "group_id": group_message.conversation_id,
@@ -322,7 +335,14 @@ def _group_stored_payload(group_message):
         "algorithm": first.algorithm if first else None,
         "reply_to_message_id": group_message.reply_to_message_id,
         "file_id": group_message.file_id_id,
-        "sender_copy": sender_copy,
+        "sender_copy": _normalized_sender_copy(
+            {
+                "ciphertext": group_message.sender_copy_ciphertext,
+                "nonce": group_message.sender_copy_nonce,
+                "auth_tag": group_message.sender_copy_auth_tag,
+                "sender_ephemeral_public_key": group_message.sender_copy_ephemeral_public_key,
+            }
+        ) if group_message.sender_copy_ciphertext else None,
         "recipients": [
             {
                 "receiver_id": r.receiver_id,
@@ -350,7 +370,7 @@ def _replay_or_conflict(existing, incoming_digest, stored_payload):
 # ── private send ──────────────────────────────────────────────────────────
 
 
-def send_private_message(sender_id, data):
+def send_private_message(sender_id, data, *, enforce_file_conversation=True):
     """Persist one private encrypted message. Returns SendResult."""
     data = validate_private_message(data)
     client_message_id = data["client_message_id"]
@@ -389,6 +409,11 @@ def send_private_message(sender_id, data):
         if blocked:
             raise PayloadError("conversation_forbidden", "Blocked users cannot send messages.")
 
+        # 2b. the receiver account must still exist and be active (R-06 fix
+        # parity: HTTP used to check this, WS did not — single source now)
+        if not get_user_model().objects.filter(pk=data["receiver_id"], is_active=True).exists():
+            raise PayloadError("receiver_not_found", "Receiver not found or inactive.")
+
         # 3. idempotency replay with content digest (R-01/R-04)
         if client_message_id:
             existing = (
@@ -409,30 +434,35 @@ def send_private_message(sender_id, data):
                 conversation=conversation,
                 message_type=data["message_type"],
                 required_holder_ids=set(active_members.values_list("user_id", flat=True)),
+                enforce_conversation=enforce_file_conversation,
             )
 
+        sender_copy = data.get("sender_copy") or {}
         try:
-            sender_copy = data.get("sender_copy") or {}
-            message = EncryptedMessage.objects.create(
-                conversation=conversation,
+            # Nested atomic = savepoint: an IntegrityError only rolls back the
+            # INSERT, leaving the outer transaction usable for the recovery
+            # query below (PostgreSQL aborts the whole transaction otherwise).
+            with transaction.atomic():
+                message = EncryptedMessage.objects.create(
+                    conversation=conversation,
                 sender_id=sender_id,
-                receiver_id=data["receiver_id"],
-                message_type=data["message_type"],
-                ciphertext=data["ciphertext"],
-                nonce=data["nonce"],
-                auth_tag=data["auth_tag"],
-                sender_ephemeral_public_key=data.get("sender_ephemeral_public_key"),
-                sender_copy_ciphertext=sender_copy.get("ciphertext"),
-                sender_copy_nonce=sender_copy.get("nonce"),
-                sender_copy_auth_tag=sender_copy.get("auth_tag"),
-                sender_copy_ephemeral_public_key=sender_copy.get("sender_ephemeral_public_key"),
-                algorithm=data["algorithm"],
-                sender_key_version=data["sender_key_version"],
-                receiver_key_version=data["receiver_key_version"],
-                client_message_id=client_message_id,
-                reply_to_message_id=data.get("reply_to_message_id"),
-                file_id_id=data.get("file_id"),
-            )
+                    receiver_id=data["receiver_id"],
+                    message_type=data["message_type"],
+                    ciphertext=data["ciphertext"],
+                    nonce=data["nonce"],
+                    auth_tag=data["auth_tag"],
+                    sender_ephemeral_public_key=data.get("sender_ephemeral_public_key"),
+                    sender_copy_ciphertext=sender_copy.get("ciphertext"),
+                    sender_copy_nonce=sender_copy.get("nonce"),
+                    sender_copy_auth_tag=sender_copy.get("auth_tag"),
+                    sender_copy_ephemeral_public_key=sender_copy.get("sender_ephemeral_public_key"),
+                    algorithm=data["algorithm"],
+                    sender_key_version=data["sender_key_version"],
+                    receiver_key_version=data["receiver_key_version"],
+                    client_message_id=client_message_id,
+                    reply_to_message_id=data.get("reply_to_message_id"),
+                    file_id_id=data.get("file_id"),
+                )
         except IntegrityError:
             # Concurrent same-ID insert: re-apply the digest rules.
             if not client_message_id:
@@ -460,7 +490,7 @@ def send_private_message(sender_id, data):
 # ── group send ────────────────────────────────────────────────────────────
 
 
-def send_group_message(sender_id, data):
+def send_group_message(sender_id, data, *, enforce_file_conversation=True):
     """Persist one group encrypted message with per-recipient copies."""
     data = validate_group_message(data)
     client_message_id = data["client_message_id"]
@@ -527,22 +557,25 @@ def send_group_message(sender_id, data):
                 conversation=conversation,
                 message_type=data["message_type"],
                 required_holder_ids=active_member_ids,
+                enforce_conversation=enforce_file_conversation,
             )
 
         sender_copy = data.get("sender_copy") or {}
         try:
-            group_message = GroupMessage.objects.create(
-                conversation=conversation,
-                sender_id=sender_id,
-                message_type=data["message_type"],
-                client_message_id=client_message_id,
-                reply_to_message_id=data.get("reply_to_message_id"),
-                file_id_id=data.get("file_id"),
-                sender_copy_ciphertext=sender_copy.get("ciphertext"),
-                sender_copy_nonce=sender_copy.get("nonce"),
-                sender_copy_auth_tag=sender_copy.get("auth_tag"),
-                sender_copy_ephemeral_public_key=sender_copy.get("sender_ephemeral_public_key"),
-            )
+            # Savepoint, same rationale as the private path.
+            with transaction.atomic():
+                group_message = GroupMessage.objects.create(
+                    conversation=conversation,
+                    sender_id=sender_id,
+                    message_type=data["message_type"],
+                    client_message_id=client_message_id,
+                    reply_to_message_id=data.get("reply_to_message_id"),
+                    file_id_id=data.get("file_id"),
+                    sender_copy_ciphertext=sender_copy.get("ciphertext"),
+                    sender_copy_nonce=sender_copy.get("nonce"),
+                    sender_copy_auth_tag=sender_copy.get("auth_tag"),
+                    sender_copy_ephemeral_public_key=sender_copy.get("sender_ephemeral_public_key"),
+                )
         except IntegrityError:
             if not client_message_id:
                 raise

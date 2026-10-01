@@ -980,10 +980,6 @@ def forward_message_view(request, conversation_id):
         payload['receiver_id'] = peer_id
         if forwarded_reply_to_id:
             payload['reply_to_message_id'] = forwarded_reply_to_id
-        try:
-            validated = ChatConsumer.validate_private_message(payload)
-        except ClientPayloadError as error:
-            return _client_payload_error_response(error)
 
         file_keys = []
         if forward_file:
@@ -993,95 +989,59 @@ def forward_message_view(request, conversation_id):
             )
             if file_error:
                 return file_error
+            # Wrapped keys must exist before the service validates file
+            # coverage for the target members.
+            _save_forward_file_keys(forward_file, file_keys, request.user)
 
+        # T32 review fix: forwards go through the unified service, so a
+        # client_message_id already used in ANOTHER conversation returns
+        # 409 idempotency_conflict instead of silently returning that other
+        # conversation's message.
         try:
-            with transaction.atomic():
-                existing = EncryptedMessage.objects.filter(
-                    sender=request.user,
-                    client_message_id=validated['client_message_id'],
-                ).first()
-                if existing:
-                    return JsonResponse({
-                        'status': 'ok',
-                        'conversation_id': existing.conversation_id,
-                        'message_id': existing.pk,
-                    }, status=200)
+            result = messaging.send_private_message(
+                request.user.pk, payload, enforce_file_conversation=False,
+            )
+        except PayloadError as error:
+            return JsonResponse(
+                {'error': error.code, 'detail': error.message},
+                status=get_error(error.code).http_status,
+            )
+        except OperationalError:
+            return JsonResponse(
+                {'error': 'storage_unavailable', 'detail': 'Database is busy. Please retry shortly.'},
+                status=get_error('storage_unavailable').http_status,
+            )
+        message = result.message
 
-                if forward_file:
-                    _save_forward_file_keys(forward_file, file_keys, request.user)
-
-                try:
-                    sender_copy = validated.get('sender_copy') or {}
-                    message = EncryptedMessage.objects.create(
-                        conversation=conversation,
-                        sender=request.user,
-                        receiver_id=validated['receiver_id'],
-                        message_type=validated['message_type'],
-                        ciphertext=validated['ciphertext'],
-                        nonce=validated['nonce'],
-                        auth_tag=validated['auth_tag'],
-                        sender_ephemeral_public_key=validated.get('sender_ephemeral_public_key'),
-                        sender_copy_ciphertext=sender_copy.get('ciphertext'),
-                        sender_copy_nonce=sender_copy.get('nonce'),
-                        sender_copy_auth_tag=sender_copy.get('auth_tag'),
-                        sender_copy_ephemeral_public_key=sender_copy.get('sender_ephemeral_public_key'),
-                        algorithm=validated['algorithm'],
-                        sender_key_version=validated['sender_key_version'],
-                        receiver_key_version=validated['receiver_key_version'],
-                        client_message_id=validated['client_message_id'],
-                        reply_to_message_id=forwarded_reply_to_id,
-                        file_id=forward_file,
-                    )
-                except IntegrityError:
-                    existing = EncryptedMessage.objects.get(
-                        sender=request.user,
-                        client_message_id=validated['client_message_id'],
-                    )
-                    return JsonResponse({
-                        'status': 'ok',
-                        'conversation_id': existing.conversation_id,
-                        'message_id': existing.pk,
-                    }, status=200)
-
-                conversation.last_message_id = message.pk
-                conversation.last_message_at = message.created_at
-                conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
-
-                ConversationMember.objects.filter(
-                    conversation=conversation,
-                    user_id=peer_id,
-                    status=ConversationMember.Status.ACTIVE,
-                ).update(unread_count=F('unread_count') + 1)
-        except (ValueError, KeyError) as e:
-            return JsonResponse({'error': f'Invalid payload: {e}'}, status=400)
-
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f'user_{peer_id}',
-            {
-                'type': 'message.single.new',
-                'data': (
-                    _serialize_file_private_message(message, _build_file_sub_object(forward_file, peer_id), viewer_id=peer_id)
-                    if forward_file else ChatConsumer.serialize_private_message(message, viewer_id=peer_id)
-                ),
-            },
-        )
-        async_to_sync(channel_layer.group_send)(
-            f'user_{request.user.pk}',
-            {
-                'type': 'message.single.new',
-                'data': (
-                    _serialize_file_private_message(message, _build_file_sub_object(forward_file, request.user.pk), viewer_id=request.user.pk)
-                    if forward_file else ChatConsumer.serialize_private_message(message, viewer_id=request.user.pk)
-                ),
-            },
-        )
+        if result.created:
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'user_{peer_id}',
+                {
+                    'type': 'message.single.new',
+                    'data': (
+                        _serialize_file_private_message(message, _build_file_sub_object(forward_file, peer_id), viewer_id=peer_id)
+                        if forward_file else ChatConsumer.serialize_private_message(message, viewer_id=peer_id)
+                    ),
+                },
+            )
+            async_to_sync(channel_layer.group_send)(
+                f'user_{request.user.pk}',
+                {
+                    'type': 'message.single.new',
+                    'data': (
+                        _serialize_file_private_message(message, _build_file_sub_object(forward_file, request.user.pk), viewer_id=request.user.pk)
+                        if forward_file else ChatConsumer.serialize_private_message(message, viewer_id=request.user.pk)
+                    ),
+                },
+            )
 
         return JsonResponse({
             'status': 'ok',
             'conversation_id': conversation.id,
             'message_id': message.pk,
-        }, status=201)
+            'created': result.created,
+        }, status=201 if result.created else 200)
 
     if conversation.type == Conversation.Type.GROUP:
         if conversation.muted_until and conversation.muted_until > timezone.now():
@@ -1099,18 +1059,6 @@ def forward_message_view(request, conversation_id):
         payload['group_id'] = conversation.id
         if forwarded_reply_to_id:
             payload['reply_to_message_id'] = forwarded_reply_to_id
-        try:
-            validated = ChatConsumer.validate_group_message(payload)
-        except ClientPayloadError as error:
-            return _client_payload_error_response(error)
-
-        recipient_user_ids = {r['receiver_id'] for r in validated['recipients']}
-        if recipient_user_ids != active_member_ids:
-            return JsonResponse({'error': 'Recipients must match current active members.'}, status=400)
-
-        client_membership_version = validated['membership_version']
-        if client_membership_version != conversation.membership_version:
-            return JsonResponse({'error': 'Membership version mismatch. Please refresh.'}, status=409)
 
         file_keys = []
         if forward_file:
@@ -1120,98 +1068,51 @@ def forward_message_view(request, conversation_id):
             )
             if file_error:
                 return file_error
+            _save_forward_file_keys(forward_file, file_keys, request.user)
 
-        with transaction.atomic():
-            existing = GroupMessage.objects.filter(
-                sender=request.user,
-                client_message_id=validated['client_message_id'],
-            ).first()
-            if existing:
-                return JsonResponse({
-                    'status': 'ok',
-                    'conversation_id': existing.conversation_id,
-                    'message_id': existing.pk,
-                }, status=200)
-
-            if forward_file:
-                _save_forward_file_keys(forward_file, file_keys, request.user)
-
-            sender_copy = validated.get('sender_copy') or {}
-            try:
-                group_message = GroupMessage.objects.create(
-                    conversation=conversation,
-                    sender=request.user,
-                    message_type=validated['message_type'],
-                    client_message_id=validated['client_message_id'],
-                    reply_to_message_id=forwarded_reply_to_id,
-                    file_id=forward_file,
-                    sender_copy_ciphertext=sender_copy.get('ciphertext'),
-                    sender_copy_nonce=sender_copy.get('nonce'),
-                    sender_copy_auth_tag=sender_copy.get('auth_tag'),
-                    sender_copy_ephemeral_public_key=sender_copy.get('sender_ephemeral_public_key'),
-                )
-            except IntegrityError:
-                existing = GroupMessage.objects.get(
-                    sender=request.user,
-                    client_message_id=validated['client_message_id'],
-                )
-                return JsonResponse({
-                    'status': 'ok',
-                    'conversation_id': existing.conversation_id,
-                    'message_id': existing.pk,
-                }, status=200)
-
-            recipient_objs = [
-                GroupMessageRecipient(
-                    group_message=group_message,
-                    receiver_id=r['receiver_id'],
-                    ciphertext=r['ciphertext'],
-                    nonce=r['nonce'],
-                    auth_tag=r['auth_tag'],
-                    algorithm=validated['algorithm'],
-                    sender_key_version=validated['sender_key_version'],
-                    receiver_key_version=r['receiver_key_version'],
-                    sender_ephemeral_public_key=r.get('sender_ephemeral_public_key'),
-                    membership_version=client_membership_version,
-                )
-                for r in validated['recipients']
-            ]
-            GroupMessageRecipient.objects.bulk_create(recipient_objs)
-
-            ConversationMember.objects.filter(
-                conversation=conversation,
-                status=ConversationMember.Status.ACTIVE,
-            ).exclude(user=request.user).update(
-                unread_count=F('unread_count') + 1,
+        # Same unified service as the normal group send: idempotency digest,
+        # membership version and recipient coverage are enforced identically.
+        try:
+            result = messaging.send_group_message(
+                request.user.pk, payload, enforce_file_conversation=False,
             )
-
-            conversation.last_message_id = group_message.pk
-            conversation.last_message_at = group_message.created_at
-            conversation.save(update_fields=['last_message_id', 'last_message_at', 'updated_at'])
-
-        channel_layer = get_channel_layer()
-        for recipient_data in ChatConsumer._build_recipients_payload(group_message, conversation):
-            if forward_file:
-                recipient_data = _serialize_file_group_recipient(
-                    group_message,
-                    GroupMessageRecipient.objects.get(
-                        group_message=group_message,
-                        receiver_id=recipient_data['receiver_id'],
-                    ),
-                    _build_file_sub_object(forward_file, recipient_data['receiver_id']),
-                )
-            if recipient_data['receiver_id'] == request.user.pk:
-                continue
-            async_to_sync(channel_layer.group_send)(
-                f"user_{recipient_data['receiver_id']}",
-                {'type': 'message.group.new', 'data': recipient_data},
+        except PayloadError as error:
+            return JsonResponse(
+                {'error': error.code, 'detail': error.message},
+                status=get_error(error.code).http_status,
             )
+        except OperationalError:
+            return JsonResponse(
+                {'error': 'storage_unavailable', 'detail': 'Database is busy. Please retry shortly.'},
+                status=get_error('storage_unavailable').http_status,
+            )
+        group_message = result.message
+
+        if result.created:
+            channel_layer = get_channel_layer()
+            for recipient_data in ChatConsumer._build_recipients_payload(group_message, conversation):
+                if forward_file:
+                    recipient_data = _serialize_file_group_recipient(
+                        group_message,
+                        GroupMessageRecipient.objects.get(
+                            group_message=group_message,
+                            receiver_id=recipient_data['receiver_id'],
+                        ),
+                        _build_file_sub_object(forward_file, recipient_data['receiver_id']),
+                    )
+                if recipient_data['receiver_id'] == request.user.pk:
+                    continue
+                async_to_sync(channel_layer.group_send)(
+                    f"user_{recipient_data['receiver_id']}",
+                    {'type': 'message.group.new', 'data': recipient_data},
+                )
 
         return JsonResponse({
             'status': 'ok',
             'conversation_id': conversation.id,
             'message_id': group_message.pk,
-        }, status=201)
+            'created': result.created,
+        }, status=201 if result.created else 200)
 
     return JsonResponse({'error': 'Invalid conversation type.'}, status=400)
 
@@ -2439,23 +2340,8 @@ def send_private_message_view(request, conversation_id):
     data = _json_body(request)
     data['conversation_id'] = conversation_id
 
-    # Check block status before attempting to send. If a private conversation
-    # already exists and both users are active members, contact/privacy rules
-    # should not block normal in-conversation sends.
-    receiver_id = data.get('receiver_id')
-    if receiver_id:
-        try:
-            receiver = User.objects.get(id=receiver_id, is_active=True)
-        except User.DoesNotExist:
-            return JsonResponse({'error': 'receiver_not_found', 'detail': 'Receiver not found.'}, status=404)
-
-        if receiver == request.user:
-            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Cannot send messages to yourself.'}, status=403)
-        if _is_blocked_by(receiver, request.user):
-            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'You have been blocked by this user.'}, status=403)
-        if _is_blocked_by(request.user, receiver):
-            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'You have blocked this user. Unblock them first.'}, status=403)
-
+    # Receiver existence/activity, self-send and block rules live in the
+    # messaging service now (single source for HTTP and WS, T32 review fix).
     try:
         result = messaging.send_private_message(request.user.pk, data)
     except PayloadError as error:
@@ -4103,176 +3989,97 @@ def send_file_message_view(request, file_id):
         except (TypeError, ValueError):
             return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'receiver_id is required for single chat.'}, status=400)
 
-        if (
-            len(active_member_ids) != 2
-            or request.user.pk not in active_member_ids
-            or receiver_id not in active_member_ids
-            or receiver_id == request.user.pk
-        ):
-            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Receiver is not the private-chat peer.'}, status=403)
-
-        receiver = User.objects.filter(pk=receiver_id, is_active=True).first()
-        if not receiver:
-            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Receiver is not active.'}, status=403)
-        if _is_blocked_by(receiver, request.user) or _is_blocked_by(request.user, receiver):
-            return JsonResponse({'error': 'conversation_forbidden', 'detail': 'Blocked users cannot exchange file messages.'}, status=403)
-
+        # Peer membership, receiver activity, block rules, idempotency and
+        # counters all live in the messaging service (T32 review fix: the
+        # direct create used to bypass idempotency and crashed with a bare
+        # IntegrityError -> 500 on same-ID retries).
         payload = dict(data)
         payload['conversation_id'] = conversation.id
         payload['receiver_id'] = receiver_id
         payload['file_id'] = ef.pk
+        payload['reply_to_message_id'] = reply_to_message_id
         try:
-            validated_payload = ChatConsumer.validate_private_message(payload)
-        except ClientPayloadError as error:
-            return _client_payload_error_response(error)
+            result = messaging.send_private_message(
+                request.user.pk, payload, enforce_file_conversation=False,
+            )
+        except PayloadError as error:
+            return JsonResponse(
+                {'error': error.code, 'detail': error.message},
+                status=get_error(error.code).http_status,
+            )
+        except OperationalError:
+            return JsonResponse(
+                {'error': 'storage_unavailable', 'detail': 'Database is busy. Please retry shortly.'},
+                status=get_error('storage_unavailable').http_status,
+            )
+        message = result.message
 
-        message = EncryptedMessage.objects.create(
-            conversation=ef.conversation,
-            sender=request.user,
-            receiver_id=receiver_id,
-            message_type=message_type,
-            ciphertext=validated_payload['ciphertext'],
-            nonce=validated_payload['nonce'],
-            auth_tag=validated_payload['auth_tag'],
-            sender_ephemeral_public_key=validated_payload.get('sender_ephemeral_public_key'),
-            sender_copy_ciphertext=(validated_payload.get('sender_copy') or {}).get('ciphertext'),
-            sender_copy_nonce=(validated_payload.get('sender_copy') or {}).get('nonce'),
-            sender_copy_auth_tag=(validated_payload.get('sender_copy') or {}).get('auth_tag'),
-            sender_copy_ephemeral_public_key=(validated_payload.get('sender_copy') or {}).get('sender_ephemeral_public_key'),
-            algorithm=validated_payload['algorithm'],
-            sender_key_version=validated_payload['sender_key_version'],
-            receiver_key_version=validated_payload['receiver_key_version'],
-            client_message_id=client_message_id or None,
-            reply_to_message_id=reply_to_message_id,
-            file_id=ef,
-        )
-        ef.conversation.last_message_at = message.created_at
-        ef.conversation.last_message_id = message.id
-        ef.conversation.save(update_fields=['last_message_at', 'last_message_id'])
-
-        receiver_serialized = _serialize_file_private_message(
-            message,
-            _build_file_sub_object(ef, receiver_id),
-            viewer_id=receiver_id,
-        )
-        sender_serialized = _serialize_file_private_message(
-            message,
-            _build_file_sub_object(ef, request.user.pk),
-            viewer_id=request.user.pk,
-        )
-
-        # Broadcast to receiver
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            ChatConsumer.user_group(receiver_id),
-            {'type': 'message.single.new', 'data': receiver_serialized},
-        )
-        # Also notify sender (for multi-device sync)
-        async_to_sync(channel_layer.group_send)(
-            ChatConsumer.user_group(request.user.pk),
-            {'type': 'message.single.new', 'data': sender_serialized},
-        )
+        if result.created:
+            receiver_serialized = _serialize_file_private_message(
+                message,
+                _build_file_sub_object(ef, message.receiver_id),
+                viewer_id=message.receiver_id,
+            )
+            sender_serialized = _serialize_file_private_message(
+                message,
+                _build_file_sub_object(ef, request.user.pk),
+                viewer_id=request.user.pk,
+            )
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                ChatConsumer.user_group(message.receiver_id),
+                {'type': 'message.single.new', 'data': receiver_serialized},
+            )
+            async_to_sync(channel_layer.group_send)(
+                ChatConsumer.user_group(request.user.pk),
+                {'type': 'message.single.new', 'data': sender_serialized},
+            )
 
         return JsonResponse({
             'file_id': ef.id,
             'message_id': message.id,
             'status': 'sent',
             'created_at': message.created_at.isoformat(),
-        }, status=201)
+            'created': result.created,
+        }, status=201 if result.created else 200)
 
     else:
-        # ── Group chat ──
-        if conversation.muted_until and conversation.muted_until > timezone.now():
-            if member.role not in (ConversationMember.Role.OWNER, ConversationMember.Role.ADMIN):
-                return JsonResponse({'error': 'group_muted', 'detail': 'This group is muted.'}, status=403)
-
-        try:
-            membership_version = int(data.get('membership_version', 0))
-        except (TypeError, ValueError):
-            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'membership_version is required for group chat.'}, status=400)
-        if membership_version <= 0:
-            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'membership_version is required for group chat.'}, status=400)
-
-        # Check membership version
-        if membership_version != ef.conversation.membership_version:
-            return JsonResponse({
-                'error': 'membership_version_conflict',
-                'detail': f'Current membership version is {ef.conversation.membership_version}.',
-                'membership_version': ef.conversation.membership_version,
-            }, status=409)
-
-        recipients_data = data.get('recipients', [])
-        if not isinstance(recipients_data, list) or not recipients_data:
-            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'recipients is required for group chat.'}, status=400)
-
+        # ── Group chat ── (mute/version/recipient rules live in the service)
         payload = dict(data)
         payload['group_id'] = conversation.id
         payload['file_id'] = ef.pk
+        payload['reply_to_message_id'] = reply_to_message_id
         try:
-            validated_payload = ChatConsumer.validate_group_message(payload)
-        except ClientPayloadError as error:
-            return _client_payload_error_response(error)
-
-        recipient_user_ids = set()
-        for r in recipients_data:
-            try:
-                recipient_user_ids.add(int(r.get('receiver_id', 0)))
-            except (TypeError, ValueError):
-                return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'recipient receiver_id must be an integer.'}, status=400)
-        if recipient_user_ids != active_member_ids:
-            return JsonResponse({'error': 'recipients_mismatch', 'detail': 'Recipients must match current active members.'}, status=400)
-
-        sender_copy = data.get('sender_copy') or {}
-        group_msg = GroupMessage.objects.create(
-            conversation=ef.conversation,
-            sender=request.user,
-            message_type=message_type,
-            client_message_id=client_message_id or None,
-            reply_to_message_id=reply_to_message_id,
-            file_id=ef,
-            sender_copy_ciphertext=sender_copy.get('ciphertext'),
-            sender_copy_nonce=sender_copy.get('nonce'),
-            sender_copy_auth_tag=sender_copy.get('auth_tag'),
-            sender_copy_ephemeral_public_key=sender_copy.get('sender_ephemeral_public_key'),
-        )
-        ef.conversation.last_message_at = group_msg.created_at
-        ef.conversation.last_message_id = group_msg.id
-        ef.conversation.save(update_fields=['last_message_at', 'last_message_id'])
-
-        channel_layer = get_channel_layer()
-        for r in validated_payload['recipients']:
-            try:
-                recv_id = int(r.get('receiver_id', 0))
-            except (TypeError, ValueError):
-                continue
-
-            recipient = GroupMessageRecipient.objects.create(
-                group_message=group_msg,
-                receiver_id=recv_id,
-                ciphertext=str(r.get('ciphertext', '')),
-                nonce=str(r.get('nonce', '')),
-                auth_tag=str(r.get('auth_tag', '')),
-                algorithm=validated_payload['algorithm'],
-                sender_key_version=validated_payload['sender_key_version'],
-                receiver_key_version=int(r.get('receiver_key_version', 0)) or None,
-                sender_ephemeral_public_key=str(r.get('sender_ephemeral_public_key') or '') or None,
-                membership_version=membership_version,
+            result = messaging.send_group_message(request.user.pk, payload)
+        except PayloadError as error:
+            return JsonResponse(
+                {'error': error.code, 'detail': error.message},
+                status=get_error(error.code).http_status,
             )
-
-            file_obj = _build_file_sub_object(ef, recv_id)
-            recipient_data = _serialize_file_group_recipient(group_msg, recipient, file_obj)
-
-            async_to_sync(channel_layer.group_send)(
-                ChatConsumer.user_group(recv_id),
-                {'type': 'message.group.new', 'data': recipient_data},
+        except OperationalError:
+            return JsonResponse(
+                {'error': 'storage_unavailable', 'detail': 'Database is busy. Please retry shortly.'},
+                status=get_error('storage_unavailable').http_status,
             )
+        group_msg = result.message
+
+        if result.created:
+            channel_layer = get_channel_layer()
+            for recipient in GroupMessageRecipient.objects.filter(group_message=group_msg):
+                file_obj = _build_file_sub_object(ef, recipient.receiver_id)
+                recipient_data = _serialize_file_group_recipient(group_msg, recipient, file_obj)
+                async_to_sync(channel_layer.group_send)(
+                    ChatConsumer.user_group(recipient.receiver_id),
+                    {'type': 'message.group.new', 'data': recipient_data},
+                )
 
         return JsonResponse({
             'file_id': ef.id,
             'message_id': group_msg.id,
             'status': 'sent',
             'created_at': group_msg.created_at.isoformat(),
-        }, status=201)
+            'created': result.created,
+        }, status=201 if result.created else 200)
 
 
 def _build_file_sub_object(ef, holder_id):

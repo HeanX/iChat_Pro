@@ -309,6 +309,19 @@
     };
   }
 
+  // Serialized message-application queue: realtime pushes and sync items
+  // funnel through one chain so a slow decrypt cannot reorder messages.
+  function createApplyQueue() {
+    var chain = Promise.resolve();
+    return {
+      enqueue: function (taskFn) {
+        var run = chain.then(taskFn);
+        chain = run.catch(function () {});
+        return run;
+      },
+    };
+  }
+
   // Sync walk: applies pages in order and only advances the stored cursor
   // after every item of a page was applied. An item that fails stops the
   // walk with the PREVIOUS cursor intact (at-least-once); an expired-cursor
@@ -388,5 +401,6 @@
     createConnection: createConnection,
     createOutbox: createOutbox,
     createSyncWalker: createSyncWalker,
+    createApplyQueue: createApplyQueue,
   };
 });

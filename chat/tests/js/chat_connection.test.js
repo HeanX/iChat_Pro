@@ -244,7 +244,169 @@ function test_message_status_monotonic() {
   console.log("✓ message status transitions are forward-only");
 }
 
+
+function test_sync_walker_advances_cursor_only_after_apply() {
+  const storage = { data: "", removed: 0 };
+  const store = {
+    get: () => storage.data,
+    set: (v) => { storage.data = v; },
+    remove: () => { storage.removed += 1; },
+  };
+  const pages = [
+    { items: [{ message: { message_id: 1 } }, { message: { message_id: 2 } }],
+      nextCursor: "c1", hasMore: true },
+    { items: [{ message: { message_id: 3, fail: true } }, { message: { message_id: 4 } }],
+      nextCursor: "c2", hasMore: true },
+  ];
+  const applied = [];
+  const walker = ChatConnection.createSyncWalker({
+    storage: store,
+    maxPages: 10,
+    fetchPage(cursor) {
+      if (cursor === "c1") return Promise.resolve(pages[1]);
+      return Promise.resolve(pages[0]);
+    },
+    applyItem(item) {
+      if (item.message.fail) return Promise.resolve(false);
+      applied.push(item.message.message_id);
+      return Promise.resolve(true);
+    },
+  });
+  return walker.run().then((result) => {
+    // Items applied in order; the failing item (3) stops the walk BEFORE
+    // the cursor advances past it - messages 3/4 stay fetchable.
+    assert(applied.join(",") === "1,2", "applied order: " + applied.join(","));
+    assert(result.status === "stopped", "walker stopped on failure");
+    assert(storage.data === "c1", "cursor stays at the last fully-applied page");
+    assert(storage.removed === 0, "nothing removed");
+  });
+}
+
+function test_sync_walker_applies_own_messages_and_skips_nothing() {
+  const storage = { data: "", removed: 0 };
+  const seen = [];
+  const walker = ChatConnection.createSyncWalker({
+    storage: store2(),
+    maxPages: 10,
+    fetchPage() {
+      return Promise.resolve({
+        items: [
+          { message: { message_id: 1, sender_id: 7 } },  // own message from another device
+          { message: { message_id: 2, sender_id: 8 } },
+        ],
+        nextCursor: "c9",
+        hasMore: false,
+      });
+    },
+    applyItem(item) {
+      seen.push(item.message.message_id);
+      return Promise.resolve(true);
+    },
+  });
+  function store2() {
+    return {
+      get: () => storage.data,
+      set: (v) => { storage.data = v; },
+      remove: () => { storage.removed += 1; },
+    };
+  }
+  return walker.run().then((result) => {
+    assert(result.status === "caught-up", "caught up");
+    // Own messages reach applyItem - the walker never skips them.
+    assert(seen.join(",") === "1,2", "own messages passed through: " + seen.join(","));
+    assert(storage.data === "c9", "final cursor stored");
+  });
+}
+
+function test_sync_walker_walks_past_empty_pages_until_done() {
+  const storage = { data: "" };
+  let calls = 0;
+  const walker = ChatConnection.createSyncWalker({
+    storage: {
+      get: () => storage.data,
+      set: (v) => { storage.data = v; },
+      remove: () => {},
+    },
+    maxPages: 100,
+    fetchPage() {
+      calls += 1;
+      if (calls <= 6) {
+        // Six pages with no visible items, all reporting has_more.
+        return Promise.resolve({ items: [], nextCursor: "p" + calls, hasMore: true });
+      }
+      return Promise.resolve({
+        items: [{ message: { message_id: 99 } }],
+        nextCursor: "final",
+        hasMore: false,
+      });
+    },
+    applyItem() { return Promise.resolve(true); },
+  });
+  return walker.run().then((result) => {
+    assert(result.status === "caught-up", "walk continues past empty pages: " + result.status);
+    assert(calls === 7, "all pages fetched: " + calls);
+    assert(storage.data === "final", "final cursor stored");
+  });
+}
+
+function test_sync_walker_expired_cursor_resnapshots_once() {
+  const storage = { data: "stale-token", removed: 0 };
+  const requested = [];
+  const walker = ChatConnection.createSyncWalker({
+    storage: {
+      get: () => storage.data,
+      set: (v) => { storage.data = v; },
+      remove: () => { storage.removed += 1; },
+    },
+    maxPages: 10,
+    fetchPage(cursor) {
+      requested.push(cursor);
+      if (cursor === "stale-token") {
+        // First call with the expired token → 410
+        return Promise.resolve({ errorCode: "sync_cursor_expired", items: [], nextCursor: "stale-token", hasMore: false });
+      }
+      return Promise.resolve({
+        items: [{ message: { message_id: 5 } }],
+        nextCursor: "fresh",
+        hasMore: false,
+      });
+    },
+    applyItem() { return Promise.resolve(true); },
+  });
+  return walker.run().then((result) => {
+    assert(result.status === "caught-up", "recovered after expiry: " + result.status);
+    assert(storage.removed === 1, "expired token cleared");
+    assert(requested[0] === "stale-token" && requested[1] === "", "re-fetched with a fresh snapshot");
+    assert(storage.data === "fresh", "fresh cursor stored");
+  });
+}
+
+function test_backoff_cap_after_jitter() {
+  const h = createHarness();
+  h.setRandom(1); // worst-case jitter (+25%)
+  const conn = ChatConnection.createConnection({
+    url: "wss://x/", socketFactory: h.socketFactory, timers: h.timers,
+    now: h.now, random: h.random,
+    baseBackoff: 20000, maxBackoff: 25000,
+  });
+  conn.connect();
+  h.sockets[0].fireClose(1006);
+  const task = h.timers.pending()[0];
+  const delay = task.at - h.now();
+  assert(delay <= 25000, "backoff never exceeds maxBackoff after jitter: " + delay);
+  console.log("✓ backoff capped after jitter");
+}
+
+const walkerTests = [
+  test_sync_walker_advances_cursor_only_after_apply,
+  test_sync_walker_applies_own_messages_and_skips_nothing,
+  test_sync_walker_walks_past_empty_pages_until_done,
+  test_sync_walker_expired_cursor_resnapshots_once,
+  test_backoff_cap_after_jitter,
+];
+
 const tests = [
+  ...walkerTests,
   test_backoff_progression_and_jitter_bounds,
   test_terminal_close_codes_stop_reconnect,
   test_heartbeat_missing_pong_reconnects,

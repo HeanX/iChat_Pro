@@ -566,8 +566,11 @@ async function apiFetch(url, options = {}) {
   }
   if (!resp.ok) {
     let detail = resp.statusText;
-    try { const body = await resp.json(); detail = body.error || body.detail || detail; } catch (_) {}
-    throw new Error(detail);
+    let code = null;
+    try { const body = await resp.json(); detail = body.error || body.detail || detail; code = body.error || null; } catch (_) {}
+    const err = new Error(detail);
+    err.code = code;
+    throw err;
   }
   return resp.json();
 }
@@ -1383,26 +1386,48 @@ async function syncCatchUp() {
   const storageKey = `ichat:syncCursor:${myUserId}:${convId}`;
   chatSyncInFlight[convId] = true;
   try {
-    let cursor = localStorage.getItem(storageKey) || "";
-    for (let page = 0; page < 5; page++) {
-      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-      const data = await apiFetch(`/api/conversations/${convId}/sync/${query}`);
-      for (const item of data.items || []) {
-        const payload = item.message;
-        if (!payload || messages.find((m) => m.id === payload.message_id)) continue;
-        if (payload.sender_id === myUserId) continue; // own messages arrive via accepted/local echo
-        if (payload.group_id || payload.membership_version !== undefined) {
-          handleIncomingMessage({ event: "message.group.new", data: payload });
-        } else {
-          handleIncomingMessage({ event: "message.single.new", data: payload });
+    const walker = ChatConnection.createSyncWalker({
+      maxPages: 100,
+      storage: {
+        get: () => localStorage.getItem(storageKey) || "",
+        set: (v) => localStorage.setItem(storageKey, v || ""),
+        remove: () => localStorage.removeItem(storageKey),
+      },
+      fetchPage: async (cursor) => {
+        try {
+          const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+          const data = await apiFetch(`/api/conversations/${convId}/sync/${query}`);
+          return { items: data.items || [], nextCursor: data.next_cursor || "", hasMore: !!data.has_more };
+        } catch (err) {
+          return { items: [], nextCursor: cursor, hasMore: false, errorCode: err && err.code };
         }
-      }
-      localStorage.setItem(storageKey, data.next_cursor || "");
-      if (!data.has_more) break;
-      cursor = data.next_cursor;
+      },
+      // Returns true only when the item was APPLIED (rendered or accounted
+      // for). Own messages are applied too — this device may not have that
+      // record yet (sent from another device), and skipping them would
+      // advance the cursor past real content.
+      applyItem: async (item) => {
+        const payload = item && item.message;
+        if (!payload || payload.message_id == null) return true;
+        if (messages.some((m) => m.id === payload.message_id)) return true;
+        const synthetic = {
+          event: payload.group_id !== undefined ? "message.group.new" : "message.single.new",
+          data: payload,
+        };
+        if (synthetic.event === "message.group.new") {
+          return !!(await handleGroupMessageReceived(synthetic));
+        }
+        return !!(await handlePrivateMessageReceived(synthetic));
+      },
+    });
+    const result = await walker.run();
+    if (result.status === "paused") {
+      // Safety cap reached mid-walk: applied pages already advanced the
+      // stored cursor; resume shortly.
+      setTimeout(() => {
+        if (chatConn && chatConn.isOnline()) syncCatchUp();
+      }, 2000);
     }
-  } catch (err) {
-    console.warn("[Sync] catch-up failed:", err && err.message);
   } finally {
     delete chatSyncInFlight[convId];
   }
@@ -1554,7 +1579,7 @@ async function handlePrivateMessageReceived(data) {
     file_id: payload.file_id || (fileData ? fileData.file_id : null),
   };
 
-  if (messages.some(msg => msg.id === payload.message_id)) return;
+  if (messages.some(msg => msg.id === payload.message_id)) return true;
 
   if (conv) {
     updateSidebarPreview(
@@ -1593,6 +1618,10 @@ async function handlePrivateMessageReceived(data) {
       }
     }
   }
+  // Sync items must report whether they were APPLIED (review: the cursor
+  // may only advance after a successful apply; decryption failures stop
+  // the walk without advancing).
+  return isFileMsg || !decryptError;
 }
 
 async function handleGroupMessageReceived(data) {
@@ -1641,7 +1670,7 @@ async function handleGroupMessageReceived(data) {
       file_id: payload.file_id || (fileData ? fileData.file_id : null),
     };
 
-    if (messages.some(msg => msg.id === payload.message_id)) return;
+    if (messages.some(msg => msg.id === payload.message_id)) return true;
 
     if (activeChatId === convId) {
       messages.push(newMsg);
@@ -1662,7 +1691,9 @@ async function handleGroupMessageReceived(data) {
     }
   } catch (err) {
     console.error('Failed to decrypt incoming group message:', err);
+    return false;
   }
+  return true;
 }
 
 function handleMessageStatusUpdate(data) {

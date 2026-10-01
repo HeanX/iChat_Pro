@@ -126,7 +126,8 @@
       setState(CONNECTION_STATES.RECONNECTING, { attempts: attempts });
       var base = Math.min(o.baseBackoff * Math.pow(2, attempts - 1), o.maxBackoff);
       var jitter = base * 0.25 * (o.random() * 2 - 1);
-      var delay = Math.max(100, Math.round(base + jitter));
+      // Cap AFTER jitter so the worst case never exceeds maxBackoff.
+      var delay = Math.min(Math.max(100, Math.round(base + jitter)), o.maxBackoff);
       reconnectTimer = o.timers.set(function () { connect(); }, delay);
     }
 
@@ -308,6 +309,77 @@
     };
   }
 
+  // Sync walk: applies pages in order and only advances the stored cursor
+  // after every item of a page was applied. An item that fails stops the
+  // walk with the PREVIOUS cursor intact (at-least-once); an expired-cursor
+  // error clears storage and re-snapshots once; pages with no visible items
+  // still advance the walk while the server reports has_more.
+  function createSyncWalker(opts) {
+    var o = Object.assign(
+      {
+        fetchPage: function () {},
+        applyItem: function () { return true; },
+        storage: { get: function () { return ""; }, set: function () {}, remove: function () {} },
+        maxPages: 100,
+      },
+      opts || {}
+    );
+
+    function run() {
+      var cursor = o.storage.get() || "";
+      var pages = 0;
+      var expiredRetry = false;
+
+      function step() {
+        if (pages >= o.maxPages) {
+          return Promise.resolve({ status: "paused", pages: pages });
+        }
+        pages += 1;
+        return Promise.resolve()
+          .then(function () { return o.fetchPage(cursor); })
+          .then(function (page) {
+            if (page.errorCode === "sync_cursor_expired" && !expiredRetry) {
+              // Snapshot lost: clear the stored token and re-snapshot once.
+              o.storage.remove();
+              cursor = "";
+              expiredRetry = true;
+              pages -= 1;
+              return step();
+            }
+            if (page.errorCode) {
+              return { status: "error", errorCode: page.errorCode, pages: pages };
+            }
+            var index = 0;
+            function applyNext() {
+              if (index >= page.items.length) return Promise.resolve(true);
+              var item = page.items[index];
+              index += 1;
+              return Promise.resolve()
+                .then(function () { return o.applyItem(item); })
+                .then(function (ok) {
+                  if (ok === false) return false;
+                  return applyNext();
+                });
+            }
+            return applyNext().then(function (allApplied) {
+              if (!allApplied) {
+                // Keep the PREVIOUS cursor: the failing item is re-fetched
+                // and re-applied on the next run (at-least-once).
+                return { status: "stopped", pages: pages };
+              }
+              o.storage.set(page.nextCursor);
+              cursor = page.nextCursor;
+              if (!page.hasMore) return { status: "caught-up", pages: pages };
+              return step();
+            });
+          });
+      }
+      return step();
+    }
+
+    return { run: run };
+  }
+
   return {
     STATES: CONNECTION_STATES,
     MESSAGE_STATES: MESSAGE_STATES,
@@ -315,5 +387,6 @@
     canTransitionMessage: canTransitionMessage,
     createConnection: createConnection,
     createOutbox: createOutbox,
+    createSyncWalker: createSyncWalker,
   };
 });

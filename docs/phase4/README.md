@@ -28,7 +28,7 @@
 - [风险与缺陷登记](risk-register.md)：technical-design §2.1 的 7 个风险点已全部确认并附代码行号证据。
 - [需求追踪矩阵](traceability-matrix.md)：SRS V2.0 全部 114 条 NEW-* 与任务的映射（P0 共 71 条）。
 - [基线验证报告](baseline-report.md)：main 基线复跑结果；**npm 启动器已恢复可用**，修正了 technical-design §12 的环境问题记录。
-- 第一轮 P0 任务已建为 GitHub Issues #207–#249（Android T22–T30 及依赖 Android 的验收项暂缓，启动时另建）；[tasks.md](tasks.md) 状态列已回填 Issue 编号。
+- 任务跟踪以仓库原始任务卡为准：78 项 P4 任务对应 Issues #128–#205（工程 `#127+Txx`、测试 `#181+Txx`）；2026-10-01 曾短暂建立的第一轮 P0 重复卡 #207–#249 已关闭合并回原卡。T01/T02/Test T01/Test T02 已带证据关闭（#128/#129/#182/#183）；Android T22–T30 及依赖 Android 的验收项暂缓，启动时再领取。[tasks.md](tasks.md) 状态列已指向原卡编号。
 
 ## 3. 来源与冲突处理
 

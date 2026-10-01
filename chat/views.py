@@ -795,104 +795,6 @@ def _client_payload_error_response(error, status=400):
     return JsonResponse({'error': error.code, 'detail': error.message}, status=status)
 
 
-def _normalize_forward_file_keys(file_keys_data, allowed_holder_ids):
-    if not isinstance(file_keys_data, list) or not file_keys_data:
-        return None, JsonResponse(
-            {'error': 'invalid_file_metadata', 'detail': 'file_keys is required for file forwarding.'},
-            status=400,
-        )
-
-    normalized = []
-    holder_ids = set()
-    for fk in file_keys_data:
-        if not isinstance(fk, dict):
-            return None, JsonResponse(
-                {'error': 'invalid_file_metadata', 'detail': 'Each file_key must be an object.'},
-                status=400,
-            )
-        try:
-            holder_id = int(fk.get('holder_id', 0))
-        except (TypeError, ValueError):
-            return None, JsonResponse(
-                {'error': 'invalid_file_metadata', 'detail': 'Each file_key must have a valid holder_id.'},
-                status=400,
-            )
-        if holder_id in holder_ids:
-            continue
-        holder_ids.add(holder_id)
-        if holder_id not in allowed_holder_ids:
-            return None, JsonResponse(
-                {'error': 'invalid_file_metadata', 'detail': 'file_keys may only target active members of the target conversation.'},
-                status=403,
-            )
-
-        encrypted_file_key = str(fk.get('encrypted_file_key', ''))
-        nonce = str(fk.get('nonce', ''))
-        auth_tag = str(fk.get('auth_tag', ''))
-        algorithm = str(fk.get('algorithm', 'AES-256-GCM'))
-        if not encrypted_file_key or not nonce or not auth_tag:
-            return None, JsonResponse(
-                {'error': 'invalid_file_metadata', 'detail': 'Each file_key requires encrypted_file_key, nonce, and auth_tag.'},
-                status=400,
-            )
-        if algorithm != 'AES-256-GCM':
-            return None, JsonResponse(
-                {'error': 'invalid_file_metadata', 'detail': f'Unsupported file key algorithm: {algorithm}.'},
-                status=400,
-            )
-
-        try:
-            sender_key_version = int(fk.get('sender_key_version', 0)) or None
-            receiver_key_version = int(fk.get('receiver_key_version', 0)) or None
-            membership_version = int(fk.get('membership_version', 0)) or None
-        except (TypeError, ValueError):
-            return None, JsonResponse(
-                {'error': 'invalid_file_metadata', 'detail': 'file_key key versions must be integers.'},
-                status=400,
-            )
-
-        normalized.append({
-            'holder_id': holder_id,
-            'encrypted_file_key': encrypted_file_key,
-            'nonce': nonce,
-            'auth_tag': auth_tag,
-            'algorithm': algorithm,
-            'sender_key_version': sender_key_version,
-            'receiver_key_version': receiver_key_version,
-            'membership_version': membership_version,
-            'sender_ephemeral_public_key': str(fk.get('sender_ephemeral_public_key', '') or '') or None,
-        })
-
-    if holder_ids != allowed_holder_ids:
-        return None, JsonResponse(
-            {'error': 'invalid_file_metadata', 'detail': 'file_keys must cover every active member of the target conversation.'},
-            status=400,
-        )
-
-    return normalized, None
-
-
-def _save_forward_file_keys(forward_file, file_keys, sender):
-    for fk in file_keys:
-        EncryptedFileKey.objects.update_or_create(
-            file=forward_file,
-            holder_id=fk['holder_id'],
-            defaults={
-                'sender': sender,
-                'encrypted_file_key': fk['encrypted_file_key'],
-                'nonce': fk['nonce'],
-                'auth_tag': fk['auth_tag'],
-                'algorithm': fk['algorithm'],
-                'sender_key_version': fk['sender_key_version'],
-                'receiver_key_version': fk['receiver_key_version'],
-                'membership_version': fk['membership_version'],
-                'sender_ephemeral_public_key': fk.get('sender_ephemeral_public_key'),
-            },
-        )
-
-
-@login_required(login_url='login')
-@require_POST
 def forward_message_view(request, conversation_id):
     """Forward an encrypted message using the same validation as WebSocket sends."""
     data = _json_body(request)
@@ -981,25 +883,15 @@ def forward_message_view(request, conversation_id):
         if forwarded_reply_to_id:
             payload['reply_to_message_id'] = forwarded_reply_to_id
 
-        file_keys = []
-        if forward_file:
-            file_keys, file_error = _normalize_forward_file_keys(
-                data.get('file_keys', []),
-                set(active_members.values_list('user_id', flat=True)),
-            )
-            if file_error:
-                return file_error
-            # Wrapped keys must exist before the service validates file
-            # coverage for the target members.
-            _save_forward_file_keys(forward_file, file_keys, request.user)
-
         # T32 review fix: forwards go through the unified service, so a
         # client_message_id already used in ANOTHER conversation returns
         # 409 idempotency_conflict instead of silently returning that other
         # conversation's message.
         try:
             result = messaging.send_private_message(
-                request.user.pk, payload, enforce_file_conversation=False,
+                request.user.pk, payload,
+                enforce_file_conversation=False,
+                pending_file_keys=data.get('file_keys'),
             )
         except PayloadError as error:
             return JsonResponse(
@@ -1060,21 +952,13 @@ def forward_message_view(request, conversation_id):
         if forwarded_reply_to_id:
             payload['reply_to_message_id'] = forwarded_reply_to_id
 
-        file_keys = []
-        if forward_file:
-            file_keys, file_error = _normalize_forward_file_keys(
-                data.get('file_keys', []),
-                active_member_ids,
-            )
-            if file_error:
-                return file_error
-            _save_forward_file_keys(forward_file, file_keys, request.user)
-
         # Same unified service as the normal group send: idempotency digest,
         # membership version and recipient coverage are enforced identically.
         try:
             result = messaging.send_group_message(
-                request.user.pk, payload, enforce_file_conversation=False,
+                request.user.pk, payload,
+                enforce_file_conversation=False,
+                pending_file_keys=data.get('file_keys'),
             )
         except PayloadError as error:
             return JsonResponse(
@@ -3935,47 +3819,9 @@ def send_file_message_view(request, file_id):
         except (TypeError, ValueError):
             return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'reply_to_message_id must be an integer.'}, status=400)
 
-    # ── Save EncryptedFileKey records ──
-    file_keys_data = data.get('file_keys', [])
-    if not isinstance(file_keys_data, list) or not file_keys_data:
-        return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'file_keys is required.'}, status=400)
-
-    normalized_file_keys, file_keys_error = _normalize_forward_file_keys(
-        file_keys_data,
-        active_member_ids,
-    )
-    if file_keys_error:
-        return file_keys_error
-    file_keys_data = normalized_file_keys
-
-    holder_ids = set()
-    for fk in file_keys_data:
-        try:
-            holder_id = int(fk.get('holder_id', 0))
-        except (TypeError, ValueError):
-            return JsonResponse({'error': 'invalid_file_metadata', 'detail': 'Each file_key must have a valid holder_id.'}, status=400)
-
-        if holder_id in holder_ids:
-            continue
-        holder_ids.add(holder_id)
-
-        EncryptedFileKey.objects.update_or_create(
-            file=ef,
-            holder_id=holder_id,
-            defaults={
-                'sender': request.user,
-                'encrypted_file_key': str(fk.get('encrypted_file_key', '')),
-                'nonce': str(fk.get('nonce', '')),
-                'auth_tag': str(fk.get('auth_tag', '')),
-                'algorithm': str(fk.get('algorithm', 'AES-256-GCM')),
-                'sender_key_version': fk.get('sender_key_version'),
-                'receiver_key_version': fk.get('receiver_key_version'),
-                'membership_version': fk.get('membership_version'),
-                'sender_ephemeral_public_key': fk.get('sender_ephemeral_public_key'),
-            },
-        )
-
-    # ── Create message ──
+    # ── Create message ── (wrapped file_keys are normalized, validated
+    # against the CURRENT members and persisted by the messaging service on
+    # the created path only — replays and rejections never touch key material)    # ── Create message ──
     if conversation_type == 'single':
         ciphertext = str(data.get('ciphertext', ''))
         nonce = str(data.get('nonce', ''))
@@ -4000,7 +3846,9 @@ def send_file_message_view(request, file_id):
         payload['reply_to_message_id'] = reply_to_message_id
         try:
             result = messaging.send_private_message(
-                request.user.pk, payload, enforce_file_conversation=False,
+                request.user.pk, payload,
+                enforce_file_conversation=False,
+                pending_file_keys=data.get('file_keys'),
             )
         except PayloadError as error:
             return JsonResponse(
@@ -4050,7 +3898,11 @@ def send_file_message_view(request, file_id):
         payload['file_id'] = ef.pk
         payload['reply_to_message_id'] = reply_to_message_id
         try:
-            result = messaging.send_group_message(request.user.pk, payload)
+            result = messaging.send_group_message(
+                request.user.pk, payload,
+                enforce_file_conversation=False,
+                pending_file_keys=data.get('file_keys'),
+            )
         except PayloadError as error:
             return JsonResponse(
                 {'error': error.code, 'detail': error.message},

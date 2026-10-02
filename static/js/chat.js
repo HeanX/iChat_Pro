@@ -68,35 +68,70 @@ async function secureKvHydrate() {
   const isDesktop = !!window.iChatDesktop;
   const keys = [CHAT_DRAFTS_STORAGE_KEY, ...aiHistoryStorageKeys()];
   for (const key of keys) {
-    // Edits made while hydrating win - never clobber newer user input.
-    if (secureKvDirty.has(key)) continue;
+    if (secureKvDirty.has(key)) continue; // newer edit already in cache
     const raw = localStorage.getItem(key);
-    if (!raw) { secureKvCache[key] = null; continue; }
+    if (!raw) continue; // nothing on disk
+    const epochAtStart = secureKvEpoch[key] || 0;
+    let value = null;
+    let parsed = false;
     if (raw.startsWith("enc:")) {
-      // NEVER remove a blob we failed to decrypt (review round 3).
+      // NEVER remove a blob we failed to decrypt - it may still be the only
+      // copy of the data (review round 4).
       if (!bridge) continue;
-      let decrypted = null;
       try {
-        decrypted = JSON.parse(await bridge.decrypt(raw.slice(4)));
+        value = JSON.parse(await bridge.decrypt(raw.slice(4)));
+        parsed = true;
       } catch (err) {
         console.warn("[SecureKV] ignoring undecryptable blob:", key);
         continue;
       }
-      if (secureKvDirty.has(key)) continue; // edit landed during decrypt
-      secureKvCache[key] = decrypted;
-      continue; // encrypted blob stays as-is (already at rest safely)
     } else {
-      // Plaintext legacy value: parse, cache, then remove the plaintext.
-      let parsed = null;
-      try { parsed = JSON.parse(raw); } catch (_) { parsed = null; }
-      localStorage.removeItem(key);
+      try {
+        value = JSON.parse(raw);
+        parsed = true;
+      } catch (err) {
+        // Unparsable plaintext: leave the record untouched.
+        console.warn("[SecureKV] ignoring unparsable legacy record:", key);
+        continue;
+      }
     }
-    // Migration markers retained below for the non-plaintext path.
-    if (secureKvCache[key] != null && (!isDesktop || bridge)) {
-      secureKvWrite(key, secureKvCache[key]);
-    }
+    // A clear() or write() landed while we were decrypting - skip.
+    if (secureKvDirty.has(key) || (secureKvEpoch[key] || 0) !== epochAtStart) continue;
+    secureKvCache[key] = value;
+    if (raw.startsWith("enc:")) continue; // already safely at rest
+    if (!(bridge && isDesktop)) continue; // web/desktop-no-bridge: plaintext stays (documented)
+    // Desktop with the bridge: migrate the plaintext to an encrypted copy;
+    // remove the plaintext ONLY after the encrypted copy is on disk.
+    await bridge.isAvailable().then((available) => {
+      if (!available) return false;
+      return bridge.encrypt(JSON.stringify(value)).then((cipher) => {
+        localStorage.setItem(key, "enc:" + cipher);
+        return true;
+      });
+    }).then((persisted) => {
+      if (persisted) localStorage.removeItem(key);
+    }).catch(() => {});
   }
   secureKvReady = true;
+}
+
+function markPersistState(key, ok) {
+  // T21 review: a silent persist failure loses data on reload - surface it
+  // to the user instead of only logging.
+  let banner = document.getElementById("ichat-persist-warning");
+  if (ok) {
+    if (banner && !banner.dataset.active) banner.remove();
+    return;
+  }
+  banner.dataset.active = "1";
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "ichat-persist-warning";
+    banner.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:2147483647;" +
+      "background:#b3261e;color:#fff;padding:8px 16px;font:14px sans-serif;text-align:center;";
+    banner.textContent = "警告：内容超出本地存储上限，暂时无法保存。请缩短内容（或清理 AI 历史）后重试。";
+    document.body.appendChild(banner);
+  }
 }
 
 function secureKvWrite(key, value) {
@@ -112,13 +147,16 @@ function secureKvWrite(key, value) {
       return bridge.encrypt(JSON.stringify(value)).then((cipher) => {
         if (secureKvEpoch[key] !== epoch) return; // cleared/rewritten meanwhile
         localStorage.setItem(key, "enc:" + cipher);
+        markPersistState(key, true);
       });
     }).catch((err) => {
+      markPersistState(key, false);
       console.error("[SecureKV] encrypted persist FAILED for", key,
         "- value survives in memory but is lost on reload:", err);
     });
   } else if (!isDesktop) {
     localStorage.setItem(key, JSON.stringify(value));
+    markPersistState(key, true);
   }
   // Desktop without a working bridge: memory only - never plaintext.
 }

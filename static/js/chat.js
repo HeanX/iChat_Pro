@@ -1699,8 +1699,23 @@ async function handlePrivateMessageReceived(data) {
   }
 
   if (activeChatId === convId) {
-    messages.push(newMsg);
+    // T33 review: a resumed sync walk can deliver older messages after
+    // newer realtime ones - insert by timeline position instead of
+    // appending, and move the rendered node to the right spot.
+    const insertIdx = ChatConnection.timelineInsertIndex(messages, newMsg);
+    messages.splice(insertIdx, 0, newMsg);
     appendMessageElement(newMsg);
+    const following = messages[insertIdx + 1];
+    if (following) {
+      const el = document.querySelector('.message-bubble-custom[data-message-id="' + newMsg.id + '"]');
+      const nextEl = document.querySelector('.message-bubble-custom[data-message-id="' + following.id + '"]');
+      if (el && nextEl && el.parentNode !== nextEl.parentNode) {
+        // not adjacent in DOM: move before the following bubble
+        nextEl.parentNode.insertBefore(el.parentNode.querySelector('.message-bubble-custom[data-message-id="' + newMsg.id + '"]') || el, nextEl);
+      } else if (el && nextEl) {
+        nextEl.parentNode.insertBefore(el, nextEl);
+      }
+    }
     scrollToBottom();
     // Send delivery receipt (only for messages from others)
     if (!newMsg.isSelf && wsClient) {
@@ -1785,8 +1800,15 @@ async function handleGroupMessageReceived(data) {
     }
 
     if (activeChatId === convId) {
-      messages.push(newMsg);
+      const insertIdx = ChatConnection.timelineInsertIndex(messages, newMsg);
+      messages.splice(insertIdx, 0, newMsg);
       appendMessageElement(newMsg);
+      const following = messages[insertIdx + 1];
+      if (following) {
+        const el = document.querySelector('.message-bubble-custom[data-message-id="' + newMsg.id + '"]');
+        const nextEl = document.querySelector('.message-bubble-custom[data-message-id="' + following.id + '"]');
+        if (el && nextEl) nextEl.parentNode.insertBefore(el, nextEl);
+      }
       scrollToBottom();
     } else {
       if (conv) {

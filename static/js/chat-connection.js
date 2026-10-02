@@ -350,6 +350,17 @@
     };
   }
 
+  // Insertion index that keeps a chronologically ordered list stable even
+  // when a paused sync walk resumes and applies older messages after newer
+  // realtime ones (review round 6). ISO-8601 strings compare chronologically.
+  function timelineInsertIndex(list, item) {
+    var idx = list.length;
+    while (idx > 0 && String(list[idx - 1].created_at) > String(item.created_at)) {
+      idx -= 1;
+    }
+    return idx;
+  }
+
   function createSyncWalker(opts) {
     var o = Object.assign(
       {
@@ -440,5 +451,6 @@
     createSyncWalker: createSyncWalker,
     createApplyQueue: createApplyQueue,
     createSeenRegistry: createSeenRegistry,
+    timelineInsertIndex: timelineInsertIndex,
   };
 });

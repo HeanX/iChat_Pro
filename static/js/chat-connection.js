@@ -354,11 +354,33 @@
   // when a paused sync walk resumes and applies older messages after newer
   // realtime ones (review round 6). ISO-8601 strings compare chronologically.
   function timelineInsertIndex(list, item) {
+    // Stable key: (created_at, id) — matches the history API ordering and
+    // keeps same-timestamp messages in id order regardless of arrival.
     var idx = list.length;
-    while (idx > 0 && String(list[idx - 1].created_at) > String(item.created_at)) {
-      idx -= 1;
+    while (idx > 0) {
+      var prev = list[idx - 1];
+      if (String(prev.created_at) > String(item.created_at)) { idx -= 1; continue; }
+      if (String(prev.created_at) < String(item.created_at)) break;
+      if ((prev.id || 0) > (item.id || 0)) { idx -= 1; continue; }
+      break;
     }
     return idx;
+  }
+
+  // Move the COMPLETE message row (not just the bubble child) of newId
+  // before the row of followingId (review round 6: moving the bubble child
+  // nested old messages inside the newer message's row, so context menus
+  // and selection targeted the wrong message).
+  function repositionMessageRow(newId, followingId) {
+    if (typeof document === "undefined") return false;
+    var el = document.querySelector('.message-bubble-custom[data-message-id="' + newId + '"]');
+    var nextEl = document.querySelector('.message-bubble-custom[data-message-id="' + followingId + '"]');
+    if (!el || !nextEl) return false;
+    var row = el.closest(".message-row");
+    var nextRow = nextEl.closest(".message-row");
+    if (!row || !nextRow || row === nextRow) return false;
+    nextRow.parentNode.insertBefore(row, nextRow);
+    return true;
   }
 
   function createSyncWalker(opts) {
@@ -452,5 +474,6 @@
     createApplyQueue: createApplyQueue,
     createSeenRegistry: createSeenRegistry,
     timelineInsertIndex: timelineInsertIndex,
+    repositionMessageRow: repositionMessageRow,
   };
 });

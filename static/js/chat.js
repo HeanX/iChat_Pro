@@ -1707,14 +1707,7 @@ async function handlePrivateMessageReceived(data) {
     appendMessageElement(newMsg);
     const following = messages[insertIdx + 1];
     if (following) {
-      const el = document.querySelector('.message-bubble-custom[data-message-id="' + newMsg.id + '"]');
-      const nextEl = document.querySelector('.message-bubble-custom[data-message-id="' + following.id + '"]');
-      if (el && nextEl && el.parentNode !== nextEl.parentNode) {
-        // not adjacent in DOM: move before the following bubble
-        nextEl.parentNode.insertBefore(el.parentNode.querySelector('.message-bubble-custom[data-message-id="' + newMsg.id + '"]') || el, nextEl);
-      } else if (el && nextEl) {
-        nextEl.parentNode.insertBefore(el, nextEl);
-      }
+      ChatConnection.repositionMessageRow(newMsg.id, following.id);
     }
     scrollToBottom();
     // Send delivery receipt (only for messages from others)
@@ -1805,9 +1798,7 @@ async function handleGroupMessageReceived(data) {
       appendMessageElement(newMsg);
       const following = messages[insertIdx + 1];
       if (following) {
-        const el = document.querySelector('.message-bubble-custom[data-message-id="' + newMsg.id + '"]');
-        const nextEl = document.querySelector('.message-bubble-custom[data-message-id="' + following.id + '"]');
-        if (el && nextEl) nextEl.parentNode.insertBefore(el, nextEl);
+        ChatConnection.repositionMessageRow(newMsg.id, following.id);
       }
       scrollToBottom();
     } else {

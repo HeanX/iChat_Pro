@@ -10,7 +10,7 @@
  *   runserver is spawned on ICHAT_HOST/ICHAT_PORT (default 127.0.0.1:8000).
  *   This branch is intentionally the only one that spawns Python.
  */
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -29,6 +29,37 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 let djangoProcess = null;
 let mainWindow = null;
 let offlinePollTimer = null;
+
+// T21: safeStorage bridge - encrypt/decrypt short secrets (key material)
+// with OS-level protection (DPAPI on Windows). Only the app's own frames
+// may invoke; payloads are size-capped.
+function senderIsTrusted(event) {
+  const frameUrl = (event.senderFrame && event.senderFrame.url) || '';
+  return isAppOrigin(frameUrl) || frameUrl.startsWith('file://');
+}
+
+function registerSecureStorageIpc() {
+  ipcMain.handle('ichat:secure-storage:is-available', (event) => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    return safeStorage.isEncryptionAvailable();
+  });
+  ipcMain.handle('ichat:secure-storage:encrypt', (event, plainText) => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    if (typeof plainText !== 'string' || plainText.length > 16384) {
+      throw new Error('invalid payload');
+    }
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('safeStorage unavailable');
+    return 'enc:' + safeStorage.encryptString(plainText).toString('base64');
+  });
+  ipcMain.handle('ichat:secure-storage:decrypt', (event, cipherB64) => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    if (typeof cipherB64 !== 'string' || !cipherB64.startsWith('enc:')) {
+      throw new Error('invalid payload');
+    }
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('safeStorage unavailable');
+    return safeStorage.decryptString(Buffer.from(cipherB64.slice(4), 'base64'));
+  });
+}
 
 function localPythonCandidates() {
   const candidates = [];
@@ -277,6 +308,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  registerSecureStorageIpc();
   startDjangoServer(); // dev mode only
 
   if (APP_CONFIG.mode === 'unconfigured') {

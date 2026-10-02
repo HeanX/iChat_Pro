@@ -7070,14 +7070,14 @@ async function keyMgrUpload() {
   }
 }
 
-function keyMgrExport() {
+async function keyMgrExport() {
   try {
     const kmgr = _kmgr();
     if (!kmgr || !kmgr.loadCurrentRecord()) {
       _showKeyMsg('No keys to export. Initialize them first.', true);
       return;
     }
-    kmgr.exportBackup();
+    await kmgr.exportBackup();
     _showKeyMsg('Backup downloaded. Keep it safe.');
   } catch (err) {
     _showKeyMsg(`Export failed: ${err.message}`, true);

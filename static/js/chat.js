@@ -1777,6 +1777,8 @@ async function handleGroupMessageReceived(data) {
       file_id: payload.file_id || (fileData ? fileData.file_id : null),
     };
 
+    if (Number(convId) === Number(activeChatId) &&
+        messages.some(msg => msg.id === payload.message_id)) return true;
     if (Number(convId) !== Number(activeChatId) &&
         backgroundSeen(Number(convId), payload.message_id)) {
       return true; // already applied via the other channel

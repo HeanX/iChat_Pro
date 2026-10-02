@@ -1719,6 +1719,7 @@ async function handlePrivateMessageReceived(data) {
     if (following) {
       ChatConnection.repositionMessageRow(newMsg.id, following.id);
     }
+    patchMessageRowInPlace(newMsg);
     scrollToBottom();
     // Send delivery receipt (only for messages from others)
     if (!newMsg.isSelf && wsClient) {
@@ -1811,6 +1812,7 @@ async function handleGroupMessageReceived(data) {
       if (following) {
         ChatConnection.repositionMessageRow(newMsg.id, following.id);
       }
+      patchMessageRowInPlace(newMsg);
       scrollToBottom();
     } else {
       if (conv) {
@@ -1888,6 +1890,8 @@ function handleMessageAccepted(data) {
     var bubble = document.querySelector('.message-bubble-custom[data-message-id="' + oldId + '"]');
     if (bubble) {
       bubble.setAttribute('data-message-id', msg.id);
+      var acceptedRow = bubble.closest('.message-row');
+      if (acceptedRow) acceptedRow.dataset.rowMessageId = String(payload.message_id);
       // Also update the selection checkbox id if present
       var checkbox = document.getElementById('msg-select-check-' + oldId);
       if (checkbox) checkbox.id = 'msg-select-check-' + msg.id;
@@ -5731,6 +5735,7 @@ function createMessageBubbleElementNew(msg, groupMeta, conv) {
   var _a = groupMeta, isConsecutive = _a.isConsecutive, isFirstInGroup = _a.isFirstInGroup, isLastInGroup = _a.isLastInGroup;
   var div = document.createElement("div");
   div.className = "message-row " + (isConsecutive ? "message-row-grouped " : "") + (isFirstInGroup ? "message-row-group-first " : "") + (isLastInGroup ? "message-row-group-last" : "");
+  if (msg && msg.id != null) div.dataset.rowMessageId = String(msg.id);
 
   if (msg.isSystem || msg.decryptError) {
     div.className += " message-row-system";

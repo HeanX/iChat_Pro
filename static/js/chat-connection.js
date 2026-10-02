@@ -371,14 +371,24 @@
   // before the row of followingId (review round 6: moving the bubble child
   // nested old messages inside the newer message's row, so context menus
   // and selection targeted the wrong message).
+  function tagMessageRows() {
+    // Give every bubble-bearing row a stable row-level id so recalled and
+    // decrypt-failed rows (no bubble) never break row lookups. Rows without
+    // any bubble stay untagged; callers tag those directly on append.
+    var rows = document.querySelectorAll(".message-row:not([data-row-message-id])");
+    rows.forEach(function (row) {
+      var bubble = row.querySelector("[data-message-id]");
+      if (bubble) row.dataset.rowMessageId = bubble.getAttribute("data-message-id");
+    });
+  }
+
   function repositionMessageRow(newId, followingId) {
     if (typeof document === "undefined") return false;
-    var el = document.querySelector('.message-bubble-custom[data-message-id="' + newId + '"]');
-    var nextEl = document.querySelector('.message-bubble-custom[data-message-id="' + followingId + '"]');
-    if (!el || !nextEl) return false;
-    var row = el.closest(".message-row");
-    var nextRow = nextEl.closest(".message-row");
-    if (!row || !nextRow || row === nextRow) return false;
+    tagMessageRows();
+    var row = document.querySelector('[data-row-message-id="' + newId + '"]');
+    var nextRow = document.querySelector('[data-row-message-id="' + followingId + '"]');
+    if (!row || !nextRow) return false;
+    if (row === nextRow) return false;
     nextRow.parentNode.insertBefore(row, nextRow);
     return true;
   }

@@ -44,6 +44,10 @@ function secureKvClear(key) {
   secureKvDirty.delete(key);
   delete secureKvCache[key];
   localStorage.removeItem(key);
+  // T21 review: a cleared key can no longer fail to persist - drop its
+  // failure state and refresh the warning banner.
+  failedPersistKeys.delete(key);
+  if (typeof updatePersistBanner === "function") updatePersistBanner();
 }
 
 function desktopSecureBridge() {

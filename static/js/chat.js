@@ -28,6 +28,57 @@ let wsClient = null;             // v1 /ws/chat/ client
 let chatConn = null;             // T33: ChatConnection instance
 let chatOutbox = null;           // T33: message status/outbox instance
 let chatSyncInFlight = {};       // per-conversation sync catch-up guard
+
+// ── T21: encrypted-at-rest KV (drafts, AI history) ──────────────────────
+// Desktop: values are safeStorage-encrypted before touching localStorage.
+// Web fallback: plaintext (documented limitation, M4 replaces). Reads are
+// served from an in-memory cache hydrated at startup - sync callers keep
+// working, writes update the cache immediately and persist async.
+const secureKvCache = {};
+let secureKvReady = false;
+
+function desktopSecureBridge() {
+  return window.iChatDesktop && window.iChatDesktop.secureStorage
+    ? window.iChatDesktop.secureStorage
+    : null;
+}
+
+async function secureKvHydrate(keys) {
+  const bridge = desktopSecureBridge();
+  for (const key of keys) {
+    const raw = localStorage.getItem(key);
+    if (!raw) { secureKvCache[key] = null; continue; }
+    if (raw.startsWith("enc:")) {
+      secureKvCache[key] = null;
+      if (bridge) {
+        try {
+          secureKvCache[key] = JSON.parse(await bridge.decrypt(raw.slice(4)));
+        } catch (err) {
+          console.warn("[SecureKV] ignoring undecryptable blob:", key);
+        }
+      }
+      continue;
+    }
+    try { secureKvCache[key] = JSON.parse(raw); } catch (_) { secureKvCache[key] = null; }
+  }
+  secureKvReady = true;
+}
+
+function secureKvWrite(key, value) {
+  secureKvCache[key] = value;
+  const bridge = desktopSecureBridge();
+  if (bridge) {
+    bridge.isAvailable().then((available) => {
+      if (!available) return; // desktop without OS encryption: memory only
+      return bridge.encrypt(JSON.stringify(value)).then((cipher) => {
+        localStorage.setItem(key, "enc:" + cipher);
+      });
+    }).catch(() => {});
+  } else {
+    // Web fallback: plaintext (documented limitation).
+    localStorage.setItem(key, JSON.stringify(value));
+  }
+}
 let msgApplyQueue = null;        // T33: serialized message application
 const backgroundSeenRegistry = ChatConnection.createSeenRegistry(500);
 
@@ -213,19 +264,14 @@ function normalizeChatData(chat) {
 const CHAT_DRAFTS_STORAGE_KEY = "ichat_drafts";
 
 function readChatDrafts() {
-  try {
-    const raw = localStorage.getItem(CHAT_DRAFTS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch (_) {
-    return {};
-  }
+  const cached = secureKvCache[CHAT_DRAFTS_STORAGE_KEY];
+  return cached && typeof cached === "object" ? cached : {};
 }
 
 function writeChatDrafts(drafts) {
-  try {
-    localStorage.setItem(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(drafts || {}));
-  } catch (_) {}
+  // T21: persisted encrypted on desktop builds (drafts may contain private
+  // message text). Reads come from the in-memory cache.
+  secureKvWrite(CHAT_DRAFTS_STORAGE_KEY, drafts || {});
 }
 
 function getConversationDraft(conversationId) {
@@ -1430,6 +1476,12 @@ function connectWebSocket() {
     },
   });
   chatConn.connect();
+
+  // T21: hydrate the encrypted-at-rest KV (drafts, AI history) once, then
+  // refresh any visible draft preview from the decrypted cache.
+  secureKvHydrate([CHAT_DRAFTS_STORAGE_KEY, AI_HISTORY_KEY, AI_HISTORY_KEY + getAiHistoryKey()]).then(() => {
+    if (activeChatId) refreshConversationDraftPreview(activeChatId);
+  });
 
   // T33: immediate retry when the network or the tab comes back.
   window.addEventListener("online", () => chatConn.networkUp());
@@ -8777,15 +8829,14 @@ function getAiModelSettingsKey(sessionId = activeAiAssistantId) {
 }
 
 function getAiHistory(sessionId = activeAiAssistantId) {
-  try {
-    return JSON.parse(localStorage.getItem(getAiHistoryKey(sessionId)) || '[]');
-  } catch (err) {
-    return [];
-  }
+  // T21: served from the secure-KV cache (hydrated at startup, encrypted at
+  // rest on desktop builds) - AI history may contain user prompts.
+  const cached = secureKvCache[getAiHistoryKey(sessionId)];
+  return Array.isArray(cached) ? cached : [];
 }
 
 function setAiHistory(history, sessionId = activeAiAssistantId) {
-  localStorage.setItem(getAiHistoryKey(sessionId), JSON.stringify(history || []));
+  secureKvWrite(getAiHistoryKey(sessionId), history || []);
 }
 
 function getAiDisplayModel() {

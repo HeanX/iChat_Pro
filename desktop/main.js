@@ -19,7 +19,15 @@ const { spawn } = require('child_process');
 
 const { normalizeOrigin, resolveAppConfig } = require('./app-config');
 
-const APP_CONFIG = resolveAppConfig(process.env, process.argv);
+// T21 review: the installer carries a DEFAULT cloud address - no env var
+// needed for the normal user. ICHAT_SERVER_URL still overrides.
+let DEFAULT_SERVER_URL = '';
+try { DEFAULT_SERVER_URL = require('./defaults.json').serverUrl || ''; } catch (e) {}
+
+const APP_CONFIG = resolveAppConfig(
+  DEFAULT_SERVER_URL ? { ...process.env, ICHAT_SERVER_URL: process.env.ICHAT_SERVER_URL || DEFAULT_SERVER_URL } : process.env,
+  process.argv,
+);
 const CLOUD_MODE = APP_CONFIG.mode === 'cloud';
 const DEV_MODE = APP_CONFIG.mode === 'dev';
 const APP_ORIGIN = APP_CONFIG.origin || '';
@@ -53,7 +61,7 @@ function registerSecureStorageIpc() {
   });
   ipcMain.handle('ichat:secure-storage:decrypt', (event, cipherB64) => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
-    if (typeof cipherB64 !== 'string' || !cipherB64.startsWith('enc:')) {
+    if (typeof cipherB64 !== 'string' || !cipherB64.startsWith('enc:') || cipherB64.length > 65536) {
       throw new Error('invalid payload');
     }
     if (!safeStorage.isEncryptionAvailable()) throw new Error('safeStorage unavailable');

@@ -633,6 +633,13 @@ function test_timeline_insert_index_keeps_order_after_resume() {
   // Equal timestamps append after the last equal one (stable).
   const idx2 = ChatConnection.timelineInsertIndex(list, { created_at: "2026-10-01T10:00:02Z", id: 10101 });
   assert(idx2 >= 1, "equal timestamp inserts after the earlier equal one");
+  // ID tiebreak: 102 arrived first, the older-id 101 must insert BEFORE it
+  // to match the history API's (created_at, id) ordering.
+  const list2 = [
+    { created_at: "2026-10-01T10:00:02Z", id: 102 },
+  ];
+  const idx3 = ChatConnection.timelineInsertIndex(list2, { created_at: "2026-10-01T10:00:02Z", id: 101 });
+  assert(idx3 === 0, "same timestamp orders by id: " + idx3);
   console.log("✓ timeline insert index keeps order across sync resume");
 }
 

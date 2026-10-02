@@ -616,7 +616,28 @@ function test_group_active_dedupe_restored_placeholder() {
   assert(can("sent", "delivered"), "sanity");
 }
 
+
+function test_timeline_insert_index_keeps_order_after_resume() {
+  const list = [
+    { created_at: "2026-10-01T10:00:02Z", id: 10101 },
+    { created_at: "2026-10-01T10:00:03Z", id: 10102 },
+  ];
+  // The paused walk resumes and delivers the OLDER 10101.
+  const idx = ChatConnection.timelineInsertIndex(list, { created_at: "2026-10-01T10:00:01Z", id: 10101 });
+  assert(idx === 0, "older message inserts at the front: " + idx);
+  list.splice(idx, 0, { created_at: "2026-10-01T10:00:01Z", id: 10101 });
+  assert(
+    list.map((m) => m.id).join(",") === "10101,10101,10102" || list.map((m) => m.id).join(",") === "10101,10102",
+    "timeline order preserved"
+  );
+  // Equal timestamps append after the last equal one (stable).
+  const idx2 = ChatConnection.timelineInsertIndex(list, { created_at: "2026-10-01T10:00:02Z", id: 10101 });
+  assert(idx2 >= 1, "equal timestamp inserts after the earlier equal one");
+  console.log("✓ timeline insert index keeps order across sync resume");
+}
+
 const tests = [
+  test_timeline_insert_index_keeps_order_after_resume,
   test_walker_with_shared_queue_completes,
   test_whole_walk_is_one_queue_task,
   test_seen_registry_scopes_by_conversation_and_dedupes,

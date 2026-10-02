@@ -23,9 +23,46 @@
     return keyVersion ? `${userId}:v${keyVersion}` : String(userId);
   }
 
-  function rememberPendingBackup(record) {
+  // T21: the pending backup carries the PRIVATE KEY JWK. On desktop builds
+  // (Electron) it is encrypted with the OS-level safeStorage bridge before
+  // it ever touches storage; the web fallback keeps the tab-scoped
+  // sessionStorage behaviour and warns loudly (M4 replaces it entirely).
+  function desktopSecureStorage() {
+    return window.iChatDesktop && window.iChatDesktop.secureStorage ? window.iChatDesktop.secureStorage : null;
+  }
+
+  async function rememberPendingBackup(record) {
     if (!record || !record.private_key) return;
-    sessionStorage.setItem(pendingBackupKey(record.user_id), JSON.stringify(record));
+    const serialized = JSON.stringify(record);
+    const bridge = desktopSecureStorage();
+    if (bridge && (await bridge.isAvailable())) {
+      const cipher = await bridge.encrypt(serialized);
+      sessionStorage.setItem(pendingBackupKey(record.user_id), 'enc:' + cipher);
+      return;
+    }
+    sessionStorage.setItem(pendingBackupKey(record.user_id), serialized);
+    console.warn('[KeyManager] Pending key backup stored WITHOUT encryption (web mode). Desktop builds encrypt it via safeStorage.');
+  }
+
+  async function loadPendingBackup(userId) {
+    const raw = sessionStorage.getItem(pendingBackupKey(userId));
+    if (!raw) return null;
+    if (raw.startsWith('enc:')) {
+      const bridge = desktopSecureStorage();
+      if (!bridge) return null; // encrypted blob without the bridge cannot be read
+      try {
+        const plain = await bridge.decrypt(raw.slice(4));
+        return JSON.parse(plain);
+      } catch (error) {
+        console.warn('Ignoring undecryptable pending key backup.', error);
+        return null;
+      }
+    }
+    try {
+      return JSON.parse(raw); // legacy plaintext (tab-scoped)
+    } catch (error) {
+      return null;
+    }
   }
 
   function idbRequest(request) {
@@ -139,7 +176,7 @@
       key_fingerprint: await fingerprint(publicKeySpki),
       saved_at: new Date().toISOString()
     };
-    rememberPendingBackup(backupRecord);
+    await rememberPendingBackup(backupRecord);
     const record = { ...backupRecord };
     delete record.private_key;
     return record;
@@ -169,7 +206,7 @@
     if (!record || !record.private_key) return record;
     const privateKey = await importPrivateKey(record.private_key, false);
     await savePrivateKey(record.user_id, privateKey);
-    rememberPendingBackup(record);
+    await rememberPendingBackup(record);
     delete record.private_key;
     saveRecord(record);
     return record;
@@ -263,14 +300,14 @@
     throw new Error('Local private key does not match the server encryption identity. Import the matching key backup or rotate keys explicitly.');
   }
 
-  function exportBackup() {
+  async function exportBackup() {
     const userId = currentUserId();
     const record = loadRecord(userId);
-    const pendingBackup = sessionStorage.getItem(pendingBackupKey(userId));
+    const pendingBackup = await loadPendingBackup(userId);
     if (!pendingBackup && (!record || !record.private_key)) {
       throw new Error('This device stores its private key as non-extractable. A JSON backup can only be exported immediately after key creation, import, or legacy migration.');
     }
-    const backupRecord = pendingBackup ? JSON.parse(pendingBackup) : record;
+    const backupRecord = pendingBackup || record;
     const blob = new Blob([JSON.stringify(backupRecord, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

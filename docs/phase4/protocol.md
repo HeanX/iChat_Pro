@@ -90,3 +90,18 @@ GET /api/conversations/{id}/sync/?cursor=&limit=100
 
 - **不回填历史**：事件日志自部署起累积；部署前的旧历史仍走分页接口（其排序已加 `(created_at, id)` 稳定 tiebreaker，T35）。
 - 客户端仍以实时推送为主通道，sync 用于断线补取与对账；`group_send` 成功不代表持久送达（见 technical-design §1）。
+
+
+## 7. 敏感数据存储边界（T21 落地，2026-10-02）
+
+| 数据 | 位置 | 保护 |
+| --- | --- | --- |
+| E2EE 私钥（长期） | 浏览器 IndexedDB（不可导出 CryptoKey） | Web 平台边界；Electron 同 |
+| 待导出私钥备份（JWK，创建/导入/迁移后暂存） | sessionStorage，**桌面构建经 Electron safeStorage 加密**（DPAPI，`enc:` 前缀） | 桌面：OS 级加密；Web 回退：tab 作用域 + 明确警告（M4 KeyStore 契约替代） |
+| localStorage 密钥记录 | 公开元数据（无私钥字段，private_key 已删除） | 非敏感 |
+| 会话凭据 | HttpOnly Session Cookie | 服务端 Session；桌面同 |
+| 服务器日志 | 部署 runbook 约定：无 Cookie/密文载荷/完整请求体 | journald + nginx 分文件 |
+
+- 桌面桥：`iChatDesktop.secureStorage.{isAvailable,encrypt,decrypt}`（ipcRenderer.invoke，通道白名单；main 侧 sender frame 校验 + 16KB 载荷上限；Electron safeStorage = Windows DPAPI）。
+- 运行中连接丢失**不导航**：桌面端注入覆盖横幅（非破坏性），M2 待发箱与 socket 重试保留；导航仅发生在启动失败（无待发箱可丢）。
+- 已知限制（如实）：Web 回退路径的 sessionStorage 备份未加密（tab 关闭即清除）；M4 KeyStore 契约将统一迁移。

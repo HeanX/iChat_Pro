@@ -22,6 +22,17 @@ function resolveAppConfig(env, argv) {
   const isDev = Array.isArray(argv) && (argv.includes("--dev") || env.ICHAT_DEV === "1");
 
   if (cloudOrigin) {
+    // Production contract: remote service addresses must use HTTPS; plain
+    // HTTP is accepted only for loopback targets (local testing).
+    let hostname = "";
+    try { hostname = new URL(cloudOrigin).hostname; } catch (e) { hostname = ""; }
+    if (cloudOrigin.startsWith("http://") && !["localhost", "127.0.0.1", "::1"].includes(hostname)) {
+      return {
+        mode: "unconfigured",
+        origin: null,
+        message: "远程服务地址必须使用 HTTPS（当前为 HTTP）：" + cloudOrigin,
+      };
+    }
     return { mode: "cloud", origin: cloudOrigin, message: null };
   }
   if (isDev) {

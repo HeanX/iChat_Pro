@@ -18,11 +18,7 @@
     "appId": "pro.ichat.desktop",
     "productName": "iChat Pro",
     "copyright": "Copyright © 2026 iChat Pro Team",
-    "files": [
-      "main.js",
-      "preload.js",
-      "offline.html"
-    ],
+    "files": ["main.js", "app-config.js", "preload.js", "offline.html"],
     "directories": {
       "output": "dist"
     },

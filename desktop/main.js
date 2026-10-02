@@ -57,7 +57,7 @@ function startDjangoServer() {
   const pythonExecutable = resolvePythonExecutable();
   djangoProcess = spawn(
     pythonExecutable,
-    ['manage.py', 'runserver', `${DJANGO_HOST}:${DJANGO_PORT}`],
+    ['manage.py', 'runserver', APP_ORIGIN.replace('http://', '')],
     {
       cwd: PROJECT_ROOT,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
@@ -143,7 +143,7 @@ function probeAppOrigin(timeoutMs = 4000) {
 // T14: poll the cloud origin while the offline page is shown; reload the
 // app automatically once the service answers again.
 function startOfflinePolling() {
-  if (offlinePollTimer) return;
+  if (offlinePollTimer || !APP_ORIGIN) return;
   offlinePollTimer = setInterval(async () => {
     if (await probeAppOrigin(3000)) {
       clearInterval(offlinePollTimer);
@@ -155,13 +155,20 @@ function startOfflinePolling() {
 }
 
 let connectivityWatchTimer = null;
+let runtimeOffline = false;
 // T14 review: runtime request failures do not trigger did-fail-load - a
-// slow watch probes the origin and flips to the offline page when down.
+// periodic watch flips an overlay banner on/off WITHOUT navigating away.
 function startConnectivityWatch() {
   if (!CLOUD_MODE || connectivityWatchTimer) return;
   connectivityWatchTimer = setInterval(async () => {
-    if (!offlinePollTimer && mainWindow && !(await probeAppOrigin(3000))) {
-      showOfflinePage();
+    if (offlinePollTimer || !mainWindow) return;
+    const reachable = await probeAppOrigin(3000);
+    if (!reachable && !runtimeOffline) {
+      runtimeOffline = true;
+      injectOfflineBanner();
+    } else if (reachable && runtimeOffline) {
+      runtimeOffline = false;
+      removeOfflineBanner();
     }
   }, 30000);
 }
@@ -184,6 +191,39 @@ function showOfflinePage() {
     query: { origin: APP_ORIGIN || '', message: APP_CONFIG.message || '' },
   });
   startOfflinePolling();
+}
+
+// Runtime connectivity loss must NOT navigate away: the chat page holds the
+// M2 outbox in memory, and a reload would drop pending messages (review
+// round 2). Instead an overlay banner is injected over the live page; the
+// M2 connection module keeps retrying its socket underneath.
+function injectOfflineBanner() {
+  if (!mainWindow || !CLOUD_MODE) return;
+  mainWindow.webContents
+    .executeJavaScript(
+      `(() => {
+        if (document.getElementById('ichat-offline-banner')) return;
+        const bar = document.createElement('div');
+        bar.id = 'ichat-offline-banner';
+        bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;' +
+          'background:#b3261e;color:#fff;padding:8px 16px;font:14px sans-serif;text-align:center;';
+        bar.textContent = '与服务的连接已断开，正在自动重试…未发送的消息会保留并稍后自动重发。';
+        document.body.appendChild(bar);
+      })()`,
+    )
+    .catch(() => {});
+}
+
+function removeOfflineBanner() {
+  if (!mainWindow) return;
+  mainWindow.webContents
+    .executeJavaScript(
+      `(() => {
+        const bar = document.getElementById('ichat-offline-banner');
+        if (bar) bar.remove();
+      })()`,
+    )
+    .catch(() => {});
 }
 
 function createWindow() {
@@ -229,7 +269,7 @@ function createWindow() {
   });
   startConnectivityWatch();
 
-  if (IS_DEV) mainWindow.webContents.openDevTools();
+  if (APP_CONFIG.mode === 'dev') mainWindow.webContents.openDevTools();
 
   mainWindow.on('closed', () => {
     mainWindow = null;

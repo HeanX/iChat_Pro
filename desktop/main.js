@@ -58,7 +58,7 @@ function registerSecureStorageIpc() {
   });
   ipcMain.handle('ichat:secure-storage:encrypt', (event, plainText) => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
-    if (typeof plainText !== 'string' || Buffer.byteLength(plainText, 'utf8') > 1048576) {
+    if (typeof plainText !== 'string' || Buffer.byteLength(plainText, 'utf8') > 2097152) {
       throw new Error('invalid payload');
     }
     if (!safeStorage.isEncryptionAvailable()) throw new Error('safeStorage unavailable');
@@ -66,14 +66,14 @@ function registerSecureStorageIpc() {
   });
   ipcMain.handle('ichat:secure-storage:decrypt', (event, cipherB64) => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
-    if (typeof cipherB64 !== 'string' || !cipherB64.startsWith('enc:') || cipherB64.length > 1600000) {
+    if (typeof cipherB64 !== 'string' || !cipherB64.startsWith('enc:') || cipherB64.length > 2800000) {
       throw new Error('invalid payload');
     }
     if (!safeStorage.isEncryptionAvailable()) throw new Error('safeStorage unavailable');
     const decoded = Buffer.from(cipherB64.slice(4), 'base64');
     // 1MB plaintext -> ~1.4MB ciphertext; the decoded cap leaves headroom
     // for the DPAPI wrapper so a full-size round-trip cannot be rejected.
-    if (decoded.length > 1258291) throw new Error('invalid payload');
+    if (decoded.length > 2097152) throw new Error('invalid payload');
     return safeStorage.decryptString(decoded);
   });
 }

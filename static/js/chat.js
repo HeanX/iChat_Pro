@@ -68,15 +68,14 @@ async function secureKvHydrate() {
   const isDesktop = !!window.iChatDesktop;
   const keys = [CHAT_DRAFTS_STORAGE_KEY, ...aiHistoryStorageKeys()];
   for (const key of keys) {
-    if (secureKvDirty.has(key)) continue; // newer edit already in cache
+    if (secureKvDirty.has(key)) continue;
     const raw = localStorage.getItem(key);
-    if (!raw) continue; // nothing on disk
+    if (!raw) continue;
     const epochAtStart = secureKvEpoch[key] || 0;
     let value = null;
     let parsed = false;
     if (raw.startsWith("enc:")) {
-      // NEVER remove a blob we failed to decrypt - it may still be the only
-      // copy of the data (review round 4).
+      // NEVER remove a blob we failed to decrypt.
       if (!bridge) continue;
       try {
         value = JSON.parse(await bridge.decrypt(raw.slice(4)));
@@ -95,22 +94,30 @@ async function secureKvHydrate() {
         continue;
       }
     }
-    // A clear() or write() landed while we were decrypting - skip.
+    // Re-check guards after EVERY await: a clear()/write() that landed
+    // while decrypting/persisting wins (review round 5).
     if (secureKvDirty.has(key) || (secureKvEpoch[key] || 0) !== epochAtStart) continue;
     secureKvCache[key] = value;
     if (raw.startsWith("enc:")) continue; // already safely at rest
-    if (!(bridge && isDesktop)) continue; // web/desktop-no-bridge: plaintext stays (documented)
-    // Desktop with the bridge: migrate the plaintext to an encrypted copy;
-    // remove the plaintext ONLY after the encrypted copy is on disk.
-    await bridge.isAvailable().then((available) => {
-      if (!available) return false;
-      return bridge.encrypt(JSON.stringify(value)).then((cipher) => {
-        localStorage.setItem(key, "enc:" + cipher);
-        return true;
-      });
-    }).then((persisted) => {
-      if (persisted) localStorage.removeItem(key);
-    }).catch(() => {});
+    if (!(bridge && isDesktop)) continue; // web/desktop-no-bridge: plaintext stays
+    // Desktop with bridge: migrate plaintext -> encrypted copy at the SAME
+    // key; nothing to remove afterwards (review round 5: the old code
+    // removed the key it had just written the encrypted copy to).
+    const persisted = await bridge.isAvailable()
+      .then((available) => {
+        if (!available) return false;
+        return bridge.encrypt(JSON.stringify(value)).then((cipher) => {
+          // epoch re-check before the final write
+          if ((secureKvEpoch[key] || 0) !== epochAtStart) return false;
+          localStorage.setItem(key, "enc:" + cipher);
+          return true;
+        });
+      })
+      .catch(() => false);
+    if (!persisted) {
+      // Migration failed: keep the plaintext record (no data loss) and warn.
+      console.warn("[SecureKV] plaintext migration failed for", key);
+    }
   }
   secureKvReady = true;
 }
@@ -118,19 +125,18 @@ async function secureKvHydrate() {
 function markPersistState(key, ok) {
   // T21 review: a silent persist failure loses data on reload - surface it
   // to the user instead of only logging.
-  let banner = document.getElementById("ichat-persist-warning");
+  const banner = document.getElementById("ichat-persist-warning");
   if (ok) {
-    if (banner && !banner.dataset.active) banner.remove();
+    if (banner) banner.remove();
     return;
   }
-  banner.dataset.active = "1";
   if (!banner) {
-    banner = document.createElement("div");
-    banner.id = "ichat-persist-warning";
-    banner.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:2147483647;" +
+    const created = document.createElement("div");
+    created.id = "ichat-persist-warning";
+    created.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:2147483647;" +
       "background:#b3261e;color:#fff;padding:8px 16px;font:14px sans-serif;text-align:center;";
-    banner.textContent = "警告：内容超出本地存储上限，暂时无法保存。请缩短内容（或清理 AI 历史）后重试。";
-    document.body.appendChild(banner);
+    created.textContent = "警告：内容超出本地存储上限，暂时无法保存。请缩短内容（或清理 AI 历史）后重试。";
+    document.body.appendChild(created);
   }
 }
 

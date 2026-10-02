@@ -3,13 +3,44 @@
   "version": "1.0.0",
   "description": "iChat Pro desktop client",
   "main": "main.js",
-  "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev"
-  },
   "author": "iChat Pro Team",
   "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "electron-builder --win nsis"
+  },
   "devDependencies": {
-    "electron": "^39.0.0"
+    "electron": "^39.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "pro.ichat.desktop",
+    "productName": "iChat Pro",
+    "copyright": "Copyright © 2026 iChat Pro Team",
+    "files": [
+      "main.js",
+      "preload.js",
+      "offline.html"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "iChat-Pro-Setup-${version}.${ext}"
+    }
   }
 }

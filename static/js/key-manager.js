@@ -364,6 +364,10 @@
       throw new Error('This backup contains mismatched key material.');
     }
     await savePrivateKey(userId, privateKey);
+    // T21 review: the pending backup must reflect the IMPORTED key, keyed
+    // by the current account - otherwise a later export returns the
+    // previously created key (identity mismatch).
+    await rememberPendingBackup(record);
     delete record.private_key;
     saveRecord(record);
     return uploadPublicKey(record);
@@ -389,3 +393,4 @@
     getCurrentPrivateKey: keyVersion => loadPrivateKey(currentUserId(), keyVersion)
   };
 })();
+

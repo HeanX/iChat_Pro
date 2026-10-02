@@ -22,8 +22,15 @@ const tests = [
     const b = resolveAppConfig({ ICHAT_SERVER_URL: "https://SUB.example.com" }, []);
     assert(a.origin === b.origin, ":443 normalized equal: " + a.origin + " vs " + b.origin);
 
-    const p80 = resolveAppConfig({ ICHAT_SERVER_URL: "http://sub.example.com:80" }, []);
-    assert(p80.origin === "http://sub.example.com", ":80 normalized away");
+    // :80 default port normalized away (at the normalizeOrigin level; the
+    // resolveAppConfig level additionally enforces the HTTPS contract).
+    assert(normalizeOrigin("http://sub.example.com:80") === "http://sub.example.com", ":80 normalized away");
+    // HTTPS contract: remote http rejected, loopback http allowed.
+    const remoteHttp = resolveAppConfig({ ICHAT_SERVER_URL: "http://sub.example.com:8000" }, []);
+    assert(remoteHttp.mode === "unconfigured", "remote http rejected");
+    assert(remoteHttp.message.includes("HTTPS"), "rejection explains the HTTPS requirement");
+    const loopbackHttp = resolveAppConfig({ ICHAT_SERVER_URL: "http://localhost:8000" }, []);
+    assert(loopbackHttp.mode === "cloud", "loopback http allowed for local tests");
     console.log("✓ cloud origin normalization");
   },
   function test_mode_gating() {

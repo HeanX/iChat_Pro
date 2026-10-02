@@ -36,7 +36,15 @@ let chatSyncInFlight = {};       // per-conversation sync catch-up guard
 // working, writes update the cache immediately and persist async.
 const secureKvCache = {};
 const secureKvDirty = new Set(); // edits made before hydration completed
+const secureKvEpoch = {};        // per-key generation: in-flight persists abort when superseded
 let secureKvReady = false;
+
+function secureKvClear(key) {
+  secureKvEpoch[key] = (secureKvEpoch[key] || 0) + 1;
+  secureKvDirty.delete(key);
+  delete secureKvCache[key];
+  localStorage.removeItem(key);
+}
 
 function desktopSecureBridge() {
   return window.iChatDesktop && window.iChatDesktop.secureStorage
@@ -65,21 +73,25 @@ async function secureKvHydrate() {
     const raw = localStorage.getItem(key);
     if (!raw) { secureKvCache[key] = null; continue; }
     if (raw.startsWith("enc:")) {
-      secureKvCache[key] = null;
-      if (bridge) {
-        try {
-          secureKvCache[key] = JSON.parse(await bridge.decrypt(raw.slice(4)));
-        } catch (err) {
-          console.warn("[SecureKV] ignoring undecryptable blob:", key);
-        }
+      // NEVER remove a blob we failed to decrypt (review round 3).
+      if (!bridge) continue;
+      let decrypted = null;
+      try {
+        decrypted = JSON.parse(await bridge.decrypt(raw.slice(4)));
+      } catch (err) {
+        console.warn("[SecureKV] ignoring undecryptable blob:", key);
+        continue;
       }
+      if (secureKvDirty.has(key)) continue; // edit landed during decrypt
+      secureKvCache[key] = decrypted;
+      continue; // encrypted blob stays as-is (already at rest safely)
     } else {
-      try { secureKvCache[key] = JSON.parse(raw); } catch (_) { secureKvCache[key] = null; }
+      // Plaintext legacy value: parse, cache, then remove the plaintext.
+      let parsed = null;
+      try { parsed = JSON.parse(raw); } catch (_) { parsed = null; }
+      localStorage.removeItem(key);
     }
-    // Migration: the plaintext copy is removed after the value reaches the
-    // cache; desktop re-persists encrypted (or drops it when the OS bridge
-    // is unavailable - plaintext must never survive on disk).
-    localStorage.removeItem(key);
+    // Migration markers retained below for the non-plaintext path.
     if (secureKvCache[key] != null && (!isDesktop || bridge)) {
       secureKvWrite(key, secureKvCache[key]);
     }
@@ -88,19 +100,24 @@ async function secureKvHydrate() {
 }
 
 function secureKvWrite(key, value) {
+  secureKvEpoch[key] = (secureKvEpoch[key] || 0) + 1;
+  const epoch = secureKvEpoch[key];
   secureKvDirty.add(key); // hydration must not clobber newer edits
   secureKvCache[key] = value;
   const bridge = desktopSecureBridge();
   const isDesktop = !!window.iChatDesktop;
   if (bridge) {
     bridge.isAvailable().then((available) => {
-      if (!available) return; // desktop without OS encryption: memory only
+      if (!available || secureKvEpoch[key] !== epoch) return; // superseded
       return bridge.encrypt(JSON.stringify(value)).then((cipher) => {
+        if (secureKvEpoch[key] !== epoch) return; // cleared/rewritten meanwhile
         localStorage.setItem(key, "enc:" + cipher);
       });
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error("[SecureKV] encrypted persist FAILED for", key,
+        "- value survives in memory but is lost on reload:", err);
+    });
   } else if (!isDesktop) {
-    // Web fallback: plaintext (documented limitation).
     localStorage.setItem(key, JSON.stringify(value));
   }
   // Desktop without a working bridge: memory only - never plaintext.
@@ -9061,7 +9078,7 @@ function deleteAiAssistantSession(sessionId) {
   const sessions = getAiAssistantSessions().filter(session => session.id !== sessionId);
   localStorage.setItem(AI_ASSISTANTS_KEY, JSON.stringify(sessions));
   delete secureKvCache[getAiHistoryKey(sessionId)];
-  localStorage.removeItem(getAiHistoryKey(sessionId));
+  secureKvClear(getAiHistoryKey(sessionId));
   localStorage.removeItem(getAiModelSettingsKey(sessionId));
   if (activeAiAssistantId === sessionId) {
     activeAiAssistantId = AI_CONVERSATION_ID;
@@ -9074,7 +9091,7 @@ function deleteAiAssistantSession(sessionId) {
 
 function clearAiAssistantSession(sessionId = activeAiAssistantId) {
   delete secureKvCache[getAiHistoryKey(sessionId)];
-  localStorage.removeItem(getAiHistoryKey(sessionId));
+  secureKvClear(getAiHistoryKey(sessionId));
   if (activeAiAssistantId === sessionId) {
     syncAiMessagesForActions([]);
     renderAiHistory([]);
@@ -9564,7 +9581,7 @@ function clearAiChat() {
     : 'Are you sure you want to clear your AI Assistant chat history?';
     
   if (confirm(confirmMsg)) {
-    localStorage.removeItem(getAiHistoryKey(activeAiAssistantId));
+    secureKvClear(getAiHistoryKey(activeAiAssistantId));
     syncAiMessagesForActions([]);
     renderAiHistory([]);
     refreshAiConversationListItem();

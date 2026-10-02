@@ -122,22 +122,31 @@ async function secureKvHydrate() {
   secureKvReady = true;
 }
 
-function markPersistState(key, ok) {
-  // T21 review: a silent persist failure loses data on reload - surface it
-  // to the user instead of only logging.
+const failedPersistKeys = new Set(); // per-key persist failures
+
+function updatePersistBanner() {
   const banner = document.getElementById("ichat-persist-warning");
-  if (ok) {
-    if (banner) banner.remove();
-    return;
+  if (failedPersistKeys.size > 0) {
+    if (!banner) {
+      const created = document.createElement("div");
+      created.id = "ichat-persist-warning";
+      created.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:2147483647;" +
+        "background:#b3261e;color:#fff;padding:8px 16px;font:14px sans-serif;text-align:center;";
+      created.textContent = "警告：内容超出本地存储上限，暂时无法保存。请缩短内容（或清理 AI 历史）后重试。";
+      document.body.appendChild(created);
+    }
+  } else if (banner) {
+    banner.remove();
   }
-  if (!banner) {
-    const created = document.createElement("div");
-    created.id = "ichat-persist-warning";
-    created.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:2147483647;" +
-      "background:#b3261e;color:#fff;padding:8px 16px;font:14px sans-serif;text-align:center;";
-    created.textContent = "警告：内容超出本地存储上限，暂时无法保存。请缩短内容（或清理 AI 历史）后重试。";
-    document.body.appendChild(created);
-  }
+}
+
+function markPersistState(key, ok) {
+  // T21 review: failure state is tracked PER KEY - an unrelated successful
+  // save must not hide an existing failure, and a superseded write's late
+  // failure must not re-show a stale warning.
+  if (ok) failedPersistKeys.delete(key);
+  else failedPersistKeys.add(key);
+  updatePersistBanner();
 }
 
 function secureKvWrite(key, value) {
@@ -156,6 +165,7 @@ function secureKvWrite(key, value) {
         markPersistState(key, true);
       });
     }).catch((err) => {
+      if (secureKvEpoch[key] !== epoch) return; // superseded write: not a real failure
       markPersistState(key, false);
       console.error("[SecureKV] encrypted persist FAILED for", key,
         "- value survives in memory but is lost on reload:", err);

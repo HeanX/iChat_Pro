@@ -22,11 +22,13 @@
     <h1>无法连接到 iChat Pro 服务</h1>
     <p>请检查网络连接后稍候，应用会自动重试。</p>
     <p>服务地址：<span class="origin" id="origin"></span></p>
-    <p class="hint">恢复连接后本页面会自动跳转，无需手动操作。</p>
+    <p class="hint" id="hint">恢复连接后本页面会自动跳转，无需手动操作。</p>
   </div>
   <script>
     const params = new URLSearchParams(window.location.search);
     document.getElementById("origin").textContent = params.get("origin") || "";
+    const message = params.get("message");
+    if (message) document.getElementById("hint").textContent = message;
   </script>
 </body>
 </html>

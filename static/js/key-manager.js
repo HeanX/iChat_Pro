@@ -45,9 +45,9 @@
     }
     if (isDesktop) {
       // OS encryption unavailable on a desktop build: do NOT persist the
-      // private key. The non-extractable CryptoKey in IndexedDB keeps
-      // working; only the exportable backup window is unavailable until
-      // safeStorage becomes available.
+      // private key AND invalidate any stale pending backup - otherwise a
+      // later export would return the WRONG identity after recovery.
+      sessionStorage.removeItem(pendingBackupKey(currentUserId()));
       console.warn('[KeyManager] safeStorage unavailable - pending key backup NOT persisted (desktop build).');
       return;
     }

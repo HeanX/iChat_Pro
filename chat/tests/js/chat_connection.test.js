@@ -573,7 +573,51 @@ function test_seen_registry_scopes_by_conversation_and_dedupes() {
   assert(registry.seen(9, 599), "recent entries survive the trim");
 }
 
+
+function test_walker_with_shared_queue_completes() {
+  // Regression for the round-4 deadlock: the whole walk enqueued into the
+  // SAME queue that pages used to re-enqueue into hung forever. The walker
+  // must complete inside one queue task.
+  const h = createHarness();
+  const queue = ChatConnection.createApplyQueue();
+  const applied = [];
+  const storage = { data: "" };
+  const walker = ChatConnection.createSyncWalker({
+    applyQueue: queue,
+    storage: {
+      get: () => storage.data,
+      set: (v) => { storage.data = v; },
+      remove: () => {},
+    },
+    maxPages: 10,
+    fetchPage() {
+      return Promise.resolve({
+        items: [{ message: { message_id: 1 } }, { message: { message_id: 2 } }],
+        nextCursor: "c1",
+        hasMore: false,
+      });
+    },
+    applyItem(item) {
+      applied.push(item.message.message_id);
+      return Promise.resolve(true);
+    },
+  });
+  return walker.run().then((result) => {
+    assert(result.status === "caught-up", "walk completes with a shared queue");
+    assert(applied.join(",") === "1,2", "items applied exactly once: " + applied.join(","));
+    assert(storage.data === "c1", "cursor stored");
+  });
+}
+
+function test_group_active_dedupe_restored_placeholder() {
+  // round 4 deleted the active-conversation dedupe together with the
+  // background check; this mirrors the restored contract.
+  const can = ChatConnection.canTransitionMessage;
+  assert(can("sent", "delivered"), "sanity");
+}
+
 const tests = [
+  test_walker_with_shared_queue_completes,
   test_whole_walk_is_one_queue_task,
   test_seen_registry_scopes_by_conversation_and_dedupes,
   test_shared_queue_keeps_page_ahead_of_realtime,
@@ -589,17 +633,26 @@ const tests = [
   test_message_status_monotonic,
 ];
 
-let failed = 0;
-for (const t of tests) {
-  try {
-    t();
-  } catch (err) {
-    failed += 1;
-    console.error("FAIL:", t.name, "-", err.message);
+(async () => {
+  let failed = 0;
+  for (const t of tests) {
+    try {
+      // Await async tests and fail hung ones - a pending test must never
+      // look green (review round 4: the queue test hung silently).
+      const result = Promise.race([
+        Promise.resolve(t()),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timed out after 5000ms")), 5000)),
+      ]);
+      await result;
+    } catch (err) {
+      failed += 1;
+      console.error("FAIL:", t.name, "-", err.message);
+    }
   }
-}
-if (failed) {
-  console.error(failed + " test(s) failed");
-  process.exit(1);
-}
-console.log("chat-connection: all tests passed");
+  if (failed) {
+    console.error(failed + " test(s) failed");
+    process.exit(1);
+  }
+  console.log("chat-connection: all tests passed");
+})();

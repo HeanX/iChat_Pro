@@ -406,10 +406,12 @@
                   return applyNext();
                 });
             }
-            // The WHOLE page runs as one queue task: realtime pushes
-            // enqueued meanwhile cannot interleave mid-page.
-            var runPage = o.applyQueue ? o.applyQueue.enqueue(applyNext) : applyNext();
-            return runPage.then(function (allApplied) {
+            // NOTE: no page-level enqueue here - the whole walk already
+            // occupies one apply-queue task, and re-enqueueing a page into
+            // the SAME queue deadlocks (walk waits for page, page waits
+            // for walk). Realtime pushes enqueued meanwhile land AFTER the
+            // entire walk, which preserves timeline order.
+            return applyNext().then(function (allApplied) {
               if (!allApplied) {
                 // Keep the PREVIOUS cursor: the failing item is re-fetched
                 // and re-applied on the next run (at-least-once).

@@ -1622,6 +1622,15 @@ async function handleWebSocketError(data) {
   window.showToast && window.showToast(message);
 }
 
+
+function tagLastMessageRow(messageId) {
+  const rows = document.querySelectorAll('.message-row');
+  const last = rows[rows.length - 1];
+  if (last && !last.dataset.rowMessageId) {
+    last.dataset.rowMessageId = String(messageId);
+  }
+}
+
 async function handlePrivateMessageReceived(data) {
   const payload = data.data || data;
   const convId = parseInt(payload.conversation_id);
@@ -1705,6 +1714,7 @@ async function handlePrivateMessageReceived(data) {
     const insertIdx = ChatConnection.timelineInsertIndex(messages, newMsg);
     messages.splice(insertIdx, 0, newMsg);
     appendMessageElement(newMsg);
+    tagLastMessageRow(newMsg.id);
     const following = messages[insertIdx + 1];
     if (following) {
       ChatConnection.repositionMessageRow(newMsg.id, following.id);
@@ -1796,6 +1806,7 @@ async function handleGroupMessageReceived(data) {
       const insertIdx = ChatConnection.timelineInsertIndex(messages, newMsg);
       messages.splice(insertIdx, 0, newMsg);
       appendMessageElement(newMsg);
+      tagLastMessageRow(newMsg.id);
       const following = messages[insertIdx + 1];
       if (following) {
         ChatConnection.repositionMessageRow(newMsg.id, following.id);
@@ -2622,11 +2633,13 @@ function appendMessageElement(newMsg) {
   // If the new message is consecutive with the previous one, patch the
   // previous row in-place so it no longer looks like "last in group".
   if (gm.isConsecutive) {
-    const prevRow = container.lastElementChild;
+    const prevMsg = messages[idx - 1];
+    const prevRow = prevMsg
+      ? document.querySelector('[data-row-message-id="' + prevMsg.id + '"]')
+      : null;
     if (prevRow) {
       prevRow.classList.remove("message-row-group-last");
       // Replace the avatar with a spacer on peer messages
-      const prevMsg = messages[idx - 1];
       if (prevMsg && !prevMsg.isSelf && !prevMsg.isSystem) {
         const prevAvatar = prevRow.querySelector(".message-avatar");
         if (prevAvatar) {

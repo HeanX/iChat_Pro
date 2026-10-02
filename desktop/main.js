@@ -24,8 +24,13 @@ const { normalizeOrigin, resolveAppConfig } = require('./app-config');
 let DEFAULT_SERVER_URL = '';
 try { DEFAULT_SERVER_URL = require('./defaults.json').serverUrl || ''; } catch (e) {}
 
+// T21 review: an explicit dev request takes precedence over the baked-in
+// default URL - --dev/ICHAT_DEV=1 must keep working without it.
+const wantsDev = process.argv.includes('--dev') || process.env.ICHAT_DEV === '1';
 const APP_CONFIG = resolveAppConfig(
-  DEFAULT_SERVER_URL ? { ...process.env, ICHAT_SERVER_URL: process.env.ICHAT_SERVER_URL || DEFAULT_SERVER_URL } : process.env,
+  !wantsDev && DEFAULT_SERVER_URL
+    ? { ...process.env, ICHAT_SERVER_URL: process.env.ICHAT_SERVER_URL || DEFAULT_SERVER_URL }
+    : process.env,
   process.argv,
 );
 const CLOUD_MODE = APP_CONFIG.mode === 'cloud';
@@ -53,7 +58,7 @@ function registerSecureStorageIpc() {
   });
   ipcMain.handle('ichat:secure-storage:encrypt', (event, plainText) => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
-    if (typeof plainText !== 'string' || plainText.length > 16384) {
+    if (typeof plainText !== 'string' || Buffer.byteLength(plainText, 'utf8') > 262144) {
       throw new Error('invalid payload');
     }
     if (!safeStorage.isEncryptionAvailable()) throw new Error('safeStorage unavailable');
@@ -61,11 +66,13 @@ function registerSecureStorageIpc() {
   });
   ipcMain.handle('ichat:secure-storage:decrypt', (event, cipherB64) => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
-    if (typeof cipherB64 !== 'string' || !cipherB64.startsWith('enc:') || cipherB64.length > 65536) {
+    if (typeof cipherB64 !== 'string' || !cipherB64.startsWith('enc:') || cipherB64.length > 700000) {
       throw new Error('invalid payload');
     }
     if (!safeStorage.isEncryptionAvailable()) throw new Error('safeStorage unavailable');
-    return safeStorage.decryptString(Buffer.from(cipherB64.slice(4), 'base64'));
+    const decoded = Buffer.from(cipherB64.slice(4), 'base64');
+    if (decoded.length > 262144) throw new Error('invalid payload');
+    return safeStorage.decryptString(decoded);
   });
 }
 

@@ -35,6 +35,7 @@ let chatSyncInFlight = {};       // per-conversation sync catch-up guard
 // served from an in-memory cache hydrated at startup - sync callers keep
 // working, writes update the cache immediately and persist async.
 const secureKvCache = {};
+const secureKvDirty = new Set(); // edits made before hydration completed
 let secureKvReady = false;
 
 function desktopSecureBridge() {
@@ -43,9 +44,24 @@ function desktopSecureBridge() {
     : null;
 }
 
-async function secureKvHydrate(keys) {
+function aiHistoryStorageKeys() {
+  // Per-assistant history keys share the AI_HISTORY_KEY prefix.
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(AI_HISTORY_KEY)) keys.push(k);
+  }
+  if (!keys.includes(AI_HISTORY_KEY)) keys.push(AI_HISTORY_KEY);
+  return keys;
+}
+
+async function secureKvHydrate() {
   const bridge = desktopSecureBridge();
+  const isDesktop = !!window.iChatDesktop;
+  const keys = [CHAT_DRAFTS_STORAGE_KEY, ...aiHistoryStorageKeys()];
   for (const key of keys) {
+    // Edits made while hydrating win - never clobber newer user input.
+    if (secureKvDirty.has(key)) continue;
     const raw = localStorage.getItem(key);
     if (!raw) { secureKvCache[key] = null; continue; }
     if (raw.startsWith("enc:")) {
@@ -57,16 +73,25 @@ async function secureKvHydrate(keys) {
           console.warn("[SecureKV] ignoring undecryptable blob:", key);
         }
       }
-      continue;
+    } else {
+      try { secureKvCache[key] = JSON.parse(raw); } catch (_) { secureKvCache[key] = null; }
     }
-    try { secureKvCache[key] = JSON.parse(raw); } catch (_) { secureKvCache[key] = null; }
+    // Migration: the plaintext copy is removed after the value reaches the
+    // cache; desktop re-persists encrypted (or drops it when the OS bridge
+    // is unavailable - plaintext must never survive on disk).
+    localStorage.removeItem(key);
+    if (secureKvCache[key] != null && (!isDesktop || bridge)) {
+      secureKvWrite(key, secureKvCache[key]);
+    }
   }
   secureKvReady = true;
 }
 
 function secureKvWrite(key, value) {
+  secureKvDirty.add(key); // hydration must not clobber newer edits
   secureKvCache[key] = value;
   const bridge = desktopSecureBridge();
+  const isDesktop = !!window.iChatDesktop;
   if (bridge) {
     bridge.isAvailable().then((available) => {
       if (!available) return; // desktop without OS encryption: memory only
@@ -74,10 +99,11 @@ function secureKvWrite(key, value) {
         localStorage.setItem(key, "enc:" + cipher);
       });
     }).catch(() => {});
-  } else {
+  } else if (!isDesktop) {
     // Web fallback: plaintext (documented limitation).
     localStorage.setItem(key, JSON.stringify(value));
   }
+  // Desktop without a working bridge: memory only - never plaintext.
 }
 let msgApplyQueue = null;        // T33: serialized message application
 const backgroundSeenRegistry = ChatConnection.createSeenRegistry(500);
@@ -1479,7 +1505,7 @@ function connectWebSocket() {
 
   // T21: hydrate the encrypted-at-rest KV (drafts, AI history) once, then
   // refresh any visible draft preview from the decrypted cache.
-  secureKvHydrate([CHAT_DRAFTS_STORAGE_KEY, AI_HISTORY_KEY, AI_HISTORY_KEY + getAiHistoryKey()]).then(() => {
+  secureKvHydrate().then(() => {
     if (activeChatId) refreshConversationDraftPreview(activeChatId);
   });
 
@@ -9034,6 +9060,7 @@ function deleteAiAssistantSession(sessionId) {
   if (!confirm(currentLanguage === 'zh' ? '确定删除这个 AI Assistant 吗？' : 'Delete this AI Assistant?')) return;
   const sessions = getAiAssistantSessions().filter(session => session.id !== sessionId);
   localStorage.setItem(AI_ASSISTANTS_KEY, JSON.stringify(sessions));
+  delete secureKvCache[getAiHistoryKey(sessionId)];
   localStorage.removeItem(getAiHistoryKey(sessionId));
   localStorage.removeItem(getAiModelSettingsKey(sessionId));
   if (activeAiAssistantId === sessionId) {
@@ -9046,6 +9073,7 @@ function deleteAiAssistantSession(sessionId) {
 }
 
 function clearAiAssistantSession(sessionId = activeAiAssistantId) {
+  delete secureKvCache[getAiHistoryKey(sessionId)];
   localStorage.removeItem(getAiHistoryKey(sessionId));
   if (activeAiAssistantId === sessionId) {
     syncAiMessagesForActions([]);

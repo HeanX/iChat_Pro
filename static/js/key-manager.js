@@ -35,13 +35,26 @@
     if (!record || !record.private_key) return;
     const serialized = JSON.stringify(record);
     const bridge = desktopSecureStorage();
+    const isDesktop = !!window.iChatDesktop; // T21: desktop builds NEVER write plaintext keys
     if (bridge && (await bridge.isAvailable())) {
       const cipher = await bridge.encrypt(serialized);
-      sessionStorage.setItem(pendingBackupKey(record.user_id), 'enc:' + cipher);
+      // Keyed by the CURRENT account (T21 P2 fix): importing another user's
+      // backup can never be exported as this user's key.
+      sessionStorage.setItem(pendingBackupKey(currentUserId()), 'enc:' + cipher);
       return;
     }
-    sessionStorage.setItem(pendingBackupKey(record.user_id), serialized);
-    console.warn('[KeyManager] Pending key backup stored WITHOUT encryption (web mode). Desktop builds encrypt it via safeStorage.');
+    if (isDesktop) {
+      // OS encryption unavailable on a desktop build: do NOT persist the
+      // private key. The non-extractable CryptoKey in IndexedDB keeps
+      // working; only the exportable backup window is unavailable until
+      // safeStorage becomes available.
+      console.warn('[KeyManager] safeStorage unavailable - pending key backup NOT persisted (desktop build).');
+      return;
+    }
+    // Web fallback: tab-scoped session storage (cleared when the tab closes);
+    // documented limitation, replaced by the M4 KeyStore contract.
+    sessionStorage.setItem(pendingBackupKey(currentUserId()), serialized);
+    console.warn('[KeyManager] Pending key backup stored WITHOUT encryption (web mode).');
   }
 
   async function loadPendingBackup(userId) {

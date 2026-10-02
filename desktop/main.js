@@ -17,14 +17,12 @@ const https = require('https');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const IS_DEV = process.argv.includes('--dev');
-const SERVER_URL = (process.env.ICHAT_SERVER_URL || '').replace(/\/+$/, '');
-const CLOUD_MODE = SERVER_URL.startsWith('https://') || SERVER_URL.startsWith('http://');
+const { normalizeOrigin, resolveAppConfig } = require('./app-config');
 
-const DJANGO_HOST = process.env.ICHAT_HOST || '127.0.0.1';
-const DJANGO_PORT = process.env.ICHAT_PORT || '8000';
-const DJANGO_ORIGIN = `http://${DJANGO_HOST}:${DJANGO_PORT}`;
-const APP_ORIGIN = CLOUD_MODE ? SERVER_URL : DJANGO_ORIGIN;
+const APP_CONFIG = resolveAppConfig(process.env, process.argv);
+const CLOUD_MODE = APP_CONFIG.mode === 'cloud';
+const DEV_MODE = APP_CONFIG.mode === 'dev';
+const APP_ORIGIN = APP_CONFIG.origin || '';
 const APP_URL = APP_ORIGIN + '/login/';
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
@@ -55,7 +53,7 @@ function resolvePythonExecutable() {
 }
 
 function startDjangoServer() {
-  if (CLOUD_MODE) return; // T14: the cloud client never spawns a backend.
+  if (CLOUD_MODE || !DEV_MODE) return; // T14: Django only in explicit dev mode.
   const pythonExecutable = resolvePythonExecutable();
   djangoProcess = spawn(
     pythonExecutable,
@@ -69,6 +67,12 @@ function startDjangoServer() {
   );
   djangoProcess.stdout.on('data', (data) => console.log(`[Django] ${data.toString().trim()}`));
   djangoProcess.stderr.on('data', (data) => console.error(`[Django] ${data.toString().trim()}`));
+  djangoProcess.on('error', (error) => {
+    // e.g. Python not installed in dev mode - surface via offline page.
+    console.error(`[Django] Failed to start: ${error.message}`);
+    djangoProcess = null;
+    if (mainWindow) mainWindow.webContents.loadURL(APP_URL).catch(() => {});
+  });
   djangoProcess.on('exit', (code) => {
     console.log(`[Django] Server exited with code ${code}`);
     djangoProcess = null;
@@ -144,9 +148,22 @@ function startOfflinePolling() {
     if (await probeAppOrigin(3000)) {
       clearInterval(offlinePollTimer);
       offlinePollTimer = null;
+      connectivityWatchTimer = null;
       if (mainWindow) mainWindow.loadURL(APP_URL).catch(() => startOfflinePolling());
     }
   }, 5000);
+}
+
+let connectivityWatchTimer = null;
+// T14 review: runtime request failures do not trigger did-fail-load - a
+// slow watch probes the origin and flips to the offline page when down.
+function startConnectivityWatch() {
+  if (!CLOUD_MODE || connectivityWatchTimer) return;
+  connectivityWatchTimer = setInterval(async () => {
+    if (!offlinePollTimer && mainWindow && !(await probeAppOrigin(3000))) {
+      showOfflinePage();
+    }
+  }, 30000);
 }
 
 function isAllowedExternalUrl(rawUrl) {
@@ -158,17 +175,13 @@ function isAllowedExternalUrl(rawUrl) {
 }
 
 function isAppOrigin(rawUrl) {
-  try {
-    return new URL(rawUrl).origin === APP_ORIGIN;
-  } catch {
-    return false;
-  }
+  return normalizeOrigin(rawUrl) === APP_ORIGIN;
 }
 
 function showOfflinePage() {
   if (!mainWindow) return;
   mainWindow.loadFile(path.join(__dirname, 'offline.html'), {
-    query: { origin: APP_ORIGIN },
+    query: { origin: APP_ORIGIN || '', message: APP_CONFIG.message || '' },
   });
   startOfflinePolling();
 }
@@ -193,12 +206,15 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  const guardNavigation = (event, url) => {
     if (!isAppOrigin(url)) {
       event.preventDefault();
       if (isAllowedExternalUrl(url)) shell.openExternal(url);
     }
-  });
+  };
+  mainWindow.webContents.on('will-navigate', guardNavigation);
+  // T14 review: server redirects (302) bypass will-navigate - guard them too.
+  mainWindow.webContents.on('will-redirect', guardNavigation);
 
   // T14: network failures while loading the cloud origin show the offline
   // page (with automatic recovery) instead of a dead window.
@@ -211,6 +227,7 @@ function createWindow() {
   mainWindow.loadURL(APP_URL).catch(() => {
     if (CLOUD_MODE) showOfflinePage();
   });
+  startConnectivityWatch();
 
   if (IS_DEV) mainWindow.webContents.openDevTools();
 
@@ -220,11 +237,17 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  startDjangoServer(); // no-op in cloud mode
+  startDjangoServer(); // dev mode only
 
-  if (!CLOUD_MODE) {
+  if (APP_CONFIG.mode === 'unconfigured') {
+    createWindow();
+    showOfflinePage();
+    return;
+  }
+
+  if (DEV_MODE) {
     try {
-      await waitForDjangoReady(`${DJANGO_ORIGIN}/login/`);
+      await waitForDjangoReady(`${APP_ORIGIN}/login/`);
     } catch (error) {
       createWindow();
       showOfflinePage();
@@ -241,6 +264,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+  startConnectivityWatch();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

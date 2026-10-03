@@ -248,6 +248,9 @@
       STATES: MESSAGE_STATES,
       canTransitionMessage: canTransitionMessage,
       track: function (clientMessageId, envelope, meta) {
+        // Creates/updates the entry WITHOUT arming the ACK timer - the
+        // timer is armed only when the envelope reaches a transport (the
+        // ws path calls armAck; the http path resolves via accepted()).
         var entry = entries[clientMessageId];
         if (!entry) {
           entry = {
@@ -260,10 +263,12 @@
           };
           entries[clientMessageId] = entry;
         }
-        entry.attempts += 1;
         setStatus(entry, MESSAGE_STATES.SENDING);
-        armAckTimer(entry);
         return entry;
+      },
+      armAck: function (clientMessageId) {
+        var entry = entries[clientMessageId];
+        if (entry) armAckTimer(entry);
       },
       accepted: function (clientMessageId, payload) {
         var entry = entries[clientMessageId];

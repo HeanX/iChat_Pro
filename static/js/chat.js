@@ -2046,18 +2046,16 @@ function handleMessageAccepted(data) {
       msg.time = formatClockTime(new Date(payload.created_at));
       const curIdx = messages.indexOf(msg);
       if (curIdx >= 0) {
+        // Review round 7 prescription: locate the row by its TEMP id,
+        // update it in place, MOVE it (before the chronological successor
+        // or to the container tail), and only THEN rebuild the neighbours
+        // positionally - at that point DOM order matches the array.
         messages.splice(curIdx, 1);
         const insertIdx = ChatConnection.timelineInsertIndex(messages, msg);
         messages.splice(insertIdx, 0, msg);
         const following = messages[insertIdx + 1];
-        if (following) {
-          // Move the COMPLETE row FIRST, then rebuild neighbours - the
-          // positional rebuild assumes DOM order matches the array.
-          ChatConnection.repositionMessageRow(msg.id, following.id);
-          patchMessageRowInPlace(msg);
-        } else {
-          patchMessageRowInPlace(msg);
-        }
+        patchMessageRowInPlace(msg);
+        ChatConnection.repositionMessageRow(msg.id, following ? following.id : null);
       }
     }
 

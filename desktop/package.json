@@ -43,8 +43,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "artifactName": "iChat-Pro-Setup-${version}.${ext}",
-      "deleteAppDataOnUninstall": true,
-      "allowElevation": true
+      "allowElevation": true,
+      "include": "build/installer.nsh"
     }
   }
 }

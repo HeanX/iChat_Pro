@@ -2038,6 +2038,24 @@ function handleMessageAccepted(data) {
     var oldId = msg.id;
     msg.id = payload.message_id;
     msg.status = payload.status || 'sent';
+    // T20 review: apply the SERVER created_at - the local clock may have
+    // drifted while offline, and a same-ID resend must land in timeline
+    // order (not at its original local position).
+    if (payload.created_at) {
+      msg.created_at = payload.created_at;
+      msg.time = formatClockTime(new Date(payload.created_at));
+      const curIdx = messages.indexOf(msg);
+      if (curIdx >= 0) {
+        messages.splice(curIdx, 1);
+        const insertIdx = ChatConnection.timelineInsertIndex(messages, msg);
+        messages.splice(insertIdx, 0, msg);
+        const following = messages[insertIdx + 1];
+        if (following) {
+          ChatConnection.repositionMessageRow(msg.id, following.id);
+        }
+        patchMessageRowInPlace(msg);
+      }
+    }
 
     // Update data-message-id on the bubble before patching status
     var bubble = document.querySelector('.message-bubble-custom[data-message-id="' + oldId + '"]');

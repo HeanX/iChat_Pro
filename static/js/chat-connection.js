@@ -379,11 +379,11 @@
   // before the row of followingId (review round 6: moving the bubble child
   // nested old messages inside the newer message's row, so context menus
   // and selection targeted the wrong message).
-  function tagMessageRows() {
+  function tagMessageRows(container) {
     // Give every bubble-bearing row a stable row-level id so recalled and
     // decrypt-failed rows (no bubble) never break row lookups. Rows without
     // any bubble stay untagged; callers tag those directly on append.
-    var rows = document.querySelectorAll(".message-row:not([data-row-message-id])");
+    var rows = container.querySelectorAll(":scope > .message-row:not([data-row-message-id])");
     rows.forEach(function (row) {
       var bubble = row.querySelector("[data-message-id]");
       if (bubble) row.dataset.rowMessageId = bubble.getAttribute("data-message-id");
@@ -392,18 +392,19 @@
 
   function repositionMessageRow(newId, followingId) {
     if (typeof document === "undefined") return false;
-    tagMessageRows();
-    var row = document.querySelector('[data-row-message-id="' + newId + '"]');
+    var container = document.getElementById('message-history-container');
+    if (!container) return false;
+    tagMessageRows(container);
+    var row = container.querySelector(':scope > .message-row[data-row-message-id="' + newId + '"]');
     if (!row) return false;
-    var nextRow = followingId != null
-      ? document.querySelector('[data-row-message-id="' + followingId + '"]')
-      : null;
-    if (nextRow) {
+    if (followingId != null) {
+      var nextRow = container.querySelector(':scope > .message-row[data-row-message-id="' + followingId + '"]');
+      if (!nextRow) return false;
       if (row === nextRow) return false;
-      nextRow.parentNode.insertBefore(row, nextRow); // before successor
+      container.insertBefore(row, nextRow);
     } else {
-      // No successor (or unlocatable): move the row to the container tail.
-      row.parentNode.appendChild(row);
+      // Only an explicitly absent successor means the timeline tail.
+      container.appendChild(row);
     }
     return true;
   }

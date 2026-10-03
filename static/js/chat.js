@@ -2035,44 +2035,56 @@ function handleMessageAccepted(data) {
   if (chatOutbox) chatOutbox.accepted(tempId); // T33: revive timed-out entries
   const msg = messages.find(m => m.id === tempId);
   if (msg) {
-    var oldId = msg.id;
+    const oldId = msg.id;
+    const oldIndex = messages.indexOf(msg);
+    const container = document.getElementById('message-history-container');
+    let row = container && container.querySelector(':scope > .message-row[data-row-message-id="' + oldId + '"]');
+    if (!row && container) {
+      // Legacy rows may have only a bubble ID. System/error rows use the
+      // stable row ID above and do not need a bubble to receive an ACK.
+      const bubble = container.querySelector('.message-bubble-custom[data-message-id="' + oldId + '"]');
+      row = bubble && bubble.closest('.message-row');
+      if (row && row.parentNode !== container) row = null;
+    }
     msg.id = payload.message_id;
     msg.status = payload.status || 'sent';
-    // T20 review: apply the SERVER created_at - the local clock may have
-    // drifted while offline, and a same-ID resend must land in timeline
-    // order (not at its original local position).
+
+    // Update the ORIGINAL row's identity before looking it up by server ID.
+    // The positional neighbour patcher must never locate a temporary row.
+    if (row) {
+      row.dataset.rowMessageId = String(msg.id);
+      const bubble = row.querySelector('.message-bubble-custom[data-message-id]');
+      if (bubble) bubble.setAttribute('data-message-id', msg.id);
+      const checkbox = row.querySelector('.message-select-checkbox');
+      if (checkbox) checkbox.id = 'msg-select-check-' + msg.id;
+    }
+    const selIdx = selectedMessageIds.indexOf(oldId);
+    if (selIdx >= 0) selectedMessageIds[selIdx] = msg.id;
+
     if (payload.created_at) {
       msg.created_at = payload.created_at;
       msg.time = formatClockTime(new Date(payload.created_at));
-      const curIdx = messages.indexOf(msg);
-      if (curIdx >= 0) {
-        // Review round 7 prescription: locate the row by its TEMP id,
-        // update it in place, MOVE it (before the chronological successor
-        // or to the container tail), and only THEN rebuild the neighbours
-        // positionally - at that point DOM order matches the array.
-        messages.splice(curIdx, 1);
-        const insertIdx = ChatConnection.timelineInsertIndex(messages, msg);
-        messages.splice(insertIdx, 0, msg);
-        const following = messages[insertIdx + 1];
+      messages.splice(oldIndex, 1);
+      const insertIdx = ChatConnection.timelineInsertIndex(messages, msg);
+      messages.splice(insertIdx, 0, msg);
+      const following = messages[insertIdx + 1];
+
+      if (row && ChatConnection.repositionMessageRow(msg.id, following ? following.id : null)) {
+        // DOM and array now agree. Rebuild both the destination neighbours
+        // and the gap left behind, since either boundary can change grouping.
         patchMessageRowInPlace(msg);
-        ChatConnection.repositionMessageRow(msg.id, following ? following.id : null);
+        if (oldIndex !== insertIdx) {
+          const formerNeighbor = messages[Math.min(oldIndex, messages.length - 1)];
+          if (formerNeighbor && formerNeighbor !== msg) patchMessageRowInPlace(formerNeighbor);
+        }
+      } else if (container) {
+        // An absent row/successor means the DOM is incomplete. Restore it
+        // without applying new array indexes to unrelated existing rows.
+        renderMessages();
       }
+    } else if (!row && container) {
+      renderMessages();
     }
-
-    // Update data-message-id on the bubble before patching status
-    var bubble = document.querySelector('.message-bubble-custom[data-message-id="' + oldId + '"]');
-    if (bubble) {
-      bubble.setAttribute('data-message-id', msg.id);
-      var acceptedRow = bubble.closest('.message-row');
-      if (acceptedRow) acceptedRow.dataset.rowMessageId = String(payload.message_id);
-      // Also update the selection checkbox id if present
-      var checkbox = document.getElementById('msg-select-check-' + oldId);
-      if (checkbox) checkbox.id = 'msg-select-check-' + msg.id;
-    }
-
-    // Sync selectedMessageIds in case the user entered select mode while sending
-    var selIdx = selectedMessageIds.indexOf(oldId);
-    if (selIdx >= 0) selectedMessageIds[selIdx] = msg.id;
     patchMessageStatusInPlace(msg);
   }
 }

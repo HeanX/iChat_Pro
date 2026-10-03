@@ -344,6 +344,10 @@
     }
     trusted.versions[String(key.key_version)] = key.key_fingerprint;
     localStorage.setItem(`${TRUST_STORAGE_PREFIX}${key.user_id}`, JSON.stringify(trusted));
+    // An explicitly trusted rotation must also replace the cached send key.
+    if (key.algorithm === IDENTITY_ALGORITHM && key.identity_public_key) {
+      _cachePublicKey(key.user_id, key.key_version, key);
+    }
   }
 
   function forgetPeerKey(userId) {
@@ -530,6 +534,9 @@
     const cacheKey = `${userId}:v${keyVersion}`;
     const exact = _publicKeyCache.get(cacheKey);
     if (exact) return exact;
+    // Historical ciphertext requires its exact version; a newer/older cached
+    // key must not stand in for a cache miss. Only versionless sends fall back.
+    if (keyVersion != null) return null;
     // Offline fallback: the send path may not know the key version yet -
     // fall back to the latest cached version for this user. startsWith
     // avoids regex-escaping pitfalls in string-constructed patterns.

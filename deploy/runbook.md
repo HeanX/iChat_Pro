@@ -37,7 +37,7 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 7. **首次引导仓库**：`sudo git clone --branch main https://github.com/HeanX/iChat_Pro.git /opt/ichat/repo`（deploy.sh 在仓库内，首次需手动克隆；之后 deploy.sh 会自行 fetch/重置）。
 8. **Nginx 必须先于首次部署**：替换 `deploy/nginx/ichat.conf` 中的 `__PLACEHOLDER__` 放到 `/etc/nginx/conf.d/`，用临时自签证书起 8443——因为 deploy.sh 的 readiness 门禁默认经 `https://127.0.0.1:8443` 全前门路径（Nginx 不可达时自动回退 loopback http，仅对带 health 免跳转的版本有效）。`sudo nginx -t && sudo systemctl enable --now nginx`。
 9. **首次部署**：`sudo bash /opt/ichat/repo/deploy/deploy.sh`（自动 clone 兜底、建 venv、migrate、collectstatic、启动、探针；并安装稳定副本到 `/opt/ichat/bin/deploy.sh`，此后统一用该入口）。
-10. 签发正式证书：`sudo certbot certonly --webroot -w /var/www/acme -d sub.20060810.xyz`，把 8443 server 块指向 `/etc/letsencrypt/live/.../fullchain.pem`，`sudo nginx -s reload`。把 `deploy/nginx/reload-nginx.sh` 安装到 `/etc/letsencrypt/renewal-hooks/deploy/ichat-reload-nginx.sh`（chmod 755）：`certbot renew` 成功续期后自动 `nginx -t` + reload，避免 Nginx 继续使用旧证书。用 `sudo certbot renew --force-renewal` 一次性验证整条链路（受 LE 每周重复证书限额约束，勿频繁执行）。
+10. 签发正式证书：`sudo certbot certonly --webroot -w /var/www/acme -d chat.20060810.xyz`，把 8443 server 块指向 `/etc/letsencrypt/live/.../fullchain.pem`，`sudo nginx -s reload`。把 `deploy/nginx/reload-nginx.sh` 安装到 `/etc/letsencrypt/renewal-hooks/deploy/ichat-reload-nginx.sh`（chmod 755）：`certbot renew` 成功续期后自动 `nginx -t` + reload，避免 Nginx 继续使用旧证书。用 `sudo certbot renew --force-renewal` 一次性验证整条链路（受 LE 每周重复证书限额约束，勿频繁执行）。
 
 ## 3. 日常发布与回滚（T50 路径）
 

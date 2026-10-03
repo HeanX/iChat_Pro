@@ -2209,6 +2209,14 @@ function updateConnectionBadge(status) {
     icon = 'wifi';
     text = _t4('Reconnecting...', '重连中...', '重新連線中...', '再接続中...');
     className = 'connection-badge reconnecting visible';
+  } else if (status === 'auth_required') {
+    icon = 'lock';
+    text = _t4('Signed out - please log in again', '登录已失效，请重新登录', '登入已失效，請重新登入', 'ログインが失効しました');
+    className = 'connection-badge disconnected visible';
+  } else if (status === 'unsupported') {
+    icon = 'alert-triangle';
+    text = _t4('Client outdated - please update', '客户端版本过旧，请升级', '用戶端版本過舊，請升級', 'クライアントが古いため更新が必要です');
+    className = 'connection-badge disconnected visible';
   } else {
     icon = 'wifi-off';
     text = _t4('Disconnected', '已断开', '已中斷連線', '切断されました');

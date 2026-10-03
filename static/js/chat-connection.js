@@ -394,10 +394,17 @@
     if (typeof document === "undefined") return false;
     tagMessageRows();
     var row = document.querySelector('[data-row-message-id="' + newId + '"]');
-    var nextRow = document.querySelector('[data-row-message-id="' + followingId + '"]');
-    if (!row || !nextRow) return false;
-    if (row === nextRow) return false;
-    nextRow.parentNode.insertBefore(row, nextRow);
+    if (!row) return false;
+    var nextRow = followingId != null
+      ? document.querySelector('[data-row-message-id="' + followingId + '"]')
+      : null;
+    if (nextRow) {
+      if (row === nextRow) return false;
+      nextRow.parentNode.insertBefore(row, nextRow); // before successor
+    } else {
+      // No successor (or unlocatable): move the row to the container tail.
+      row.parentNode.appendChild(row);
+    }
     return true;
   }
 

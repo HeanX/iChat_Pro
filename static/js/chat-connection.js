@@ -268,7 +268,10 @@
       },
       armAck: function (clientMessageId) {
         var entry = entries[clientMessageId];
-        if (entry) armAckTimer(entry);
+        if (entry) {
+          entry.attempts += 1; // the initial transport attempt
+          armAckTimer(entry);
+        }
       },
       accepted: function (clientMessageId, payload) {
         var entry = entries[clientMessageId];

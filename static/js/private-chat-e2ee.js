@@ -421,6 +421,25 @@
   const _publicKeyCache = new Map();  // key: `${userId}:v${keyVersion}`
   const PUBLIC_KEY_CACHE_MAX = 200;
 
+  const PUBLIC_KEY_CACHE_STORAGE_KEY = 'ichat_e2ee_public_key_cache';
+  // T20: the cache is persisted (public keys are non-sensitive) so an
+  // offline send can encrypt with the peer's already-fetched key instead of
+  // re-fetching /api/keys/ and failing.
+  function _persistPublicKeyCache() {
+    try {
+      const obj = {};
+      for (const [k, v] of _publicKeyCache) obj[k] = v;
+      localStorage.setItem(PUBLIC_KEY_CACHE_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) {}
+  }
+  function _hydratePublicKeyCache() {
+    try {
+      const obj = JSON.parse(localStorage.getItem(PUBLIC_KEY_CACHE_STORAGE_KEY) || '{}');
+      for (const k of Object.keys(obj)) _publicKeyCache.set(k, obj[k]);
+    } catch (_) {}
+  }
+  _hydratePublicKeyCache();
+
   function _cachePublicKey(userId, keyVersion, key) {
     const cacheKey = `${userId}:v${keyVersion}`;
     if (_publicKeyCache.size >= PUBLIC_KEY_CACHE_MAX) {
@@ -429,6 +448,7 @@
       _publicKeyCache.delete(firstKey);
     }
     _publicKeyCache.set(cacheKey, key);
+    _persistPublicKeyCache();
   }
 
   function _getCachedPublicKey(userId, keyVersion) {

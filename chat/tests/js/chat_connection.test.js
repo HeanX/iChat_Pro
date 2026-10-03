@@ -212,12 +212,12 @@ function test_outbox_resend_uses_same_id_and_gives_up() {
     onDeliver(envelope) { return online; },
   });
   outbox.track("m1", { data: { client_message_id: "m1" } });
-  outbox.armAck("m1"); // initial transport attempt
+  outbox.armAck("m1"); // initial transport attempt (counted)
   h.timers.advance(10000); // failed
   outbox.resendPending(); // attempt 2
   outbox.resendPending(); // attempt 3
-  assert(outbox.get("m1").attempts === 3, "three delivery attempts");
-  outbox.resendPending(); // attempt 4 would exceed maxAttempts
+  assert(outbox.get("m1").attempts === 3, "initial + two resends: " + outbox.get("m1").attempts);
+  outbox.resendPending(); // would exceed maxAttempts
   assert(outbox.get("m1").attempts === 3, "gives up after maxAttempts");
   h.timers.advance(10000); // let the in-flight ack timer time out
   assert(outbox.get("m1").status === "failed", "stays failed after give-up");

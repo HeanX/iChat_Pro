@@ -498,6 +498,22 @@
 
   // ── In-memory public key cache ─────────────────────────────────
   const _publicKeyCache = new Map();  // key: `${userId}:v${keyVersion}`
+
+  const GROUP_PUBLIC_KEY_CACHE_STORAGE_KEY = 'ichat_e2ee_group_public_key_cache';
+  function _persistGroupPublicKeyCache() {
+    try {
+      const obj = {};
+      for (const [k, v] of _publicKeyCache) obj[k] = v;
+      localStorage.setItem(GROUP_PUBLIC_KEY_CACHE_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) {}
+  }
+  function _hydrateGroupPublicKeyCache() {
+    try {
+      const obj = JSON.parse(localStorage.getItem(GROUP_PUBLIC_KEY_CACHE_STORAGE_KEY) || '{}');
+      for (const k of Object.keys(obj)) _publicKeyCache.set(k, obj[k]);
+    } catch (_) {}
+  }
+  _hydrateGroupPublicKeyCache();
   const PUBLIC_KEY_CACHE_MAX = 200;
 
   function _cachePublicKey(userId, keyVersion, key) {
@@ -507,6 +523,7 @@
       _publicKeyCache.delete(firstKey);
     }
     _publicKeyCache.set(cacheKey, key);
+    _persistGroupPublicKeyCache();
   }
 
   function _getCachedPublicKey(userId, keyVersion) {

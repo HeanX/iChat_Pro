@@ -18,7 +18,13 @@
     "appId": "pro.ichat.desktop",
     "productName": "iChat Pro",
     "copyright": "Copyright © 2026 iChat Pro Team",
-    "files": ["main.js", "app-config.js", "defaults.json", "preload.js", "offline.html"],
+    "files": [
+      "main.js",
+      "app-config.js",
+      "defaults.json",
+      "preload.js",
+      "offline.html"
+    ],
     "directories": {
       "output": "dist"
     },
@@ -36,7 +42,9 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "iChat-Pro-Setup-${version}.${ext}"
+      "artifactName": "iChat-Pro-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": true,
+      "allowElevation": true
     }
   }
 }

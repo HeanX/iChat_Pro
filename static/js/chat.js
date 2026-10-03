@@ -2051,9 +2051,13 @@ function handleMessageAccepted(data) {
         messages.splice(insertIdx, 0, msg);
         const following = messages[insertIdx + 1];
         if (following) {
+          // Move the COMPLETE row FIRST, then rebuild neighbours - the
+          // positional rebuild assumes DOM order matches the array.
           ChatConnection.repositionMessageRow(msg.id, following.id);
+          patchMessageRowInPlace(msg);
+        } else {
+          patchMessageRowInPlace(msg);
         }
-        patchMessageRowInPlace(msg);
       }
     }
 

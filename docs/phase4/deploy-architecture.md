@@ -32,7 +32,7 @@ Browser / Electron / (Android 暂缓)
 | TCP 6379 | Redis | 仅 127.0.0.1 |
 | TCP/UDP 443、2096、25383 | **Xray/3x-ui（既有共存服务）** | 不属于本项目，禁止占用/改动 |
 
-**决策记录（ADR-P4-01）：聊天 HTTPS 使用 8443。** 目标主机 TCP/UDP 443 已被既有 Xray（VLESS Reality + Hysteria2）占用，交接方明确要求不得覆盖；Reality 不支持向本地 Nginx 的透明回退分流，因此聊天服务独立监听 8443。后果：客户端地址需带端口（`https://sub.20060810.xyz:8443`）；`DJANGO_CSRF_TRUSTED_ORIGINS`、Electron `ICHAT_SERVER_URL` 均使用带端口的完整 Origin。HTTP→HTTPS 跳转由 80 端口 server 块完成（NEW-CLD-002 的“自动跳转”按此口径验收）。
+**决策记录（ADR-P4-01）：聊天 HTTPS 使用 8443。** 目标主机 TCP/UDP 443 已被既有 Xray（VLESS Reality + Hysteria2）占用，交接方明确要求不得覆盖；Reality 不支持向本地 Nginx 的透明回退分流，因此聊天服务独立监听 8443。后果：客户端地址需带端口（`https://chat.20060810.xyz:8443`）；`DJANGO_CSRF_TRUSTED_ORIGINS`、Electron `ICHAT_SERVER_URL` 均使用带端口的完整 Origin。HTTP→HTTPS 跳转由 80 端口 server 块完成（NEW-CLD-002 的“自动跳转”按此口径验收）。
 
 ## 3. 数据流要点
 

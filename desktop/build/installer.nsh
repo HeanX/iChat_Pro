@@ -11,5 +11,11 @@
     delete_app_data:
       RMDir /r "$APPDATA\ichat-pro-desktop"
     done:
-  ${EndIf}
+
+  ; Review: force-clean leftovers that the standard uninstaller can miss.
+  ; - runtime logs etc. keep $INSTDIR alive as an empty folder
+  ; - a stale uninstall registration can point at the removed uninstaller
+  RMDir /r "$INSTDIR"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}"
 !macroend

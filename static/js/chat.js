@@ -3811,24 +3811,25 @@ async function sendMessage() {
     }
 
     // ── Send: WebSocket first, HTTP fallback ──────────────────
-    let accepted;
-    const wsOk = wsClient && wsClient.sendPayload && wsClient.sendPayload({
-      event: wsEvent,
-      request_id: clientMsgId,
-      data: wsData,
+    // T20 review: the envelope enters the OUTBOX BEFORE any transport is
+    // attempted - an offline send must survive for same-ID resend after
+    // reconnect (previously only the ws-ok path was tracked, so offline
+    // sends vanished when the HTTP fallback also failed).
+    const envelope = { event: wsEvent, request_id: clientMsgId, data: wsData };
+    chatOutbox.track(clientMsgId, envelope, {
+      conversationId: conv.id,
+      conversationType: conv.type,
     });
+    pendingOutgoingMessages[clientMsgId] = {
+      conversationId: conv.id,
+      conversationType: conv.type,
+      text
+    };
+
+    let accepted;
+    const wsOk = wsClient && wsClient.sendPayload && wsClient.sendPayload(envelope);
     if (wsOk) {
-      pendingOutgoingMessages[clientMsgId] = {
-        conversationId: conv.id,
-        conversationType: conv.type,
-        text
-      };
-      // T33: ACK-timeout tracking — the envelope is retried with the SAME
-      // client_message_id until confirmed.
-      chatOutbox.track(clientMsgId, { event: wsEvent, request_id: clientMsgId, data: wsData }, {
-        conversationId: conv.id,
-        conversationType: conv.type,
-      });
+      chatOutbox.armAck(clientMsgId);
       // WebSocket accepted — response arrives async via handleMessageAccepted
       return;
     }
@@ -3836,6 +3837,7 @@ async function sendMessage() {
     // WebSocket unavailable — fall back to HTTP
     logToCryptoConsole("[Send] WebSocket unavailable, falling back to HTTP");
     accepted = await apiFetch(httpUrl, { method: "POST", body: httpBody });
+    chatOutbox.accepted(clientMsgId);
     handleMessageAccepted({ data: accepted });
   } catch (err) {
     console.error("Send failed:", err);

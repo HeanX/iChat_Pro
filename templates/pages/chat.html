@@ -327,14 +327,14 @@
 {% block extra_js %}
 <!-- Main Chat Interaction JavaScript -->
 <script id="ichat-key-manager-script" src="{% static 'js/key-manager.js' %}?v=20260624-versioned-local-keys" data-current-user-id="{{ request.user.pk }}" data-username="{{ request.user.username }}" data-email="{{ request.user.email|default:'' }}" data-avatar-url="{{ settings_avatar_url|default:'' }}" data-initials="{{ settings_initials|default:'' }}" data-avatar-color="{{ settings_avatar_color|default:'#5c6bc0' }}"></script>
-<script src="{% static 'js/private-chat-e2ee.js' %}?v=20261003-t20b"></script>
-<script src="{% static 'js/group-chat-e2ee.js' %}?v=20261003-t20b"></script>
+<script src="{% static 'js/private-chat-e2ee.js' %}?v=20261003-t20e"></script>
+<script src="{% static 'js/group-chat-e2ee.js' %}?v=20261003-t20e"></script>
 <script src="{% static 'js/file-transfer.js' %}?v=20261003-t20b"></script>
 <script src="{% static 'js/context-menu.js' %}?v=20261003-t20b"></script>
 <script src="{% static 'js/chat-conversation-actions.js' %}?v=20261003-t20b"></script>
 <script src="{% static 'js/chat-message-actions.js' %}?v=20261003-t20b"></script>
-<script src="{% static 'js/chat-connection.js' %}?v=20261003-t20a"></script>
-<script src="{% static 'js/chat.js' %}?v=20261003-t20d"></script>
+<script src="{% static 'js/chat-connection.js' %}?v=20261003-t20e"></script>
+<script src="{% static 'js/chat.js' %}?v=20261003-t20e"></script>
 <script nonce="{{ request.csp_nonce }}">
   function exportLocalKeyBackup() {
     try {

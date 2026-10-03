@@ -531,14 +531,17 @@
     const exact = _publicKeyCache.get(cacheKey);
     if (exact) return exact;
     // Offline fallback: the send path may not know the key version yet -
-    // fall back to the latest cached version for this user.
+    // fall back to the latest cached version for this user. startsWith
+    // avoids regex-escaping pitfalls in string-constructed patterns.
+    const prefix = userId + ":v";
     let best = null;
     let bestVersion = -1;
     for (const [k, v] of _publicKeyCache) {
-      const m = k.match(new RegExp('^' + userId + ':v(\d+)$'));
-      if (m) {
-        const ver = parseInt(m[1], 10);
-        if (ver > bestVersion) { bestVersion = ver; best = v; }
+      if (!k.startsWith(prefix)) continue;
+      const ver = parseInt(k.slice(prefix.length), 10);
+      if (Number.isFinite(ver) && ver > bestVersion) {
+        bestVersion = ver;
+        best = v;
       }
     }
     return best;

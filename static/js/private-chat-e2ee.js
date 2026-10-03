@@ -453,7 +453,20 @@
 
   function _getCachedPublicKey(userId, keyVersion) {
     const cacheKey = `${userId}:v${keyVersion}`;
-    return _publicKeyCache.get(cacheKey) || null;
+    const exact = _publicKeyCache.get(cacheKey);
+    if (exact) return exact;
+    // Offline fallback: the send path may not know the key version yet -
+    // fall back to the latest cached version for this user.
+    let best = null;
+    let bestVersion = -1;
+    for (const [k, v] of _publicKeyCache) {
+      const m = k.match(new RegExp('^' + userId + ':v(\d+)$'));
+      if (m) {
+        const ver = parseInt(m[1], 10);
+        if (ver > bestVersion) { bestVersion = ver; best = v; }
+      }
+    }
+    return best;
   }
 
   /**

@@ -10,7 +10,7 @@
  *   runserver is spawned on ICHAT_HOST/ICHAT_PORT (default 127.0.0.1:8000).
  *   This branch is intentionally the only one that spawns Python.
  */
-const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu, Tray } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -194,12 +194,12 @@ function probeAppOrigin(timeoutMs = 4000) {
 // T14: poll the cloud origin while the offline page is shown; reload the
 // app automatically once the service answers again.
 function startOfflinePolling() {
-  if (offlinePollTimer || !APP_ORIGIN) return;
+  if (isQuitting || offlinePollTimer || !APP_ORIGIN) return;
   offlinePollTimer = setInterval(async () => {
-    if (await probeAppOrigin(3000)) {
+    if (isQuitting) return;
+    if (await probeAppOrigin(3000) && !isQuitting) {
       clearInterval(offlinePollTimer);
       offlinePollTimer = null;
-      connectivityWatchTimer = null;
       if (mainWindow) mainWindow.loadURL(APP_URL).catch(() => startOfflinePolling());
     }
   }, 5000);
@@ -210,10 +210,11 @@ let runtimeOffline = false;
 // T14 review: runtime request failures do not trigger did-fail-load - a
 // periodic watch flips an overlay banner on/off WITHOUT navigating away.
 function startConnectivityWatch() {
-  if (!CLOUD_MODE || connectivityWatchTimer) return;
+  if (isQuitting || !CLOUD_MODE || connectivityWatchTimer) return;
   connectivityWatchTimer = setInterval(async () => {
-    if (offlinePollTimer || !mainWindow) return;
+    if (isQuitting || offlinePollTimer || !mainWindow) return;
     const reachable = await probeAppOrigin(3000);
+    if (isQuitting) return;
     if (!reachable && !runtimeOffline) {
       runtimeOffline = true;
       injectOfflineBanner();
@@ -340,8 +341,9 @@ function createWindow() {
 // T17: tray - icon reuses the T16 ICO (getBrandIconPath). Creation failure
 // keeps the window visible (minimize behaves normally, no tray features).
 function createTray() {
+  if (tray) return true;
   try {
-    const iconPath = getBrandIconPath();
+    const iconPath = getBrandIconPath(app);
     if (!iconPath || !fs.existsSync(iconPath)) throw new Error('icon missing');
     tray = new Tray(iconPath);
     tray.setToolTip('iChat Pro');
@@ -355,12 +357,14 @@ function createTray() {
     return true;
   } catch (err) {
     console.error('[Tray] creation failed, window stays interactive:', err.message);
+    if (tray) tray.destroy();
     tray = null;
     return false;
   }
 }
 
 function showMainWindow() {
+  if (isQuitting) return;
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
     return;
@@ -371,53 +375,6 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
-app.whenReady().then(async () => {
-  configureBranding(app, Menu);
-  registerSecureStorageIpc();
-  startDjangoServer(); // dev mode only
-
-  if (APP_CONFIG.mode === 'unconfigured') {
-    createWindow();
-    showOfflinePage();
-    return;
-  }
-
-  if (DEV_MODE) {
-    try {
-      await waitForDjangoReady(`${APP_ORIGIN}/login/`);
-    } catch (error) {
-      createWindow();
-      showOfflinePage();
-      return;
-    }
-  } else {
-    // Fail fast into the offline page when the service is down at launch.
-    const reachable = await probeAppOrigin();
-    if (!reachable) {
-      createWindow();
-      showOfflinePage();
-      return;
-    }
-  }
-
-  createWindow();
-  createTray(); // on failure the window stays interactive (no tray features)
-  startConnectivityWatch();
-
-  // T17: single instance - a second launch focuses the existing window
-  // instead of creating a duplicate process/tray.
-  const gotLock = app.requestSingleInstanceLock();
-  if (!gotLock) {
-    app.quit();
-    return;
-  }
-  app.on('second-instance', () => showMainWindow());
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
-
 app.on('before-quit', () => {
   isQuitting = true;
   if (tray) {
@@ -425,9 +382,50 @@ app.on('before-quit', () => {
     tray = null;
   }
   if (offlinePollTimer) clearInterval(offlinePollTimer);
+  offlinePollTimer = null;
+  if (connectivityWatchTimer) clearInterval(connectivityWatchTimer);
+  connectivityWatchTimer = null;
   stopDjangoServer();
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+// Acquire before ready, network probes or spawning Django. Offline and
+// unconfigured launches obey the same ownership rule as online launches.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // If startup is still probing, its one window will appear when ready.
+    if (mainWindow) showMainWindow();
+  });
+
+  app.whenReady().then(async () => {
+    configureBranding(app, Menu);
+    registerSecureStorageIpc();
+    startDjangoServer(); // dev mode only
+
+    let initiallyOffline = APP_CONFIG.mode === 'unconfigured';
+    if (DEV_MODE) {
+      try {
+        await waitForDjangoReady(`${APP_ORIGIN}/login/`);
+      } catch (error) {
+        initiallyOffline = true;
+      }
+    } else if (CLOUD_MODE) {
+      initiallyOffline = !(await probeAppOrigin());
+    }
+    if (isQuitting) return;
+
+    createWindow();
+    createTray(); // Failure leaves normal taskbar minimize available.
+    if (initiallyOffline) showOfflinePage();
+
+    app.on('activate', () => {
+      if (!isQuitting && BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}

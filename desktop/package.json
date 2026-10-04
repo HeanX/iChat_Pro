@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "test:installer": "node scripts/test-installer.cjs"
   },
   "devDependencies": {
     "electron": "^39.0.0",

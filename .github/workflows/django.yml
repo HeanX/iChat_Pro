@@ -7,6 +7,24 @@ on:
       - main
 
 jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install NSIS compiler
+        run: choco install nsis --yes --no-progress
+
+      - name: Exercise real NSIS uninstall helpers in isolation
+        working-directory: desktop
+        run: npm run test:installer
+
   javascript:
     runs-on: ubuntu-latest
     steps:

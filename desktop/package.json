@@ -13,7 +13,8 @@
   },
   "devDependencies": {
     "electron": "^39.0.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "rcedit": "^5.0.0"
   },
   "build": {
     "appId": "pro.ichat.desktop",
@@ -38,7 +39,8 @@
           ]
         }
       ],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -46,6 +48,7 @@
       "artifactName": "iChat-Pro-Setup-${version}.${ext}",
       "allowElevation": true,
       "include": "build/installer.nsh"
-    }
+    },
+    "afterPack": "scripts/afterPack.cjs"
   }
 }

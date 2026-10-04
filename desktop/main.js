@@ -43,6 +43,8 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 let djangoProcess = null;
 let mainWindow = null;
 let offlinePollTimer = null;
+let tray = null;
+let isQuitting = false;
 
 // T21: safeStorage bridge - encrypt/decrypt short secrets (key material)
 // with OS-level protection (DPAPI on Windows). Only the app's own frames
@@ -321,9 +323,52 @@ function createWindow() {
 
   if (APP_CONFIG.mode === 'dev') mainWindow.webContents.openDevTools();
 
+  // T17: minimize hides to tray (same window restored later - no reload,
+  // connection and outbox preserved). Without a tray minimize is normal.
+  mainWindow.on('minimize', (event) => {
+    if (tray) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+// T17: tray - icon reuses the T16 ICO (getBrandIconPath). Creation failure
+// keeps the window visible (minimize behaves normally, no tray features).
+function createTray() {
+  try {
+    const iconPath = getBrandIconPath();
+    if (!iconPath || !fs.existsSync(iconPath)) throw new Error('icon missing');
+    tray = new Tray(iconPath);
+    tray.setToolTip('iChat Pro');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: '打开主窗口', click: () => showMainWindow() },
+      { type: 'separator' },
+      { label: '退出', click: () => app.quit() },
+    ]));
+    tray.on('click', () => showMainWindow());
+    tray.on('double-click', () => showMainWindow());
+    return true;
+  } catch (err) {
+    console.error('[Tray] creation failed, window stays interactive:', err.message);
+    tray = null;
+    return false;
+  }
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  // Same BrowserWindow restored: no reload - connection and outbox survive.
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 app.whenReady().then(async () => {
@@ -356,7 +401,17 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+  createTray(); // on failure the window stays interactive (no tray features)
   startConnectivityWatch();
+
+  // T17: single instance - a second launch focuses the existing window
+  // instead of creating a duplicate process/tray.
+  const gotLock = app.requestSingleInstanceLock();
+  if (!gotLock) {
+    app.quit();
+    return;
+  }
+  app.on('second-instance', () => showMainWindow());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -364,6 +419,11 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
   if (offlinePollTimer) clearInterval(offlinePollTimer);
   stopDjangoServer();
 });

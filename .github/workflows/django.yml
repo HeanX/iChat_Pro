@@ -21,6 +21,14 @@ jobs:
       - name: Install NSIS compiler
         run: choco install nsis --yes --no-progress
 
+      - name: Install desktop build dependencies
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+
+      - name: Build and verify Windows name, version and icon resources
+        working-directory: desktop
+        run: npm run test:branding
+
       - name: Exercise real NSIS uninstall helpers in isolation
         working-directory: desktop
         run: npm run test:installer

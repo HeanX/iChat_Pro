@@ -10,7 +10,7 @@
  *   runserver is spawned on ICHAT_HOST/ICHAT_PORT (default 127.0.0.1:8000).
  *   This branch is intentionally the only one that spawns Python.
  */
-const { app, BrowserWindow, ipcMain, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -18,6 +18,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const { normalizeOrigin, resolveAppConfig } = require('./app-config');
+const { configureBranding, getBrandIconPath } = require('./app-branding');
 
 // T21 review: the installer carries a DEFAULT cloud address - no env var
 // needed for the normal user. ICHAT_SERVER_URL still overrides.
@@ -281,6 +282,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'iChat Pro',
+    icon: getBrandIconPath(app),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -325,6 +327,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  configureBranding(app, Menu);
   registerSecureStorageIpc();
   startDjangoServer(); // dev mode only
 

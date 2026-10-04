@@ -9,7 +9,8 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "dist": "electron-builder --win nsis",
-    "test:installer": "node scripts/test-installer.cjs"
+    "test:installer": "node scripts/test-installer.cjs",
+    "test:branding": "node scripts/test-branding.cjs"
   },
   "devDependencies": {
     "electron": "^39.0.0",
@@ -23,9 +24,14 @@
     "files": [
       "main.js",
       "app-config.js",
+      "app-branding.js",
       "defaults.json",
       "preload.js",
       "offline.html"
+    ],
+    "extraResources": [
+      { "from": "build/icon.ico", "to": "branding/icon.ico" },
+      { "from": "build/icon.png", "to": "branding/icon.png" }
     ],
     "directories": {
       "output": "dist"

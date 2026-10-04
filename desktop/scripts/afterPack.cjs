@@ -16,6 +16,8 @@ exports.default = async function (context) {
       ProductName: 'iChat Pro',
       CompanyName: 'iChat Pro Team',
       LegalCopyright: 'Copyright (c) 2026 iChat Pro Team',
+      InternalName: context.packager.appInfo.productFilename,
+      OriginalFilename: context.packager.appInfo.productFilename + '.exe',
     },
     'file-version': pkg.version,
     'product-version': pkg.version,

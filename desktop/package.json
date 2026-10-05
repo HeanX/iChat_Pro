@@ -10,7 +10,8 @@
     "dev": "electron . --dev",
     "dist": "electron-builder --win nsis",
     "test:installer": "node scripts/test-installer.cjs",
-    "test:branding": "node scripts/test-branding.cjs"
+    "test:branding": "node scripts/test-branding.cjs",
+    "test:layout": "node scripts/test-sidebar-layout.cjs"
   },
   "devDependencies": {
     "electron": "^39.0.0",

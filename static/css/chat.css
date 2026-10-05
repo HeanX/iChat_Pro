@@ -4479,6 +4479,9 @@ input:checked + .slider:before {
 }
 
 .sidebar-telegram-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   height: 44px;
 }
 

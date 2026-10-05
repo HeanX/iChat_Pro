@@ -441,6 +441,11 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  // T18: the runtime AppUserModelID must equal the NSIS shortcut's
+  // (electron-builder build.appId) or Windows shows the toast but never
+  // routes its click activation. Must be set before any Notification.
+  app.setAppUserModelId('pro.ichat.desktop');
+
   app.on('second-instance', () => {
     // If startup is still probing, its one window will appear when ready.
     if (mainWindow) showMainWindow();

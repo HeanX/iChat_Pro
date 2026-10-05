@@ -37,6 +37,7 @@ function launch(options = {}) {
     getVersion: () => '1.0.0',
     setAboutPanelOptions() {},
     requestSingleInstanceLock: () => true,
+    setAppUserModelId(id) { app.aumid = id; },
     whenReady() {
       return { then: callback => { startup = Promise.resolve().then(callback); return startup; } };
     },
@@ -184,6 +185,10 @@ test('preload bridge exposes the narrow notification API and forwards clicks', (
 test('valid payload from the app frame shows a branded notification', async () => {
   const h = launch();
   await h.started();
+  // T18: the runtime AUMID must match the electron-builder appId or Windows
+  // shows the toast but click activation is never routed.
+  const pkg = JSON.parse(fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'));
+  assert.equal(h.app.aumid, pkg.build.appId);
   const handler = h.handlers.get('ichat:notifications:show');
   assert.ok(handler, 'notification IPC handler not registered');
   const result = await handler(trusted(h.appOrigin()), VALID);

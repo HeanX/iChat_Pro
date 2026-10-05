@@ -49,6 +49,14 @@ used by `chat.js`; the Electron shell only re-validates and displays.
   ≤ 80, body ≤ 200, empty rejected); the toast carries the T16 brand icon;
   clicking it calls the tray `showMainWindow` path (same window, no reload)
   and forwards the conversation id.
+- AppUserModelID: the runtime AUMID is set to the electron-builder
+  `build.appId` (`pro.ichat.desktop`) before any notification. Without the
+  match, Windows displays the toast but never routes its click activation —
+  the 2026-10-05 isolated-build native record showed toasts sourced from the
+  default `electron.app.iChat Pro` with zero click events. Click acceptance
+  therefore REQUIRES the installed build (Start Menu shortcut + matched
+  AUMID); `win-unpacked` and isolated test builds cannot deliver toast
+  clicks by design.
 
 ## Automated evidence
 

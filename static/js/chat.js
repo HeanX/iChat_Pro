@@ -14,6 +14,45 @@ let currentLanguage = localStorage.getItem('ichat_lang') || (function() {
 })() || 'en';
 // 4-language inline helper: _t4(en, zh, zhTW, ja)
 function _t4(en, zh, zhTW, ja) { return {en, zh, 'zh-TW': zhTW, ja}[currentLanguage] || en; }
+
+// T18: incoming-message notification gating (mute / user switches / focus).
+// `notificationSettings` is filled from /api/settings/notifications/ during
+// init; until then (or on failure) the module's defaults apply.
+let notificationSettings = null;
+const chatNotificationCenter = window.ChatNotifications
+  ? window.ChatNotifications.createNotificationCenter({
+      getSettings: () => notificationSettings,
+      getConversation: (id) => conversationsById[id],
+      isAppUnfocused: () => document.hidden || !document.hasFocus(),
+      show: (payload) => {
+        // A failed notification must never break message rendering.
+        if (window.iChatDesktop && window.iChatDesktop.notifications) {
+          Promise.resolve(window.iChatDesktop.notifications.show(payload)).catch(() => {});
+        }
+      },
+      translate: _t4,
+    })
+  : null;
+
+async function loadNotificationSettings() {
+  try {
+    const data = await apiFetch('/api/settings/notifications/');
+    if (data && typeof data === 'object') notificationSettings = data;
+  } catch (err) {
+    console.warn('Notification settings unavailable, using defaults:', err && err.message);
+  }
+}
+
+// T18: desktop only - the main process confirms the window is up before the
+// renderer gets the click, so selectChat always runs in a visible window.
+function setupDesktopNotificationBridge() {
+  if (!(window.iChatDesktop && window.iChatDesktop.notifications)) return;
+  window.iChatDesktop.notifications.onClicked((payload) => {
+    const convId = parseInt(payload && payload.conversationId);
+    if (convId && conversationsById[convId]) selectChat(convId);
+  });
+}
+
 let isSelectingMessages = false;
 let selectedMessageIds = [];
 let messages = [];               // Decrypted messages for the currently active conversation
@@ -1660,8 +1699,8 @@ async function syncCatchUp() {
         // Called INSIDE the walker's page task, which already runs on the
         // shared apply queue (realtime pushes cannot interleave mid-page).
         return synthetic.event === "message.group.new"
-          ? !!(await handleGroupMessageReceived(synthetic))
-          : !!(await handlePrivateMessageReceived(synthetic));
+          ? !!(await handleGroupMessageReceived(synthetic, { source: "sync" }))
+          : !!(await handlePrivateMessageReceived(synthetic, { source: "sync" }));
       },
     });
     const result = await walker.run();
@@ -1784,7 +1823,7 @@ function tagLastMessageRow(messageId) {
   }
 }
 
-async function handlePrivateMessageReceived(data) {
+async function handlePrivateMessageReceived(data, meta) {
   const payload = data.data || data;
   const convId = parseInt(payload.conversation_id);
   const conv = conversationsById[convId];
@@ -1897,13 +1936,27 @@ async function handlePrivateMessageReceived(data) {
       }
     }
   }
+  // T18: realtime pushes may raise a system notification (gated by the
+  // notification center: mute, user switches, focus, sync source skips).
+  if (chatNotificationCenter) {
+    chatNotificationCenter.notifyIncoming({
+      convId: convId,
+      convType: 'single',
+      isSelf: newMsg.isSelf,
+      decryptError: !!decryptError,
+      isFileMsg: isFileMsg,
+      text: isFileMsg ? '' : plaintext,
+      senderName: conv ? conv.name : undefined,
+      source: meta && meta.source,
+    });
+  }
   // Sync items must report whether they were APPLIED (review: the cursor
   // may only advance after a successful apply; decryption failures stop
   // the walk without advancing).
   return isFileMsg || !decryptError;
 }
 
-async function handleGroupMessageReceived(data) {
+async function handleGroupMessageReceived(data, meta) {
   const payload = data.data || data;
   const convId = payload.group_id;
   const conv = conversationsById[convId];
@@ -1980,6 +2033,18 @@ async function handleGroupMessageReceived(data) {
     }
     if (conv) {
       updateSidebarPreview(conv, isFileMsg ? ('[' + (payload.message_type || 'file') + ']') : plaintext, newMsg.time, payload.sender_id);
+    }
+    if (chatNotificationCenter) {
+      chatNotificationCenter.notifyIncoming({
+        convId: Number(convId),
+        convType: 'group',
+        isSelf: newMsg.isSelf,
+        decryptError: false,
+        isFileMsg: isFileMsg,
+        text: isFileMsg ? '' : plaintext,
+        senderName: newMsg.sender_name,
+        source: meta && meta.source,
+      });
     }
   } catch (err) {
     console.error('Failed to decrypt incoming group message:', err);
@@ -7581,6 +7646,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await fetchConversations();
   startPendingGroupInvitationPolling();
+  loadNotificationSettings();
+  setupDesktopNotificationBridge();
 
   connectWebSocket();
 

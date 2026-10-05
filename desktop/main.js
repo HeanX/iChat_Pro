@@ -10,7 +10,7 @@
  *   runserver is spawned on ICHAT_HOST/ICHAT_PORT (default 127.0.0.1:8000).
  *   This branch is intentionally the only one that spawns Python.
  */
-const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu, Tray } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu, Tray, Notification } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -78,6 +78,49 @@ function registerSecureStorageIpc() {
     // for the DPAPI wrapper so a full-size round-trip cannot be rejected.
     if (decoded.length > 2162688) throw new Error('invalid payload');
     return safeStorage.decryptString(decoded);
+  });
+}
+
+// T18: system notifications for incoming messages. The renderer decrypts and
+// decides whether a notification is due (conversation mute, user settings,
+// window focus); this handler re-validates the payload, shows the toast and
+// routes clicks back so the same window is restored and navigated.
+const NOTIFICATION_TITLE_MAX = 80;
+const NOTIFICATION_BODY_MAX = 200;
+
+function sanitizeNotificationPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const conversationId = Number(payload.conversationId);
+  if (!Number.isInteger(conversationId) || conversationId <= 0) return null;
+  if (payload.conversationType !== 'single' && payload.conversationType !== 'group') return null;
+  const title = typeof payload.title === 'string' ? payload.title.trim().slice(0, NOTIFICATION_TITLE_MAX) : '';
+  const body = typeof payload.body === 'string' ? payload.body.trim().slice(0, NOTIFICATION_BODY_MAX) : '';
+  if (!title || !body) return null;
+  return { conversationId, conversationType: payload.conversationType, title, body };
+}
+
+function registerNotificationIpc() {
+  ipcMain.handle('ichat:notifications:show', (event, payload) => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    const clean = sanitizeNotificationPayload(payload);
+    if (!clean) throw new Error('invalid payload');
+    if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return false;
+    const notification = new Notification({
+      title: clean.title,
+      body: clean.body,
+      icon: getBrandIconPath(app),
+    });
+    notification.on('click', () => {
+      showMainWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ichat:notifications:clicked', {
+          conversationId: clean.conversationId,
+          conversationType: clean.conversationType,
+        });
+      }
+    });
+    notification.show();
+    return true;
   });
 }
 
@@ -406,6 +449,7 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     configureBranding(app, Menu);
     registerSecureStorageIpc();
+    registerNotificationIpc();
     startDjangoServer(); // dev mode only
 
     let initiallyOffline = APP_CONFIG.mode === 'unconfigured';

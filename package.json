@@ -6,7 +6,7 @@
   "scripts": {
     "build:css": "npx @tailwindcss/cli -i ./static/css/tailwind-input.css -o ./static/css/tailwind.css --minify",
     "watch:css": "npx @tailwindcss/cli -i ./static/css/tailwind-input.css -o ./static/css/tailwind.css --watch",
-    "test:e2ee": "node ./chat/tests/js/private_chat_e2ee.test.js && node ./chat/tests/js/group_chat_e2ee.test.js && node ./chat/tests/js/chat_connection.test.js && node ./chat/tests/js/desktop_config.test.js && node --test ./chat/tests/js/message_accepted.test.js ./chat/tests/js/public_key_cache.test.js ./chat/tests/js/desktop_branding.test.js ./chat/tests/js/desktop_tray.test.js"
+    "test:e2ee": "node ./chat/tests/js/private_chat_e2ee.test.js && node ./chat/tests/js/group_chat_e2ee.test.js && node ./chat/tests/js/chat_connection.test.js && node ./chat/tests/js/desktop_config.test.js && node --test ./chat/tests/js/message_accepted.test.js ./chat/tests/js/public_key_cache.test.js ./chat/tests/js/desktop_branding.test.js ./chat/tests/js/desktop_tray.test.js ./chat/tests/js/chat_notifications.test.js ./chat/tests/js/desktop_notifications.test.js ./chat/tests/js/notification_integration.test.js"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.0",

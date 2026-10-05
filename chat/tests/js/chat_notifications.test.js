@@ -5,12 +5,13 @@ const ChatNotifications = require('../../../static/js/chat-notifications.js');
 
 const FUTURE = new Date(Date.now() + 3600_000).toISOString();
 const PAST = new Date(Date.now() - 3600_000).toISOString();
+const SETTINGS = Object.fromEntries(Object.keys(ChatNotifications.DEFAULT_SETTINGS).map(key => [key, true]));
 
 function makeCenter(overrides = {}) {
   const shown = [];
   const center = ChatNotifications.createNotificationCenter({
-    getSettings: overrides.settings === undefined ? null : () => overrides.settings,
-    getConversation: id => (overrides.conversations || {})[id] || null,
+    getSettings: () => overrides.settings === null ? null : { ...SETTINGS, ...overrides.settings },
+    getConversation: id => (overrides.conversations || { 7: { name: 'Alice' } })[id] || null,
     isAppUnfocused: () => overrides.unfocused !== undefined ? overrides.unfocused : true,
     show: payload => shown.push(payload),
     translate: (en) => en,
@@ -126,10 +127,17 @@ test('normalizeSettings keeps defaults for missing or non-boolean fields', () =>
   );
 });
 
-test('unknown conversation still notifies using the sender name', () => {
-  const { center, shown } = makeCenter();
-  assert.equal(center.notifyIncoming({ ...baseMeta, senderName: undefined }), true);
-  assert.equal(shown[0].title, 'iChat Pro');
+test('unknown conversation never bypasses the missing mute metadata', () => {
+  const { center, shown } = makeCenter({ conversations: {} });
+  assert.equal(center.notifyIncoming(baseMeta), false);
+  assert.equal(shown.length, 0);
+});
+
+test('unknown settings and malformed permission fields stay disabled', () => {
+  assert.equal(makeCenter({ settings: null }).center.notifyIncoming(baseMeta), false);
+  for (const field of ['display_notifications', 'private_chat_notifications']) {
+    assert.equal(makeCenter({ settings: { [field]: 'true' } }).center.notifyIncoming(baseMeta), false);
+  }
 });
 
 test('isConversationMuted is false for absent or malformed values', () => {

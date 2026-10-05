@@ -38,6 +38,7 @@ async function main() {
     // Exercise entry-point behavior from the archive, not just source files.
     const lifecycle = spawnSync(process.execPath, [
       '--test', path.join(desktopRoot, '../chat/tests/js/desktop_tray.test.js'),
+      path.join(desktopRoot, '../chat/tests/js/desktop_notifications.test.js'),
     ], {
       env: { ...process.env, ICHAT_DESKTOP_TEST_ARCHIVE: archive },
       encoding: 'utf8', timeout: 30000, windowsHide: true,

@@ -17,8 +17,10 @@ function _t4(en, zh, zhTW, ja) { return {en, zh, 'zh-TW': zhTW, ja}[currentLangu
 
 // T18: incoming-message notification gating (mute / user switches / focus).
 // `notificationSettings` is filled from /api/settings/notifications/ during
-// init; until then (or on failure) the module's defaults apply.
+// init; while unknown, notifications and content previews stay disabled.
 let notificationSettings = null;
+let notificationSettingsEpoch = 0;
+let notificationConversationRefresh = null;
 const chatNotificationCenter = window.ChatNotifications
   ? window.ChatNotifications.createNotificationCenter({
       getSettings: () => notificationSettings,
@@ -27,19 +29,55 @@ const chatNotificationCenter = window.ChatNotifications
       show: (payload) => {
         // A failed notification must never break message rendering.
         if (window.iChatDesktop && window.iChatDesktop.notifications) {
-          Promise.resolve(window.iChatDesktop.notifications.show(payload)).catch(() => {});
+          Promise.resolve().then(() => window.iChatDesktop.notifications.show(payload)).catch(() => {});
         }
       },
       translate: _t4,
     })
   : null;
 
-async function loadNotificationSettings() {
+function updateChatNotificationSettings(data) {
+  if (!data || Number(data.user_id) !== Number(myUserId) || !myUserId) return;
+  notificationSettings = data;
+  notificationSettingsEpoch += 1;
+}
+
+window.addEventListener('ichat:notification-settings-changed', (event) => {
+  updateChatNotificationSettings(event.detail);
+});
+
+// Keep a distinct name: the embedded settings page has its own loader.
+async function loadChatNotificationSettings() {
+  const epoch = notificationSettingsEpoch;
   try {
     const data = await apiFetch('/api/settings/notifications/');
-    if (data && typeof data === 'object') notificationSettings = data;
+    if (notificationSettingsEpoch === epoch) updateChatNotificationSettings(data);
   } catch (err) {
-    console.warn('Notification settings unavailable, using defaults:', err && err.message);
+    console.warn('Notification settings unavailable; notifications disabled:', err && err.message);
+  }
+}
+
+async function ensureNotificationConversation(convId) {
+  if (!conversationsById[convId]) {
+    if (!notificationConversationRefresh) {
+      notificationConversationRefresh = Promise.resolve().then(() => fetchConversations())
+        .finally(() => { notificationConversationRefresh = null; });
+    }
+    await notificationConversationRefresh;
+  }
+  return conversationsById[convId];
+}
+
+async function notifyIncomingChatMessage(meta) {
+  if (!chatNotificationCenter || meta.isSelf || (meta.source && meta.source !== 'realtime')) return;
+  try {
+    // A first message may precede the conversation-list update. Wait for its
+    // mute metadata instead of notifying with incomplete privacy information.
+    if (await ensureNotificationConversation(meta.convId)) {
+      chatNotificationCenter.notifyIncoming(meta);
+    }
+  } catch (err) {
+    console.warn('Notification unavailable:', err && err.message);
   }
 }
 
@@ -47,9 +85,14 @@ async function loadNotificationSettings() {
 // renderer gets the click, so selectChat always runs in a visible window.
 function setupDesktopNotificationBridge() {
   if (!(window.iChatDesktop && window.iChatDesktop.notifications)) return;
-  window.iChatDesktop.notifications.onClicked((payload) => {
-    const convId = parseInt(payload && payload.conversationId);
-    if (convId && conversationsById[convId]) selectChat(convId);
+  window.iChatDesktop.notifications.onClicked(async (payload) => {
+    const convId = Number(payload && payload.conversationId);
+    if (!Number.isSafeInteger(convId) || convId <= 0) return;
+    try {
+      if (await ensureNotificationConversation(convId)) await selectChat(convId);
+    } catch (err) {
+      console.warn('Notification conversation unavailable:', err && err.message);
+    }
   });
 }
 
@@ -1849,7 +1892,7 @@ async function handlePrivateMessageReceived(data, meta) {
         receiver_key_version: payload.receiver_key_version,
       });
     } else {
-      plaintext = '[Encrypted message — E2EE module not loaded]';
+      throw new Error('missing_key_material');
     }
   } catch (err) {
     console.error('Failed to decrypt incoming message:', err);
@@ -1896,7 +1939,7 @@ async function handlePrivateMessageReceived(data, meta) {
       payload.sender_id
     );
   } else {
-    fetchConversations();
+    ensureNotificationConversation(convId).catch(() => {});
   }
 
   if (activeChatId === convId) {
@@ -1938,18 +1981,16 @@ async function handlePrivateMessageReceived(data, meta) {
   }
   // T18: realtime pushes may raise a system notification (gated by the
   // notification center: mute, user switches, focus, sync source skips).
-  if (chatNotificationCenter) {
-    chatNotificationCenter.notifyIncoming({
-      convId: convId,
-      convType: 'single',
-      isSelf: newMsg.isSelf,
-      decryptError: !!decryptError,
-      isFileMsg: isFileMsg,
-      text: isFileMsg ? '' : plaintext,
-      senderName: conv ? conv.name : undefined,
-      source: meta && meta.source,
-    });
-  }
+  notifyIncomingChatMessage({
+    convId: convId,
+    convType: 'single',
+    isSelf: newMsg.isSelf,
+    decryptError: !!decryptError,
+    isFileMsg: isFileMsg,
+    text: isFileMsg ? '' : plaintext,
+    senderName: conv ? conv.name : undefined,
+    source: meta && meta.source,
+  });
   // Sync items must report whether they were APPLIED (review: the cursor
   // may only advance after a successful apply; decryption failures stop
   // the walk without advancing).
@@ -1982,7 +2023,7 @@ async function handleGroupMessageReceived(data, meta) {
         sender_ephemeral_public_key: payload.sender_ephemeral_public_key,
       });
     } else {
-      plaintext = '[Encrypted group message — E2EE module not loaded]';
+      throw new Error('missing_key_material');
     }
 
     const newMsg = {
@@ -2034,20 +2075,25 @@ async function handleGroupMessageReceived(data, meta) {
     if (conv) {
       updateSidebarPreview(conv, isFileMsg ? ('[' + (payload.message_type || 'file') + ']') : plaintext, newMsg.time, payload.sender_id);
     }
-    if (chatNotificationCenter) {
-      chatNotificationCenter.notifyIncoming({
-        convId: Number(convId),
-        convType: 'group',
-        isSelf: newMsg.isSelf,
-        decryptError: false,
-        isFileMsg: isFileMsg,
-        text: isFileMsg ? '' : plaintext,
-        senderName: newMsg.sender_name,
-        source: meta && meta.source,
-      });
-    }
+    notifyIncomingChatMessage({
+      convId: Number(convId),
+      convType: 'group',
+      isSelf: newMsg.isSelf,
+      decryptError: false,
+      isFileMsg: isFileMsg,
+      text: isFileMsg ? '' : plaintext,
+      senderName: newMsg.sender_name,
+      source: meta && meta.source,
+    });
   } catch (err) {
     console.error('Failed to decrypt incoming group message:', err);
+    notifyIncomingChatMessage({
+      convId: Number(convId), convType: 'group',
+      isSelf: payload.sender_id === myUserId,
+      decryptError: true, isFileMsg: isFileMsg, text: '',
+      senderName: payload.sender_name,
+      source: meta && meta.source,
+    });
     return false;
   }
   return true;
@@ -7646,7 +7692,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await fetchConversations();
   startPendingGroupInvitationPolling();
-  loadNotificationSettings();
+  loadChatNotificationSettings();
   setupDesktopNotificationBridge();
 
   connectWebSocket();

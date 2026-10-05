@@ -27,16 +27,14 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  // Defaults mirror the server model (UserNotificationSettings): everything
-  // on except channel notifications (not used here). Applied while the real
-  // settings request is in flight or when it fails, so a transient API error
-  // never silences notifications.
+  // Unknown/malformed settings grant no notification or preview permission.
+  // The server's actual booleans replace these after the settings load succeeds.
   var DEFAULT_SETTINGS = {
-    display_notifications: true,
-    private_chat_notifications: true,
-    group_chat_notifications: true,
-    message_preview_private: true,
-    message_preview_group: true,
+    display_notifications: false,
+    private_chat_notifications: false,
+    group_chat_notifications: false,
+    message_preview_private: false,
+    message_preview_group: false,
   };
 
   var TITLE_MAX = 80;
@@ -112,6 +110,7 @@
       if (meta.convType !== "group" && !settings.private_chat_notifications) return false;
 
       var conv = getConversation ? getConversation(meta.convId) : null;
+      if (!conv) return false; // mute information must be known first
       if (isConversationMuted(conv)) return false;
 
       var title = clampText(meta.senderName || (conv && conv.name) || "iChat Pro", TITLE_MAX);

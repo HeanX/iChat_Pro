@@ -340,6 +340,9 @@
     if (volumeVal) volumeVal.textContent = value + '%';
 
     syncBrowserNotificationState();
+    // This page is embedded in chat's sidebar: update notification gating in
+    // the same document immediately after a successful load/save.
+    window.dispatchEvent(new CustomEvent('ichat:notification-settings-changed', { detail: data }));
   }
 
   async function loadNotificationSettings() {
@@ -406,6 +409,7 @@
   }
 
   function syncBrowserNotificationState() {
+    if (window.iChatDesktop && window.iChatDesktop.notifications) return;
     var display = document.getElementById('notif-display');
     if (!display || !('Notification' in window)) return;
     if (Notification.permission === 'denied') {
@@ -417,6 +421,8 @@
   }
 
   async function requestNotificationPermissionIfNeeded() {
+    // Electron uses native IPC toasts, independently of Web Notification permission.
+    if (window.iChatDesktop && window.iChatDesktop.notifications) return true;
     if (!('Notification' in window)) {
       if (window.showToast) window.showToast('当前浏览器不支持通知');
       return false;

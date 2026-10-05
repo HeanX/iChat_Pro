@@ -38,6 +38,7 @@ function launch(options = {}) {
     setName() {},
     getVersion: () => '1.0.0',
     setAboutPanelOptions() {},
+    setAppUserModelId(id) { app.aumid = id; },
     requestSingleInstanceLock() {
       order.push('lock');
       return options.lock !== false;

@@ -71,6 +71,26 @@ Test the rebuilt packaged app, not a previous installed executable:
 The review build has been launched against `chat.20060810.xyz:8443`. Native
 minimize and second-launch restoration were exercised with the same window
 handle and unchanged root/renderer process IDs. Clicking X then left zero app
-processes. Actual notification-area click
-and hidden-menu Exit, plus logged-in outbox preservation, remain separate native
-acceptance steps; do not close #144 solely on the automated results above.
+processes.
+
+## Native acceptance result (2026-10-05, Asia/Shanghai)
+
+Baseline: main `93c0190`, installer SHA-256 `01F801A5…EEFE94C` (full value in
+the close-out record). The packaged build was driven against the cloud login
+page with the real notification-area icon:
+
+1. Minimize, single click on the tray icon: original window (ID 68330)
+   restored, all four app PIDs unchanged, one tray icon, no page reload.
+2. Minimize, double click: same window restored again, PIDs unchanged, icons
+   did not multiply.
+3. Hidden window, real tray context menu, Exit chosen by the user: agent
+   verified the iChat process count dropped to 0 and the window list no longer
+   contained the window.
+4. Logged-in outbox preservation across minimize/restore and delivery after
+   network recovery: verified manually by the user.
+
+Two early automation double-click attempts missed due to tray flyout focus and
+were not counted as passes. The session combined the assistant's direct
+process/window evidence with the user's manual confirmation ("均可用") and is
+recorded in `T17-native-record.md` (assistant working notes, 2026-10-05).
+T17 acceptance is closed; Issue #144 closed on this basis.

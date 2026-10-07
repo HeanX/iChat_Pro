@@ -1,5 +1,12 @@
 # Phase4 云端部署架构（P4 T04 / Issue #131）
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](../current-status.md)；文档用途与归档规则见 [文档维护索引](../documentation-status.md)。
+
+## 本次更新
+
+核对生产版本 f2f60ec，现行入口 https://chat.20060810.xyz:8443；Daphne 是 systemd 托管实例，多 worker 为可扩展方案。PG16/Redis6 loopback，CI Redis7。live/ready/login 200；这不代表登录后核心接口或通知布局已验收。应用指定 SHA 回滚与同主机独立恢复有证据，跨实例恢复/监控告警待做。
+
 > 状态：已按 AWS 东京节点实况定稿（2026-10-01）。运维操作细则见 [deploy/runbook.md](../../deploy/runbook.md)。
 
 ## 1. 目标部署拓扑

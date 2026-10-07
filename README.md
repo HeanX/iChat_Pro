@@ -1,169 +1,99 @@
 # iChat Pro
 
-iChat Pro 是一个基于 Django 的轻量级安全即时通信项目，面向课程小组作业交付。项目实现了账号体系、联系人、私聊、群聊、端到端加密消息、文件转发、会话管理、基础设置页、AI Assistant 面板和 Electron 桌面端包装。
+iChat Pro 是基于 Django、Channels 和 Web Crypto 的安全即时通信课程项目，支持账号、联系人、私聊、群聊、加密文件、消息管理、设置和独立 AI Assistant。Windows 客户端通过 Electron 连接同一云服务。
 
-## 功能概览
+截至 2026-10-07，核对基线为 `f2f60ec`：Phase4 原始 78 项任务中 29 项关闭、49 项开放。云端部署、消息可靠性及 Windows 的云模式、安装、品牌、托盘、连接恢复和敏感存储已有验收；通知尚待最后的客户端布局复验，文件桌面集成、Android 和多设备增强仍未完成。详情见 [项目现状](docs/current-status.md) 和 [文档总览](docs/README.md)。
 
-- 用户注册、登录、登出和个人资料管理
-- 联系人关系、私聊会话创建和会话列表
-- 群聊创建、成员管理、邀请、公告和静音
-- WebSocket 实时消息收发
-- 私聊和群聊端到端加密消息流程
-- 文件传输、加密文件密钥分发和转发
-- 消息已送达、已读、撤回、删除和自动清理
-- 搜索、通知、隐私与安全、数据与存储等设置页面
-- AI Assistant 配置与对话面板
-- Electron 桌面客户端包装
+## 运行依赖
 
-## 技术栈
+| 部分 | 当前实现 |
+| --- | --- |
+| 服务端 | Python 3.13+、Django 6.0.5、Channels 4.3.2、Daphne（由 channels[daphne] 安装，本地复核为 4.2.1） |
+| 数据库 | 本地默认 SQLite；生产 PostgreSQL 16，驱动 psycopg 3.3.6 |
+| 分发与缓存 | 本地内存；生产 Redis 6 系列、channels-redis 4.3.0；CI Redis 7 |
+| Web | Django 模板、JavaScript、Web Crypto、生产自托管 Tailwind CSS |
+| Windows | Electron 39 系列、electron-builder 25 系列、NSIS，应用版本 1.0.0 |
 
-- Python 3.13+
-- Django
-- Django Channels
-- SQLite
-- HTML / CSS / JavaScript
-- Tailwind CSS
-- Node.js
-- Electron
+具体 Python 版本锁定见 [requirements.txt](requirements.txt)，Node 依赖以两份 package-lock.json 为准。Python `redis==8.1.0` 是客户端库版本，不是服务器版本。
 
-## 快速开始
+## 本地开发
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-Copy-Item .env.example .env
+python -m pip install -r requirements.txt
 python manage.py migrate
 python manage.py runserver 127.0.0.1:8000
 ```
 
-启动后访问：
+浏览器访问 `http://127.0.0.1:8000/`。本地未指定 DATABASE_URL/REDIS_URL 时使用 SQLite 和内存通道，不能据此证明 PostgreSQL 并发或 Redis 跨进程语义。
 
-```text
-http://127.0.0.1:8000/
-```
+settings.py 从进程环境读取配置，不会自动加载 `.env`。`.env.example` 是占位说明；复制文件不会使配置生效。PowerShell 可明确设置 `$env:DJANGO_DEBUG = 'True'` 等变量。生产配置用 [deploy/env.production.example](deploy/env.production.example)，由部署脚本和 systemd 加载，说明见 [Runbook](deploy/runbook.md)。
 
-## 演示账号
-
-可以运行演示数据脚本创建 3 个测试账号：
+## Windows 客户端
 
 ```powershell
-python demo_setup.py
+cd desktop
+npm ci
+npm start
 ```
 
-| 用户名 | 密码 |
-| --- | --- |
-| `alice` | `demo1234` |
-| `bob` | `demo1234` |
-| `carol` | `demo1234` |
+默认云地址为 `https://chat.20060810.xyz:8443`，来自 [defaults.json](desktop/defaults.json)。云模式不启动 Python/Django。需要覆盖服务地址时，在启动前设置 `$env:ICHAT_SERVER_URL = 'https://your-server.example:8443'`。
 
-## 测试
-
-后端测试：
+本地开发使用 `npm run dev` 或 `ICHAT_DEV=1`；未显式指定云地址时，开发模式启动本地 Django，默认 `127.0.0.1:8000`。`ICHAT_HOST`、`ICHAT_PORT`、`ICHAT_PYTHON` 用于该分支。显式 ICHAT_SERVER_URL 优先于 dev 请求；远程 HTTP 被拒绝，loopback HTTP 允许用于本地测试。旧变量 ICHAT_SKIP_DJANGO 已不适用。
 
 ```powershell
+cd desktop
+npm run dist
+```
+
+产物在 `desktop/dist/iChat-Pro-Setup-1.0.0.exe`。安装包只包含桌面壳与 Electron 资源，聊天页面和脚本由云端提供。卸载默认保留数据；交互选择“是”删除当前用户 `%APPDATA%\ichat-pro-desktop`，静默卸载保留数据。真实安装/卸载验收已完成，隔离 NSIS 测试不能代替原生验收。EXE 名称、图标和版本已校验，未配置商业代码签名证书。
+
+## 验证
+
+```powershell
+python manage.py check
+python manage.py makemigrations --check --dry-run
 python manage.py test
-```
-
-只运行 chat 应用测试：
-
-```powershell
-python manage.py test chat
-```
-
-前端端到端加密逻辑测试：
-
-```powershell
+npm ci
 npm run test:e2ee
 ```
 
-测试代码已统一整理到：
-
-```text
-chat/tests/
-```
-
-## Electron 桌面端
+Windows 桌面专用检查：
 
 ```powershell
 cd desktop
-npm install
-npm start
+npm ci
+npm run test:layout
+npm run test:branding
+npm run test:installer
 ```
 
-开发模式：
+最后一条需要 NSIS 编译器，可用 MAKENSIS 指定路径。基线 [CI run 37630595919](https://github.com/HeanX/iChat_Pro/actions/runs/37630595919) 的 test、integration、javascript、windows-installer 全绿：SQLite 和 PostgreSQL/Redis 各执行 404 条 Django 测试，Chromium 布局 36/36，NSIS 隔离断言 24/24。覆盖率门禁、扫描和强制合并检查仍待实施。
 
-```powershell
-cd desktop
-npm run dev
-```
+## 功能与边界
 
-默认情况下，桌面端会加载本地 Django 服务：
+- HTTP/WS 文本、文件、转发共用事务消息服务；同 ID 原请求重放不重复落库、计未读或生成事件，冲突返回 409。
+- ConversationEvent 记录新增消息，sync API 用签名游标补取，按当前权限投影；撤回/删除事件同步和历史事件回填尚未实现。
+- 待发箱位于内存，断网及托盘隐藏/恢复保留；重启、崩溃或页面重载不保证恢复未确认消息。
+- 长期私钥在 IndexedDB 的不可导出 CryptoKey 中；桌面待导出备份、草稿和 AI 历史经 safeStorage 加密，Web 回退限制见 [协议存储边界](docs/phase4/protocol.md#7-敏感数据存储边界)。
+- Android APK、设备级身份/分发/撤销、自动更新及生产监控告警不能作为当前已交付能力。
+
+## 本地演示数据
+
+仅在隔离的开发数据库中运行 `python demo_setup.py`，创建 alice、bob、carol，演示密码均为 `demo1234`。这些是本地演示数据，不是公网测试账号；不要在生产执行此脚本。
+
+## 目录
 
 ```text
-http://127.0.0.1:8000/
+accounts/       账号、公钥与设置
+chat/           模型、HTTP、WS、统一服务及测试
+ichat_pro/      配置、ASGI、认证中间件、健康检查
+static/         前端、加密与连接模块
+templates/      Django 页面
+desktop/        Windows 桌面壳、IPC、打包及原生测试
+deploy/         云部署、备份、恢复和续期脚本
+docs/           现行说明、课程需求、历史报告及证据
 ```
 
-也可以通过环境变量跳过自动启动 Django：
-
-```powershell
-$env:ICHAT_SKIP_DJANGO = "1"
-cd desktop
-npm start
-```
-
-## 目录结构
-
-```text
-accounts/      用户、资料、联系人、密钥信任相关功能
-chat/          聊天、会话、消息、群组、AI Assistant 相关功能
-chat/tests/    后端与加密逻辑测试
-desktop/       Electron 桌面端
-docs/          项目文档、设计文档和验收材料
-ichat_pro/     Django 项目配置
-static/        CSS、JavaScript、图片资源
-templates/     Django 页面模板
-```
-
-## 重要文档
-
-| 文档 | 说明 |
-| --- | --- |
-| `docs/README.md` | 文档目录总览和推荐阅读顺序 |
-| `docs/iChat Pro 系统性介绍文档.md` | 系统目标、架构、模块、流程和交付边界 |
-| `docs/iChat Pro 需求文档_修订版.md` | 项目需求说明 |
-| `docs/iChat Pro API 接口文档.md` | API 接口说明 |
-| `docs/iChat Pro 数据库设计规范文档.md` | 数据库设计 |
-| `docs/iChat Pro 实时通信与端到端加密消息协议设计文档.md` | 实时通信与 E2EE 协议 |
-| `docs/iChat Pro UML 与架构图交付文档.md` | UML 与架构图说明 |
-| `docs/iChat Pro 演示指南.md` | 演示流程 |
-
-## 环境变量
-
-| 变量 | 说明 |
-| --- | --- |
-| `DJANGO_SECRET_KEY` | Django 密钥，生产或正式演示环境建议配置 |
-| `DEBUG` | 是否启用调试模式 |
-| `QWEN_API_KEY` | AI Assistant 使用的 API Key |
-| `QWEN_MODEL` | AI Assistant 使用的模型名称 |
-| `ICHAT_HOST` | Electron 加载的 Django 主机，默认 `127.0.0.1` |
-| `ICHAT_PORT` | Electron 加载的 Django 端口，默认 `8000` |
-| `ICHAT_SKIP_DJANGO` | 设置为 `1` 时 Electron 不自动启动 Django |
-
-## 交付说明
-
-提交或打包项目时建议排除以下本地文件和目录：
-
-```text
-.venv/
-node_modules/
-desktop/node_modules/
-.idea/
-.claude/
-db.sqlite3
-media/
-outputs/
-```
-
-这些内容属于本地依赖、运行数据或生成产物，不是项目源码的必要组成部分。
+交付不包含 `.env`、私钥、数据库、用户媒体、本地依赖或 dist 二进制。原始任务范围见 [Phase4 需求](docs/phase4/requirements.md)，实时完成状态以 [任务清单](docs/phase4/tasks.md) 和对应 Issue 证据为准。

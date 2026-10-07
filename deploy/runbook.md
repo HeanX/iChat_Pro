@@ -1,5 +1,12 @@
 # iChat Pro 部署 Runbook（AWS 东京节点）
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](../docs/current-status.md)；文档用途与归档规则见 [文档维护索引](../docs/documentation-status.md)。
+
+## 本次更新
+
+现行生产入口 chat.20060810.xyz:8443；代码与部署基线 f2f60ec，最后核对 DEPLOYMENTS.log 为 2026-10-07T13:42:16Z。live/ready/login HTTPS 200，readiness 自动检查 DB+cache JSON。自动登录/核心接口冒烟失败阻断尚未实现（#204）；监控告警（#139）和完整发布审批（#177）仍待验收。服务器 SHA、GitHub main 和安装包 SHA 分别记录，回滚不自动降级数据库。
+
 > 适用主机：AWS ap-northeast-1d / t3.small / Amazon Linux 2023 / EIP `13.158.121.80`。
 > 本机与该主机共存代理服务（Xray 占用 TCP/UDP 443、面板 25383、订阅 2096），**这些端口不属于聊天系统，操作时禁止占用或重启它们**。
 > 秘密（DB 密码、SECRET_KEY、3x-ui 凭据）只保存在服务器上；本文不记录任何真实秘密。
@@ -27,8 +34,7 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 
 1. 安装依赖：`sudo dnf install -y python3.13 python3.13-pip git nginx postgresql16-server redis6 certbot`
 2. 初始化 PostgreSQL：`sudo postgresql-setup --initdb && sudo systemctl enable --now postgresql`
-3. 创建数据库与账号（密码用 `openssl rand -hex 24` 生成，写入 .env，勿回显）：
-   `sudo -u postgres psql -c "CREATE USER ichat PASSWORD '...'; CREATE DATABASE ichat OWNER ichat;"`
+3. 创建数据库与账号：先 `sudo -u postgres psql`，分别执行 `CREATE ROLE ichat LOGIN;`、交互 `\password ichat`（避免密码进入命令/日志），再执行 `CREATE DATABASE ichat OWNER ichat;`。将连接凭据安全写入 .env；CREATE DATABASE 必须在事务块之外执行，不能把它和建角色合并成同一条 `psql -c`。
 4. Redis：`sudo systemctl enable --now redis6`（默认仅监听 127.0.0.1）
 5. 建服务账号与目录：
    `sudo useradd -r -d /opt/ichat -s /sbin/nologin ichat`

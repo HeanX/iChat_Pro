@@ -1,5 +1,12 @@
 # iChat Pro 基于端到端加密的轻量级即时通讯系统需求文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+本学期新增需求采用 course-testing/SRS V2.0 第 3 节 NEW-* 与 phase4/requirements.md；保留这里的继承需求，不混用旧生态 Phase4 编号。原始 78 卡当前 29 关闭、49 开放，Windows P0 已闭环但 Android/测试工程等 P0 未完成。需求目标不因当前实现缺口删减；逐条状态见 phase4/traceability-matrix.md。
+
 ## 一、项目概述
 
 ### 1.1 项目名称

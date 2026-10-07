@@ -1,5 +1,12 @@
 # iChat Pro AI Assistant 增强整理文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+桌面 AI 历史已走安全 KV：扫描 AI_HISTORY_KEY 全部 Assistant 前缀键、解密水合缓存、dirty/epoch 防迟到覆盖，三个清空入口统一失效在途任务并清理失败状态；失败横幅按 key+epoch 维护。Web 仍有 localStorage 明文回退，旧明文迁移失败保留原记录。AI Assistant 是用户独立交互，不自动获取聊天明文；Channel/Agent Gateway/RAG 不属于本次已交付。
+
 ## 1. 背景
 
 本轮工作围绕 iChat Pro 内置 AI Assistant 页面展开，目标是把原本偏 Mock/演示性质的 AI 对话入口，整理成更接近真实可用的多模型 AI 会话能力，并让它在消息列表、顶部状态栏、右侧详情面板、转发、搜索、Markdown 渲染等交互上尽量和普通私聊保持一致。
@@ -311,4 +318,3 @@ AI Assistant 的隐私提示保持明确：
 3. 不同 provider 的接口协议并不完全一致。虽然已经支持 OpenAI-compatible 和 Anthropic-compatible，但聚合平台返回格式仍可能有差异，需要继续通过错误气泡暴露细节。
 4. AI Assistant 的 Markdown 默认渲染是特例，普通私聊/群聊仍保持 `/md` 规则。
 5. Dark mode 专用模型图标已回滚，当前使用统一亮色模型图标。
-

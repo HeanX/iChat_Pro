@@ -1,5 +1,12 @@
 # iChat Pro 系统性介绍文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+当前 Web/Windows 连接公网 Django ASGI，生产采用 PostgreSQL 16 + Redis，而本地默认 SQLite/内存。HTTP/WS 已共用 messaging 服务；新增 ConversationEvent/sync；Windows 云模式、安装、品牌、托盘、可靠连接与敏感存储闭环。通知最终 UI 复验、桌面文件集成、Android、多设备仍开放。下列原总体图中的 SQLite 指本地基线，生产拓扑以 phase4/deploy-architecture.md 为准。
+
 ## 1. 项目定位
 
 iChat Pro 是一个面向课程小组作业交付的轻量级安全即时通信系统。项目以 Django Web 应用为主体，结合 Django Channels 实现实时通信，并通过 Electron 提供桌面端包装。系统重点展示账号体系、联系人、私聊、群聊、端到端加密消息、基础文件转发、设置中心、AI Assistant 和交付文档体系。
@@ -27,7 +34,8 @@ flowchart LR
     Browser --> WS["Django Channels WebSocket"]
     Django --> Models["Django Models"]
     WS --> Models
-    Models --> SQLite["SQLite 数据库"]
+    Models --> PostgreSQL["PostgreSQL 16（生产）/ SQLite（本地）"]
+    Channels --> Redis["Redis Channel Layer（生产）"]
     Browser --> Crypto["浏览器端 E2EE JS 模块"]
     Crypto --> Browser
     Django --> AI["AI Assistant Provider / Mock Provider"]

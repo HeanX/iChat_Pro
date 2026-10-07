@@ -1,5 +1,12 @@
 # iChat Pro 端到端加密通信设计文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+当前 key-manager 已把长期私钥放入 IndexedDB 的不可导出 CryptoKey，localStorage 公开记录不含 private_key。桌面 pending JWK、草稿和 AI 历史经 safeStorage/DPAPI；Web 回退与旧迁移失败残留边界见 phase4/protocol.md §7。私聊/群聊公钥缓存按用户和版本持久化，离线发送依赖已有可信缓存；显式历史版本不能用其他版本冒充。当前模块包含临时发送公钥与 sender_copy，各 viewer 获取自己的副本。服务端密钥材料校验/覆盖/写入在 created 事务分支，重放不会覆盖密钥。不可导出不阻止同源恶意脚本用钥，多设备与完整 Signal/Double Ratchet 未实现。后文密码学流程/拟定表结构须与实际字段核对。
+
 > Phase 说明：Phase 1 必须完成文本私聊和文本群聊的基础 E2EE。Phase 2 补齐基础通信产品可用性，Phase 3 用于产品化收口与稳定化。本文档中的 Sender Key、Double Ratchet、正式多设备同步和高级加密能力统一顺延至 Phase 4；多媒体和文件分块仅保留为后续扩展设计，不作为 Phase 1 验收要求。
 
 ## 1. 设计目标

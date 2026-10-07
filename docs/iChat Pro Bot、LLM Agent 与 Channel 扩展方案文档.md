@@ -1,5 +1,12 @@
 # iChat Pro Bot、LLM Agent 与 Channel 扩展方案文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。历史记录或原阶段设计；下文保留当时口径，不能作为现行完成声明。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+该文是独立远期生态规划，不属于本学期 Phase4 的 P0 核心交付。当前存在独立 AI Assistant；完整 Bot、Channel、Gateway、RAG/OpenClaw 不能因为此设计文档存在就宣称已实现。编号引用必须说明原阶段，不能与 P4 T01–T54 混用。
+
 > 状态：Draft v1.0
 > 适用范围：Phase 4 扩展生态设计；Phase 3 仅提前实现最小 LLM Assistant 展示能力
 > 前置条件：完成 Phase 2 基础通信产品可用性补全和 Phase 3 产品化收口/最小 LLM 展示

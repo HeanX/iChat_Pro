@@ -1,5 +1,12 @@
 # iChat Pro 部署安全说明
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+生产当前使用 chat.20060810.xyz:8443 的 Nginx TLS、Daphne/systemd、PostgreSQL 16 与 Redis loopback；DEBUG=False、秘密必填、精确 Host/CSRF Origin、代理 HTTPS、静态/私有媒体目录分离已实现。API 认证 401，DB URL 非法启动失败。部署/备份/恢复与证书 reload 细则以 deploy/runbook.md 为准；readiness 不是全部业务冒烟。日志脱敏是持续约束，监控告警、独立测试环境、扫描与强制合并门禁仍待验收。
+
 > 版本 1.0 — 2026 年 6 月 4 日
 > 适用环境：生产部署 / 预发布环境
 

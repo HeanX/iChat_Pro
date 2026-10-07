@@ -1,5 +1,12 @@
 # iChat Pro UML 与架构图交付文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+现行组件图应包括：Web/Electron → Nginx TLS 8443 → Daphne → PostgreSQL、Redis、持久媒体；HTTP/WS → messaging 服务 → ConversationEvent；sync → 历史同源权限投影。新增 Conversation.sync_sequence/ConversationEvent，长期密钥 IndexedDB CryptoKey、桌面 safeStorage。下列一期/二期/规划图保留其阶段标题，拟新增的 Device/Channel/Bot 等不代表当前模型；生产拓扑以 phase4/technical-design.md 为准。
+
 > 版本：v3.0
 > 日期：2026-06-25
 > 作者：ketter1024

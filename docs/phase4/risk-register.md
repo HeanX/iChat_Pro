@@ -1,8 +1,27 @@
 # Phase4 风险与缺陷登记
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。历史记录或原阶段设计；下文保留当时口径，不能作为现行完成声明。
+> 当前状态见 [项目现状](../current-status.md)；文档用途与归档规则见 [文档维护索引](../documentation-status.md)。
+
+## 本次更新
+
+原 7 项风险均已进入已闭环任务的修复与回归证据链。这里的“处置完成”只针对原缺陷，不替代 Android、多设备、崩溃恢复等新范围的验收。
+
+| 编号 | 当前处置 | 证据入口 |
+| --- | --- | --- |
+| R-01 | 权限/一致性先于幂等，外会话 ID 返回 409 | [#159](https://github.com/HeanX/iChat_Pro/issues/159)、messaging.py |
+| R-02 | 合法群重放先于当前成员版本/密钥覆盖处理 | [#159](https://github.com/HeanX/iChat_Pro/issues/159)、PR #262/#264 |
+| R-03 | HTTP/WS 文本/文件/转发共用服务和 viewer 投影 | [#163](https://github.com/HeanX/iChat_Pro/issues/163)、PR #260/#262 |
+| R-04 | created/replayed 区分，零重复密钥/未读/广播/事件 | [#159](https://github.com/HeanX/iChat_Pro/issues/159)、PR #264/#266 |
+| R-05 | Redis cache 用户连接计数替代 group_channels | [#158](https://github.com/HeanX/iChat_Pro/issues/158)、test_protocol.py、真实依赖 #195；worker 崩溃遗留计数边界需另验 |
+| R-06 | API 401 JSON，WS 4401，客户端认证终态 | [#158](https://github.com/HeanX/iChat_Pro/issues/158)、middleware.py |
+| R-07 | DB URL 非法启动失败、生产代理/CSRF/静态/媒体配置 | [#138](https://github.com/HeanX/iChat_Pro/issues/138)、settings.py、部署证据 |
+
+原始静态取证如下；当时的“待修复”与行号保留，不能据此判断当前代码仍含这些缺陷。
+
 > 复核日期：2026-10-01；代码基线：main `9d0a660`（PR #206 合并后）。
 > 本文对 [technical-design.md §2.1](technical-design.md) 列出的 7 个风险点逐条做静态代码取证。
-> 结论均为"待修复缺陷/风险"，不是已完成修复；处置任务保留 `P4` 前缀编号。
+> 以下初次取证结论与代码行号适用于 2026-10-01 的 9d0a660，不是当前 main。2026-10-07 的处置结果见文首表；保留旧证据用于追溯。
 
 ## 复核结论总览
 

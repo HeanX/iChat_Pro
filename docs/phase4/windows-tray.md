@@ -1,5 +1,12 @@
 # T17 Windows window and tray acceptance
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](../current-status.md)；文档用途与归档规则见 [文档维护索引](../documentation-status.md)。
+
+## 本次更新
+
+T17/#144 已关闭，原生单击/双击恢复、隐藏态菜单退出、登录态待发箱保留有直接记录与用户确认；恢复同一 BrowserWindow，不重载。单实例锁位于启动网络/Django 之前；托盘失败保留正常窗口行为。下面步骤供回归，不能写成仍缺原验收。
+
 T17 is P1 (Issue #144). Minimize hides the existing window when a tray is
 available; restoring it must not reload the renderer. The window X and tray
 Exit terminate the application. This preserves T15's close-without-processes

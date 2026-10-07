@@ -1,5 +1,12 @@
 # T18 Windows system notifications acceptance
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](../current-status.md)；文档用途与归档规则见 [文档维护索引](../documentation-status.md)。
+
+## 本次更新
+
+T18/#145 保持开放：正式安装版点击恢复/会话定位、iChat Pro 应用入口、OS 开关与内嵌设置即时生效已由用户确认；预览切换后布局回归由 PR #328 修复。三种窗口/明暗主题 36/36 fixture、生产 CSS 版本/内容和 health/login 已核对，尚未记录修复后的正式登录客户端预览开关/返回聊天/顶部位置最终复验。当前代码/生产 f2f60ec；本地安装包 ac468df3… 未因云 CSS 修复重建。不要把健康或 fixture 当这项最终原生验收。
+
 T18 is P1 (Issue #145, NEW-WIN-008). Incoming messages raise a Windows toast
 when the app is not the focus; the notification respects mute and privacy
 settings; clicking it restores the same window (no reload) and opens the

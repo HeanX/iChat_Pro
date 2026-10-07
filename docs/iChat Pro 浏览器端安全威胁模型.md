@@ -1,162 +1,60 @@
-# iChat Pro 浏览器端安全威胁模型
+# iChat Pro 浏览器与桌面安全威胁模型
 
-> 版本 1.0 — 2026 年 6 月 4 日
-> 覆盖范围：浏览器端私钥存储、E2EE 执行环境、第三方脚本接口
+> 更新：2026-10-07；代码基线 f2f60ec。覆盖现行 Web 与 Windows；完整跨平台威胁模型 P4 T38/#165 仍未验收，Android、多设备策略另行补齐。
 
----
+## 1. 资产和边界
 
-## 1. 资产清单
-
-| 资产 | 存储位置 | 敏感度 | 泄露后果 |
-| --- | --- | --- | --- |
-| 用户身份私钥 (ECDH P-256) | `localStorage` (`ichat_identity_key:{userId}`) | **极高** | 攻击者可解密该用户所有历史及未来消息 |
-| 对端公钥信任记录 | `localStorage` (`ichat_peer_identity:{userId}`) | **高** | 可被篡改以实现中间人攻击 |
-| 会话派生密钥 (AES-256-GCM) | 内存（不持久化） | **高** | 泄露后可解密当前会话消息 |
-| 解密后的明文消息 | 内存/DOM | **高** | 泄露聊天内容 |
-| CSRF Token | Cookie | **中** | 可伪造用户请求 |
-| 主题偏好 | `localStorage` (`ichat-theme`) | **低** | 无安全影响 |
-
----
-
-## 2. 威胁模型
-
-### 2.1 威胁角色
-
-| 角色 | 能力 | 风险等级 |
+| 资产 | 当前存储 | 影响 |
 | --- | --- | --- |
-| **XSS 攻击者** | 在页面上下文中执行任意 JavaScript | **严重** |
-| **供应链攻击者** | 控制 CDN 或第三方脚本内容 | **严重** |
-| **物理访问攻击者** | 直接访问用户设备/浏览器 | **高** |
-| **网络中间人** | 拦截/篡改 HTTP 流量 | **中**（HTTPS 下缓解） |
-| **恶意浏览器扩展** | 访问页面 DOM 和 localStorage | **中** |
+| 身份私钥 | IndexedDB 不可导出 CryptoKey | 同源恶意脚本仍可调用解密/派生操作 |
+| 待导出 JWK | 账户键控 sessionStorage；桌面 safeStorage 密文，Web 回退明文 | 备份泄漏可暴露身份能力；桌面桥不可用不写新明文 |
+| 对端公钥/信任指纹/缓存 | localStorage 公开记录 | 篡改可能影响身份信任；缓存不构成额外身份验证 |
+| 聊天明文/草稿/AI 历史 | 渲染内存；桌面 KV 密文、Web localStorage 回退 | 同源脚本/屏幕访问可读；旧迁移失败明文仍可能存在 |
+| 会话 Cookie | HttpOnly，生产 Secure/SameSite | 可授予账户访问，不能直接代替 E2EE 私钥 |
+| 消息/文件密文与元数据 | PG、媒体持久目录 | 时间、关系、规模等元数据不因 E2EE 消失 |
 
-### 2.2 攻击向量与缓解措施
+数据流：Web/Electron 加密 → HTTPS/WSS → Nginx → Django/PG；文件密钥只分发给授权 holder，密文下载走鉴权接口。sync 按当前权限投影，不能放宽成员/删除/拉黑边界。公开头像与私有 uploads 分开。
 
-#### 2.2.1 XSS → localStorage 私钥窃取
+## 2. 已有控制
 
-**攻击路径：**
-1. 攻击者通过存储型/反射型 XSS 在页面注入恶意脚本
-2. 恶意脚本读取 `localStorage.getItem('ichat_identity_key:{userId}')`
-3. 私钥被外传至攻击者控制的服务器
-4. 攻击者使用私钥解密该用户所有历史及未来消息
+key-manager 删除公开记录中的 private_key，长期私钥以不可导出 CryptoKey 保存。桌面窄 safeStorage 桥在 main 检查应用 Origin/file frame 与大小上限，DPAPI 保护落盘备份、草稿和 AI 历史；限制细则见 [现行协议](phase4/protocol.md#7-敏感数据存储边界)。它不允许把“加密落盘”解释为“页面无法读取”。
 
-**当前状态：**
-- 私钥以 JWK 格式明文存储在 `localStorage` 中
-- `localStorage` 对同源所有 JavaScript 完全可读
-- 无 CSP 头限制脚本执行
+消息服务在事务中校验身份、会话、幂等一致性及密钥材料；created 才写密钥/未读/事件。转发权限为 owner 或 key-holder，目标成员覆盖恒检查。非法材料和冲突拒绝不改变密钥。
 
-**缓解措施：**
-- [ ] 部署严格的 Content-Security-Policy (CSP)，禁止 inline script 和未授权外部脚本
-- [ ] 对所有用户输入进行服务端 HTML 实体编码（Django 模板默认已做）
-- [ ] 考虑将私钥迁移至 `IndexedDB` + `Web Crypto non-extractable` 密钥（长期）
-- [ ] 实施 Trusted Types 以防范 DOM-based XSS
+API 失效返回 401 JSON，WS 4401；ASGI 保留 AllowedHostsOriginValidator 和 Session 认证。生产 Host、CSRF Origin、代理 HTTPS、Secure Cookie 和 HSTS 配置已存在。
 
-#### 2.2.2 CDN 供应链攻击
+`ichat_pro/csp_middleware.py` 已提供 CSP，生产 Tailwind CSS 自托管。script-src 的 inline 许可受 settings 控制，默认不允许；样式 inline 默认仍允许，DEBUG 会添加开发源。应以响应头和生产配置为准，不能继续写“没有 CSP/总是依赖 Play CDN”，也不能承诺所有外部来源或注入途径已排除。
 
-**攻击路径：**
-1. CDN 提供商被入侵，或攻击者发布恶意 npm 版本
-2. 恶意脚本被注入 `tailwindcss` 或 `lucide` 的加载链
-3. 恶意脚本读取 `localStorage` 或拦截 `Web Crypto API` 调用
-4. 私钥或明文消息被外传
+通知在设置未知/损坏时关闭，未知会话先查元数据/静音；关闭预览用通用文案，解密失败/文件不泄漏正文；本人发送与 sync 补取不触发通知。OS 通知控制和云页面显示是不同边界。
 
-**当前状态：**
-- `tailwindcss` 从 `cdn.tailwindcss.com` 加载（无 SRI）
-- `lucide` 已固定版本 `0.462.0` 并添加 SRI hash
-- 无 CSP 限制脚本来源
+## 3. 主要威胁
 
-**缓解措施：**
-- [x] `lucide` 已使用 SRI + 固定版本
-- [ ] Tailwind CSS Play CDN 无法添加 SRI（内容动态变化）；建议生产环境使用 Tailwind CLI 构建静态 CSS
-- [ ] 添加 CSP `script-src` 白名单
-- [ ] 定期审查 npm 依赖的 CVE 公告
+### 同源脚本或云端页面被替换
 
-#### 2.2.3 物理访问 → 浏览器密钥提取
+不可导出限制直接 exportKey，但同源脚本可以操作 CryptoKey、读当前明文、调用受信 IPC。云端模板/静态资源供应链、XSS、恶意扩展仍可破坏机密性。TLS、CSP、DOM 转义、来源/导航限制和依赖审查是控制，不能据此声称对可信服务端主动投毒提供完整保护。
 
-**攻击路径：**
-1. 攻击者获得设备的物理访问权限
-2. 打开浏览器开发者工具，在 Console 中执行 `localStorage.getItem(...)`
-3. 或导出浏览器配置文件
+### 本地磁盘与会话备份
 
-**缓解措施：**
-- [ ] 在部署文档中说明设备加密和锁屏策略
-- [ ] 为用户提供"退出时清除密钥"选项（考虑到聊天可用性，默认不开启）
-- [x] 密钥导出/备份功能已通过文件下载实现，用户自行保管备份文件安全
+桌面新写入加密；桥不可用仅保留内存。旧明文迁移失败保留原数据，Web pending 备份与草稿/AI 回退仍可能是明文。浏览器配置目录、操作系统账号、已解锁 DPAPI 环境和导出文件属于实际风险面。退出或卸载保留数据不是密钥销毁证明，默认卸载需遵守保留政策。
 
-#### 2.2.4 中间人攻击 → 公钥替换
+### 公钥替换与历史版本
 
-**攻击路径：**
-1. 攻击者拦截客户端到服务器的 HTTPS 请求
-2. 替换 `/api/keys/{userId}/` 返回的对端公钥为攻击者公钥
-3. 客户端使用攻击者公钥加密消息
-4. 攻击者解密后重新加密发送给真正的接收方
+公钥从账户服务获取并由客户端维护信任/版本缓存。无版本请求可按用户缓存选择已缓存版本，明确历史版本不得被其他版本冒充。身份变化提示与用户确认不能因离线缓存绕过。设备级独立密钥与撤销还未交付。
 
-**缓解措施：**
-- [ ] HTTPS 强制（生产环境必须配置 TLS）
-- [ ] 公钥固定（HPKP，已废弃）或 Certificate Transparency 监控
-- [x] 首次使用信任 (TOFU) + 密钥指纹验证：客户端在 `rememberPeerIdentity()` 中记录对端公钥指纹，密钥变更时抛出 `peer_key_changed` 错误并阻止发送
-- [ ] 考虑提供带外指纹验证通道（如二维码扫码验证）
+### 会话与对象级越权
 
-#### 2.2.5 恶意浏览器扩展
+认证并不足以访问任意会话、消息或文件。服务/读取接口都必须验证当前关系、成员、holder、个人删除及群加入时间；重放也必须验证请求上下文。sync cursor 用户/会话绑定、HMAC/TTL 不替代权限检查。
 
-**攻击路径：**
-1. 用户安装了具有广泛权限的恶意扩展
-2. 扩展读取页面 DOM 或拦截 Web Crypto API
-3. 明文消息或密钥材料被窃取
+### 可靠性与误导状态
 
-**缓解措施：**
-- [ ] 部署 CSP `script-src` 限制（无法完全防御扩展，但可提高门槛）
-- [ ] 在用户文档中提醒浏览器扩展风险
+Redis 暂时不可用可中断实时推送；PG 的持久事件用于补取。内存待发箱重启可能丢失，不能向用户显示已持久化确认。日志、通知、错误正文和失败横幅不可泄漏私钥或消息明文。
 
----
+## 4. 未完成的安全验收
 
-## 3. 密钥生命周期安全
+Android KeyStore/生命周期、统一平台存储契约、设备撤销/逐设备副本、历史密钥迁移、安全扫描、全面日志审计与跨端威胁数据流尚未验收。既有 safeStorage 与本文更新不自动关闭 #165/#166 或安全测试 #198。
 
-| 阶段 | 安全措施 | 当前状态 |
-| --- | --- | --- |
-| **生成** | `window.crypto.subtle.generateKey`（真实随机源） | ✅ 已实现 |
-| **存储** | `localStorage` 明文 JWK | ⚠️ 需改善（受 XSS 威胁） |
-| **使用** | `window.crypto.subtle.importKey` + 内存中操作 | ✅ 已实现 |
-| **轮换** | 上传新公钥 → `key_version` 递增 | ✅ 已实现 |
-| **备份** | JSON 文件下载（含明文私钥） | ⚠️ 用户需自行保管 |
-| **导入** | JSON 文件上传 + 密钥材料一致性校验 | ✅ 已实现（含公私钥匹配验证） |
-| **销毁** | 清除 `localStorage` 对应键 | ⚠️ 无自动过期机制 |
+已有回归入口包括私聊/群聊 E2EE、公钥缓存、消息/文件幂等负向、sync 权限、通知隐私/IPC。测试全绿不等于覆盖率或渗透测试达标；专项计划和结论仍需对应任务证据。
 
----
+## 5. 维护
 
-## 4. 风险矩阵
-
-| 风险 | 可能性 | 影响 | 风险等级 | 优先级 |
-| --- | --- | --- | --- | --- |
-| XSS → 私钥窃取 | 中 | 极高 | **严重** | P0 |
-| CDN 供应链 → 密钥窃取 | 低 | 极高 | **高** | P1 |
-| 物理访问 → 密钥提取 | 低 | 高 | **中** | P2 |
-| 中间人 → 公钥替换 | 极低 | 高 | **低** | P3 |
-| 恶意扩展 → 数据窃取 | 中 | 高 | **中** | P2 |
-
----
-
-## 5. 后续改进路线
-
-1. **短期（Phase 1 验收前）：**
-   - 部署 CSP 头（`Content-Security-Policy`）
-   - 生产环境使用 Tailwind CLI 构建静态 CSS，移除 Play CDN 依赖
-   - 编写部署安全清单
-
-2. **中期（Phase 2）：**
-   - 将私钥从 `localStorage` 迁移至 `IndexedDB`
-   - 探索 `Web Crypto` 不可提取密钥（`extractable: false`）用于私钥（需重新设计密钥备份流程）
-   - 添加 Trusted Types 支持
-
-3. **长期（Phase 4+）：**
-   - 集成 WebAuthn 用于密钥访问授权
-   - 支持硬件安全模块（HSM）或 secure enclave
-   - 实现双棘轮（Double Ratchet）协议以支持前向安全性
-
----
-
-## 6. 参考资料
-
-- [Web Crypto API Specification](https://www.w3.org/TR/WebCryptoAPI/)
-- [Content Security Policy Level 3](https://www.w3.org/TR/CSP3/)
-- [Subresource Integrity](https://www.w3.org/TR/SRI/)
-- [OWASP XSS Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/XSS_Prevention_Cheat_Sheet.html)
+新增持久字段、IPC、通知预览、导出入口或身份版本时同步改资产表与威胁测试。原 2026-06-04 文档的 localStorage 明文长期私钥/无 CSP 描述为旧基线，可从 Git 历史追溯；当前状态见 [项目现状](current-status.md)。

@@ -162,5 +162,4 @@ themes (36 checks). The Windows CI job runs `npm run test:layout`.
 Against base `908ba19`, the same test fails with shell scrollTop 694 instead of
 0. The repaired sources pass 36/36; `npm run test:e2ee` passes all existing
 runners and 62 Node-test cases, and `manage.py check` reports no issues.
-Issue #145 still needs the layout fix deployed and a final installed-client
-preview-switch/return-to-chat confirmation before closure.
+Deployment follow-up (2026-10-07): PR #328 merged as `c23127f` and was deployed through the stable deployment script. DB/cache readiness, public live/ready/login endpoints returned 200, the production template uses stylesheet version `20261005-t18-layout`, and served CSS matches merged source after CRLF/LF normalization. The real Chromium layout suite was rerun and passed 36/36. The in-app browser created the login tab but repeated connection attempts timed out; no logged-in production UI interaction was completed. Keep #145 open for final installed-client preview-switch/return-to-chat confirmation.

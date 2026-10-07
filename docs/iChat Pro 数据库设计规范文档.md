@@ -1,5 +1,12 @@
 # iChat Pro 数据库设计规范文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+当前生产数据库 PostgreSQL 16，本地 SQLite 用于开发。迁移已推进到 chat/0021_conversation_sync_sequence_conversationevent：Conversation 新增 sync_sequence（PositiveBigIntegerField，默认 0）；ConversationEvent 字段为 conversation、sequence、kind、message_type、message_id、created_at，唯一约束 (conversation, sequence)，同字段组合索引。事件只存引用/元数据，kind 当前仅 message；消息事务持会话行锁分配序号，重放不生成事件，未回填旧历史。设备级身份/逐设备消息副本仍未实现。后文旧 SQL/ER 图是阶段设计示意，不能代替 migrations 或直接执行在生产。
+
 > Phase 说明：Phase 1 实际交付以文本私聊、文本群聊和逐成员密文记录为核心。本文档中的加密文件、文件分块和文件密钥表属于 Phase 2 扩展设计预留，不作为 Phase 1 实际建表验收要求。
 > T32 对齐：2026-06-03 根据最终代码模型更新 ER 图，移除已删除的 `accounts.Group`/`accounts.GroupMember` 旧表。
 
@@ -142,6 +149,21 @@ erDiagram
 ```
 
 > ⚠️ `accounts.Group` 和 `accounts.GroupMember` 已在 T22 中合并到 `chat.Conversation` 和 `chat.ConversationMember`，不再作为独立表存在。
+
+
+### 新增事件模型
+
+| 模型或字段 | 类型与约束 | 当前用途 |
+| --- | --- | --- |
+| Conversation.sync_sequence | PositiveBigIntegerField，默认 0 | 同会话内已提交事件的高水位 |
+| ConversationEvent.conversation | Conversation 外键，CASCADE | 事件所属会话 |
+| sequence | PositiveBigIntegerField | 与 conversation 联合唯一/索引 |
+| kind | CharField(20)，当前 message | 仅新增消息事件 |
+| message_type | CharField(20)，可空 | 引用消息种类 |
+| message_id | IntegerField，可空 | 引用消息 ID，结合 message_type 解释 |
+| created_at | auto_now_add | 事件写入时间，消息呈现排序仍用消息 created_at/id |
+
+消息写入和事件写入位于同一事务，不单独提交事件。序号由会话行锁保护；合法重放复用原结果。历史 SQL 示例和旧 ER 图未覆盖此迁移，真实建表/回滚边界以 chat/migrations 与部署 Runbook 为准。
 
 ## 1. 设计目标
 

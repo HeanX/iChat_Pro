@@ -1,8 +1,39 @@
 # iChat Pro API 接口文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+新增现行端点：GET /health/live/、GET /health/ready/（依赖失败 503），GET /api/conversations/{id}/sync/?cursor=&limit=100。sync 返回 items、next_cursor、has_more、high_water；cursor 绑定用户/会话，7 天过期 410，篡改 400。HTTP /api/* 认证失效返回 401 JSON，不再用登录 HTML。文本/文件/转发发送已统一服务：首次创建保留各入口的成功响应，同 ID 合法重放 200 且 created=false，冲突 409 idempotency_conflict；接收者停用 404 receiver_not_found，密钥材料非法 400 invalid_file_metadata。新密钥写入只在 created 事务路径；历史可见性同源适用于 sync。详细协议与错误码以 phase4/protocol.md 和 chat/errors.py 为准。下面旧接口示例未穷举这些新增契约。
+
 > 版本：2026-06-11  
 > 来源：`accounts/urls.py`、`chat/urls.py`、`chat/routing.py`、`accounts/views.py`、`chat/views.py`、`chat/consumers.py` 与后端测试用例。  
 > 说明：本机 `gh issue list` 可执行，但当前环境未登录 GitHub，返回 `HTTP 401: Requires authentication`，因此本文以代码与现有后端设计文档为准。
+
+
+### 现行新增端点
+
+| 方法与路径 | 输入 | 返回与边界 |
+| --- | --- | --- |
+| GET /health/live/ | 无认证参数 | 200 存活状态，不暴露内部配置 |
+| GET /health/ready/ | 无认证参数 | DB/cache 正常 200，失败 503；生产探针校验 JSON |
+| GET /api/conversations/{id}/sync/ | cursor 可空；limit 默认 100，整型 clamp 到 1–200 | items/next_cursor/has_more/high_water；当前用户必须有活动会话成员资格 |
+
+```json
+{
+  "items": [],
+  "next_cursor": "<opaque-signed-cursor>",
+  "has_more": true,
+  "high_water": 120
+}
+```
+
+该示例表示被可见性过滤的页，客户端仍须按 has_more 继续。items 非空时每项为 sequence、kind、created_at、message（逐 viewer 密文投影）。cursor 是不透明 token，不允许客户端自行修改或将 high_water 当 token 存储。非整型 limit 为 400；游标过期 410、非法 400；拉黑会话 403，非成员/不可用会话 404；未认证 401。
+
+### 现行发送与文件副作用
+
+同一 client_message_id 的合法原请求返回 200/created=false，冲突 409，服务端已提交但 ACK 丢失可安全重试。文本、文件、转发的写入规则统一；HTTP 与 WS 不允许各自提前写文件密钥。密钥材料不合格返回 invalid_file_metadata，不覆盖历史材料。新消息保存后的广播失败不应被解释为数据库没有提交；客户端用同 ID 重试或 sync 对账。
 
 ## 1. 通用约定
 

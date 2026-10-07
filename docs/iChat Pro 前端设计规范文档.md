@@ -1,5 +1,12 @@
 # iChat Pro 前端 GUI 设计规范
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+新增共享模块 chat-connection.js、message-accepted.js、chat-notifications.js；chat.js 仍为现有集成文件，没有迁移 React/Vue。连接/待发/ACK/sync 共用模块，待发箱为内存；实时与补取串行应用，按会话去重，时间线按服务端 (created_at,id) 与稳定行 ID。内嵌设置页即时通知变更，设置未知/损坏先关闭通知。PR #328 将设置样式限定在 settings-page 内，侧栏 flex 的 min-height/min-width/overflow 与聊天顶部定位已修，36/36 Chromium fixture 通过；正式客户端最后 UI 复验仍待 #145。生产静态缓存按模板版本参数刷新，当前 chat.css 为 20261005-t18-layout。
+
 > 更新日期：2026-06-08  
 > Phase 说明：Phase 1 已完成基础账号、联系人、文本私聊、文本群聊、端到端加密通信、安全提示和 Electron 基础外壳。Phase 2 已完成基础通信产品可用性补全。Phase 3 用于产品化收口、展示稳定化和最小 LLM Assistant 接入；完整 Bot、Agent、Channel 生态顺延至 Phase 4。  
 > 当前实现状态：`main` 已合并 P2 T01-T04，包括左侧栏子视图布局、设置首页、编辑资料/二维码弹层、通知设置页前端版本。后续设计规范仍覆盖 P2 T05-T18 的待实现页面和交互。

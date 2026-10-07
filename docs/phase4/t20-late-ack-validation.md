@@ -1,5 +1,12 @@
 # T20 late ACK validation
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。历史记录或原阶段设计；下文保留当时口径，不能作为现行完成声明。
+> 当前状态见 [项目现状](../current-status.md)；文档用途与归档规则见 [文档维护索引](../documentation-status.md)。
+
+## 本次更新
+
+保留 2026-10-03 的复现、时序与边界。之后 PR #304 修复稳定行身份、晚 ACK 时间与排序，并加强接线回归/异步 runner；#147 已由最终断网/排序实测关闭。该任务通过不等于崩溃后内存待发箱恢复。
+
 Date: 2026-10-03. Baseline: 745db6c (PR #303). Related issue: #147.
 
 ## Regression and fix

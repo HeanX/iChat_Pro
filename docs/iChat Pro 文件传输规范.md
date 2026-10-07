@@ -1,5 +1,12 @@
 # iChat Pro 文件传输规范
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+现行文件 single/group 与转发 single/group 全部接入 messaging 服务。pending_file_keys 的形状、AES-256-GCM 材料、nonce 12 字节、tag 16 字节、版本及 ephemeral base64 校验/覆盖/写入仅在 created 事务路径执行；非法 400 invalid_file_metadata、冲突 409，重放不改历史密钥。转发允许 owner-or-key-holder 并关闭目标会话匹配，目标成员密钥覆盖始终检查。私有媒体下载走鉴权，不公开 /media/uploads/。这里描述 Web 文件协议；Windows 原生选择/保存/打开 #146 尚未交付。
+
 > 状态：Draft v0.1  
 > 适用范围：图片、普通文件、贴纸等多媒体消息传输  
 > 设计目标：服务端只存储加密后的文件内容和必要元数据，不保存文件明文、明文文件名或明文 `file_key`。

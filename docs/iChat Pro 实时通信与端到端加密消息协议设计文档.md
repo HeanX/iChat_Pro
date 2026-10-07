@@ -1,5 +1,12 @@
 # iChat Pro 实时通信与端到端加密消息协议设计文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。历史记录或原阶段设计；下文保留当时口径，不能作为现行完成声明。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+当前协议为 1.0，缺省版本兼容；未知版本 error 后 close 4003，认证失效 4401/API 401。现行统一错误表在 chat/errors.py；HTTP/WS 文本、文件和转发共享事务服务、viewer 投影与 created/replayed 语义。补取使用 ConversationEvent + HMAC 游标，客户端整页应用成功再存 cursor、整 walk 共用队列；历史/实时/ACK 按 (created_at,id)。下面旧阶段协议草案保留设计背景，冲突时以 phase4/protocol.md 和当前 views/consumers/services 为准。
+
 > 状态：Draft v0.2
 > 适用范围：T10、T11、T12、T14、T15
 > 评审对象：成员 A（公钥管理）、成员 B（消息模型）、成员 D（前端接入）

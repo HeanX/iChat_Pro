@@ -1,56 +1,32 @@
 # iChat Pro 文档总览
 
-本文档作为 `docs/` 目录入口，用于说明各文档的阅读顺序、当前交付口径和维护规则。
+> 更新：2026-10-07；代码基线 f2f60ec。原始 Phase4 任务 29/78 闭环，仍有 49 项开放。
 
-## 推荐阅读顺序
+## 从哪里开始
 
 | 顺序 | 文档 | 用途 |
 | --- | --- | --- |
-| 1 | `iChat Pro 系统性介绍文档.md` | 从整体理解系统目标、架构、模块和演示边界 |
-| 2 | `iChat Pro 需求文档_修订版.md` | 查看需求范围、阶段边界和验收标准 |
-| 3 | `iChat Pro 技术栈.md` | 查看主要技术选型和运行依赖 |
-| 4 | `iChat Pro API 接口文档.md` | 查看后端接口设计 |
-| 5 | `iChat Pro 数据库设计规范文档.md` | 查看核心数据模型 |
-| 6 | `iChat Pro 实时通信与端到端加密消息协议设计文档.md` | 查看 WebSocket 和消息协议 |
-| 7 | `iChat Pro 端到端加密通信设计文档.md` | 查看 E2EE 密钥、加密和信任设计 |
-| 8 | `iChat Pro UML 与架构图交付文档.md` | 查看 UML、架构和交付图表 |
-| 9 | `iChat Pro 演示指南.md` / `iChat Pro Phase 3 演示脚本与验收文档.md` | 查看演示流程和验收操作 |
+| 1 | [当前实现与交付状态](current-status.md) | 已完成、待验收、部署/安装包/CI 基线和限制 |
+| 2 | [全部文档维护索引](documentation-status.md) | 区分现行说明、原始需求、历史记录和归档附件 |
+| 3 | [Phase4 任务](phase4/tasks.md) / [需求追踪](phase4/traceability-matrix.md) | 78 项任务及 114 条 NEW-* 的证据状态 |
+| 4 | [现行技术方案](phase4/technical-design.md) / [协议](phase4/protocol.md) | 代码入口、模型、幂等、补取、状态机和存储边界 |
+| 5 | [部署 Runbook](../deploy/runbook.md) / [部署架构](phase4/deploy-architecture.md) | 发布、备份、恢复、续期及端口 |
+| 6 | [课程交付现状报告](course-delivery/交付状态报告-20261007.md) | 可提交的日期快照，另有同名 Word/PDF |
 
-## 文档分类
+本学期范围是 Windows/Android、公网部署、可靠消息、E2EE 与软件测试实践。早期 Phase4 的 Channel/Bot/Agent 生态规划单独保留，不复用本学期任务号。
 
-| 分类 | 文档 |
-| --- | --- |
-| Phase4 开发交接 | [开发入口](phase4/README.md)、[需求与验收](phase4/requirements.md)、[技术方案与代码入口](phase4/technical-design.md)、[Agent 工作包](phase4/agent-handoff.md)、[78 项任务](phase4/tasks.md) |
-| 软件测试课程 | `course-testing/iChat Pro 软件需求规格说明书.md`、`course-testing/第一次实验-需求分析与任务拆解报告.md`、`course-testing/第二次实验-软件工程全链路与AI实践报告.md`、`course-testing/代码规范、版本管理与测试工具说明.md`、`course-testing/AI实践记录.md`、`course-testing/小组分工表.md` |
-| 总览与需求 | `iChat Pro 系统性介绍文档.md`、`iChat Pro 需求文档_修订版.md`、`iChat Pro Phase 规划与一期交付审查文档.md` |
-| 架构与设计 | `iChat Pro 技术栈.md`、`iChat Pro 后端设计规范文档.md`、`iChat Pro 前端设计规范文档.md`、`iChat Pro UML 与架构图交付文档.md` |
-| 数据与接口 | `iChat Pro API 接口文档.md`、`iChat Pro 数据库设计规范文档.md` |
-| 通信与安全 | `iChat Pro 实时通信与端到端加密消息协议设计文档.md`、`iChat Pro 端到端加密通信设计文档.md`、`iChat Pro 浏览器端安全威胁模型.md`、`iChat Pro 部署安全说明.md` |
-| 功能专题 | `iChat Pro 文件传输规范.md`、`iChat Pro 群组管理与邀请流程实现文档.md`、`iChat Pro 群组左侧面板整合说明文档.md`、`iChat Pro 转发界面与文件转发问题梳理.md`、`iChat Pro AI Assistant 增强整理文档.md`、`iChat Pro Twemoji 表情渲染方案文档.md` |
-| 扩展规划 | `iChat Pro Bot、LLM Agent 与 Channel 扩展方案文档.md` |
-| 验收与测试 | `iChat Pro Phase 2 验收手册.md`、`iChat Pro Phase 3 演示脚本与验收文档.md`、`phase2_test_coverage.md`、`p3_t01_regression_report.md` |
+## 需求与验收
 
-## 当前交付口径
+[SRS V2.0](course-testing/iChat%20Pro%20软件需求规格说明书.md)、[原始任务拆解](course-testing/第一次实验-需求分析与任务拆解报告.md)、[Phase4 需求](phase4/requirements.md) 保留要求与优先级。需求存在不等于实现完成；单项代码测试通过不等于跨端专项验收完成。
 
-- 上学期版本作为本学期的回归基线，已有能力包括账号、联系人、私聊、群聊、实时通信、端到端加密消息、文件转发、设置页、AI Assistant 面板和 Electron 桌面端原型。
-- 本学期软件测试实践的新增交付重点为可安装的 Windows App、Android App、公网云部署、E2EE 与消息可靠性增强，以及覆盖黑盒、白盒、安全、性能和兼容性的测试体系。
-- Channel、完整 Bot、Agent Gateway、语音/视频通话和高级 Signal Protocol 不属于本学期必须完成的核心范围；若核心任务提前完成，再作为扩展项评估。
-- 测试代码已统一整理到 `chat/tests/`，JS 加密测试位于 `chat/tests/js/`。
+Windows 安装、品牌、托盘、连接恢复、敏感存储已闭环；通知最终布局复验 #145、文件集成 #146、Android、多设备和测试工程仍开放。准确状态请读上方任务和矩阵。
 
-需要交给其他 Agent 开发本学期 Phase4 时，从 [Phase4 开发交接入口](phase4/README.md) 开始。该目录采用最新课程的跨平台/云端/可靠性/测试范围，并明确区分早期 Channel、Bot 与 Agent 生态规划。
+## 专题与旧版本
 
-## 常用验证命令
+API、数据库、前后端设计、E2EE、群组、文件与 AI 文档均增加本次实现补充。旧协议示意、规划图和 SQL 示例需要结合现行补充与代码阅读，不能直接当生产迁移脚本。带 Phase2/Phase3、实验日期的验收和测试报告保留原结果；维护索引列出其历史用途。
 
-```powershell
-python manage.py check
-python manage.py makemigrations --check --dry-run
-python manage.py test
-npm run test:e2ee
-```
+## 验证与维护
 
-## 文档维护规则
+根目录运行 `python manage.py check`、`python manage.py makemigrations --check --dry-run`、`python manage.py test`、`npm run test:e2ee`。Windows 的 desktop 目录另外运行 `npm run test:layout`、`npm run test:branding`、`npm run test:installer`。完整依赖和环境说明见 [项目 README](../README.md)。
 
-- 新增功能时优先更新需求、API、数据库、演示和系统介绍文档。
-- 涉及 WebSocket 或加密协议时，同步更新实时通信协议文档和 E2EE 设计文档。
-- 涉及前端布局和页面交互时，同步更新前端设计规范和相关专题文档。
-- 交付包中不包含本地依赖、数据库、媒体文件和生成产物；这些内容按 README 的交付说明排除。
+更新功能时同步改现行 API/模型/协议与验收证据；历史记录仅追加日期说明，不覆盖当时的测试结果。变更状态须有对应 Issue、PR、CI 或原生记录。不要把 fixture 测试写成正式安装版验收，也不要把安装包 SHA 写成服务器版本。文档不包含真实账号密码、私钥、Token 或生产 .env。

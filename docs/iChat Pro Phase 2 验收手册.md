@@ -1,5 +1,12 @@
 # iChat Pro Phase 2 验收手册
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。历史记录或原阶段设计；下文保留当时口径，不能作为现行完成声明。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+保留 Phase2 原验收步骤和日期，不用当前 404 测试覆盖当时结果。新增云端/Windows/可靠性验收见 phase4/tasks.md、windows-tray.md、windows-notifications.md；旧 localhost、模块缺口和待办只属于原阶段。
+
 > 版本：v2.0
 > 日期：2026-06-15
 > 适用范围：P2 T01-T17 全量前端验收 + P2 T18 手动验收综合

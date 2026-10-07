@@ -1,5 +1,12 @@
 # iChat Pro Twemoji 表情渲染方案文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+表情方案仍作为独立渲染设计；本次没有宣布新的表情任务完成。新增消息、补取和晚 ACK 的行重建须复用当前统一渲染器，不能手动移动气泡子节点或丢失 data-row-message-id。生产 CSS/脚本缓存刷新和 CSP 约束以现行模板/settings 为准，外部资源或转换库须先核对实际代码。
+
 > 状态：Draft v1.0
 > 适用范围：Web 前端、Electron 桌面端、T16 真实聊天数据接入
 > 推荐实现：自托管固定版本的 Twemoji SVG 素材
@@ -412,4 +419,3 @@ and licensed under CC-BY 4.0.
    ```text
    docs/iChat Pro 实时通信与端到端加密消息协议设计文档.md
    ```
-

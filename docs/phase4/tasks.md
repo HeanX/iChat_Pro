@@ -1,6 +1,6 @@
 # Phase4 78 项原始任务与工作包映射
 
-> 整理日期：2026-10-01。原任务取自本地[第一次实验任务拆解](../course-testing/第一次实验-需求分析与任务拆解报告.md)第7节。  
+> 整理日期：2026-10-01；状态复核：2026-10-07（基线 f2f60ec）。原任务取自本地[第一次实验任务拆解](../course-testing/第一次实验-需求分析与任务拆解报告.md)第7节。
 > 保留原编号、标题、交付物、验收、优先级与依赖；新增工作包映射。任务卡已与仓库 Issue 对齐（见使用说明）。
 
 ## 使用说明
@@ -8,7 +8,7 @@
 - `P4 T01–T54` 为54个工程任务，`P4 Test T01–T24` 为24个测试任务；两套编号不能合并或省略Test。
 - 任务卡对应关系：工程任务 `P4 Txx` → Issue `#127+xx`（#128–#181），测试任务 `P4 Test Txx` → Issue `#181+xx`（#182–#205）。领取任务时在对应 Issue 上记录进展，完成后关闭并回填本表状态列。
 - “工作包”是[Agent交接文档](agent-handoff.md)中的实施组织；测试包可在各开发包中同步协作。
-- 状态初始为“未核对”，不等于尚未开始。领取任务时对照代码/Issue/证据更新，验收通过后才标记完成。
+- 本次按原卡状态和证据核对：29 项关闭、49 项开放；工程 25/54、测试 4/24。开放项“未完成”指完整验收未闭环，不等于完全没有实现。需求专项通过仍须查追踪矩阵，不能由任务关闭直接推定。
 - 下方依赖为原文，包含跨工程/测试编号的范围简写；按实际逐项前置条件核对。可提前做设计和骨架，但最终完成必须满足依赖。
 - 原需求与任务有少量优先级差异，见[需求文档第7节](requirements.md#7-原始材料冲突与处理)，不静默改写原Issue范围。
 
@@ -16,89 +16,89 @@
 
 | 任务号 | 工作包 | 内容 | 交付物 | 原验收标准 | 原优先级 | 原依赖 | 状态/证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P4 T01 | WP00 | 确认新旧需求边界和需求编号 | 需求规格说明书 V2.0 | 全员评审，新需求与继承功能明确区分 | P0 | 无 | 已完成（Issue #128） |
-| P4 T02 | WP00 | 建立 Git 工作流和任务模板 | 分支、提交、PR、Issue 规范 | 提交和缺陷可关联任务编号 | P0 | P4 T01 | 已完成（Issue #129） |
-| P4 T03 | WP00 | 制定迭代计划和风险清单 | 里程碑、风险登记表 | 范围、负责人、时间和降级方案明确 | P1 | P4 T01 | 未核对 |
-| P4 T04 | WP01 | 设计云端部署架构 | 架构图、端口和数据流说明 | Web、ASGI、PostgreSQL、Redis、存储边界明确 | P0 | P4 T01 | 已完成（Issue #131，2026-10-01） |
-| P4 T05 | WP01 | 准备云服务器和域名 | 服务器、DNS 和防火墙配置 | 公网域名可解析，只有必要端口开放 | P0 | P4 T04 | 已完成（Issue #132，2026-10-01 公网取证） |
-| P4 T06 | WP01 | 配置 Nginx、HTTPS 和 WSS | TLS 与反向代理配置 | HTTP 跳转 HTTPS，WebSocket 正常升级 | P0 | P4 T05 | 已完成（Issue #133；续期 reload hook 已实测） |
-| P4 T07 | WP01 | 部署 Django ASGI 服务 | 可托管应用服务 | 不使用开发服务器，异常退出后可自动恢复 | P0 | P4 T06 | 已完成（Issue #134，2026-10-01） |
-| P4 T08 | WP01 | 接入 PostgreSQL | 数据库配置和迁移记录 | 所有 migrations 成功，核心数据可读写 | P0 | P4 T07 | 已完成（Issue #135，2026-10-01） |
-| P4 T09 | WP01 | 接入 Redis Channel Layer | Redis 与实时通信配置 | 多客户端消息可正确分发，Redis 不开放公网 | P0 | P4 T07 | 已完成（Issue #136，2026-10-01） |
-| P4 T10 | WP01 | 配置持久化文件存储 | 媒体/密文文件存储方案 | 服务重启或升级后文件仍可访问 | P0 | P4 T07 | 已完成（Issue #137，2026-10-01） |
-| P4 T11 | WP01 | 配置环境变量和秘密管理 | 生产配置清单 | 仓库、安装包和日志中无生产密钥 | P0 | P4 T07 | 已完成（Issue #138，2026-10-01） |
-| P4 T12 | WP01 | 配置健康检查、日志和监控 | 监控面板或记录 | 能发现服务、资源、证书和关键错误状态 | P1 | P4 T07～P4 T11 | 部分完成（Issue #139，监控告警 P1 后续） |
-| P4 T13 | WP01 | 实现备份、恢复和回滚 | 脚本/手册及演练记录 | 独立环境恢复成功，版本可回退 | P0 | P4 T08、P4 T10 | 已完成（Issue #140；复审两项补齐：首次部署回归修复 + 可复跑恢复演练，二次复验通过） |
-| P4 T14 | WP03 | 将 Electron 默认目标切换为云服务 | 环境化服务地址配置 | 无需本地 Django 即可使用核心功能 | P0 | P4 T06～P4 T11 | 已完成（Issue #141；两轮复审整改后闭环，默认云地址已内建，T15 生命周期实测确认无需本地 Django 即可启动云端登录页） |
-| P4 T15 | WP03 | 完成 Windows 打包配置 | `.exe` 安装包 | 干净 Windows 环境可安装、启动和卸载 | P0 | P4 T14 | 已完成（Issue #142；四轮复审整改后复验闭环：安装/云端启动/双路径卸载/注册表清理，NSIS 断言 24/24） |
-| P4 T16 | WP03 | 统一名称、图标和版本 | 产品资源与关于信息 | 安装器、窗口、托盘和快捷方式标识一致 | P1 | P4 T15 | 已实现并复核（Issue #143；PR #317 后补齐关于入口、完整 exe 标识和 Windows 构建资源校验，详见 [品牌验收](windows-branding.md)；托盘标识随 T17 实测；数字签名另需证书，不在本项范围） |
-| P4 T17 | WP03 | 实现窗口与系统托盘 | 桌面窗口/托盘功能 | 最小化、恢复和退出行为正确 | P1 | P4 T15 | 已完成（Issue #144；PR #319 实现托盘，用户 PR #321 修复 Tray 导入/图标参数、单实例锁时机、离线启动路径与退出清理；main 93c0190 四项 CI 全绿，安装包 SHA-256 前缀 01f801a5；15 项源码/打包回归通过，原生实测托盘单击/双击恢复同窗、隐藏态菜单退出进程归零、登录态待发箱保留均通过，详见 [托盘验收](windows-tray.md)） |
-| P4 T18 | WP03 | 接入 Windows 系统通知 | 通知与会话跳转 | 新消息通知遵守静音设置，点击可定位会话 | P1 | P4 T14 | 进行中（Issue #145；PR #324/#326/#327 已合并；原生点击、正式显示名、OS 开关与预览即时生效已有用户确认；PR #328 已合并并部署 c23127f，布局回归复跑 36/36、生产健康/登录 200 与新版 CSS 内容核对通过；浏览器工具连接超时，登录态页面交互复验待完成，见 [完成索引](completion-audit-20261007.md)） |
-| P4 T19 | WP03 | 完善文件选择、下载和打开 | 文件系统集成 | 文件跨端收发成功，异常路径有提示 | P1 | P4 T14 | 未核对 |
-| P4 T20 | WP03 | 实现连接状态和自动重连 | 状态提示及重连逻辑 | 网络恢复后 30 秒内重新连接 | P0 | P4 T14 | 已完成（Issue #147；部署 16e6345 后生产复验：9.2s 重连、自动重发、补取无重复、晚 ACK 排序正确；[关闭证据](https://github.com/HeanX/iChat_Pro/issues/147#issuecomment-5970277528)） |
-| P4 T21 | WP03 | 强化敏感数据存储和日志 | 安全存储方案、日志规则 | 私钥、Token 和聊天明文不进入普通文件和日志 | P0 | P4 T14 | 已完成（Issue #148；八轮复审整改后复验闭环：safeStorage 桥+加密 KV+存储边界文档） |
-| P4 T22 | WP04 | 确认 Capacitor 等移动端技术方案 | 技术决策记录、工程骨架 | 能复用现有页面并生成 Android 工程 | P0 | P4 T01 | 未核对 |
-| P4 T23 | WP04 | 完成移动端响应式适配 | 手机端页面 | 核心操作无溢出、遮挡或鼠标悬停依赖 | P0 | P4 T22 | 未核对 |
-| P4 T24 | WP04 | 生成 Android APK/AAB | 可安装包 | 真机或独立模拟器安装并启动 | P0 | P4 T22、P4 T23 | 未核对 |
-| P4 T25 | WP04 | 适配返回键和应用生命周期 | 生命周期处理逻辑 | 后台恢复不串号、不重复发送、不丢失草稿 | P0 | P4 T24 | 未核对 |
-| P4 T26 | WP04 | 实现网络变化检测和重连 | Android 网络状态模块 | Wi-Fi/移动网络切换后自动恢复聊天 | P0 | P4 T24 | 未核对 |
-| P4 T27 | WP04 | 接入前台/后台通知 | Android 通知模块 | 权限申请、静音和点击跳转正确 | P1 | P4 T24 | 未核对 |
-| P4 T28 | WP04 | 接入文件选择和保存 | Android 文件能力 | 权限拒绝、取消和有效文件操作均有正确结果 | P1 | P4 T24 | 未核对 |
-| P4 T29 | WP04 | 接入 Android 安全存储 | 私钥/凭据保护方案 | 普通存储、日志中无法直接读取敏感值 | P0 | P4 T24 | 未核对 |
-| P4 T30 | WP04 | 研究完全退出后的云推送 | 推送原型与测试记录 | 不泄露 E2EE 明文，失败不影响消息持久化 | P2 | P4 T27 | 未核对 |
-| P4 T31 | WP02 | 统一三端协议版本和错误码 | 协议文档 | 客户端可识别兼容版本和错误类型 | P0 | P4 T14、P4 T24 | 已完成（Issue #158；ADR-P4-02 + 生产实测 401/4003 门禁） |
-| P4 T32 | WP02 | 复核并增强消息唯一 ID 与幂等 | 服务端/客户端实现及测试 | HTTP/WebSocket 重试不产生重复消息 | P0 | P4 T31 | 已完成（Issue #159；两轮复审整改复验：savepoint/密钥时机/摘要规范化，384 条全绿） |
-| P4 T33 | WP02 | 完善消息发送状态机 | 状态定义与实现 | sending/sent/delivered/read/failed 转换合法 | P0 | P4 T31 | 已完成（Issue #160；六轮复审整改后复验闭环：连接/状态机/补取/渲染全链路，浏览器 14 项检查通过） |
-| P4 T34 | WP02 | 实现遗漏消息补取 | 同步接口或协议 | 断线期间消息恢复后可补取且不重复 | P0 | P4 T32、P4 T33 | 已完成（Issue #161；复审整改后复验：sync 读取投影与历史同源，404 条全绿） |
-| P4 T35 | WP02 | 统一服务端时间和消息排序 | 排序规则及测试 | 设备时间偏差不造成明显乱序 | P0 | P4 T31 | 已完成（Issue #162；sync 序号排序 + 历史 (created_at,id) tiebreaker） |
-| P4 T36 | WP02 | 统一 HTTP fallback 与 WebSocket 规则 | 一致性测试与修复 | 两条发送路径执行相同权限、幂等和状态逻辑 | P0 | P4 T32、P4 T33 | 已完成（Issue #163；两轮复审整改复验：全部写入路径入服务层，无视图旁路） |
-| P4 T37 | WP02 | 完成 Windows—Android 跨端聊天 | 综合演示与结果记录 | 两台独立设备双向文本消息通过 | P0 | P4 T20、P4 T26、P4 T31～P4 T36 | 未核对 |
-| P4 T38 | WP05 | 编写 E2EE 威胁模型和数据流 | 威胁模型、数据流图 | 明确资产、攻击面、信任边界和不可保存数据 | P0 | P4 T01、P4 T04 | Issue #165 |
-| P4 T39 | WP05 | 适配平台安全存储 | Windows/Android 密钥存储实现 | 普通存储或日志中无可直接读取私钥 | P0 | P4 T21、P4 T29 | Issue #166 |
-| P4 T40 | WP05 | 设计并实现设备身份模型 | 模型、迁移、接口 | 同一账号不同设备可独立识别 | P1 | P4 T38 | 未核对 |
-| P4 T41 | WP05 | 实现设备列表与撤销 | 设置页面、接口和测试 | 被撤销设备不接收后续消息密钥 | P1 | P4 T40 | 未核对 |
-| P4 T42 | WP05 | 实现多设备新消息密钥分发 | 协议、代码和测试 | 每个有效设备可解密新消息 | P1 | P4 T40、P4 T41 | 未核对 |
-| P4 T43 | WP05 | 研究历史密钥迁移 | 设计文档或安全原型 | 仅经用户授权，失败和撤销路径明确 | P2 | P4 T42 | 未核对 |
-| P4 T44 | WP07 | 接入静态检查和格式门禁 | CI 配置 | 检查失败时流水线失败 | P0 | P4 T02 | Issue #171 |
-| P4 T45 | WP07 | 接入 Django、迁移和自动化测试 | CI 配置 | 任一核心测试失败时禁止合并 | P0 | P4 Test T01、P4 T02 | 部分完成（Issue #172；Django/迁移、SQLite、PG/Redis、JS、Windows 四项 CI 已接入；main 未设置 required_status_checks，尚不满足失败禁止合并；见 [完成索引](completion-audit-20261007.md)） |
-| P4 T46 | WP07 | 接入覆盖率门禁 | CI 报告 | 低于阈值时阻断或产生审批例外记录 | P0 | P4 Test T12 | Issue #173 |
-| P4 T47 | WP07 | 接入依赖与秘密扫描 | 安全流水线 | 高危漏洞或密钥泄露阻断发布 | P1 | P4 T11、P4 Test T17 | 未核对 |
-| P4 T48 | WP07 | 自动/标准化构建客户端 | 构建流水线和产物 | 安装包带版本号、校验值和构建记录 | P1 | P4 T15、P4 T24 | 未核对 |
-| P4 T49 | WP07 | 部署独立测试环境 | 测试环境流水线 | 与生产配置、数据和密钥隔离 | P1 | P4 T07～P4 T11 | 未核对 |
-| P4 T50 | WP07 | 建立生产发布审批与回滚 | 发布流程 | 可追踪发布人、版本、时间并可恢复稳定版本 | P1 | P4 T13、P4 Test T23 | 未核对 |
-| P4 T51 | WP08 | 建立 AI 使用记录 | AI 实践日志 | 记录任务、用途、人工修改和验证结果 | P1 | P4 T01 | 已完成（Issue #178；AI 实践日志、PR #304 实测与复核记录；2026-10-07 证据核对补关，见 [完成索引](completion-audit-20261007.md)） |
-| P4 T52 | WP08 | AI 辅助日志与缺陷分析 | 分析记录 | 建议可追溯到真实日志和复现结果 | P2 | P4 Test T21 | 已完成（Issue #179；晚 ACK 真实复现、PR #304 修复与 #147 生产复验；见 [完成索引](completion-audit-20261007.md)） |
-| P4 T53 | WP08 | 整理安装、云端和跨端证据 | 截图、视频、日志 | 每项 P0 成果有可复核证据 | P0 | 各 Epic P0 完成 | 未核对 |
-| P4 T54 | WP08 | 整理最终实验材料 | 报告、附件和演示脚本 | 文档、代码和实测结果一致 | P0 | P4 Test T22、P4 T50、P4 T53 | 未核对 |
+| P4 T01 | WP00 | 确认新旧需求边界和需求编号 | 需求规格说明书 V2.0 | 全员评审，新需求与继承功能明确区分 | P0 | 无 | 已完成（[Issue #128](https://github.com/HeanX/iChat_Pro/issues/128)）） |
+| P4 T02 | WP00 | 建立 Git 工作流和任务模板 | 分支、提交、PR、Issue 规范 | 提交和缺陷可关联任务编号 | P0 | P4 T01 | 已完成（[Issue #129](https://github.com/HeanX/iChat_Pro/issues/129)）） |
+| P4 T03 | WP00 | 制定迭代计划和风险清单 | 里程碑、风险登记表 | 范围、负责人、时间和降级方案明确 | P1 | P4 T01 | 未完成（[Issue #130](https://github.com/HeanX/iChat_Pro/issues/130) 开放）；部分产出：风险清单与里程碑已有；负责人、时间及降级方案待完整验收 |
+| P4 T04 | WP01 | 设计云端部署架构 | 架构图、端口和数据流说明 | Web、ASGI、PostgreSQL、Redis、存储边界明确 | P0 | P4 T01 | 已完成（[Issue #131](https://github.com/HeanX/iChat_Pro/issues/131)）；2026-10-01 |
+| P4 T05 | WP01 | 准备云服务器和域名 | 服务器、DNS 和防火墙配置 | 公网域名可解析，只有必要端口开放 | P0 | P4 T04 | 已完成（[Issue #132](https://github.com/HeanX/iChat_Pro/issues/132)）；2026-10-01 公网取证 |
+| P4 T06 | WP01 | 配置 Nginx、HTTPS 和 WSS | TLS 与反向代理配置 | HTTP 跳转 HTTPS，WebSocket 正常升级 | P0 | P4 T05 | 已完成（[Issue #133](https://github.com/HeanX/iChat_Pro/issues/133)）；续期 reload hook 已实测 |
+| P4 T07 | WP01 | 部署 Django ASGI 服务 | 可托管应用服务 | 不使用开发服务器，异常退出后可自动恢复 | P0 | P4 T06 | 已完成（[Issue #134](https://github.com/HeanX/iChat_Pro/issues/134)）；2026-10-01 |
+| P4 T08 | WP01 | 接入 PostgreSQL | 数据库配置和迁移记录 | 所有 migrations 成功，核心数据可读写 | P0 | P4 T07 | 已完成（[Issue #135](https://github.com/HeanX/iChat_Pro/issues/135)）；2026-10-01 |
+| P4 T09 | WP01 | 接入 Redis Channel Layer | Redis 与实时通信配置 | 多客户端消息可正确分发，Redis 不开放公网 | P0 | P4 T07 | 已完成（[Issue #136](https://github.com/HeanX/iChat_Pro/issues/136)）；2026-10-01 |
+| P4 T10 | WP01 | 配置持久化文件存储 | 媒体/密文文件存储方案 | 服务重启或升级后文件仍可访问 | P0 | P4 T07 | 已完成（[Issue #137](https://github.com/HeanX/iChat_Pro/issues/137)）；2026-10-01 |
+| P4 T11 | WP01 | 配置环境变量和秘密管理 | 生产配置清单 | 仓库、安装包和日志中无生产密钥 | P0 | P4 T07 | 已完成（[Issue #138](https://github.com/HeanX/iChat_Pro/issues/138)）；2026-10-01 |
+| P4 T12 | WP01 | 配置健康检查、日志和监控 | 监控面板或记录 | 能发现服务、资源、证书和关键错误状态 | P1 | P4 T07～P4 T11 | 未完成（[Issue #139](https://github.com/HeanX/iChat_Pro/issues/139) 开放）；部分实现：health/日志已完成，监控告警待做 |
+| P4 T13 | WP01 | 实现备份、恢复和回滚 | 脚本/手册及演练记录 | 独立环境恢复成功，版本可回退 | P0 | P4 T08、P4 T10 | 已完成（[Issue #140](https://github.com/HeanX/iChat_Pro/issues/140)）；复审两项补齐：首次部署回归修复 + 可复跑恢复演练，二次复验通过 |
+| P4 T14 | WP03 | 将 Electron 默认目标切换为云服务 | 环境化服务地址配置 | 无需本地 Django 即可使用核心功能 | P0 | P4 T06～P4 T11 | 已完成（[Issue #141](https://github.com/HeanX/iChat_Pro/issues/141)）；两轮复审整改后闭环，默认云地址已内建，T15 生命周期实测确认无需本地 Django 即可启动云端登录页 |
+| P4 T15 | WP03 | 完成 Windows 打包配置 | `.exe` 安装包 | 干净 Windows 环境可安装、启动和卸载 | P0 | P4 T14 | 已完成（[Issue #142](https://github.com/HeanX/iChat_Pro/issues/142)）；四轮复审整改后复验闭环：安装/云端启动/双路径卸载/注册表清理，NSIS 断言 24/24 |
+| P4 T16 | WP03 | 统一名称、图标和版本 | 产品资源与关于信息 | 安装器、窗口、托盘和快捷方式标识一致 | P1 | P4 T15 | 已完成（[Issue #143](https://github.com/HeanX/iChat_Pro/issues/143)）；PR #317 后补齐关于入口、完整 exe 标识和 Windows 构建资源校验，详见 [品牌验收](windows-branding.md)；托盘标识随 T17 实测；数字签名另需证书，不在本项范围 |
+| P4 T17 | WP03 | 实现窗口与系统托盘 | 桌面窗口/托盘功能 | 最小化、恢复和退出行为正确 | P1 | P4 T15 | 已完成（[Issue #144](https://github.com/HeanX/iChat_Pro/issues/144)）；PR #319 实现托盘，用户 PR #321 修复 Tray 导入/图标参数、单实例锁时机、离线启动路径与退出清理；main 93c0190 四项 CI 全绿，安装包 SHA-256 前缀 01f801a5；15 项源码/打包回归通过，原生实测托盘单击/双击恢复同窗、隐藏态菜单退出进程归零、登录态待发箱保留均通过，详见 [托盘验收](windows-tray.md) |
+| P4 T18 | WP03 | 接入 Windows 系统通知 | 通知与会话跳转 | 新消息通知遵守静音设置，点击可定位会话 | P1 | P4 T14 | 未完成（[Issue #145](https://github.com/HeanX/iChat_Pro/issues/145) 开放）；实现及回归已完成；通知预览布局修复后的正式客户端最终复验待记录 |
+| P4 T19 | WP03 | 完善文件选择、下载和打开 | 文件系统集成 | 文件跨端收发成功，异常路径有提示 | P1 | P4 T14 | 未完成（[Issue #146](https://github.com/HeanX/iChat_Pro/issues/146) 开放）；待实施原生文件选择、保存及打开 |
+| P4 T20 | WP03 | 实现连接状态和自动重连 | 状态提示及重连逻辑 | 网络恢复后 30 秒内重新连接 | P0 | P4 T14 | 已完成（[Issue #147](https://github.com/HeanX/iChat_Pro/issues/147)）；部署 16e6345 后生产复验：9.2s 重连、自动重发、补取无重复、晚 ACK 排序正确；[关闭证据](https://github.com/HeanX/iChat_Pro/issues/147#issuecomment-5970277528) |
+| P4 T21 | WP03 | 强化敏感数据存储和日志 | 安全存储方案、日志规则 | 私钥、Token 和聊天明文不进入普通文件和日志 | P0 | P4 T14 | 已完成（[Issue #148](https://github.com/HeanX/iChat_Pro/issues/148)）；八轮复审整改后复验闭环：safeStorage 桥+加密 KV+存储边界文档 |
+| P4 T22 | WP04 | 确认 Capacitor 等移动端技术方案 | 技术决策记录、工程骨架 | 能复用现有页面并生成 Android 工程 | P0 | P4 T01 | 未完成（[Issue #149](https://github.com/HeanX/iChat_Pro/issues/149) 开放）；Android 工程与验收待开展 |
+| P4 T23 | WP04 | 完成移动端响应式适配 | 手机端页面 | 核心操作无溢出、遮挡或鼠标悬停依赖 | P0 | P4 T22 | 未完成（[Issue #150](https://github.com/HeanX/iChat_Pro/issues/150) 开放）；Android 工程与验收待开展 |
+| P4 T24 | WP04 | 生成 Android APK/AAB | 可安装包 | 真机或独立模拟器安装并启动 | P0 | P4 T22、P4 T23 | 未完成（[Issue #151](https://github.com/HeanX/iChat_Pro/issues/151) 开放）；Android 工程与验收待开展 |
+| P4 T25 | WP04 | 适配返回键和应用生命周期 | 生命周期处理逻辑 | 后台恢复不串号、不重复发送、不丢失草稿 | P0 | P4 T24 | 未完成（[Issue #152](https://github.com/HeanX/iChat_Pro/issues/152) 开放）；Android 工程与验收待开展 |
+| P4 T26 | WP04 | 实现网络变化检测和重连 | Android 网络状态模块 | Wi-Fi/移动网络切换后自动恢复聊天 | P0 | P4 T24 | 未完成（[Issue #153](https://github.com/HeanX/iChat_Pro/issues/153) 开放）；Android 工程与验收待开展 |
+| P4 T27 | WP04 | 接入前台/后台通知 | Android 通知模块 | 权限申请、静音和点击跳转正确 | P1 | P4 T24 | 未完成（[Issue #154](https://github.com/HeanX/iChat_Pro/issues/154) 开放）；Android 工程与验收待开展 |
+| P4 T28 | WP04 | 接入文件选择和保存 | Android 文件能力 | 权限拒绝、取消和有效文件操作均有正确结果 | P1 | P4 T24 | 未完成（[Issue #155](https://github.com/HeanX/iChat_Pro/issues/155) 开放）；Android 工程与验收待开展 |
+| P4 T29 | WP04 | 接入 Android 安全存储 | 私钥/凭据保护方案 | 普通存储、日志中无法直接读取敏感值 | P0 | P4 T24 | 未完成（[Issue #156](https://github.com/HeanX/iChat_Pro/issues/156) 开放）；Android 工程与验收待开展 |
+| P4 T30 | WP04 | 研究完全退出后的云推送 | 推送原型与测试记录 | 不泄露 E2EE 明文，失败不影响消息持久化 | P2 | P4 T27 | 未完成（[Issue #157](https://github.com/HeanX/iChat_Pro/issues/157) 开放）；Android 工程与验收待开展 |
+| P4 T31 | WP02 | 统一三端协议版本和错误码 | 协议文档 | 客户端可识别兼容版本和错误类型 | P0 | P4 T14、P4 T24 | 已完成（[Issue #158](https://github.com/HeanX/iChat_Pro/issues/158)）；ADR-P4-02 + 生产实测 401/4003 门禁 |
+| P4 T32 | WP02 | 复核并增强消息唯一 ID 与幂等 | 服务端/客户端实现及测试 | HTTP/WebSocket 重试不产生重复消息 | P0 | P4 T31 | 已完成（[Issue #159](https://github.com/HeanX/iChat_Pro/issues/159)）；两轮复审整改复验：savepoint/密钥时机/摘要规范化，384 条全绿 |
+| P4 T33 | WP02 | 完善消息发送状态机 | 状态定义与实现 | sending/sent/delivered/read/failed 转换合法 | P0 | P4 T31 | 已完成（[Issue #160](https://github.com/HeanX/iChat_Pro/issues/160)）；六轮复审整改后复验闭环：连接/状态机/补取/渲染全链路，浏览器 14 项检查通过 |
+| P4 T34 | WP02 | 实现遗漏消息补取 | 同步接口或协议 | 断线期间消息恢复后可补取且不重复 | P0 | P4 T32、P4 T33 | 已完成（[Issue #161](https://github.com/HeanX/iChat_Pro/issues/161)）；复审整改后复验：sync 读取投影与历史同源，404 条全绿 |
+| P4 T35 | WP02 | 统一服务端时间和消息排序 | 排序规则及测试 | 设备时间偏差不造成明显乱序 | P0 | P4 T31 | 已完成（[Issue #162](https://github.com/HeanX/iChat_Pro/issues/162)）；sync 序号排序 + 历史 (created_at,id) tiebreaker |
+| P4 T36 | WP02 | 统一 HTTP fallback 与 WebSocket 规则 | 一致性测试与修复 | 两条发送路径执行相同权限、幂等和状态逻辑 | P0 | P4 T32、P4 T33 | 已完成（[Issue #163](https://github.com/HeanX/iChat_Pro/issues/163)）；两轮复审整改复验：全部写入路径入服务层，无视图旁路 |
+| P4 T37 | WP02 | 完成 Windows—Android 跨端聊天 | 综合演示与结果记录 | 两台独立设备双向文本消息通过 | P0 | P4 T20、P4 T26、P4 T31～P4 T36 | 未完成（[Issue #164](https://github.com/HeanX/iChat_Pro/issues/164) 开放） |
+| P4 T38 | WP05 | 编写 E2EE 威胁模型和数据流 | 威胁模型、数据流图 | 明确资产、攻击面、信任边界和不可保存数据 | P0 | P4 T01、P4 T04 | 未完成（[Issue #165](https://github.com/HeanX/iChat_Pro/issues/165) 开放）；浏览器文档已更新；完整跨平台威胁模型与数据流验收仍待做 |
+| P4 T39 | WP05 | 适配平台安全存储 | Windows/Android 密钥存储实现 | 普通存储或日志中无可直接读取私钥 | P0 | P4 T21、P4 T29 | 未完成（[Issue #166](https://github.com/HeanX/iChat_Pro/issues/166) 开放）；跨平台/设备增强待验收 |
+| P4 T40 | WP05 | 设计并实现设备身份模型 | 模型、迁移、接口 | 同一账号不同设备可独立识别 | P1 | P4 T38 | 未完成（[Issue #167](https://github.com/HeanX/iChat_Pro/issues/167) 开放）；跨平台/设备增强待验收 |
+| P4 T41 | WP05 | 实现设备列表与撤销 | 设置页面、接口和测试 | 被撤销设备不接收后续消息密钥 | P1 | P4 T40 | 未完成（[Issue #168](https://github.com/HeanX/iChat_Pro/issues/168) 开放）；跨平台/设备增强待验收 |
+| P4 T42 | WP05 | 实现多设备新消息密钥分发 | 协议、代码和测试 | 每个有效设备可解密新消息 | P1 | P4 T40、P4 T41 | 未完成（[Issue #169](https://github.com/HeanX/iChat_Pro/issues/169) 开放）；跨平台/设备增强待验收 |
+| P4 T43 | WP05 | 研究历史密钥迁移 | 设计文档或安全原型 | 仅经用户授权，失败和撤销路径明确 | P2 | P4 T42 | 未完成（[Issue #170](https://github.com/HeanX/iChat_Pro/issues/170) 开放）；跨平台/设备增强待验收 |
+| P4 T44 | WP07 | 接入静态检查和格式门禁 | CI 配置 | 检查失败时流水线失败 | P0 | P4 T02 | 未完成（[Issue #171](https://github.com/HeanX/iChat_Pro/issues/171) 开放） |
+| P4 T45 | WP07 | 接入 Django、迁移和自动化测试 | CI 配置 | 任一核心测试失败时禁止合并 | P0 | P4 Test T01、P4 T02 | 未完成（[Issue #172](https://github.com/HeanX/iChat_Pro/issues/172) 开放）；四项 CI 已运行；主分支 required_status_checks 未配置，完整门禁未验收 |
+| P4 T46 | WP07 | 接入覆盖率门禁 | CI 报告 | 低于阈值时阻断或产生审批例外记录 | P0 | P4 Test T12 | 未完成（[Issue #173](https://github.com/HeanX/iChat_Pro/issues/173) 开放） |
+| P4 T47 | WP07 | 接入依赖与秘密扫描 | 安全流水线 | 高危漏洞或密钥泄露阻断发布 | P1 | P4 T11、P4 Test T17 | 未完成（[Issue #174](https://github.com/HeanX/iChat_Pro/issues/174) 开放） |
+| P4 T48 | WP07 | 自动/标准化构建客户端 | 构建流水线和产物 | 安装包带版本号、校验值和构建记录 | P1 | P4 T15、P4 T24 | 未完成（[Issue #175](https://github.com/HeanX/iChat_Pro/issues/175) 开放）；Windows 构建已有；Android 构建及原任务完整验收待做 |
+| P4 T49 | WP07 | 部署独立测试环境 | 测试环境流水线 | 与生产配置、数据和密钥隔离 | P1 | P4 T07～P4 T11 | 未完成（[Issue #176](https://github.com/HeanX/iChat_Pro/issues/176) 开放） |
+| P4 T50 | WP07 | 建立生产发布审批与回滚 | 发布流程 | 可追踪发布人、版本、时间并可恢复稳定版本 | P1 | P4 T13、P4 Test T23 | 未完成（[Issue #177](https://github.com/HeanX/iChat_Pro/issues/177) 开放） |
+| P4 T51 | WP08 | 建立 AI 使用记录 | AI 实践日志 | 记录任务、用途、人工修改和验证结果 | P1 | P4 T01 | 已完成（[Issue #178](https://github.com/HeanX/iChat_Pro/issues/178)）；AI 实践日志、PR #304 实测与复核记录；2026-10-07 证据核对补关，见 [完成索引](completion-audit-20261007.md) |
+| P4 T52 | WP08 | AI 辅助日志与缺陷分析 | 分析记录 | 建议可追溯到真实日志和复现结果 | P2 | P4 Test T21 | 已完成（[Issue #179](https://github.com/HeanX/iChat_Pro/issues/179)）；晚 ACK 真实复现、PR #304 修复与 #147 生产复验；见 [完成索引](completion-audit-20261007.md) |
+| P4 T53 | WP08 | 整理安装、云端和跨端证据 | 截图、视频、日志 | 每项 P0 成果有可复核证据 | P0 | 各 Epic P0 完成 | 未完成（[Issue #180](https://github.com/HeanX/iChat_Pro/issues/180) 开放） |
+| P4 T54 | WP08 | 整理最终实验材料 | 报告、附件和演示脚本 | 文档、代码和实测结果一致 | P0 | P4 Test T22、P4 T50、P4 T53 | 未完成（[Issue #181](https://github.com/HeanX/iChat_Pro/issues/181) 开放） |
 
 ## 测试任务（24项）
 
 | 任务号 | 工作包 | 内容 | 交付物 | 原验收标准 | 原优先级 | 原依赖 | 状态/证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P4 Test T01 | WP00 | 建立现有功能与自动化测试基线 | 基线测试报告 | 当前主分支检查、测试和已知问题可复现 | P0 | P4 T01 | 已完成（Issue #182） |
-| P4 Test T02 | WP00 | 建立需求追踪矩阵 | 需求—任务—用例矩阵 | 每项 P0/P1 新需求有关联任务和测试类型 | P0 | P4 T01 | 已完成（Issue #183） |
-| P4 Test T03 | WP06 | 编写 Windows 安装/E2E 测试 | 测试脚本与报告 | 安装、核心聊天、通知、文件和恢复场景通过 | P0 | P4 T15～P4 T21 | Issue #184 |
-| P4 Test T04 | WP06 | 编写 Android UI 与兼容性测试 | Appium/手工测试报告 | 两个 API Level 或设备配置完成核心流程 | P0 | P4 T23～P4 T29 | 未核对 |
-| P4 Test T05 | WP06 | 完成群聊和文件跨端验证 | 综合测试记录 | 群消息和加密文件在各端结果一致 | P1 | P4 T19、P4 T28、P4 T37 | 未核对 |
-| P4 Test T06 | WP06 | 复核三端加密协议兼容性 | 加密测试向量 | Windows、Android、浏览器对相同向量结果一致 | P0 | P4 T14、P4 T24 | Issue #187 |
-| P4 Test T07 | WP06 | 审计服务端密文边界 | 数据库/API/日志检查报告 | 无消息明文、私钥和文件密钥明文 | P0 | P4 T07～P4 T11 | Issue #188 |
-| P4 Test T08 | WP06 | 验证密钥指纹和变化提醒 | UI、接口和测试 | 新密钥不自动继承旧信任状态 | P0 | P4 Test T06 | Issue #189 |
-| P4 Test T09 | WP06 | 编写总体测试计划 | 测试计划 | 范围、环境、方法、人员、准入/准出标准完整 | P0 | P4 T01～P4 Test T02 | Issue #190 |
-| P4 Test T10 | WP06 | 设计黑盒测试 | 黑盒用例集 | 包含等价类、边界值、判定表、状态和场景法 | P0 | P4 Test T09 | Issue #191 |
-| P4 Test T11 | WP06 | 设计白盒测试 | 白盒用例与路径说明 | 覆盖关键条件、分支、循环和异常路径 | P0 | P4 Test T09 | Issue #192 |
-| P4 Test T12 | WP06 | 建立覆盖率统计 | coverage 配置和报告 | 语句/分支覆盖率可重复生成并达到评审目标 | P0 | P4 Test T01、P4 Test T11 | Issue #193 |
-| P4 Test T13 | WP06 | 完善 HTTP/WebSocket 集成测试 | 自动化测试集 | P0 接口成功、异常、边界和越权场景有覆盖 | P0 | P4 T31～P4 T36 | Issue #194 |
-| P4 Test T14 | WP06 | 建立 PostgreSQL/Redis 集成测试 | 测试环境与结果 | 不以 SQLite/内存通道完全替代正式依赖验证 | P0 | P4 T08、P4 T09 | 已完成（Issue #195，CI PG/Redis 350 条 + 服务器实测） |
-| P4 Test T15 | WP06 | 建立浏览器/Electron E2E | Playwright 等脚本 | 失败保留截图、日志或跟踪文件 | P1 | P4 Test T03 | 未核对 |
-| P4 Test T16 | WP06 | 建立 Android UI 自动化 | Appium 等脚本 | 安装、权限、登录、聊天和生命周期可执行 | P1 | P4 Test T04 | 未核对 |
-| P4 Test T17 | WP06 | 执行安全测试 | SAST、DAST、依赖和手工安全报告 | 高危缺陷清零，中危缺陷有处理结论 | P0 | 相关功能完成 | Issue #198 |
-| P4 Test T18 | WP06 | 执行性能和稳定性测试 | 脚本与报告 | 记录环境、负载、P50/P95/P99、错误率和资源 | P1 | P4 T07～P4 T12、P4 T37 | 未核对 |
-| P4 Test T19 | WP06 | 执行弱网和故障测试 | 网络/故障测试报告 | 延迟、丢包、断网、重启和恢复场景有证据 | P0 | P4 T34～P4 T37 | Issue #200 |
-| P4 Test T20 | WP06 | 执行兼容性测试 | Windows/Android/浏览器矩阵 | 指定环境核心流程均有结论 | P1 | P4 Test T03、P4 Test T04 | 未核对 |
-| P4 Test T21 | WP06 | 建立缺陷管理与回归流程 | 缺陷清单、修复和回归记录 | 缺陷关联需求、用例、提交和复测结果 | P0 | P4 Test T09 | 已完成（Issue #202；缺陷→需求/PR/用例→独立复核→生产复验的流程与实际闭环；见 [完成索引](completion-audit-20261007.md)） |
-| P4 Test T22 | WP06 | 编写最终测试总结 | 完整测试报告 | 数据可由原始执行结果复核，无虚构结果 | P0 | P4 Test T10～P4 Test T21 | Issue #203 |
-| P4 Test T23 | WP07 | 部署后冒烟测试 | 冒烟脚本 | 健康、登录和核心接口失败时阻断发布 | P0 | P4 Test T14、P4 T49 | Issue #204 |
-| P4 Test T24 | WP08 | AI 辅助需求与用例评审 | 评审记录 | AI 建议经人工确认，不直接作为结论 | P1 | P4 Test T02、P4 Test T09 | 未核对 |
+| P4 Test T01 | WP00 | 建立现有功能与自动化测试基线 | 基线测试报告 | 当前主分支检查、测试和已知问题可复现 | P0 | P4 T01 | 已完成（[Issue #182](https://github.com/HeanX/iChat_Pro/issues/182)）） |
+| P4 Test T02 | WP00 | 建立需求追踪矩阵 | 需求—任务—用例矩阵 | 每项 P0/P1 新需求有关联任务和测试类型 | P0 | P4 T01 | 已完成（[Issue #183](https://github.com/HeanX/iChat_Pro/issues/183)）） |
+| P4 Test T03 | WP06 | 编写 Windows 安装/E2E 测试 | 测试脚本与报告 | 安装、核心聊天、通知、文件和恢复场景通过 | P0 | P4 T15～P4 T21 | 未完成（[Issue #184](https://github.com/HeanX/iChat_Pro/issues/184) 开放） |
+| P4 Test T04 | WP06 | 编写 Android UI 与兼容性测试 | Appium/手工测试报告 | 两个 API Level 或设备配置完成核心流程 | P0 | P4 T23～P4 T29 | 未完成（[Issue #185](https://github.com/HeanX/iChat_Pro/issues/185) 开放） |
+| P4 Test T05 | WP06 | 完成群聊和文件跨端验证 | 综合测试记录 | 群消息和加密文件在各端结果一致 | P1 | P4 T19、P4 T28、P4 T37 | 未完成（[Issue #186](https://github.com/HeanX/iChat_Pro/issues/186) 开放） |
+| P4 Test T06 | WP06 | 复核三端加密协议兼容性 | 加密测试向量 | Windows、Android、浏览器对相同向量结果一致 | P0 | P4 T14、P4 T24 | 未完成（[Issue #187](https://github.com/HeanX/iChat_Pro/issues/187) 开放） |
+| P4 Test T07 | WP06 | 审计服务端密文边界 | 数据库/API/日志检查报告 | 无消息明文、私钥和文件密钥明文 | P0 | P4 T07～P4 T11 | 未完成（[Issue #188](https://github.com/HeanX/iChat_Pro/issues/188) 开放） |
+| P4 Test T08 | WP06 | 验证密钥指纹和变化提醒 | UI、接口和测试 | 新密钥不自动继承旧信任状态 | P0 | P4 Test T06 | 未完成（[Issue #189](https://github.com/HeanX/iChat_Pro/issues/189) 开放） |
+| P4 Test T09 | WP06 | 编写总体测试计划 | 测试计划 | 范围、环境、方法、人员、准入/准出标准完整 | P0 | P4 T01～P4 Test T02 | 未完成（[Issue #190](https://github.com/HeanX/iChat_Pro/issues/190) 开放） |
+| P4 Test T10 | WP06 | 设计黑盒测试 | 黑盒用例集 | 包含等价类、边界值、判定表、状态和场景法 | P0 | P4 Test T09 | 未完成（[Issue #191](https://github.com/HeanX/iChat_Pro/issues/191) 开放） |
+| P4 Test T11 | WP06 | 设计白盒测试 | 白盒用例与路径说明 | 覆盖关键条件、分支、循环和异常路径 | P0 | P4 Test T09 | 未完成（[Issue #192](https://github.com/HeanX/iChat_Pro/issues/192) 开放） |
+| P4 Test T12 | WP06 | 建立覆盖率统计 | coverage 配置和报告 | 语句/分支覆盖率可重复生成并达到评审目标 | P0 | P4 Test T01、P4 Test T11 | 未完成（[Issue #193](https://github.com/HeanX/iChat_Pro/issues/193) 开放） |
+| P4 Test T13 | WP06 | 完善 HTTP/WebSocket 集成测试 | 自动化测试集 | P0 接口成功、异常、边界和越权场景有覆盖 | P0 | P4 T31～P4 T36 | 未完成（[Issue #194](https://github.com/HeanX/iChat_Pro/issues/194) 开放）；已有接口/WS 自动回归；专项 P0 用例索引与验收待完成 |
+| P4 Test T14 | WP06 | 建立 PostgreSQL/Redis 集成测试 | 测试环境与结果 | 不以 SQLite/内存通道完全替代正式依赖验证 | P0 | P4 T08、P4 T09 | 已完成（[Issue #195](https://github.com/HeanX/iChat_Pro/issues/195)）；CI PG/Redis 350 条 + 服务器实测 |
+| P4 Test T15 | WP06 | 建立浏览器/Electron E2E | Playwright 等脚本 | 失败保留截图、日志或跟踪文件 | P1 | P4 Test T03 | 未完成（[Issue #196](https://github.com/HeanX/iChat_Pro/issues/196) 开放） |
+| P4 Test T16 | WP06 | 建立 Android UI 自动化 | Appium 等脚本 | 安装、权限、登录、聊天和生命周期可执行 | P1 | P4 Test T04 | 未完成（[Issue #197](https://github.com/HeanX/iChat_Pro/issues/197) 开放） |
+| P4 Test T17 | WP06 | 执行安全测试 | SAST、DAST、依赖和手工安全报告 | 高危缺陷清零，中危缺陷有处理结论 | P0 | 相关功能完成 | 未完成（[Issue #198](https://github.com/HeanX/iChat_Pro/issues/198) 开放） |
+| P4 Test T18 | WP06 | 执行性能和稳定性测试 | 脚本与报告 | 记录环境、负载、P50/P95/P99、错误率和资源 | P1 | P4 T07～P4 T12、P4 T37 | 未完成（[Issue #199](https://github.com/HeanX/iChat_Pro/issues/199) 开放） |
+| P4 Test T19 | WP06 | 执行弱网和故障测试 | 网络/故障测试报告 | 延迟、丢包、断网、重启和恢复场景有证据 | P0 | P4 T34～P4 T37 | 未完成（[Issue #200](https://github.com/HeanX/iChat_Pro/issues/200) 开放） |
+| P4 Test T20 | WP06 | 执行兼容性测试 | Windows/Android/浏览器矩阵 | 指定环境核心流程均有结论 | P1 | P4 Test T03、P4 Test T04 | 未完成（[Issue #201](https://github.com/HeanX/iChat_Pro/issues/201) 开放） |
+| P4 Test T21 | WP06 | 建立缺陷管理与回归流程 | 缺陷清单、修复和回归记录 | 缺陷关联需求、用例、提交和复测结果 | P0 | P4 Test T09 | 已完成（[Issue #202](https://github.com/HeanX/iChat_Pro/issues/202)）；缺陷→需求/PR/用例→独立复核→生产复验的流程与实际闭环；见 [完成索引](completion-audit-20261007.md) |
+| P4 Test T22 | WP06 | 编写最终测试总结 | 完整测试报告 | 数据可由原始执行结果复核，无虚构结果 | P0 | P4 Test T10～P4 Test T21 | 未完成（[Issue #203](https://github.com/HeanX/iChat_Pro/issues/203) 开放） |
+| P4 Test T23 | WP07 | 部署后冒烟测试 | 冒烟脚本 | 健康、登录和核心接口失败时阻断发布 | P0 | P4 Test T14、P4 T49 | 未完成（[Issue #204](https://github.com/HeanX/iChat_Pro/issues/204) 开放）；readiness 自动门禁已有；登录/核心 API 冒烟失败阻断未实现 |
+| P4 Test T24 | WP08 | AI 辅助需求与用例评审 | 评审记录 | AI 建议经人工确认，不直接作为结论 | P1 | P4 Test T02、P4 Test T09 | 未完成（[Issue #205](https://github.com/HeanX/iChat_Pro/issues/205) 开放） |
 
 ## 验收与维护
 

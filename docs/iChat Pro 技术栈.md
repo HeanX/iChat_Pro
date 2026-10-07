@@ -1,5 +1,12 @@
 # iChat Pro 技术栈
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+当前服务端 Python 3.13+ / Django 6.0.5 / Channels 4.3.2 / Daphne（由 extra 安装，本机 4.2.1）；PostgreSQL 驱动 psycopg 3.3.6、channels-redis 4.3.0、redis Python 客户端 8.1.0。生产 PostgreSQL 16 / Redis 6 系列，CI PostgreSQL 16 / Redis 7，本地默认 SQLite/内存。桌面 Electron 39 系列、electron-builder 25 系列、NSIS，版本 1.0.0；生产 CSS 已自托管。默认 Electron 连接云端，只有显式 dev 启动 Django。具体锁定见 requirements.txt 与两份 package-lock.json；后文选型/路线不是新增完成声明。
+
 > Phase 说明：当前代码以 Django Templates + 原生 JavaScript 为主。HTMX 可作为后续局部刷新优化选项，但不是 Phase 1 验收的强制依赖。Phase 2 聚焦基础通信产品可用性，Phase 3 聚焦产品化收口、展示稳定化和最小 LLM Assistant 接入；Channel、完整 Bot/Agent 生态和 OpenClaw Adapter 统一顺延至 Phase 4。
 
 ### 1. 总体定位

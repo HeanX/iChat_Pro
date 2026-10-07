@@ -1,5 +1,12 @@
 # iChat Pro 后端设计规范文档
 
+> 更新日期：2026-10-07；核对代码基线：`f2f60ec`。现行说明已按代码和验收证据更新。
+> 当前状态见 [项目现状](current-status.md)；文档用途与归档规则见 [文档维护索引](documentation-status.md)。
+
+## 本次更新
+
+新增统一 chat/services/messaging.py 和签名游标 chat/services/sync.py；HTTP/WS 文本、文件、转发共用事务、权限与 viewer 投影。嵌套 atomic savepoint 处理唯一约束冲突，created 才产生密钥/未读/广播/事件副作用。API 401 JSON、协议错误注册表、health/live/ready 和持久事件补取已实现。生产 PostgreSQL 16/Redis，DEBUG=False 读生产环境配置；URL 解析失败拒绝启动。原模块设计的服务层缺口已补，设备级模型与变更事件仍待实现。
+
 ## 1. 设计目标
 
 本系统后端面向端到端加密即时通信场景设计，主要负责用户认证、公钥管理、会话关系维护、密文消息存储、群聊成员管理、加密文件存储和 WebSocket 实时推送。由于系统采用端到端加密机制，后端不负责生成用户私钥，不负责生成会话密钥，不负责消息加密或解密，也不保存任何聊天明文内容。

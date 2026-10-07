@@ -139,6 +139,7 @@
   }
 
   .notification-row {
+    position: relative;
     min-height: 46px;
     display: flex;
     align-items: center;
@@ -219,10 +220,22 @@
     cursor: pointer;
   }
 
+  /* Keep the focus target inside its own row. An unconstrained absolute
+     checkbox makes Chromium scroll the hidden-overflow sidebar shell. */
   .notification-row > input[type="checkbox"] {
     position: absolute;
+    width: 1px;
+    height: 1px;
+    top: 50%;
+    right: 0;
+    margin: 0;
     opacity: 0;
     pointer-events: none;
+  }
+
+  .notification-row > input[type="checkbox"]:focus-visible + .telegram-switch {
+    outline: 2px solid #3390ec;
+    outline-offset: 3px;
   }
 
   .telegram-switch {

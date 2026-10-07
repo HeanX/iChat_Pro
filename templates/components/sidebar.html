@@ -5,10 +5,10 @@
   <div id="sidebar-chat-view" class="h-full flex flex-col">
     
     <!-- Header: Drawer trigger + search bar -->
-    <div id="sidebar-chat-header" class="px-4 py-3 flex items-center space-x-3.5 flex-shrink-0 border-b border-transparent">
+    <div id="sidebar-chat-header" class="sidebar-telegram-header px-4 py-3 flex items-center space-x-3.5 flex-shrink-0 border-b border-transparent">
       <!-- Hamburger Menu button -->
       <div class="relative">
-        <button id="drawer-btn" data-ichat-onclick="toggleMainMenu(event)" class="p-2 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none" title="Main Menu" data-i18n-title="main_menu">
+        <button id="drawer-btn" data-ichat-onclick="toggleMainMenu(event)" class="sidebar-telegram-menu p-2 rounded-full hover:bg-bgSearch text-textMain transition-all focus:outline-none" title="Main Menu" data-i18n-title="main_menu">
           <i data-lucide="menu" class="w-5 h-5"></i>
         </button>
         
@@ -110,7 +110,7 @@
       </div>
       
       <!-- Search Input Container -->
-      <div class="relative flex-1">
+      <div class="sidebar-telegram-search relative flex-1">
         <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-textSecondary pointer-events-none">
           <i data-lucide="search" class="w-4 h-4"></i>
         </span>

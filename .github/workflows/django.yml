@@ -25,6 +25,10 @@ jobs:
         working-directory: desktop
         run: npm ci --no-audit --no-fund
 
+      - name: Exercise notification focus and sidebar layout in real Chromium
+        working-directory: desktop
+        run: npm run test:layout
+
       - name: Build and verify Windows name, version and icon resources
         working-directory: desktop
         run: npm run test:branding

@@ -70,6 +70,8 @@ npm run test:e2ee                              # includes ALL notification suite
 
 # desktop/ - real packager: tray + notification shell tests against the new archive
 npm run test:branding
+# Real Chromium layout/focus regression (temporary profile, mocked settings API)
+npm run test:layout
 # Disposable NSIS helper checks; this does not test notifications
 npm run test:installer
 ```
@@ -133,6 +135,32 @@ conversation; notification sounds follow the OS default (the in-app
 that arrive while the app is fully offline appear only as unread badges after
 catch-up, without toasts.
 
-Native toast presentation, Windows notification settings and actual toast clicks
-remain pending for Issue #145. Mocked shell and renderer tests are automated
-regression evidence, not a native Windows acceptance record.
+Installed-build reviewer confirmation (2026-10-05, installer SHA-256
+`ac468df305bd43c73179555671b3aaf80fca06773427f64a42e14a2ad299d5f9`):
+the user confirmed toast click restoration/conversation routing, the Windows
+source name **iChat Pro**, OS notification on/off behavior, and generic toast
+content with message preview disabled. These are manual installed-build results;
+the isolated fixture and mocked suites alone do not establish native acceptance.
+
+The same preview-switch test exposed two renderer layout defects: focusing an
+unconstrained absolutely positioned checkbox scrolled the sidebar shell (about
+695px), and the chat header did not use its existing menu/search component
+styles. The fix anchors the focus target inside its own notification row and
+connects the header classes, with a bounded, shrinking search wrapper. The
+`chat.css` URL is versioned `20261005-t18-layout` so cached desktop clients fetch
+the repaired stylesheet.
+
+`desktop/scripts/test-sidebar-layout.cjs` loads the production notification
+markup/script, sidebar header/navigation, CSS and event dispatcher in a real,
+hidden Electron Chromium renderer. It uses only a new temporary profile and
+a loopback fixture with a mocked settings API; no cloud requests, existing
+account settings or cryptographic keys are touched. It checks private/group
+preview off/on, saving without reload, keyboard focus/Space, sidebar-shell
+position and menu/search alignment across 1260x720, 900x480 and 400x720 in both
+themes (36 checks). The Windows CI job runs `npm run test:layout`.
+
+Against base `908ba19`, the same test fails with shell scrollTop 694 instead of
+0. The repaired sources pass 36/36; `npm run test:e2ee` passes all existing
+runners and 62 Node-test cases, and `manage.py check` reports no issues.
+Issue #145 still needs the layout fix deployed and a final installed-client
+preview-switch/return-to-chat confirmation before closure.

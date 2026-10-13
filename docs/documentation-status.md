@@ -1,10 +1,12 @@
 # 全部文档维护索引
 
-> 复核日期：2026-10-07；代码基线 f2f60ec。所有受版本控制的 Markdown 已复核并更新，原二进制课程归档保留。
+> 复核日期：2026-10-12（事实快照 2026-10-07）。代码基线 f2f60ec：本地 HEAD 4703ff3 与基线之间只有文档改动，无代码差异。所有受版本控制的 Markdown 已复核并更新，原二进制课程归档保留。
 
 现行事实入口是 [项目现状](current-status.md)。同名旧 PDF/Word 并非 Markdown 本次状态补注的镜像；原需求/实验成果按当时版本归档，新交付状态报告另提供三个同步格式。未核实的姓名、学号、责任与验收不虚填。
 
 ## 文档清单
+
+2026-10-12 增补（本地 HEAD `4703ff3`）：[项目交接文档](项目交接文档.md) 与 [GitHub 协作开发指南](GitHub协作开发指南.md)。用于成员接手与共同开发，已核对本地配置、脚本和 CI 定义；生产、Issue 与专项验收沿用原日期证据，本次未复验。
 
 | 文档 | 用途与本次维护 |
 | --- | --- |
@@ -14,6 +16,8 @@
 | [deploy/runbook.md](../deploy/runbook.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [desktop/build/README.md](../desktop/build/README.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/README.md](README.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/GitHub协作开发指南.md](GitHub%E5%8D%8F%E4%BD%9C%E5%BC%80%E5%8F%91%E6%8C%87%E5%8D%97.md) | 现行说明/专题；成员加入、Issue、分支、PR、评审、冲突与 CI 约定 |
+| [docs/项目交接文档.md](%E9%A1%B9%E7%9B%AE%E4%BA%A4%E6%8E%A5%E6%96%87%E6%A1%A3.md) | 现行说明/专题；接手顺序、环境搭建、代码入口、待办与签收表 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告.docx](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A.docx) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告.pdf](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A.pdf) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告_v2.docx](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A_v2.docx) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |

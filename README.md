@@ -18,7 +18,7 @@ iChat Pro 是基于 Django、Channels 和 Web Crypto 的安全即时通信课程
 
 ## 本地开发
 
-首次接手请读 [项目交接文档](docs/项目交接文档.md)；与其他成员共同开发请读 [GitHub 协作开发指南](docs/GitHub协作开发指南.md)，包含任务领取、分支、PR、冲突处理和验收记录。
+首次接手请读 [项目交接文档](docs/项目交接文档.md)；与其他成员共同开发请读 [GitHub 协作开发指南](docs/GitHub协作开发指南.md)，包含任务领取、分支、PR、冲突处理和验收记录。单元测试与代码评审过程见 [第四次实验报告](docs/course-testing/第四次实验-单元测试与代码评审报告.md)，中期完成情况见 [项目中期完成情况报告](docs/course-testing/项目中期完成情况报告.md)。
 
 ```powershell
 python -m venv .venv

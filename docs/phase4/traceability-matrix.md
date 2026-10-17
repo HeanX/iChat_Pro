@@ -126,7 +126,7 @@
 | NEW-TST-007 | 分支覆盖率 | P0 | — | P4 Test T12 | 待专项验收：见对应开放任务及需求原文 |
 | NEW-TST-008 | 高风险覆盖率 | P0 | — | P4 Test T12 | 待专项验收：见对应开放任务及需求原文 |
 | NEW-TST-009 | 单元测试 | P0 | — | P4 Test T10～T13 | 部分：现有 404 Django + JS 回归；完整需求覆盖待各专项任务 |
-| NEW-TST-010 | 接口测试 | P0 | — | P4 Test T13 | 部分：2026-10-18 新增 HTTP 侧用例 49 条（私聊 16 / 群聊 9 / sync 6 / 撤回状态删除 7 / 文件 11），本机实测全通过；编号见 [T13 验收记录](../testing/p4-test-t13-http-ws-integration.md)；仍缺非作者评审与 CI run |
+| NEW-TST-010 | 接口测试 | P0 | — | P4 Test T13 | 部分：2026-10-18 新增 HTTP 侧用例 51 条（私聊 16 / 群聊 9 / sync 6 / 撤回状态删除 7 / 文件 13），本机实测全通过；编号见 [T13 验收记录](../testing/p4-test-t13-http-ws-integration.md)；仍缺非作者人类评审与 CI run |
 | NEW-TST-011 | WebSocket 测试 | P0 | — | P4 Test T13 | 部分：2026-10-18 新增 WS 侧用例 15 条（信封 5 / 回执 3 / 撤回 4 / typing 3），其中 `message.recall` 由零覆盖变为 4 条；仍缺 Redis 多进程与弱网证据 |
 | NEW-TST-012 | 数据库集成测试 | P0 | — | P4 Test T14 | 已验证：真实 PostgreSQL 16 CI [#195](https://github.com/HeanX/iChat_Pro/issues/195) |
 | NEW-TST-013 | Redis 集成测试 | P0 | — | P4 Test T14 | 已验证：真实 Redis 7 CI [#195](https://github.com/HeanX/iChat_Pro/issues/195) |

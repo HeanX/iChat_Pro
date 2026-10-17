@@ -4,7 +4,7 @@
 > 基线：`cfe53be`（分支 `test/p4-test-t13-http-ws-integration`，worktree `.review/wt-t13`）。
 > 环境：Windows / Python 3.13.12（仓库内 `.venv`）/ Django 6.0.5 / Channels 4.3.2 /
 > 本地 SQLite + InMemoryChannelLayer。**不是** PostgreSQL/Redis，本机也没有。
-> 交付物：`chat/tests/test_http_ws_integration.py`（64 条）。
+> 交付物：`chat/tests/test_http_ws_integration.py`（66 条）。
 
 ---
 
@@ -19,21 +19,21 @@
 | 维度 | 开工前 | 本次补充 |
 | --- | --- | --- |
 | HTTP 私聊发送 | 有成功/replay/冲突 | 补 6 类畸形载荷、64 KiB 与 64 字符边界、拉黑、停用接收者、自发送、错会话类型、GET 带体、未登录 |
-| HTTP 群聊发送 | **无**（`recipients_mismatch` / `group_muted` / `group_too_large` 三个码全仓 0 次命中） | 补 9 条，含 50/51 人上限边界 |
+| HTTP 群聊发送 | 有偶发调用（`test_messaging_service`/`test_sync_api`/`test_t32_review` 共 4 处 POST `send-group`，都是为幂等/事件/文件主题顺带发一条），但 `recipients_mismatch` / `group_muted` / `group_too_large` 三个码全仓 **0 次命中** | 补 9 条，含 50/51 人上限边界 |
 | sync 补取 | 有游标/分页/可见性 | 补 `limit` 非整型与 1/200 clamp 边界、非成员、非活跃会话 |
 | 撤回 / 状态 / 删除 | 有部分 | 补 HTTP 撤回的时间窗边界与非成员越权、状态双端可见、删除只影响本人 |
 | `message.recall`（WS 事件） | **0 次命中，完全无覆盖** | 补 4 条：成功、重复、超时、越权 |
-| WebSocket 信封 | 有 ping/pong、4043、4401 | 补信封字段集合、非对象 JSON、未知事件 |
+| WebSocket 信封 | 有 ping/pong、close **4003** 与 **4401**（`test_protocol.py`），但 4003 那条只用 `assertRaises(Exception)` 等超时，从未读 close code | 补信封字段集合、非对象 JSON、未知事件；4003 改为读 `websocket.close` 帧断言 |
 | 回执（WS） | 有成功路径 | 补越权（非接收者）、非法 status |
 | typing | 有广播 | 补缺 `conversation_id`、跨会话越权 |
-| 文件 API | 只有上传幂等与 key 校验 | 补会话创建边界、跨用户 chunk 越权、非持有人元数据、删除态、类型不匹配 |
+| 文件 API | 只有上传幂等与 key 校验 | 补会话创建边界、跨用户 chunk 越权、两处 `file_forbidden` 守卫、删除态、两种类型不匹配码 |
 
 **结论**：本卡不是"再写一遍已有测试"，而是把四类场景按接口补齐成**可索引**的用例集，
 并逐条标注它对应哪一个 contract（`chat/errors.py` REGISTRY 或 ADR-P4-02）。
 
 ---
 
-## 2. 用例索引（64 条）
+## 2. 用例索引（66 条）
 
 方法名规则：`test_<id 小写>_...`，一个 id 对应恰好一个方法。
 `files` 列之外无第二处定义——同一行为不在别的文件重复。
@@ -110,7 +110,9 @@
 | HTTP-FILE-08 | 异常 | 已删除文件 → 410 `file_unavailable`（**已知偏差**） | `test_file_08_deleted_file_is_unavailable` |
 | HTTP-FILE-09 | 异常 | `message_kind` 与 `message_type` 不符 → 400 `message_type_mismatch` | `test_file_09_send_message_type_mismatch` |
 | HTTP-FILE-10 | 异常 | 不存在的 file_id → 404 `file_not_found` | `test_file_10_send_file_message_rejects_unknown_file` |
-| HTTP-FILE-11 | 回归锚点 | 同时钉住注册表 409 与视图 410 | `test_file_unavailable_status_mismatch_is_still_open` |
+| HTTP-FILE-11 | 异常 | 统一服务层路径 → 400 **已注册** `file_type_mismatch` | `test_file_11_registered_file_type_mismatch_is_reachable` |
+| HTTP-FILE-12 | 越权 | metadata 视图自己的 key 守卫（无 key 的 owner 也被拒） | `test_file_12_non_holder_cannot_read_metadata_without_a_key` |
+| HTTP-FILE-13 | 回归锚点 | 同时钉住注册表 409 与视图 410 | `test_file_unavailable_status_mismatch_is_still_open` |
 
 ### 2.6 WebSocket
 
@@ -143,27 +145,31 @@
 | 类别 | 条数 |
 | --- | ---: |
 | 成功（happy path，含成功/幂等、成功/边界、成功/越权三个复合项） | 11 |
-| 异常（注册错误码 / 错误方法 / 畸形输入） | 24 |
+| 异常（注册错误码 / 错误方法 / 畸形输入） | 26 |
 | 边界（长度、大小、上限、clamp、时间窗） | 11 |
 | 越权（他人 id、非成员、停用、拉黑、跨会话） | 17 |
 | 回归锚点（已知偏差） | 1 |
-| **合计** | **64** |
+| **合计** | **66** |
 
-错误码覆盖：`chat/errors.py` 的 `REGISTRY` 共 **25** 个码，本文件直接断言了其中 **21** 个：
+> 口径说明：`test_file_02` 用 1 TB 触发 `file_too_large`，属「远超上限」而非
+> 边界值本身（上限是 100 MiB）。它计入「异常」而非「边界」，不当作边界覆盖证据。
+
+错误码覆盖：`chat/errors.py` 的 `REGISTRY` 共 **25** 个码，本文件直接断言了其中 **22** 个
+（第 2 轮审查后新增 `file_type_mismatch`）：
 `invalid_payload`、`unsupported_algorithm`、`invalid_file_metadata`、
 `unsupported_protocol_version`、`not_implemented`、`authentication_required`、
 `conversation_not_found`、`receiver_not_found`、`conversation_forbidden`、
 `membership_conflict`、`recipients_mismatch`、`group_muted`、`group_too_large`、
 `message_not_found`、`already_recalled`、`recall_timeout`、`idempotency_conflict`、
-`sync_cursor_invalid`、`file_not_found`、`file_forbidden`、`file_unavailable`。
+`sync_cursor_invalid`、`file_not_found`、`file_forbidden`、`file_unavailable`、
+`file_type_mismatch`。
 
-未覆盖的 4 个及其原因：
+未覆盖的 3 个及其原因：
 
 | 未覆盖码 | 原因 |
 | --- | --- |
 | `storage_unavailable` / `database_busy` | 需要注入 `OperationalError` 才能触发，属故障注入（#200 范围）；既有 `test_protocol.py` 只验注册表断言，未验视图路径 |
 | `sync_cursor_expired` | 既有 `test_sync_api.py` 用 mock 时间覆盖，本卡不重复 |
-| `file_type_mismatch` | 需要先有 kind 与 type 同时合法但内容不符的文件，属数据模块边界 |
 
 复算命令（本节的数字都能由它重算）：
 
@@ -211,15 +217,15 @@
 
 # 本卡交付物（跑多次，耗时在 37–41s 之间波动）
 .\.venv\Scripts\python.exe manage.py test chat.tests.test_http_ws_integration
-# → Found 64 test(s). / Ran 64 tests / OK
+# → Found 66 test(s). / Ran 66 tests / OK
 
-# 全量（含本卡 64 条）
+# 全量（含本卡 66 条）
 .\.venv\Scripts\python.exe manage.py test --parallel 1
-# → Found 468 test(s). / Ran 468 tests / OK (skipped=2)
+# → Found 470 test(s). / Ran 470 tests / OK (skipped=2)
 
 # 模块回归（messaging 相关，含本卡）
 .\.venv\Scripts\python.exe manage.py test chat.tests.test_http_ws_integration chat.tests.test_protocol chat.tests.test_private_realtime chat.tests.test_group_realtime chat.tests.test_messaging_service chat.tests.test_t32_review chat.tests.test_sync_api
-# → Found 129 test(s). / Ran 129 tests / OK (skipped=2)
+# → Found 131 test(s). / Ran 131 tests / OK (skipped=2)
 
 # 前端链（未改动前端，确认没有连带破坏）
 npm run test:e2ee
@@ -293,7 +299,7 @@ covered via IntegrityError」），**不是覆盖漏洞**，因此不为此写�
 .\.venv\Scripts\python.exe manage.py test chat.tests.test_http_ws_integration.PrivateSendHttpTests
 ```
 
-期望：`Ran 64 tests` + `OK`，耗时约 35–45s（WebSocket 用例占大头）。
+期望：`Ran 66 tests` + `OK`，耗时约 32–45s（WebSocket 与 205 事件用例占大头）。
 
 ---
 
@@ -301,15 +307,17 @@ covered via IntegrityError」），**不是覆盖漏洞**，因此不为此写�
 
 按 `docs/handoff/conventions.md` §1 的强制流程，作者写完后另开**全新上下文**的子 Agent 审查，
 只给它仓库路径、分支、`gh issue view 194` 原文、`.review/pending.diff` 与必跑命令，
-不给任何实现说明。
+不给任何实现说明。每次整改后**再开一个新的**（不复用）。
 
-| 轮次 | 结论 | 发现 | 整改 |
+| 轮次 | 结论 | 主要发现 | 处理 |
 | --- | --- | --- | --- |
-| 1 | **PASS WITH FINDINGS** | BLOCKER 1、MAJOR 2、MINOR 4 | 全部处理，见下 |
+| 1 | PASS WITH FINDINGS | BLOCKER 1（close code 未真断言）、MAJOR 2（sync 200 上界未覆盖、变异表口径不实）、MINOR 4 | 全部整改 |
+| 2 | PASS WITH FINDINGS | MAJOR 1（`file_type_mismatch` 未覆盖的理由写错）、MINOR 9（含 2 处文档事实错误、1 处自相矛盾） | 全部整改，见文末 |
+| 3 | 见 Issue 评论 | — | 本轮整改后已再开第三个审查者复验 |
 
-### BLOCKER（已修）
+### 第 1 轮
 
-`test_env_06` 用 `assertRaises(Exception)` 等超时，**从未读取 close code**。
+**BLOCKER（已修）** `test_env_06` 用 `assertRaises(Exception)` 等超时，**从未读取 close code**。
 把 `consumers.py` 的 4003 改成 4400、或整行删掉 `await self.close(...)`，用例都**仍然绿**。
 整改：改为 `receive_output()` 读取真实 `websocket.close` 帧并断言
 `code == UNSUPPORTED_PROTOCOL_CLOSE_CODE == 4003`。整改后 B1/B1b 两个变异体均 **CAUGHT**。
@@ -318,35 +326,53 @@ covered via IntegrityError」），**不是覆盖漏洞**，因此不为此写�
 > 本卡只修自己新增的那一条，**未改动** `test_protocol.py`（避免扩大本卡边界），
 > 但已在下面「遗留」中记录，建议消息模块作者单独修。
 
-### MAJOR（已修）
+**MAJOR（已修）**
 
-1. `test_sync_03` 自称验证 200 上限，实际只断言 `len(items)==3`，而 fixture 只有 3 条事件，
-   任何 ≥3 的上限都满足。整改：该用例自建 205 条事件的会话，断言首页恰 200 条、
-   `has_more=true`、`high_water=205`，第二页取回 201–205 且 `has_more=false`。
-   整改后 M4b（只去上界）/ M4c（上界放宽到 500）均 **CAUGHT**。
+1. `test_sync_03` 自称验证 200 上限，实际只断言 `len(items)==3`，而 fixture 只有 3 条事件。
+   整改：该用例自建 205 条事件的会话，断言首页恰 200 条、`has_more=true`、`high_water=205`，
+   第二页取回 201–205 且 `has_more=false`。M4b/M4c 均 **CAUGHT**。
 2. §5 变异表曾把 M4 记成「去掉 sync clamp → CAUGHT」，掩盖了上界未覆盖的事实。
-   整改：拆成 M4 / M4b / M4c 三行，并补写「口径更正」说明。
+   整改：拆成 M4 / M4b / M4c 三行并补写「口径更正」。
 
-### MINOR（已处理）
+**MINOR（已处理）**：补齐漏记的未注册码（`file_too_large`、`upload_forbidden`）；
+变异脚本入库为 `chat/tests/t13_mutation_probe.py`；`test_priv_03` 的恒真断言改为断言注册表契约。
 
-1. §4 只记了 `message_type_mismatch`，漏了同样未注册的 `file_too_large`、`upload_forbidden`。
-   整改：补齐两条，并给出「本文件断言的未注册码共 3 个」的复算命令。
-2. 证据脚本原先只存在于未入库的 `.review/`，且 `.review/` 未被忽略，有误提交风险。
-   整改：变异脚本正式入库为 `chat/tests/t13_mutation_probe.py`（含 11 个变异体、
-   自动还原 + SHA-256 校验），文档改为指向它。
-3. `test_priv_03` 的旧断言 `assertFalse(x["error"] in REGISTRY and REGISTRY[...].retryable)`
-   实际查的是字面量而非响应，恒真。整改：改为 `assertFalse(error.retryable)` +
-   `assertEqual(response.status_code, error.http_status)`。
-4. 部分「边界内接受」用例只断言 201。整改：`test_sync_03` 已加强；其余保留，
-   因为 `test_priv_01` 已覆盖落库路径，重复断言会制造虚假的独立证据。
+### 第 2 轮
+
+**MAJOR（已修）** 本文曾写 `file_type_mismatch`「需要特殊数据 fixture，覆盖不了」，这个理由**不成立**。
+实测表明存在**两条不同的检查、返回两个不同的码**：
+
+| 端点 | 触发 | 返回 |
+| --- | --- | --- |
+| `POST /api/files/<id>/messages/`（`send_file_message_view`） | `message_type` 与上传的 `message_kind` 不符 | 400 **`message_type_mismatch`**（未注册） |
+| `POST /api/conversations/<id>/messages/send/` 带 `file_id`（统一服务 `validate_attached_file`） | 同上 | 400 **`file_type_mismatch`**（已注册） |
+
+整改：新增 `HTTP-FILE-11` 专门走统一服务层拿到**已注册**的码
+（变异验证 R2-1：删掉该校验后用例红），既有的 `HTTP-FILE-09` 继续记录未注册的那个。
+
+**MINOR（已处理）**
+
+1. 本文「WebSocket 信封：有 ping/pong、4043、4401」中的 **4043 是笔误**，基线全仓无此码
+   （只有 close 4003 与 4401），已改正。
+2. 「HTTP 群聊发送：**无**」不成立——基线有 4 处 POST `send-group`
+   （`test_messaging_service:296`、`test_sync_api:228/429`、`test_t32_review:547`），
+   只是都为别的主题顺带发送。已改为如实描述。
+3. `test_priv_02` 只断言行数，不查 unread / sync 序号 / 事件数。已补齐三项
+   （变异验证 R2-3：让重放再计未读后用例红）。
+4. `test_file_02` 用 10^12 字节，属「远超」而非边界。已在 §3 的分类口径中注明。
+5. `test_rcl_04` 在 HTTP 与 WS 两个类里同名，按裸方法名无法区分。索引表已按类名限定。
+6. `file_forbidden` 有两道守卫，原先只覆盖一道。已补 `HTTP-FILE-12`
+   （变异验证 R2-2：删掉 metadata 视图自己的 key 守卫后用例红）。
+7. 本节原文自相矛盾（「尚未重新开新审查者」却又称「已另开」）。已改为上表的轮次记录，
+   未发生的事不再写成已发生。
+8. 新文档引用 `docs/handoff/*`，而该目录在本分支不存在（只存在于主工作区磁盘）。
+   已改为不复用该链接。
+9. `t13_mutation_probe.py` 的 `subprocess.run` 无 `timeout`，卡死时 `finally` 仍会执行还原，
+   但可能长时间挂起。已加 `timeout`。
 
 ### 本轮遗留（未修，如实记录）
 
 | 项 | 说明 |
 | --- | --- |
 | `test_protocol.py:132` | 同样是 `assertRaises(Exception)` 而非读 close code，属既有缺陷，本卡未越界修改 |
-| 非作者评审的独立性 | 审查者由作者在同一会话内派出子 Agent。它不继承作者的推理上下文，但**不等于人类评审**；`tasks.md` 里仍把「非作者评审」列为未完成 |
-| 第二轮审查 | 本案整改后**尚未**重新开新审查者复验（见下） |
-
-> 按 conventions §1，不通过后应「修复 → 再开**新的**审查子 Agent」。
-> 本轮整改后已另开第二个独立审查者复验，其结论见 Issue 评论与最终交付说明。
+| 评审独立性 | 审查者由作者派出子 Agent，**不继承作者推理上下文，但不等于人类评审**；`tasks.md` 仍把「非作者评审」列为未完成 |

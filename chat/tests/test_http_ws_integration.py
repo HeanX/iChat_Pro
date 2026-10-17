@@ -130,6 +130,7 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 from chat.errors import REGISTRY, UNSUPPORTED_PROTOCOL_CLOSE_CODE
 from chat.models import (
     Conversation,
+    ConversationEvent,
     ConversationMember,
     EncryptedFile,
     EncryptedFileKey,
@@ -303,12 +304,24 @@ class PrivateSendHttpTests(MessagingHttpBase):
     def test_priv_02_replay_returns_200_without_a_second_row(self):
         first = self.post_private(_private_payload(self.conv_ab.pk, self.bob.pk, "priv-02"))
         self.assertEqual(first.status_code, 201)
+        unread_after_create = ConversationMember.objects.get(
+            conversation=self.conv_ab, user=self.bob,
+        ).unread_count
 
         second = self.post_private(_private_payload(self.conv_ab.pk, self.bob.pk, "priv-02"))
         self.assertEqual(second.status_code, 200, second.content)
         self.assertFalse(second.json()["created"])
         self.assertEqual(second.json()["message_id"], first.json()["message_id"])
         self.assertEqual(EncryptedMessage.objects.filter(client_message_id="priv-02").count(), 1)
+        # A replay must not re-count unread (created=False => zero writes).
+        self.assertEqual(
+            ConversationMember.objects.get(conversation=self.conv_ab, user=self.bob).unread_count,
+            unread_after_create,
+        )
+        # ...nor allocate a second sync sequence or durable event.
+        self.conv_ab.refresh_from_db()
+        self.assertEqual(self.conv_ab.sync_sequence, 1)
+        self.assertEqual(ConversationEvent.objects.filter(conversation=self.conv_ab).count(), 1)
 
     def test_priv_03_same_id_different_content_conflicts(self):
         self.post_private(_private_payload(self.conv_ab.pk, self.bob.pk, "priv-03"))
@@ -591,8 +604,6 @@ class SyncHttpTests(MessagingHttpBase):
         `has_more` is true; with the clamp relaxed or removed the page would
         be 205 and the test goes red.
         """
-        from chat.models import ConversationEvent
-
         conv = Conversation.objects.create(type=Conversation.Type.SINGLE, created_by=self.alice)
         ConversationMember.objects.create(conversation=conv, user=self.alice)
         ConversationMember.objects.create(conversation=conv, user=self.bob)
@@ -846,6 +857,65 @@ class FileApiHttpTests(MessagingHttpBase):
         )
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["error"], "file_not_found")
+
+    def test_file_11_registered_file_type_mismatch_is_reachable(self):
+        """The REGISTERED `file_type_mismatch` code, not its unregistered twin.
+
+        There are two distinct checks and they return different codes:
+
+        * ``POST /api/files/<id>/messages/`` (``send_file_message_view``)
+          compares ``message_type`` with the upload's ``message_kind`` and
+          answers the **unregistered** ``message_type_mismatch``
+          (covered by HTTP-FILE-09).
+        * the unified service (``send_private_message`` with ``file_id``)
+          reaches ``validate_attached_file`` and raises the **registered**
+          ``file_type_mismatch``.
+
+        Only the second one is a code clients can branch on per
+        ``docs/phase4/protocol.md`` §2, so it needs its own case.
+        """
+        ef = self.create_available_file(
+            client_file_id="t13-reg-kind", message_kind=EncryptedFile.MessageKind.FILE,
+        )
+        for holder in (self.alice, self.bob):
+            EncryptedFileKey.objects.create(
+                file=ef, holder=holder, sender=self.alice,
+                encrypted_file_key="k", nonce=B64_12, auth_tag=B64_16,
+            )
+
+        response = self.post_private({
+            "conversation_id": self.conv_ab.pk,
+            "receiver_id": self.bob.pk,
+            "client_message_id": "t13-reg-kind-1",
+            "message_type": "image",  # upload kind is "file"
+            "file_id": ef.pk,
+            "ciphertext": CT,
+            "nonce": B64_12,
+            "auth_tag": B64_16,
+            "algorithm": "AES-256-GCM",
+            "sender_key_version": 1,
+            "receiver_key_version": 1,
+        })
+        self.assertEqual(response.status_code, REGISTRY["file_type_mismatch"].http_status)
+        self.assertEqual(response.json()["error"], "file_type_mismatch")
+        self.assertFalse(EncryptedMessage.objects.filter(client_message_id="t13-reg-kind-1").exists())
+
+    def test_file_12_non_holder_cannot_read_metadata_without_a_key(self):
+        """Second `file_forbidden` guard: the caller may reach the record but
+        holds no wrapped key (``get_file_metadata_view``'s own check)."""
+        ef = self.create_available_file(client_file_id="t13-noKey2")
+        # carol is not the owner and has no key -> rejected by the shared
+        # helper; give her nothing so the guard under test is the one hit.
+        response = self.client_for(self.carol).get(f"/api/files/{ef.pk}/")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "file_forbidden")
+
+        # The owner passes the helper but the metadata view still requires a
+        # file key row, so an owner whose key row is missing is refused too.
+        EncryptedFileKey.objects.all().delete()
+        response = self.client_for(self.alice).get(f"/api/files/{ef.pk}/")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "file_forbidden")
 
     def test_file_unavailable_status_mismatch_is_still_open(self):
         """KNOWN DEVIATION — pinned on purpose.

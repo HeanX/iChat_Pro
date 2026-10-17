@@ -135,9 +135,13 @@ def _digest(path):
 
 
 def _run(selector):
+    # A hard timeout matters: without it a hung test run would keep this
+    # process alive indefinitely. The `finally` below still restores the
+    # mutated bytes even when the timeout fires.
     result = subprocess.run(
         [PYTHON, "manage.py", "test", selector, "-v", "0"],
         cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=900,
     )
     blob = (result.stderr or "") + (result.stdout or "")
     tail = [line for line in blob.splitlines() if line.startswith(("Ran ", "OK", "FAILED"))]

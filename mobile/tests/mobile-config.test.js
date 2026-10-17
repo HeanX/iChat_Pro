@@ -120,3 +120,37 @@ test('live reload over loopback http sets cleartext so the WebView can load it',
   assert.strictEqual(capCfg.server.url, 'http://localhost:8000');
   assert.strictEqual(capCfg.server.cleartext, true, 'loopback http live reload needs cleartext');
 });
+
+test('a forged resolved object cannot enable cleartext for a remote host', () => {
+  // buildCapacitorConfig is exported; it must not trust the insecure flag.
+  const forged = {
+    mode: 'configured',
+    origin: 'https://chat.example.com',
+    wsUrl: 'wss://chat.example.com/ws/chat/',
+    serverUrl: 'https://chat.example.com',
+    insecure: true,
+    message: null,
+  };
+  const capCfg = buildCapacitorConfig(forged);
+  assert.strictEqual(capCfg.server.cleartext, false, 'remote https must stay non-cleartext');
+
+  const forgedRemoteHttp = {
+    mode: 'configured',
+    origin: 'http://chat.example.com',
+    wsUrl: 'ws://chat.example.com/ws/chat/',
+    serverUrl: 'http://chat.example.com',
+    insecure: true,
+    message: null,
+  };
+  const capCfg2 = buildCapacitorConfig(forgedRemoteHttp);
+  assert.strictEqual(capCfg2.server.cleartext, false, 'remote http never gets cleartext');
+});
+
+test('a garbage serverUrl is dropped rather than written verbatim', () => {
+  const capCfg = buildCapacitorConfig({
+    mode: 'configured',
+    serverUrl: 'javascript:alert(1)',
+    insecure: true,
+  });
+  assert.strictEqual(capCfg.server, undefined, 'invalid serverUrl is not emitted');
+});

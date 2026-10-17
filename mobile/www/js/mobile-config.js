@@ -145,10 +145,19 @@ function buildCapacitorConfig(resolved) {
     },
   };
   if (resolved && resolved.mode === 'configured' && resolved.serverUrl) {
-    // `cleartext` must mirror the scheme. Hardcoding false made live reload
-    // silently fail over http://localhost, because the WebView refused to load
-    // a cleartext URL. Allow it only when the origin really is loopback http.
-    cfg.server = { url: resolved.serverUrl, cleartext: resolved.insecure === true };
+    // Defence in depth: this function is exported and could be handed a
+    // hand-built object. Re-derive the scheme from the URL instead of trusting
+    // the `insecure` flag, so a forged {insecure:true, serverUrl:'https://...'}
+    // still cannot produce cleartext:true for a remote host.
+    const serverOrigin = normalizeOrigin(resolved.serverUrl);
+    const cleartext = serverOrigin !== null && isLoopback(serverOrigin) &&
+      serverOrigin.indexOf('http://') === 0;
+    if (serverOrigin !== null) {
+      // `cleartext` must mirror the scheme. Hardcoding false made live reload
+      // silently fail over http://localhost, because the WebView refused to
+      // load a cleartext URL. Only loopback http may set it.
+      cfg.server = { url: serverOrigin, cleartext: cleartext };
+    }
   }
   return cfg;
 }

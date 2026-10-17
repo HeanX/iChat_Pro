@@ -1,4 +1,4 @@
-﻿# 模块 8：Android / 移动端（从零立项）
+# 模块 8：Android / 移动端（从零立项）
 
 > 交接对象：负责在 Windows/Web 之外增加 Android 端的 Agent。
 > 核对日期 2026-10-18，基线 `cfe53be`。规范见 [conventions.md](conventions.md)。
@@ -15,9 +15,9 @@
 仓库里现在有：
   mobile/                     Capacitor 8.5.3 工程（package.json / capacitor.config.json / www/）
   mobile/android/             Capacitor CLI 真实生成的 Android 工程（不是占位目录）
-  mobile/tests/               node:test 配置契约测试（10 条，纯 Node，无需模拟器）
+  mobile/tests/               node:test 配置契约测试（13 条，纯 Node，无需模拟器）
   docs/phase4/adr-p4-03-*.md  技术决策记录
-  app-debug.apk               已构建成功（4.22 MB，SHA256 FCE3182E…66C7AE6，见 ADR §5.1）
+  app-debug.apk               已构建成功（4.22 MB，SHA256 67104134…26C878，见 ADR §5.1）
 仓库里仍然没有：
   提交进库的 APK / AAB          （产物在 build/ 下，已 gitignore；不可安装到设备）
   真机或模拟器的运行记录        （0 次：adb devices 为空，无 emulator 包，无 Hyper-V）
@@ -162,8 +162,28 @@ cd android
 ```
 
 **不要**把 `capacitor.config.json` 的 `server.url` 热重载配置当成正式方案——它会让 App 依赖开发机。
-骨架已用 `mobile/www/js/mobile-config.js` + 10 条测试把这条规则固化：发布解析结果恒为
+骨架已用 `mobile/www/js/mobile-config.js` + 13 条测试把这条规则固化：发布解析结果恒为
 `serverUrl: null`，生成的 `capacitor.config.json` 不含 `server` 块，只有显式 `--live-reload` 才会写入。
+
+> **改 `mobile/www/**` 之后必须先 `npx cap sync android` 再 `assembleDebug`。**
+> Gradle 只打包已经同步进 `android/app/src/main/assets/public/` 的副本，不会回头看 `www/`。
+> T22 整改时就漏了这一步，导致 APK 内嵌的是旧版资源（ADR §5.1 构建历史 ③→④）。
+
+### 6.1 FileProvider 路径约定（T28 会用到）
+
+T22 把 Capacitor 模板默认的 `<external-path path="." />`（**暴露整个外部存储**）收窄成了三条
+子目录规则，见 `mobile/android/app/src/main/res/xml/file_paths.xml`：
+
+| name | 实际目录 |
+| --- | --- |
+| `ichat_cache` | `cacheDir/ichat/` |
+| `ichat_files` | `filesDir/ichat/` |
+| `ichat_external_files` | `getExternalFilesDir()/ichat/` |
+
+**约束**：写文件时目标路径必须落在上述 `ichat/` 子目录内，否则 `FileProvider.getUriForFile()`
+会抛 `IllegalArgumentException: Failed to find configured root`。
+T28 若要新增位置，**追加一条具体子目录，不要退回 `path="."`**。
+注意模板原有的 `cache-path path="."` 已被删除，所以 `cacheDir` 根下的文件不再可共享。
 
 ---
 

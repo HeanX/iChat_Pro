@@ -19,7 +19,7 @@
    需要 token 的情形与前置条件见 §3.3。
 3. **工程骨架已落地并可构建**：`mobile/` 可 `npm install` + `npx cap sync` + Gradle 构建，
    `mobile/android/` 是 Capacitor CLI **真实生成**（非手写）的原生工程；
-   **`app-debug.apk` 已真实产出**（最终产物 4.22 MB / `FCE3182E…66C7AE6`，SHA256 与构建命令见 §5）。
+   **`app-debug.apk` 已真实产出**（最终产物 4.22 MB / `67104134…26C878`，SHA256 与构建命令见 §5）。
 4. **本机工具链**：JDK 21+ 与 **Android SDK Platform 36 缺失**（系统只有 JDK 1.8 与 SDK 33/34）。
    已通过 **workspace 内可写 SDK 根目录**（`mobile/.android-sdk`）+ 本机已有的 **OpenJDK 23** 补齐，
    构建成功。**真机 / 模拟器安装与启动未执行**（无设备、无 emulator 包、无 Hyper-V），属"未验证"。
@@ -156,7 +156,7 @@ mobile/
 │       ├── mobile-config.js        # 纯函数配置契约（Node 可测）
 │       └── shell.js                # 启动页渲染，仅读 window.ICHAT_MOBILE_ENV
 ├── tests/
-│   └── mobile-config.test.js       # node:test，10 条
+│   └── mobile-config.test.js       # node:test，13 条
 └── android/                        # Capacitor CLI 真实生成的原生工程
 ```
 
@@ -228,18 +228,38 @@ gradle assembleDebug --no-daemon --console=plain
 # manifest 加固（禁用备份）后重新构建并复验
 gradle assembleDebug --no-daemon --console=plain
 # -> BUILD SUCCESSFUL in 14s  （183 tasks: 13 executed, 170 up-to-date）
+
+# 第 2 轮整改：改了 www/js/mobile-config.js 之后，必须先 cap sync 再构建！
+# （漏这一步会让 APK 内嵌旧版 web 资源——第 2 轮审查正是抓住了这点）
+cd ..                      # 回到 mobile/
+npx cap sync android
+# -> √ Copying web assets from www to android\app\src\main\assets\public
+#    √ Sync finished in 0.113s
+cd android
+gradle assembleDebug --no-daemon --console=plain
+# -> BUILD SUCCESSFUL in 12s  （183 tasks: 27 executed, 156 up-to-date）
 ```
 
-产物与校验（审查整改后重新构建的最终产物）：
+> **改 `mobile/www/**` 后必须 `npx cap sync android` 再构建。** `gradle assembleDebug` 只编译
+> 已经 synced 进 `android/app/src/main/assets/public/` 的副本，不会自己回头看 `www/`。
+
+产物与校验（第 2 轮整改后重新 `cap sync` + 重新构建的最终产物）：
 
 ```
 mobile/android/app/build/outputs/apk/debug/app-debug.apk
   大小    4.22 MB (4,424,830 bytes)
-  SHA256  FCE3182ED2200D1B747C7DB060176B55BB0BF40AFDC34B04EBFC8D55866C7AE6
+  SHA256  671041340377964EC10EBC495D4CC087F390B2E4A0C6F8BB5080BAEAFA26C878
 ```
 
-> 构建历史：① 初版 3.94 MB / `F10D3570…CDFCD2`；② manifest 禁用备份后 4.22 MB / `0D05C92B…4B4976`；
-> ③ 审查整改（收窄 FileProvider、修正仪器化测试断言）后为上面的 `FCE3182E…66C7AE6`。
+> 构建历史（每次的差异都是实质改动，不是重建噪声）：
+> ① 初版 3.94 MB / `F10D3570…CDFCD2`；
+> ② manifest 禁用备份后 4.22 MB / `0D05C92B…4B4976`；
+> ③ 审查整改（收窄 FileProvider、修仪器化断言）后 `FCE3182E…66C7AE6`
+> —— **但这一步漏跑了 `npx cap sync`**，APK 内嵌的 `mobile-config.js` 仍是 5152 B 的旧版
+> （`cleartext:false`），所以该 SHA 无法按文档复现。**这是第 2 轮审查发现的证据缺陷，已修**；
+> ④ 重跑 `cap sync` + 重构 `buildCapacitorConfig`（不再信任 `insecure` 标志）后为上面的
+> `67104134…26C878`：APK 内 `mobile-config.js` 为 **6064 B**，与 `mobile/www/js/mobile-config.js`
+> 逐字节一致，且代码里含 `cleartext: resolved.insecure === true` 的替代实现（已改为自校验）。
 > **产物不入库**（`build/` 已 gitignore）。
 
 APK 内容核验（`aapt2 dump badging` + `aapt2 dump xmltree` + zip 目录，**真实输出**）：
@@ -259,11 +279,14 @@ AndroidManifest 中被加固的三项（从 APK 内反查，不是看源码）�
   android:fullBackupContent=false
   android:dataExtractionRules=@0x7f100001
 
-assets/public/index.html           1962
-assets/public/js/mobile-config.js  5152
-assets/public/js/shell.js          1646
-assets/public/css/mobile-shell.css 2346
+assets/public/index.html           2015
+assets/public/js/mobile-config.js  6064
+assets/public/js/shell.js          1702
+assets/public/css/mobile-shell.css 2478
 ```
+
+> 上面四个数字从**最终产物** `67104134…26C878` 的 zip 目录读出，与 `mobile/www/` 下同名文件
+> 逐字节等长。早期草稿里的 1962/5152/1646/2346 是 step ③ 那个未同步的旧包，已作废。
 
 → 说明 `webDir: www` 生效，`www/` 里的骨架页确实被打进 APK。
 
@@ -288,7 +311,7 @@ T29 仍需在 §2.3 的 (a)/(b)/(c) 中做出选择。
 | --- | --- | --- |
 | 能复用现有页面并生成 Android 工程 | **工程已生成且可构建出 APK**；"复用现有页面"的**运行时**验证需 T24 出包后在设备上加载 Django 页面 | §5.1 的 `npx cap add android` 输出 + APK 产物 + `launchable-activity` |
 | 相关代码或配置经过非作者成员评审 | 见交付记录（独立审查子 Agent 结论，§8） | 同上 |
-| 适用的自动化或人工测试已执行并保存证据 | `node --test mobile/tests/mobile-config.test.js` **10/10 通过**；Gradle 构建成功；**设备安装/启动/截图未执行** | §5.1 |
+| 适用的自动化或人工测试已执行并保存证据 | `node --test mobile/tests/mobile-config.test.js` **13/13 通过**；Gradle 构建成功；**设备安装/启动/截图未执行** | §5.1 |
 | 需求、部署或测试文档已同步更新 | 本 ADR + `docs/phase4/tasks.md` T22 行 + `docs/handoff/android-mobile.md` §1 + `docs/documentation-status.md` | 同上 |
 
 ### 5.3 明确未完成的项（不得当作通过）
@@ -300,7 +323,7 @@ T29 仍需在 §2.3 的 (a)/(b)/(c) 中做出选择。
 | WebView 内登录 → WS → 收发一条消息 | 属 T24 及之后范围，本卡不含 |
 | 用固定 wrapper Gradle 8.14.3 构建 | 该发行版在 GitHub Releases，本机到该主机连接被重置；改用本机缓存的 Gradle 9.5.1。**CI 必须用 `./gradlew` 复跑** |
 | WebView 实际 `Origin` 头行为 | 当前构建不加载远端页面，测试前提不存在；需 T24 接通同源加载 + 设备抓包，见 §3.2 |
-| **debug APK 含 `debuggable=true`** | debug 构建标志位。`capacitor.config.json` 的 `webContentsDebuggingEnabled:false` **压不住它**——`CapConfig.java` 的 fallback 是 `isDebug`，读的正是 `FLAG_DEBUGGABLE`。**该 APK 可被 Chromium DevTools 远程调试，不得分发给任何人试用。** release 构建 `debuggable=false`，无此问题 |
+| **debug APK 含 `debuggable=true`** | debug 构建的标志位。**真正的风险不是 WebView 远程调试**：`capacitor.config.json` 已显式写 `webContentsDebuggingEnabled: false`，Capacitor 会据此调用 `setWebContentsDebuggingEnabled(false)`，DevTools 附加不上（`isDebug` 只是**缺省值**，显式值优先）。**实际风险是 `adb run-as com.ichat.pro`**：`debuggable=true` 允许通过 adb 以应用身份读取私有目录，而这正是 WebView 存储 E2EE 私钥的地方。因此**该 debug APK 不得分发给任何人试用，也不得用于任何真实账号**。release 构建 `debuggable=false`，无此问题；T29 落地后仍需重新评估。 |
 
 ---
 
@@ -366,7 +389,8 @@ adb shell am start -n com.ichat.pro/.MainActivity
 
 | 轮次 | 审查者 | 结论 | 发现项 | 整改 |
 | --- | --- | --- | --- | --- |
-| 1 | 独立审查子 Agent（非作者上下文，只给 Issue 原文 + diff + 命令） | **PASS WITH FINDINGS** | 2 BLOCKER / 5 MAJOR / 6 MINOR | 见下表 |
+| 1 | 独立审查子 Agent（非作者上下文，只给 Issue 原文 + diff + 命令） | **PASS WITH FINDINGS** | 2 BLOCKER / 5 MAJOR / 6 MINOR | 见 §8.1 |
+| 2 | 新的独立审查子 Agent（不复用第 1 轮会话） | **PASS WITH FINDINGS** | 0 BLOCKER / 3 MAJOR / 7 MINOR | 见 §8.2 |
 
 ### 8.1 第 1 轮发现项与整改
 
@@ -377,16 +401,37 @@ adb shell am start -n com.ichat.pro/.MainActivity
 | MAJOR | `docs/documentation-status.md` 仍写"未产出 APK"，与 ADR/handoff 矛盾 | 已改为"APK 已构建 + 真机未执行" |
 | MAJOR | `tasks.md` T22 行写"APK 产物…未执行 / 缺 JDK 17+"，与事实冲突；链接错指 §6 | 重写该行，链接改 §5.3 |
 | MAJOR | §0 结论 2 与 §3.1 把"同源加载 Django 页面"写成现在时，实际 `server.url=null` 只加载本地 assets | §0/§3.1 改为"目标形态"，明确 T22 未接通、属 T24 |
-| MAJOR | debug APK 含 `debuggable=true`，`webContentsDebuggingEnabled:false` 压不住（`CapConfig` fallback 是 `isDebug`） | §5.3 增列：该 APK 可被 DevTools 远程调试，**不得分发试用** |
+| MAJOR | debug APK 含 `debuggable=true`，ADR 未披露其风险 | §5.3 增列：风险是 `adb run-as` 可读应用私有目录（WebView 存储 E2EE 私钥），**不得分发试用、不得配真实账号**。第 2 轮更正：原先写成"可被 DevTools 远程调试"是错的，配置里显式 `false` 会生效 |
 | MAJOR | `write-capacitor-config.js` 失败时仍写文件，可能覆盖受版本控制的 `capacitor.config.json` | 失败路径改为**先退出、不写文件**（实测 exit 1 且文件未变） |
 | MINOR | 仪器化测试断言 `com.getcapacitor.app`，与 `applicationId=com.ichat.pro` 不符，首跑必红 | 改为 `com.ichat.pro` |
 | MINOR | `file_paths.xml` 的 `external-path path="."` 把整个外部存储暴露给 FileProvider | 收窄为 `ichat/` 子目录的 cache/files/external-files 三条 |
-| MINOR | live-reload 配 `http://localhost` 却写 `cleartext:false`，WebView 会拒绝加载 | `cleartext` 改为镜像 scheme；新增第 11 条测试守护 |
+| MINOR | live-reload 配 `http://localhost` 却写 `cleartext:false`，WebView 会拒绝加载 | `cleartext` 改为镜像 scheme；新增测试守护 |
 | MINOR | `@capacitor/cli` 仅 devDependency，`npm ci --omit=dev` 下 `cap` 不可用 | 脚本改用 `npx --no-install cap`，失败时明确报错而非静默装包 |
 | MINOR | `data_extraction_rules.xml` 是否漏 `device_*` | 复查结论：**未漏**，前五个 domain 是官方最小写法，保留 |
 
-整改后复验：`node --test` **11/11 通过**；重新构建 `BUILD SUCCESSFUL`，并从 APK 二进制清单反查确认
+整改后复验：`node --test` 通过；重新构建 `BUILD SUCCESSFUL`，并从 APK 二进制清单反查确认
 `allowBackup=false`、`dataExtractionRules` 生效、FileProvider 仅三条收窄路径。
 
+### 8.2 第 2 轮发现项与整改
+
+第 2 轮由**新的**审查子 Agent 执行，它没有拿到第 1 轮的结论，全部自行验证。结果：0 BLOCKER，
+但它抓出 3 处**我（作者）的整改声明本身不实/不全**，值得记下来：
+
+| 级别 | 问题 | 整改 |
+| --- | --- | --- |
+| MAJOR | 测试条数只同步了一半：handoff 两处、ADR 两处仍写 10 条，而 §8.1 与 `tasks.md` 已写 11/11（实际 11） | 全仓统一；后续又增到 **13 条**，四处表述已一致 |
+| MAJOR | §5.3 的 `debuggable` 安全披露**机制写反了**：原称 `webContentsDebuggingEnabled:false` 压不住、APK 可被 DevTools 调试。实际配置里显式 `false` 会生效，DevTools 附加不上；**真正风险是 `adb run-as` 读应用私有目录（WebView 里的 E2EE 私钥）**，原稿完全没提 | 已重写 §5.3 该条与 §8.1 对应行，写明正确机制与真实风险 |
+| MAJOR | **APK 内嵌 web 资源是旧版**：`mobile-config.js` 仍是 5152 B 的 `cleartext:false` 版本，因改完源码后漏跑 `npx cap sync`，而 §5.1 命令块里根本没有这一步 → 该 SHA 按文档复现不出来 | 补跑 `cap sync` 重建；§5.1 补入 `cap sync` 步骤并加粗警告；构建历史记为 ③→④ |
+| MINOR | `file_paths.xml` 的 `ichat/` 子目录约定只写在 XML 注释里，T28 会踩 `IllegalArgumentException` | 写进本模块交接文档 §6.1，含"改 `www/` 必须先 `cap sync`"的同类提醒 |
+| MINOR | 本轮编辑给 3 份文档新加了 UTF-8 BOM（原文件无 BOM） | 已用 `UTF8Encoding($false)` 全部剥除，四份文档 BOM=False 复验通过 |
+| MINOR | `buildCapacitorConfig` 直接信任传入的 `insecure` 标志，伪造对象可得 `cleartext:true` | 改为从 `serverUrl` 自校验（`normalizeOrigin` + `isLoopback`），新增 2 条测试：伪造远程 https / 远程 http / 非法 `javascript:` URL 均被挡 |
+| MINOR | `ExampleUnitTest` 仍是 `assertEquals(4,2+2)` 模板垃圾 | 保留（不属本卡功能范围），在 §5.3 未验证项注明它不构成任何覆盖 |
+| MINOR | 新文档链接的 `conventions.md` / `testing-quality-ci.md` 在本分支未被 git 跟踪 | 属工作区既有状况（交接文档整体尚未入库），**不是本卡引入**；提 PR 时需一并提交，已在此记录 |
+| MINOR | 无 `.gitattributes` 钉住换行/二进制处理 | 新增根 `.gitattributes`：`gradlew` 与 `*.sh` 强制 LF，wrapper jar 标 binary。**注明它不能锁定可执行位**（那只能靠 `git update-index --chmod=+x`） |
+
+第 2 轮整改后复验：`node --test` **13/13 通过**；`cap sync` + `assembleDebug` 成功，APK 内
+`mobile-config.js` 为 **6064 B** 且与 `mobile/www/` 逐字节一致（已从 zip 内解出比对）。
+
 > 按 `conventions.md` §1：审查者只拿到 Issue 原文 + diff + 命令，不给作者说明。
-> 第 1 轮已用尽一轮，**整改后需开新的审查子 Agent 复核**（不复用本轮会话）。
+> 两轮均已开新上下文，未复用会话。第 2 轮结果仍为"有发现项"，**未达到纯 PASS**，
+> 因此本卡不宣称"评审已通过"，只提交证据由人确认。

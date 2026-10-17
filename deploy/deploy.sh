@@ -133,6 +133,13 @@ fi
 # Opt out only for a known-broken hotfix: ICHAT_SKIP_SMOKE=1 (logged loudly).
 if [[ "${ICHAT_SKIP_SMOKE:-0}" == "1" ]]; then
     echo "WARNING: ICHAT_SKIP_SMOKE=1 — login/core-API smoke gate SKIPPED for this deploy." >&2
+elif [[ ! -f "$REPO_DIR/deploy/smoke.sh" ]]; then
+    # Rolling back to a commit from before the gate existed (e.g. f2f60ec,
+    # the 2026-10-07 production build) means the target tree has no smoke
+    # script. Failing here would make the documented rollback path itself
+    # unusable, so skip loudly and record the exception instead.
+    echo "WARNING: target commit $DEPLOYED_SHA predates deploy/smoke.sh — smoke gate SKIPPED." >&2
+    SMOKE_ABSENT=1
 else
     if [[ -z "${SMOKE_USERNAME:-}" || -z "${SMOKE_PASSWORD:-}" ]]; then
         echo "ERROR: SMOKE_USERNAME/SMOKE_PASSWORD are not set in $APP_DIR/.env." >&2
@@ -142,7 +149,7 @@ else
         exit 1
     fi
     echo "==> Post-deploy smoke gate"
-    AUTO_BASE_URL=1 SMOKE_INSECURE_TLS=1 \
+    AUTO_BASE_URL=1 SMOKE_INSECURE_TLS=1 SMOKE_PYTHON="$VENV_DIR/bin/python" \
         bash "$REPO_DIR/deploy/smoke.sh" || {
         echo "ERROR: post-deploy smoke gate FAILED — release $DEPLOYED_SHA is NOT recorded." >&2
         echo "       The service was restarted, so the old process is already gone." >&2
@@ -151,8 +158,13 @@ else
     }
 fi
 
-echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness: db+cache ok; smoke: passed)"
-printf '%s  %s  %s  %s\n' "$(date -u +%FT%TZ)" "$DEPLOYED_SHA" "$TARGET" \
-    "$([[ "${ICHAT_SKIP_SMOKE:-0}" == "1" ]] && echo 'smoke=skipped' || echo 'smoke=passed')" \
-    >> "$LOG_FILE"
+SMOKE_RESULT=passed
+if [[ "${ICHAT_SKIP_SMOKE:-0}" == "1" ]]; then
+    SMOKE_RESULT=skipped
+elif [[ "${SMOKE_ABSENT:-0}" == "1" ]]; then
+    SMOKE_RESULT=skipped-no-script
+fi
+echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness: db+cache ok; smoke: $SMOKE_RESULT)"
+printf '%s  %s  %s  smoke=%s\n' "$(date -u +%FT%TZ)" "$DEPLOYED_SHA" "$TARGET" \
+    "$SMOKE_RESULT" >> "$LOG_FILE"
 exit 0

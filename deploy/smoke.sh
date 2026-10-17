@@ -105,7 +105,17 @@ if [[ "${AUTO_BASE_URL:-0}" == "1" ]]; then
     BASE_URL=${BASE_URL:-https://127.0.0.1:8443}
     if ! curl "${CURL_TLS[@]}" -fsS -o /dev/null --max-time 3 \
             -H "Host: $HOST_NAME" "$BASE_URL/health/live/" 2>/dev/null; then
+        # Loopback Daphne. Only the health paths are exempt from the SSL
+        # redirect, and CSRF_COOKIE_SECURE/SESSION_COOKIE_SECURE are on in
+        # production, so the login and session checks cannot pass over plain
+        # http against a DEBUG=False release. Say so plainly instead of
+        # letting the operator read four confusing failures.
         BASE_URL=http://127.0.0.1:8000
+        echo "WARNING: nothing answered on https://127.0.0.1:8443 — falling back" >&2
+        echo "         to $BASE_URL. Health checks work there, but login cannot:" >&2
+        echo "         production sets SECURE_SSL_REDIRECT and secure cookies." >&2
+        echo "         Start Nginx before the first deploy, or run with BASE_URL" >&2
+        echo "         set to the real https origin." >&2
     fi
 fi
 
@@ -258,18 +268,49 @@ else
 fi
 
 # --- 4. authenticated core APIs -----------------------------------------
+# Parse the JSON rather than grepping for a key name: a 200 error page that
+# happens to contain the word must not pass. deploy.sh passes the venv
+# interpreter in SMOKE_PYTHON; otherwise take an interpreter that actually
+# runs (Windows ships a python3 alias that is not a real interpreter), and
+# fall back to the exact quoted-key form Django emits.
+SMOKE_PY=""
+for candidate in "${SMOKE_PYTHON:-}" python3 python; do
+    [[ -n "$candidate" ]] || continue
+    if command -v "$candidate" >/dev/null 2>&1 \
+            && "$candidate" -c 'import sys' >/dev/null 2>&1; then
+        SMOKE_PY=$candidate
+        break
+    fi
+done
+
+json_has_key() {  # json_has_key <body> <key>; exit 0 when the top object has it
+    local body=$1 key=$2
+    if [[ -n "$SMOKE_PY" ]]; then
+        printf '%s' "$body" | "$SMOKE_PY" -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if isinstance(data, dict) and sys.argv[1] in data else 1)
+' "$key"
+    else
+        [[ "$body" == *"\"$key\":"* ]]
+    fi
+}
+
 http_body_and_code "$BASE_URL/api/conversations/" -b "$COOKIE_JAR"
-if [[ "$CODE" == "200" && "$BODY" == *'"conversations"'* ]]; then
-    pass "core API: GET /api/conversations/ -> 200 with conversations"
+if [[ "$CODE" == "200" ]] && json_has_key "$BODY" conversations; then
+    pass "core API: GET /api/conversations/ -> 200 JSON with conversations"
 else
-    fail "core API: GET /api/conversations/ -> ${CODE:-no-response} (expected 200 JSON with \"conversations\")"
+    fail "core API: GET /api/conversations/ -> ${CODE:-no-response} (expected 200 JSON containing \"conversations\")"
 fi
 
 http_body_and_code "$BASE_URL/api/profile/me/" -b "$COOKIE_JAR"
-if [[ "$CODE" == "200" && "$BODY" == *'"profile"'* ]]; then
-    pass "core API: GET /api/profile/me/ -> 200 with profile"
+if [[ "$CODE" == "200" ]] && json_has_key "$BODY" profile; then
+    pass "core API: GET /api/profile/me/ -> 200 JSON with profile"
 else
-    fail "core API: GET /api/profile/me/ -> ${CODE:-no-response} (expected 200 JSON with \"profile\")"
+    fail "core API: GET /api/profile/me/ -> ${CODE:-no-response} (expected 200 JSON containing \"profile\")"
 fi
 
 # --- 5. unauthenticated API contract (T31) ------------------------------

@@ -5,9 +5,9 @@
 
 ## 本次更新
 
-2026-10-18（#204 / P4 Test T23）：发布流程在 readiness 之后加了一道**冒烟门禁** `deploy/smoke.sh`，覆盖登录、CSRF、会话与核心 API；失败不写 `DEPLOYMENTS.log` 且 deploy 退出非零。新增第 7 节说明冒烟账号策略。该门禁目前只在本地 SQLite + Django live server 下验证过（7 条用例），**未在生产验证**。
+2026-10-18（#204 / P4 Test T23）：发布流程在 readiness 之后加了一道**冒烟门禁** `deploy/smoke.sh`，覆盖登录、CSRF、会话与核心 API；失败不写 `DEPLOYMENTS.log` 且 deploy 退出非零。新增第 7 节说明冒烟账号策略与前置条件。该门禁目前只在本地 SQLite + Django live server 下验证过（19 条用例，其中 6 条锚定 deploy.sh 的日志语义），**未在生产验证**。
 
-现行生产入口 chat.20060810.xyz:8443；代码与部署基线 f2f60ec，最后核对 DEPLOYMENTS.log 为 2026-10-07T13:42:16Z。live/ready/login HTTPS 200，readiness 自动检查 DB+cache JSON，登录/核心接口冒烟失败阻断已实现（#204 待评审与真机证据）；监控告警（#139）和完整发布审批（#177）仍待验收。服务器 SHA、GitHub main 和安装包 SHA 分别记录，回滚不自动降级数据库。
+现行生产入口 chat.20060810.xyz:8443；代码与部署基线 f2f60ec，最后核对 DEPLOYMENTS.log 为 2026-10-07T13:42:16Z。live/ready/login HTTPS 200，readiness 自动检查 DB+cache JSON，登录/核心接口冒烟失败阻断已实现代码（#204 待真实环境证据）；监控告警（#139）和完整发布审批（#177）仍待验收。服务器 SHA、GitHub main 和安装包 SHA 分别记录，回滚不自动降级数据库。
 
 > 适用主机：AWS ap-northeast-1d / t3.small / Amazon Linux 2023 / EIP `13.158.121.80`。
 > 本机与该主机共存代理服务（Xray 占用 TCP/UDP 443、面板 25383、订阅 2096），**这些端口不属于聊天系统，操作时禁止占用或重启它们**。
@@ -53,7 +53,7 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 - 发布：`sudo /opt/ichat/bin/deploy.sh`（校验配置 → migrate → collectstatic → restart → readiness 门禁 → 冒烟门禁）。
 - **readiness 门禁**：带生产 Host 头经本机 Nginx TLS（`https://127.0.0.1:8443`）请求 `/health/ready/` 并校验 JSON body——对任意被部署版本都有效（旧版本会把 http 探测 301 到 https），301/400 不会误判成功。
 - **冒烟门禁（T23 / #204）**：readiness 通过后执行 `deploy/smoke.sh`，断言 `health/live`、`health/ready`、登录表单与 CSRF、登录会话、`/api/conversations/`、`/api/profile/me/`，以及未认证 `/api/` 返回 401。任一失败则**不写 `DEPLOYMENTS.log` 并 exit 1**——"能连上但登录坏了"的版本不算发布成功。服务此时已重启，需用 `--commit <上一个SHA>` 回退，见下方"回滚应用"。
-- **每次部署把 `<UTC时间> <commit SHA> <目标> smoke=passed|skipped` 追加到 `/opt/ichat/DEPLOYMENTS.log`**；服务器实际运行的 SHA 以该文件和 `git -C /opt/ichat/repo rev-parse HEAD` 为准，可能与仓库 main 不同（回滚期间）。缺省为 `smoke=passed`；只有显式 `ICHAT_SKIP_SMOKE=1` 才会记 `skipped`。
+- **每次部署把 `<UTC时间> <commit SHA> <目标> smoke=passed|skipped|skipped-no-script` 追加到 `/opt/ichat/DEPLOYMENTS.log`**；服务器实际运行的 SHA 以该文件和 `git -C /opt/ichat/repo rev-parse HEAD` 为准，可能与仓库 main 不同（回滚期间）。`skipped` 只能由 `ICHAT_SKIP_SMOKE=1` 产生，`skipped-no-script` 出现在回滚到 #204 之前的版本时。
 - **回滚应用**：`sudo /opt/ichat/bin/deploy.sh --commit <上一个SHA>`——checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记录日志。恢复新版本：重跑 `deploy.sh`（不带 --commit）。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
 - 失败排查：`journalctl -u ichat -n 100`、`tail -50 /var/log/nginx/ichat.error.log`、冒烟失败项见 deploy 输出。
 
@@ -103,5 +103,8 @@ SMOKE_PASSWORD=<与上面 set_password 相同的强随机密码>
 
 - 账号需要 `is_active=True` 且无 `must_change_password` 类限制，否则登录会失败。
 - 每次发布冒烟会为它创建并立刻销毁一个会话（脚本 EXIT 时 `POST /logout/`）；发布日志里因此会出现该账号的登录/登出记录，属预期。
+- **前置条件**：`.env` 的 `DJANGO_CSRF_TRUSTED_ORIGINS` 必须含带端口的 8443 Origin（如 `https://chat.20060810.xyz:8443`）。冒烟走真实登录表单，Referer 是带端口的 Origin，而 nginx 的 `$host` 会去掉端口；不匹配时登录 POST 被 CSRF 拒绝，冒烟判失败。浏览器登录的前置条件与此相同。
+- **`http://127.0.0.1:8000` 回退不能用于冒烟**：`DEBUG=False` 下 `SECURE_REDIRECT_EXEMPT` 只豁免 `health/`，且 `CSRF_COOKIE_SECURE`/`SESSION_COOKIE_SECURE` 已开，登录在纯 http 上必然失败。回退只够跑健康检查，脚本会打印 WARNING。首次部署请先起 Nginx。
+- **回滚到 #204 之前的版本**：目标树没有 `deploy/smoke.sh`，门禁打印 WARNING 并记 `smoke=skipped-no-script`，**不会**让回滚失败。
 - **紧急例外**：若登录链路已确认损坏、需要先发布修复，可在该次发布前 `export ICHAT_SKIP_SMOKE=1`。这会把 `smoke=skipped` 明确写进 `DEPLOYMENTS.log`，属于可追溯的例外，**不是常规路径**。
 - 缺 `SMOKE_USERNAME`/`SMOKE_PASSWORD` 时 deploy.sh **直接失败**（不会跳过），这是刻意设计：没有冒烟证据的发布不允许静默通过。

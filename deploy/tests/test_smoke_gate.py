@@ -22,6 +22,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -39,11 +40,31 @@ BASH = shutil.which("bash")
 HAS_BASH = BASH is not None and SMOKE_SCRIPT.is_file()
 
 
+def _run_smoke(env):
+    """Run the real gate script and return the completed process.
+
+    ``errors="replace"`` because the script and Django both emit non-ASCII
+    (the section markers, Chinese messages) and stdout is decoded with the
+    console code page on Windows.
+    """
+    return subprocess.run(
+        [BASH, str(SMOKE_SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=120,
+    )
+
+
 def _smoke_env(**overrides):
     env = {
         "PATH": os.environ.get("PATH", ""),
         "TMPDIR": os.environ.get("TMPDIR") or os.environ.get("TEMP") or "",
         "SMOKE_TIMEOUT": "10",
+        # Windows ships a "python3" alias that is a Store stub, so hand the
+        # script the interpreter we are already running under.
+        "SMOKE_PYTHON": sys.executable,
         "SMOKE_USERNAME": "",
         "SMOKE_PASSWORD": "",
     }
@@ -76,16 +97,55 @@ class SmokeGateTests(LiveServerTestCase):
             "SMOKE_PASSWORD": "Sm0ke-Gate-Passw0rd!",
         }
         overrides.update(env_overrides or {})
-        env = _smoke_env(**overrides)
-        return subprocess.run(
-            [BASH, str(SMOKE_SCRIPT)],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        return _run_smoke(_smoke_env(**overrides))
 
-    # --- the gate must pass a working release ---------------------------
+    # --- the production code path: AUTO_BASE_URL ------------------------
+    def test_auto_base_url_derives_the_origin_and_logs_in(self):
+        """Drive the branch deploy.sh actually uses.
+
+        With AUTO_BASE_URL=1 the script picks the base URL itself, injects a
+        Host header and rebuilds the Referer Django's CSRF check compares.
+        Passing BASE_URL (as the other tests do) skips all of that, so this
+        is the only test that would catch a broken SITE_ORIGIN — the failure
+        mode that would make every real deploy fail its own gate.
+        """
+        env = _smoke_env(
+            # The HTTPS front door does not exist in tests, so let the script
+            # probe by itself. BASE_URL is still set: AUTO_BASE_URL keeps an
+            # explicit BASE_URL, and the Host header + Referer rebuild — the
+            # part that broke — always runs on this branch.
+            AUTO_BASE_URL="1",
+            BASE_URL=self.live_server_url,
+            DJANGO_ALLOWED_HOSTS="localhost",
+            SMOKE_USERNAME="deploy_smoke_probe",
+            SMOKE_PASSWORD="Sm0ke-Gate-Passw0rd!",
+        )
+        result = _run_smoke(env)
+        output = (result.stdout or "") + (result.stderr or "")
+        # The Host header is injected on this path; the gate must still pass,
+        # which is only possible if the Referer matches what Django sees.
+        self.assertIn("Smoke PASSED", output, msg=output)
+        self.assertEqual(result.returncode, 0, msg=output)
+
+    def test_auto_base_url_rejects_a_bad_referer_origin(self):
+        """If SITE_ORIGIN is malformed, CSRF rejects the login POST.
+
+        Pin the failure mode: an origin that does not match the Host header
+        must fail the login check rather than silently pass.
+        """
+        env = _smoke_env(
+            AUTO_BASE_URL="1",
+            BASE_URL=self.live_server_url,
+            # A host the request does not actually carry -> Referer mismatch.
+            DJANGO_ALLOWED_HOSTS="wrong-host.example",
+            SMOKE_USERNAME="deploy_smoke_probe",
+            SMOKE_PASSWORD="Sm0ke-Gate-Passw0rd!",
+        )
+        result = _run_smoke(env)
+        output = (result.stdout or "") + (result.stderr or "")
+        self.assertNotEqual(result.returncode, 0, msg=output)
+        self.assertIn("Smoke FAILED", output)
+
     def test_healthy_release_passes_and_reports_each_check(self):
         result = self.run_smoke()
         output = result.stdout + result.stderr

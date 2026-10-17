@@ -131,7 +131,7 @@ static/js/chat.js         +132 行 saveOrDownloadBlob / offerOpenSavedFile 与�
 
 | 轮次 | 审查者 | 结论 | BLOCKER / MAJOR / MINOR | 修复提交 |
 | --- | --- | --- | --- | --- |
-| 1 | 独立子 Agent（无作者上下文） | PASS WITH FINDINGS | 3 / 8 / 5 | `c1f0a9d`（本轮） |
+| 1 | 独立子 Agent（无作者上下文） | PASS WITH FINDINGS | 3 / 8 / 5 | `8b3038a` |
 
 ### 第 1 轮发现与处置
 

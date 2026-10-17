@@ -53,7 +53,7 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 - 本方案保护的是**路径与大小**，不是**内容**：解密后的字节由渲染端产出，主进程不校验哈希。完整性由 AES-GCM 的 auth tag 在上游保证。
 - 令牌在内存里，应用重启即失效；已保存的文件仍在磁盘上，但"打开"按钮不再有效。
 - 主进程不校验写入内容与文件扩展名是否匹配。这是刻意的：用户选什么名字就写什么名字。
-- 覆盖已有文件时按**绝对偏移**写入（首块 `w+` 截断，后续 `r+` 定位），收尾时再按声明大小截断一次。选择这个行为而不是"写临时文件再改名"，是为了让"用户选的目标路径"始终等于"磁盘上的文件"；代价是中途失败会留下部分内容（不会回滚到旧文件），此时按钮显示 `Retry` 而不是 `Done`。
+- 覆盖已有文件时按**绝对偏移**写入（首块 `w+` 会让旧文件先被清空，后续 `r+` 定位）。截断语义完全由首块承担，`seal` 不再重复截断。选择这个行为而不是"写临时文件再改名"，是为了让"用户选的目标路径"始终等于"磁盘上的文件"；代价是中途失败会留下部分内容（不会回滚到旧文件），此时按钮显示 `Retry` 而不是 `Done`。
 
 ---
 
@@ -87,16 +87,16 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- |
 | `.\.venv\Scripts\python.exe manage.py check` | `System check identified no issues (0 silenced).` |
 | `.\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run` | `No changes detected` |
-| `npm run test:e2ee` | **100 tests / 100 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 38 条） |
+| `npm run test:e2ee` | **101 tests / 101 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 39 条） |
 | `cd desktop && npm run test:layout` | `Sidebar layout: 36/36 browser checks passed` |
-| `cd desktop && npm run test:branding` | 打包 asar 内 **60 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
+| `cd desktop && npm run test:branding` | 打包 asar 内 **61 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
 | `cd desktop && npm run test:installer` | `NSIS runtime: 24/24 assertions passed` |
-| `cd desktop && npm run test:files` | **38 tests / 38 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
+| `cd desktop && npm run test:files` | **39 tests / 39 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
 
-新增套件 `chat/tests/js/desktop_file_io.test.js` 共 38 条，分四层：
+新增套件 `chat/tests/js/desktop_file_io.test.js` 共 39 条，分四层：
 
 1. **策略层**（`desktop/file-io.js`）：真实临时目录里写字节，覆盖文件名净化、严格字节数解析、顺序追加、越界、重放、过期、绑定发送者、授权上限、失败不推进偏移、**写一半失败后重试不重复追加**、**覆盖更长旧文件后按声明大小截断**、空文件、**白名单外一律拒绝打开**（`.scf/.url/.pyw/.py/.sh/.pl/.rb/.exe/'无扩展名'/双扩展名`）、**已 seal 不占配额**、**失败后可释放配额**、**对话框路径尾随点/空格不绕过白名单（且合法文档仍可打开）**。
-2. **主进程层**（真实 `main.js` 在 vm 沙箱里跑，只替换 OS 网络/对话框）：四条通道注册、非受信 frame 拒绝、**校验先于弹框**、取消不建授权、同 frame 并发对话框拒绝、端到端（对话框→两块→seal→打开）、跨 sender 拒绝、可执行不调用 `openPath`、`openPath` 返回错误串时上报。
+2. **主进程层**（真实 `main.js` 在 vm 沙箱里跑，只替换 OS 网络/对话框）：五条通道注册（含 `release`）、非受信 frame 拒绝、**校验先于弹框**、取消不建授权、同 frame 并发对话框拒绝、端到端（对话框→两块→seal→打开）、跨 sender 拒绝、可执行不调用 `openPath`、`openPath` 返回错误串时上报。
 3. **桥与渲染层**（真实 `preload.js` + `static/js/file-transfer.js`）：无桥时退回原行为、5 MiB 分 3 块且偏移为 `0/2/4 MiB`、字节可按序重组且完全相等、截断写入被拒绝、**`{ok:false,code}` 信封拆包**、错误码到中文文案的映射、0 字节文件仍走原生保存、**失败时释放授权**、释放本身失败不掩盖原始错误。
 4. **按钮状态机**（真实 `static/js/chat.js` 的 `offerOpenSavedFile`，最小 DOM 桩）：`saved` 才显示 `Done` 并附“打开”、`failed` 显示 `Retry` 且不保留 `downloaded` 样式、取消回到 `Download`、重复下载不叠加“打开”按钮。
 
@@ -135,7 +135,8 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- | --- | --- | --- |
 | 1 | 独立子 Agent（无作者上下文） | PASS WITH FINDINGS | 3 / 8 / 5 | `8b3038a` |
 | 2 | 另一个独立子 Agent（全新上下文，不复用第 1 轮） | FAIL | 1 / 3 / 5 | `78f1d13` |
-| 3 | 第三个独立子 Agent（全新上下文，不复用前两轮） | PASS WITH FINDINGS | 0 / 3 / 5 | 4549f80 |
+| 3 | 第三个独立子 Agent（全新上下文，不复用前两轮） | PASS WITH FINDINGS | 0 / 3 / 4（另 1 条 MINOR 遗留到第 4 轮） | 4549f80 |
+| 4 | 第四个独立子 Agent（收尾轮，逐条核实第 3 轮遗留项） | PASS WITH FINDINGS | 0 / 0 / 3（均为文档级） | 本提交 |
 
 ### 第 1 轮发现与处置
 
@@ -190,6 +191,19 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | MINOR | seal 里的 `truncateSync` 分支不可达（首块 `w+` 已截断） | 删除死代码 |
 
 第 3 轮后真跑 7 条命令：`test:e2ee` 100/100、`test:files` 38/38、`test:branding` 60/60、`test:layout` 36/36、`test:installer` 24/24，`check` 与 `makemigrations --check` 无问题。第 3 轮存活的三条变异（关掉 `unsupported` 分支、删除 release 注册、SVG 放回白名单）现已各自被抓到。
+
+### 第 4 轮（收尾轮）发现与处置
+
+第 4 轮逐条核实第 3 轮遗留项：A/B/C 三条 MAJOR 全部确认关闭，且各自有能失败的变异测试保护；D/E/F/G 均已落实；H 的守卫存在且 `finally` 正确递减。剩余 3 条均为文档级：
+
+| 严重度 | 问题 | 处置 |
+| --- | --- | --- |
+| MINOR | 文中仍写"四条通道"（实际 5 条），与同文档"五条 IPC"矛盾 | 改为五条 |
+| MINOR | 仍称 `seal` 会"按声明大小截断"，而该分支已删 | 改为截断由首块 `w+` 承担 |
+| MINOR | 第 3 轮计数 `0/3/5` 与实际表格（3 MAJOR + 4 MINOR）不符 | 改为 `0/3/4` 并注明 H 遗留到第 4 轮 |
+| MINOR | B 的回归保护只到函数级：删掉/改回生产调用点仍全绿 | 增加源码级接线断言（统计出现次数，必须恰好 2 次 = 定义 + 调用），两种变异均已抓到 |
+
+第 4 轮后真跑 7 条命令：`test:e2ee` 101/101、`test:files` 39/39、`test:branding` 61/61、`test:layout` 36/36、`test:installer` 24/24，`check` 与 `makemigrations --check` 无问题。
 
 ### 变异测试结果（三轮问题修复后复验）
 

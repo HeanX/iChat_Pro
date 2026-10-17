@@ -1059,3 +1059,21 @@ test('SVG is not auto-opened even though it looks like an image', () => {
   assert.ok(fs.existsSync(filePath), 'the file is still saved');
   assert.throws(() => api.openTarget({ token: grant.token, senderId: 1 }), /blocked_type/);
 });
+
+test('the file bubble routes its save result through the tested button helper', () => {
+  // Round 4 review: the helper itself was covered, but wiring it up was not -
+  // deleting the call site (or reverting it to offerOpenSavedFile) left the
+  // suite green, because renderFileMessageBubble cannot be loaded in this
+  // harness. A source-level assertion is coarse but it does catch the
+  // regression that matters: the prod path must go through the helper.
+  // Counting occurrences, not just `includes`: the *definition*
+  // (`function applySaveResultToDownloadButton(btn, save)`) also matches the
+  // call text, so an `includes` check stayed green when the call was deleted.
+  const callSites = chatSource.split('applySaveResultToDownloadButton(btn, save)').length - 1;
+  assert.equal(callSites, 2,
+    'one definition plus exactly one call site; deleting the call must fail this');
+  assert.ok(
+    !/\.then\(function \(save\) \{\s*offerOpenSavedFile\(btn, save\);/.test(chatSource),
+    'the bubble must not bypass the helper and call offerOpenSavedFile directly',
+  );
+});

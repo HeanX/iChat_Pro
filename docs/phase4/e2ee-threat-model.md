@@ -329,12 +329,15 @@ sequenceDiagram
 | --- | --- |
 | 私聊/群聊加解密 | `node chat/tests/js/private_chat_e2ee.test.js`、`group_chat_e2ee.test.js` |
 | 公钥缓存与版本回退 | `node --test chat/tests/js/public_key_cache.test.js` |
-| 密钥变化提醒（不继承信任） | `node --test chat/tests/js/key_change_reminder.test.js` |
 | 内嵌设置与通知门控 | `node --test chat/tests/js/notification_integration.test.js` |
+| 消息应用与迟到 ACK | `node --test chat/tests/js/message_accepted.test.js` |
+| 连接状态机与退避 | `node chat/tests/js/chat_connection.test.js` |
 | 服务端密文边界校验 | `.\.venv\Scripts\python.exe manage.py test chat` |
 | 密钥信任与指纹 | `.\.venv\Scripts\python.exe manage.py test accounts` |
 
-聚合命令：`npm run test:e2ee`。
+聚合命令：`npm run test:e2ee`（本文基线 `cfe53be` 上实测 12 个文件、`node --test` 部分 **62 项通过 / 0 失败**）。
+
+> **基线注记**：`chat/tests/js/key_change_reminder.test.js`（对应 §5 T-07"新密钥不继承旧信任"）**不在本文基线 `cfe53be` 上**，它在后续提交 `bfe6076`（P4 Test T08）才引入。该文件存在时 `npm run test:e2ee` 的 `node --test` 部分为 70 项。引用"70 项"的表述必须同时说明基线，否则不可复现。
 
 > **测试全绿不等于本文的任何威胁已被消除**。上表证明的是"当前实现按文档描述的方式工作"，不是"攻击不可行"。
 

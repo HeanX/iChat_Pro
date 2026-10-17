@@ -53,11 +53,11 @@ No changes detected
 
 ```text
 $ .\.venv\Scripts\python.exe manage.py test accounts --parallel 1
-Ran 141 tests in 34.973s
+Ran 142 tests in 36.602s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test accounts.test_key_change_reminder
-Ran 14 tests in 5.128s
+Ran 15 tests in 5.665s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test chat.tests.test_phase2_issues
@@ -65,11 +65,11 @@ Ran 47 tests in 22.433s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test --parallel 1
-Ran 418 tests in 147.050s
+Ran 419 tests in 151.082s
 OK (skipped=2)
 ```
 
-`accounts` 由 127 条增至 141 条（本卡新增 14 条，见 `accounts/test_key_change_reminder.py`）。
+`accounts` 由 127 条增至 142 条（本卡新增 15 条，见 `accounts/test_key_change_reminder.py`）。
 
 **2 条 skip 明细**（本机无 PostgreSQL，属预期）：
 

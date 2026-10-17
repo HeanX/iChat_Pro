@@ -326,6 +326,28 @@ class KeyChangeReminderTests(TestCase):
             'nothing was ever endorsed, so there is nothing to warn about',
         )
 
+    def test_last_endorsed_persists_when_new_key_is_explicitly_untrusted(self):
+        """key_changed and last_endorsed_* answer different questions.
+
+        Marking the rotated key 'untrusted' silences the reminder, but the
+        earlier endorsement of v1 is history and keeps being reported.
+        """
+        self._bob_uploads(self.v1)
+        self._trust('verified')
+        self._bob_uploads(self.v2)
+        self.assertTrue(self._trust_list_row()['key_changed'])
+
+        self.assertEqual(self._trust('untrusted').status_code, 200)
+        row = self._trust_list_row()
+        self.assertFalse(row['key_changed'])
+        self.assertEqual(row['trust_status'], 'untrusted')
+        self.assertEqual(
+            row['last_endorsed_key_version'],
+            1,
+            'the earlier endorsement stays visible even though the warning is off',
+        )
+        self.assertEqual(row['last_endorsed_key_fingerprint'], self.v1['key_fingerprint'])
+
     def test_trust_list_not_changed_after_reverification(self):
         self._bob_uploads(self.v1)
         self._trust('verified')

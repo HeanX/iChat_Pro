@@ -1274,10 +1274,13 @@ def contact_fingerprints_view(request, user_id):
         # The preceding key version (whatever its verdict was).
         'previous_key_fingerprint': previous.key_fingerprint if previous else None,
         'previous_key_version': previous.key_version if previous else None,
-        # The last fingerprint the user endorsed -- the subject of a warning.
         'previous_trust_status': (
             trust_map.get(previous.key_fingerprint, 'untrusted') if previous else None
         ),
+        # The last fingerprint the user endorsed other than the active one. It
+        # stays reported even when key_changed is false (after re-verifying the
+        # new key, or after explicitly marking it untrusted), because it is
+        # history, not a warning flag.
         'last_endorsed_key_fingerprint': superseded.key_fingerprint if superseded else None,
         'last_endorsed_key_version': superseded.key_version if superseded else None,
         'last_endorsed_trust_status': superseded.trust_status if superseded else None,
@@ -1332,12 +1335,10 @@ def key_trust_view(request, user_id):
 
     elif request.method == 'DELETE':
         # Removes the verdict for the *active* fingerprint only (unchanged from
-        # T38). Older KeyTrust rows are kept for audit, matching the "trust is
-        # not inherited, old records are kept" rule in docs/phase4/agent-handoff.md
-        # and the T08 acceptance evidence (docs/phase4/t08-acceptance-evidence.md).
-        # Deleting a whole contact's history was considered for T08 and rejected
-        # for that reason: a post-rotation reminder is cleared by verifying the
-        # new key, not by destroying the audit trail.
+        # T38); older KeyTrust rows are kept for audit. Deleting a whole
+        # contact's history was considered for T08 and rejected for that
+        # reason: a post-rotation reminder is cleared by verifying the new key,
+        # not by destroying the audit trail.
         deleted, _ = KeyTrust.objects.filter(
             user=request.user,
             contact=target,
@@ -1408,7 +1409,8 @@ def key_trust_list_view(request):
                 if previous and previous.key_fingerprint in records_by_fingerprint
                 else (KeyTrust.TrustStatus.UNTRUSTED if previous else None)
             ),
-            # The last fingerprint the user endorsed -- the subject of a warning.
+            # The last fingerprint the user endorsed other than the active one;
+            # reported as history even when key_changed is false.
             'last_endorsed_key_fingerprint': endorsed.key_fingerprint if endorsed else None,
             'last_endorsed_key_version': endorsed.key_version if endorsed else None,
             'last_endorsed_trust_status': endorsed.trust_status if endorsed else None,

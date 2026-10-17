@@ -67,6 +67,21 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- release audit helpers ----------------------------------------------
+# Every value that lands in DEPLOYMENTS.log goes through a whitelist first.
+# The log is one key=value record per line and it is read by humans and by
+# --status, so an embedded newline in an environment variable must never be
+# able to forge a second record (e.g. SSH_CONNECTION or --branch).
+sanitise() {  # sanitise <value> [maxlen]
+    local value=$1 max=${2:-96}
+    # tr -cs collapses every run of non-whitelisted bytes into one '_'; a
+    # newline therefore cannot survive. Leading/trailing separators are
+    # trimmed so a whitespace-only input becomes empty, not '_'.
+    printf '%s' "$value" \
+        | tr -cs 'A-Za-z0-9._@#/-' '_' \
+        | sed -e 's/^_*//' -e 's/_*$//' \
+        | cut -c1-"$max"
+}
+
 # Who is releasing. Under sudo the operator is SUDO_USER; root itself is not
 # an answer to "who deployed this". ICHAT_DEPLOYER takes precedence for CI.
 deploy_actor() {
@@ -75,10 +90,11 @@ deploy_actor() {
         if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
             actor=$SUDO_USER
         else
-            actor=${USER:-${LOGNAME:-unknown}}
+            actor=${USER:-${LOGNAME:-}}
         fi
     fi
-    printf '%s' "$actor" | tr -cs 'A-Za-z0-9._@-' '_' | cut -c1-64
+    actor=$(sanitise "$actor" 64)
+    printf '%s' "${actor:-unknown}"
 }
 
 deploy_via() {
@@ -88,17 +104,44 @@ deploy_via() {
 # Where the request came from. An SSH session carries SSH_CONNECTION, whose
 # first field is the client address; otherwise record the local console.
 deploy_origin() {
+    local origin=local-console
     if [[ -n "${SSH_CONNECTION:-}" ]]; then
-        printf '%s' "${SSH_CONNECTION%% *}"
-    else
-        printf 'local-console'
+        origin=$(sanitise "${SSH_CONNECTION%% *}" 64)
+        [[ -n "$origin" ]] || origin=unknown-ssh
     fi
+    printf '%s' "$origin"
 }
 
 # Approval reference. Recorded on every line; only *enforced* when the caller
-# is not deploying an already-approved target (see require_approval below).
+# is not deploying an already-approved target (see the approval gate below).
+# A whitespace/punctuation-only value sanitises to empty — or to bare
+# separators like "///" — and either way is NOT an approval: a real reference
+# must contain at least one alphanumeric character.
 deploy_approval() {
-    printf '%s' "${ICHAT_APPROVAL:-none}" | tr -cs 'A-Za-z0-9._@#/-' '_' | cut -c1-96
+    local approval
+    approval=$(sanitise "${ICHAT_APPROVAL:-}" 96)
+    if [[ ! "$approval" =~ [A-Za-z0-9] ]]; then
+        approval=""
+    fi
+    printf '%s' "${approval:-none}"
+}
+
+# ICHAT_REQUIRE_APPROVAL is parsed against an explicit truthy set: a typo such
+# as "true"/"yes"/"True" must fail loudly instead of silently disabling the
+# gate, and an unknown value must not be read as "off". The result is set in
+# REQUIRE_APPROVAL by reference (not echoed from a subshell), because `exit`
+# inside $(...) would only leave the subshell and let the deploy continue.
+parse_require_approval() {
+    local raw=${ICHAT_REQUIRE_APPROVAL:-1}
+    case "${raw,,}" in
+        1|true|yes|on) REQUIRE_APPROVAL=1 ;;
+        0|false|no|off) REQUIRE_APPROVAL=0 ;;
+        *)
+            echo "ERROR: ICHAT_REQUIRE_APPROVAL=$raw is not a recognised value." >&2
+            echo "       Use 1/true/yes/on or 0/false/no/off." >&2
+            exit 2
+            ;;
+    esac
 }
 
 # --- --status -----------------------------------------------------------
@@ -107,11 +150,21 @@ if [[ "$SHOW_STATUS" == "1" ]]; then
         echo "No deployments recorded in $LOG_FILE"
         exit 0
     fi
+    # The last successfully recorded release is the authoritative answer to
+    # "what is running": DEPLOYMENTS.log is only appended after both gates
+    # pass, while `git rev-parse HEAD` in the repo can lag behind (a refused
+    # release never reaches the log, and a manual checkout changes the tree
+    # without deploying).
     echo "Recent releases in $LOG_FILE (newest last):"
-    tail -n "${ICHAT_STATUS_LINES:-5}" "$LOG_FILE"
-    current=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+    if [[ "$VERBOSE" == "1" ]]; then
+        tail -n "${ICHAT_STATUS_LINES:-5}" "$LOG_FILE"
+    else
+        tail -n "${ICHAT_STATUS_LINES:-5}" "$LOG_FILE" \
+            | sed -e 's/ via=/ /' -e 's/ from=[^ ]*//'
+    fi
+    last_sha=$(awk -F'sha=' 'NF>1 {split($2, a, " "); sha=a[1]} END {print sha}' "$LOG_FILE")
     echo
-    echo "Running now: $current"
+    echo "Running now (last recorded release): ${last_sha:-unknown}"
     if [[ "$VERBOSE" != "1" ]]; then
         echo "(use --verbose for the full field list)"
     fi
@@ -122,6 +175,38 @@ if [[ -n "$COMMIT" ]]; then
     TARGET="$BRANCH@$COMMIT"
 else
     TARGET="$BRANCH"
+fi
+# --branch/--commit come from the command line; keep the logged target free of
+# whitespace so it cannot break the one-record-per-line invariant.
+TARGET=$(sanitise "$TARGET" 96)
+[[ -n "$TARGET" ]] || { echo "ERROR: empty deploy target after sanitising." >&2; exit 2; }
+
+# --- approval gate (P4 T50 / #177) ---
+# A production release must name the approval it belongs to, so DEPLOYMENTS.log
+# can tie a running SHA back to a decision.
+#   ICHAT_APPROVAL=<ticket/PR/change-id>
+#   ICHAT_REQUIRE_APPROVAL=1|0  (1 in production; 0 only for a known-good
+#                                emergency, which is itself recorded)
+# `--commit` (a rollback to a previously approved SHA) is always allowed.
+#
+# THIS RUNS BEFORE ANY GIT COMMAND. /opt/ichat/repo is the tree systemd runs,
+# so fetching/checking out first would leave the production tree on an
+# unapproved commit even when the release is then refused — and would make
+# `git rev-parse HEAD` (the documented evidence of what runs) point at a
+# commit that was never deployed. A refused release must not touch the tree.
+APPROVAL=$(deploy_approval)
+REQUIRE_APPROVAL=""
+parse_require_approval
+if [[ "$APPROVAL" == "none" && "$REQUIRE_APPROVAL" == "1" && -z "$COMMIT" ]]; then
+    echo "ERROR: this release has no approval reference." >&2
+    echo "       Set ICHAT_APPROVAL to the ticket/PR that approved it, e.g." >&2
+    echo "         sudo ICHAT_APPROVAL='#177 PR-42' $BIN_COPY" >&2
+    echo "       Rollbacks (--commit) do not require one." >&2
+    echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
+    exit 1
+fi
+if [[ "$APPROVAL" == "none" ]]; then
+    echo "WARNING: no approval reference (kind=$([[ -n "$COMMIT" ]] && echo rollback || echo deploy)); recorded as approval=none." >&2
 fi
 
 echo "==> Deploying iChat Pro target=$TARGET"
@@ -144,27 +229,6 @@ else
     git -C "$REPO_DIR" reset --quiet --hard "origin/$BRANCH"
 fi
 DEPLOYED_SHA=$(git -C "$REPO_DIR" rev-parse HEAD)
-
-# --- approval gate (P4 T50 / #177) ---
-# A production release must name the approval it belongs to, so DEPLOYMENTS.log
-# can tie a running SHA back to a decision. Enforced BEFORE anything touching
-# the running service, so a refused release changes nothing.
-#   ICHAT_APPROVAL=<ticket/PR/change-id>
-#   ICHAT_REQUIRE_APPROVAL=1  (default in production; 0 only for a known-good
-#                              emergency, which is itself recorded)
-# `--commit` (a rollback to a previously approved SHA) is always allowed.
-APPROVAL=$(deploy_approval)
-REQUIRE_APPROVAL=${ICHAT_REQUIRE_APPROVAL:-1}
-if [[ "$APPROVAL" == "none" && "$REQUIRE_APPROVAL" == "1" && -z "$COMMIT" ]]; then
-    echo "ERROR: this release has no approval reference." >&2
-    echo "       Set ICHAT_APPROVAL to the ticket/PR that approved it, e.g." >&2
-    echo "         sudo ICHAT_APPROVAL='#177 PR-42' $BIN_COPY" >&2
-    echo "       Rollbacks (--commit) do not require one. Nothing was changed." >&2
-    exit 1
-fi
-if [[ "$APPROVAL" == "none" ]]; then
-    echo "WARNING: ICHAT_APPROVAL is unset (kind=$([[ -n "$COMMIT" ]] && echo rollback || echo deploy)); recorded as approval=none." >&2
-fi
 
 # --- python env ---
 [[ -d "$VENV_DIR" ]] || python3.13 -m venv "$VENV_DIR"
@@ -279,18 +343,30 @@ printf 'ts=%s sha=%s target=%s kind=%s actor=%s via=%s from=%s smoke=%s approval
     "$(deploy_approval)" \
     >> "$LOG_FILE"
 
-# Remember the SHA that is now running and the one it replaced, so a rollback
-# target is always available even after the log is rotated. The previous SHA
-# is whatever the state file said before this run — NOT git reflog, which
-# reflects fetches/checkouts rather than deployments.
-mkdir -p "$STATE_DIR"
+# Remember the SHA of the last SUCCESSFUL release and the one it replaced, so
+# a rollback target is always available even after the log is rotated. This is
+# bookkeeping only: the log line above is already written and the release is
+# live, so a failure here must not turn a successful deploy into a failed one.
+# The previous SHA is whatever the state file said before this run — NOT git
+# reflog, which reflects fetches/checkouts rather than deployments.
 PREVIOUS=""
-if [[ -s "$STATE_DIR/current" ]]; then
-    PREVIOUS=$(cat "$STATE_DIR/current")
+if state_ok=1; then
+    mkdir -p "$STATE_DIR" 2>/dev/null || state_ok=0
+fi
+if [[ "$state_ok" == "1" && -s "$STATE_DIR/current" ]]; then
+    PREVIOUS=$(cat "$STATE_DIR/current" 2>/dev/null || true)
     [[ "$PREVIOUS" == "$DEPLOYED_SHA" ]] && PREVIOUS=
 fi
-printf '%s\n' "$DEPLOYED_SHA" > "$STATE_DIR/current"
-[[ -n "$PREVIOUS" ]] && printf '%s\n' "$PREVIOUS" > "$STATE_DIR/previous"
+if [[ "$state_ok" == "1" ]]; then
+    printf '%s\n' "$DEPLOYED_SHA" > "$STATE_DIR/current" 2>/dev/null || state_ok=0
+fi
+if [[ "$state_ok" == "1" && -n "$PREVIOUS" ]]; then
+    printf '%s\n' "$PREVIOUS" > "$STATE_DIR/previous" 2>/dev/null || state_ok=0
+fi
+if [[ "$state_ok" != "1" ]]; then
+    echo "WARNING: could not update $STATE_DIR; the release IS recorded in" >&2
+    echo "         $LOG_FILE and is running. Rollback target: see the log." >&2
+fi
 echo "==> Recorded: actor=$(deploy_actor) kind=$RELEASE_KIND approval=$(deploy_approval)"
 [[ -n "$PREVIOUS" ]] && echo "    rollback target if needed: $PREVIOUS"
 exit 0

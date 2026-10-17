@@ -29,7 +29,9 @@ DEPLOY_SCRIPT = REPO_ROOT / "deploy" / "deploy.sh"
 BASH = shutil.which("bash")
 HAS_BASH = BASH is not None and DEPLOY_SCRIPT.is_file()
 
-HELPERS_START = "deploy_actor() {"
+# The helpers block runs from the first audit helper through the banner that
+# starts --status, so sanitise() and every helper drawn from it are included.
+HELPERS_START = "# --- release audit helpers ---"
 HELPERS_END = "# --- --status"
 APPROVAL_START = "# --- approval gate (P4 T50 / #177) ---"
 # The audit line begins with this literal printf (a raw backslash-n in the
@@ -183,23 +185,32 @@ class ApprovalGateTests(unittest.TestCase):
     """An unapproved release must be refused and must change nothing."""
 
     def run_gate(self, *, approval, commit, require="1"):
-        """Run the approval block with the same variables deploy.sh sets."""
+        """Run the approval block with the same variables deploy.sh sets.
+
+        ICHAT_APPROVAL/ICHAT_REQUIRE_APPROVAL arrive through the environment so
+        whitespace is preserved verbatim; embedding them as shell literals
+        would turn a tab into the two characters "\\t".
+        """
         workdir = Path(tempfile.mkdtemp(prefix="ichat-approval-"))
         self.addCleanup(shutil.rmtree, workdir, True)
         log = workdir / "DEPLOYMENTS.log"
         log.touch()
+        # The extracted range continues past the gate to the python-env
+        # banner, and the .env guard sits in between — satisfy it so the test
+        # observes the gate's own exit code.
+        (workdir / ".env").write_text("", encoding="utf-8")
         harness = workdir / "h.sh"
         harness.write_text(
             "#!/usr/bin/env bash\nset -uo pipefail\n"
             + helpers_block()
             + "\n"
             + f"LOG_FILE={log.as_posix()!r}\n"
+            + f"APP_DIR={workdir.as_posix()!r}\n"
             + "BIN_COPY=/opt/ichat/bin/deploy.sh\n"
             + "DEPLOYED_SHA=deadbeef\n"
+            + "TARGET=main\n"
             + f"COMMIT={commit!r}\n"
-            + f"ICHAT_REQUIRE_APPROVAL={require!r}\n"
-            + f"ICHAT_APPROVAL={approval!r}\n"
-            + extract(APPROVAL_START, "# --- python env ---")
+            + extract(APPROVAL_START, "echo \"==> Deploying iChat Pro target=")
             + "\necho GATE_PASSED\n",
             encoding="utf-8",
         )
@@ -208,6 +219,8 @@ class ApprovalGateTests(unittest.TestCase):
             "PATH": os.environ.get("PATH", ""),
             "TMPDIR": os.environ.get("TMPDIR") or os.environ.get("TEMP") or "",
             "USER": "tester",
+            "ICHAT_APPROVAL": approval,
+            "ICHAT_REQUIRE_APPROVAL": require,
         }
         result = subprocess.run(
             [BASH, str(harness)],
@@ -240,7 +253,36 @@ class ApprovalGateTests(unittest.TestCase):
     def test_emergency_override_is_allowed_but_warned(self):
         result, _ = self.run_gate(approval="none", commit="", require="0")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("ICHAT_APPROVAL is unset", result.stderr)
+        self.assertIn("no approval reference", result.stderr)
+
+    def test_whitespace_only_approval_is_not_an_approval(self):
+        """A blank/punctuation value must not slip past the gate.
+
+        The value is passed through the environment (not embedded as a shell
+        literal) so a real tab/newline reaches the script — repr() would hand
+        bash the two characters "\\t" instead of a tab.
+        """
+        for blank in (" ", "   ", "\t", "\n", " \t\n ", "!!!", "///"):
+            result, _ = self.run_gate(approval=blank, commit="")
+            self.assertNotEqual(
+                result.returncode, 0,
+                msg=f"approval={blank!r} was accepted; it is not an approval",
+            )
+            self.assertIn("no approval reference", result.stderr)
+
+    def test_unrecognised_require_approval_is_a_config_error(self):
+        """A typo must fail loudly, never silently disable the gate."""
+        result, _ = self.run_gate(approval="none", commit="", require="true-ish")
+        self.assertEqual(result.returncode, 2, msg=result.stdout + result.stderr)
+        self.assertIn("not a recognised value", result.stderr)
+
+    def test_truthy_variants_keep_the_gate_on(self):
+        for truthy in ("1", "true", "YES", "on"):
+            result, _ = self.run_gate(approval="none", commit="", require=truthy)
+            self.assertNotEqual(
+                result.returncode, 0,
+                msg=f"ICHAT_REQUIRE_APPROVAL={truthy} must still require approval",
+            )
 
     def test_approval_gate_runs_before_touching_the_service(self):
         """Position matters: the refusal must precede migrate/restart."""
@@ -251,6 +293,32 @@ class ApprovalGateTests(unittest.TestCase):
                 gate_at,
                 text.index(later),
                 msg=f"the approval gate must run before {later!r}",
+            )
+
+    def test_approval_gate_runs_before_any_git_operation(self):
+        """A refused release must not move the production tree either.
+
+        /opt/ichat/repo is what systemd runs, so fetching or checking out
+        before the gate would leave the tree on an unapproved commit and make
+        `git rev-parse HEAD` (the documented evidence of what runs) point at a
+        commit that was never deployed.
+        """
+        text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        gate_at = text.index(APPROVAL_START)
+        for earlier_sensitive in (
+            "git clone",
+            "fetch --quiet origin",
+            "checkout --quiet --force",
+            "reset --quiet --hard",
+        ):
+            position = text.index(earlier_sensitive)
+            self.assertLess(
+                gate_at,
+                position,
+                msg=(
+                    f"the approval gate must run before {earlier_sensitive!r}; "
+                    "a refused release must not modify the production tree"
+                ),
             )
 
 
@@ -441,4 +509,4 @@ class StatusOutputTests(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertIn("sha=aaaa", output)
         self.assertIn("sha=bbbb", output)
-        self.assertIn("Running now:", output)
+        self.assertIn("Running now (last recorded release): bbbb", output)

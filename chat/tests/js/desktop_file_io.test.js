@@ -599,7 +599,7 @@ test('writes and opens are refused for other senders and for executables', async
 });
 
 test('an OS-level open failure is reported instead of swallowed', async () => {
-  const target = tempPath('no-association.dat');
+  const target = tempPath('no-association.txt');
   const h = launch({ dialogPath: target, openPathError: 'No application is associated with this file' });
   await h.started();
   const pick = (await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin()),
@@ -884,4 +884,126 @@ test('a repeated download does not stack openers', () => {
   offer(button, { status: 'saved', token: 'tok-2', fileName: 'a.txt' });
   const second = children.filter((child) => child.attributes && child.attributes['data-file-open'] !== undefined);
   assert.equal(second.length, 1, 'exactly one opener remains');
+});
+
+// ── Round 2 review: the gaps its mutation testing exposed ─────────────────
+
+test('only known document types are auto-opened, everything else is refused', () => {
+  // Round 2 (BLOCKER): a blocklist cannot enumerate what Windows Shell will
+  // execute. The decision is an allowlist, so these must all be refused even
+  // though the file itself is saved normally.
+  const api = io.createFileIo({ maxGrants: 64 });
+  const execute = [
+    'payload.scf', 'payload.url', 'payload.py', 'payload.pyw', 'payload.sh',
+    'payload.pl', 'payload.rb', 'payload.exe', 'payload.bat', 'payload.cmd',
+    'payload.msi', 'payload.ps1', 'payload.vbs', 'payload.js', 'payload.jse',
+    'payload.wsf', 'payload.hta', 'payload.jar', 'payload.lnk', 'payload.pif',
+    'payload.cpl', 'payload.reg', 'payload.msix', 'payload.appx',
+    'no-extension', 'archive.tar.gz.exe', 'payload.SCF', 'payload.PyW',
+  ];
+  for (const name of execute) {
+    const filePath = tempPath('open-' + name.replace(/[^a-z0-9.]/gi, '_'));
+    const grant = api.createSaveGrant({ fileName: name, totalBytes: 2, senderId: 1, filePath });
+    api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'TVo=' });
+    api.sealGrant({ token: grant.token, senderId: 1 });
+    assert.ok(fs.existsSync(filePath), name + ' is still saved to disk');
+    assert.throws(() => api.openTarget({ token: grant.token, senderId: 1 }), /blocked_type/, name);
+  }
+  for (const name of ['report.pdf', 'notes.txt', 'photo.PNG', 'sheet.xlsx', 'clip.mp4', 'bundle.zip']) {
+    const filePath = tempPath('ok-' + name);
+    const grant = api.createSaveGrant({ fileName: name, totalBytes: 2, senderId: 1, filePath });
+    api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'TVo=' });
+    api.sealGrant({ token: grant.token, senderId: 1 });
+    assert.equal(api.openTarget({ token: grant.token, senderId: 1 }).filePath, filePath, name);
+  }
+});
+
+test('a sealed grant does not consume the create quota', () => {
+  // Round 2 (MAJOR): mutation C showed nothing protected this. Saving more
+  // files than the cap allows must keep working as long as each one finishes.
+  const api = io.createFileIo({ maxGrants: 2 });
+  for (let index = 0; index < 6; index += 1) {
+    const filePath = tempPath('quota-' + index + '.txt');
+    const grant = api.createSaveGrant({ fileName: 'q.txt', totalBytes: 2, senderId: 1, filePath });
+    api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'QUI=' });
+    api.sealGrant({ token: grant.token, senderId: 1 });
+  }
+  assert.ok(api.activeGrants() >= 2, 'sealed grants stay resolvable for "open"');
+  // Two *unfinished* grants still hit the cap.
+  const a = api.createSaveGrant({ fileName: 'a.txt', totalBytes: 9, senderId: 1, filePath: tempPath('a.txt') });
+  api.createSaveGrant({ fileName: 'b.txt', totalBytes: 9, senderId: 1, filePath: tempPath('b.txt') });
+  assert.throws(() => api.createSaveGrant({
+    fileName: 'c.txt', totalBytes: 9, senderId: 1, filePath: tempPath('c.txt'),
+  }), /too_many_grants/);
+  // Releasing one frees the slot again.
+  api.releaseGrant({ token: a.token, senderId: 1 });
+  assert.equal(api.createSaveGrant({
+    fileName: 'c.txt', totalBytes: 9, senderId: 1, filePath: tempPath('c.txt'),
+  }).totalBytes, 9);
+});
+
+test('releasing a failed download frees its slot and invalidates the token', () => {
+  const api = io.createFileIo({ maxGrants: 1 });
+  const first = api.createSaveGrant({ fileName: 'f.txt', totalBytes: 4, senderId: 1, filePath: tempPath('f.txt') });
+  api.writeChunk({ token: first.token, senderId: 1, offset: 0, dataBase64: 'QUI=' });
+  assert.throws(() => api.createSaveGrant({
+    fileName: 'g.txt', totalBytes: 4, senderId: 1, filePath: tempPath('g.txt'),
+  }), /too_many_grants/);
+
+  assert.deepEqual(api.releaseGrant({ token: first.token, senderId: 1 }),
+    { released: true, fileName: 'f.txt', discardedBytes: 2 });
+  assert.throws(() => api.writeChunk({ token: first.token, senderId: 1, offset: 2, dataBase64: 'QUI=' }),
+    /not_found/, 'a released token must stop working');
+  // The slot is available again.
+  const second = api.createSaveGrant({ fileName: 'g.txt', totalBytes: 4, senderId: 1, filePath: tempPath('g.txt') });
+  assert.equal(typeof second.token, 'string');
+  // Other senders cannot release someone else's grant.
+  assert.throws(() => api.releaseGrant({ token: second.token, senderId: 2 }), /wrong_sender/);
+});
+
+test('a trailing dot or space in the dialog path cannot smuggle an executable', () => {
+  // Round 2 (MAJOR): mutation D showed the previous case was unreachable,
+  // because sanitizeFileName already strips the trailing space from the
+  // suggested name. The path that actually reaches openTarget is the one the
+  // user confirmed in the dialog, so mutate *that*.
+  const api = io.createFileIo({ maxGrants: 8 });
+  for (const dialogName of ['payload.exe.', 'payload.exe ', 'payload.scf.', 'payload.bat  ']) {
+    const filePath = tempPath('smuggled-' + dialogName.replace(/[^a-z.]/gi, '_'));
+    const grant = api.createSaveGrant({ fileName: 'innocent.txt', totalBytes: 2, senderId: 1, filePath });
+    api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'TVo=' });
+    api.sealGrant({ token: grant.token, senderId: 1 });
+    assert.throws(() => api.openTarget({ token: grant.token, senderId: 1 }), /blocked_type/, dialogName);
+  }
+  // The normalisation is what makes the *legitimate* trailing-dot case still
+  // work: Windows strips "report.pdf." to "report.pdf", so it must be openable.
+  const legitPath = tempPath('legit.pdf.');
+  const legit = api.createSaveGrant({ fileName: 'legit.pdf', totalBytes: 2, senderId: 1, filePath: legitPath });
+  api.writeChunk({ token: legit.token, senderId: 1, offset: 0, dataBase64: 'TVo=' });
+  api.sealGrant({ token: legit.token, senderId: 1 });
+  assert.equal(api.openTarget({ token: legit.token, senderId: 1 }).filePath, legitPath,
+    'a trailing dot must not turn a document into an unopenable file');
+});
+
+test('a failed native save releases its grant so retries are not quota-blocked', async () => {
+  // Round 2 (MAJOR): mutation H showed nothing covered the release call.
+  const released = [];
+  const { bridge } = fakeBridge({
+    writeChunk: async () => failed('write_failed', 'ENOSPC'),
+    release: async (payload) => { released.push(payload.token); return ok({ released: true }); },
+  });
+  const { ft } = loadFileTransfer(bridge);
+  await assert.rejects(() => ft.saveBlobToDisk(new Blob(['abc']), { original_name: 'a.txt' }),
+    (error) => error.nativeCode === 'write_failed');
+  sameShape(released, ['tok-1'], 'the failed grant must be handed back');
+});
+
+test('a release that itself fails does not mask the original error', async () => {
+  const { bridge } = fakeBridge({
+    writeChunk: async () => failed('write_failed'),
+    release: async () => failed('not_found'),
+  });
+  const { ft } = loadFileTransfer(bridge);
+  await assert.rejects(() => ft.saveBlobToDisk(new Blob(['abc']), { original_name: 'a.txt' }),
+    (error) => error.nativeCode === 'write_failed',
+    'the user must still see why the save failed');
 });

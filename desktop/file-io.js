@@ -34,14 +34,25 @@ const MAX_GRANTS = 8;
 const GRANT_TTL_MS = 30 * 60 * 1000;
 const MAX_FILE_NAME_LENGTH = 180;
 
-// Windows resolves no extension and treats these as executable. shell.openPath
-// on such a file runs code that arrived from a chat peer, so it is refused:
-// the file is still saved, the user can open it from Explorer themselves.
-const BLOCKED_OPEN_EXTENSIONS = [
-  '.exe', '.com', '.bat', '.cmd', '.msi', '.msp', '.scr', '.pif',
-  '.ps1', '.psm1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh',
-  '.hta', '.cpl', '.jar', '.lnk', '.reg', '.msc', '.gadget', '.dll',
-  '.application', '.appx', '.appxbundle', '.msix', '.msixbundle',
+// Round 2 review (BLOCKER): a *blocklist* is the wrong shape for this. The
+// name comes from the peer's encrypted metadata and becomes the save dialog's
+// default, so a peer can pick any extension - and Windows Shell executes far
+// more than the obvious list: .scf, .url, .pyw, .py, .sh, .pl, .rb, .cpl,
+// .js, .jse, .wsf, .hta, .jar, .pif, .msix... Enumerating them is a losing
+// game. Only known-safe *document* types are opened automatically; everything
+// else is saved normally and the user opens it from Explorer themselves.
+const OPENABLE_EXTENSIONS = [
+  // plain text / data
+  '.txt', '.log', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.md', '.ini', '.cfg', '.conf',
+  // documents
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', '.rtf', '.epub',
+  // images
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tif', '.tiff', '.svg', '.ico', '.heic',
+  // audio / video
+  '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma',
+  '.mp4', '.mkv', '.mov', '.avi', '.webm', '.wmv', '.flv', '.m4v',
+  // archives (opened by the archiver, not executed)
+  '.zip', '.7z', '.rar', '.tar', '.gz', '.tgz', '.bz2', '.xz',
 ];
 
 const RESERVED_FILE_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
@@ -118,7 +129,7 @@ function decodeBase64(raw) {
  * @param {number} [options.grantTtlMs]
  * @param {() => number} [options.now]
  * @param {() => string} [options.createToken]
- * @param {string[]} [options.blockedExtensions]
+ * @param {string[]} [options.openableExtensions]
  */
 function createFileIo(options = {}) {
   const fileSystem = options.fs || fs;
@@ -127,7 +138,7 @@ function createFileIo(options = {}) {
   const grantTtlMs = options.grantTtlMs || GRANT_TTL_MS;
   const now = options.now || (() => Date.now());
   const createToken = options.createToken || (() => crypto.randomUUID());
-  const blockedExtensions = options.blockedExtensions || BLOCKED_OPEN_EXTENSIONS;
+  const openableExtensions = options.openableExtensions || OPENABLE_EXTENSIONS;
 
   /** token -> grant */
   const grants = new Map();
@@ -214,6 +225,26 @@ function createFileIo(options = {}) {
     }
     if (grant.senderId !== senderId) fail('wrong_sender');
     return grant;
+  }
+
+  /**
+   * Give up on a download and free its quota slot.
+   *
+   * Round 2 review (MAJOR): without this, every failed attempt (disk full,
+   * file locked) kept its grant forever, so after 8 failures every save in the
+   * next 30 minutes failed with a misleading "too many downloads" message.
+   * The partially written file is left on disk (the user may want it) but the
+   * token stops working, so the renderer must restart the download.
+   */
+  function releaseGrant(input) {
+    if (!input || typeof input !== 'object') fail('invalid_payload', 'request');
+    const token = input.token;
+    if (typeof token !== 'string' || token.length === 0 || token.length > 128) fail('invalid_payload', 'token');
+    const grant = grants.get(token);
+    if (!grant) fail('not_found');
+    if (grant.senderId !== input.senderId) fail('wrong_sender');
+    grants.delete(token);
+    return { released: true, fileName: grant.fileName, discardedBytes: grant.writtenBytes };
   }
 
   /**
@@ -311,11 +342,13 @@ function createFileIo(options = {}) {
     const grant = requireGrant(input.token, input.senderId);
     if (!grant.sealed) fail('not_sealed');
     if (grant.writtenBytes !== grant.totalBytes) fail('incomplete');
-    // Review round 1 (MINOR): Win32 strips trailing dots/spaces, so
-    // "evil.exe " would otherwise land as "evil.exe" while extname() reports
-    // ".exe " and slips past the blocklist. Normalise before checking.
-    const extension = path.extname(String(grant.filePath).replace(/[. ]+$/, '')).toLowerCase();
-    if (blockedExtensions.includes(extension)) fail('blocked_type', extension);
+    // Round 1 (MINOR): Win32 strips trailing dots/spaces, so "evil.exe "
+    // lands as "evil.exe" while extname() would report ".exe ". Round 2
+    // (BLOCKER): the decision is an allowlist, so anything unusual - including
+    // a missing extension or a double extension - simply is not openable.
+    const trimmed = String(grant.filePath).replace(/[. ]+$/, '');
+    const extension = path.extname(trimmed).toLowerCase();
+    if (!openableExtensions.includes(extension)) fail('blocked_type', extension || '(none)');
     try {
       if (!fileSystem.existsSync(grant.filePath)) fail('not_found');
     } catch (error) {
@@ -330,6 +363,7 @@ function createFileIo(options = {}) {
     createSaveGrant,
     writeChunk,
     sealGrant,
+    releaseGrant,
     openTarget,
     prune,
     // Introspection for logs/tests; never exposed over IPC.
@@ -343,7 +377,7 @@ module.exports = {
   sanitizeFileName,
   toByteCount,
   FileIoError,
-  BLOCKED_OPEN_EXTENSIONS,
+  OPENABLE_EXTENSIONS,
   MAX_FILE_BYTES,
   MAX_CHUNK_BYTES,
   MAX_GRANTS,

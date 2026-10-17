@@ -217,6 +217,13 @@ function registerFileIpc() {
     return fileIo.sealGrant({ ...(payload || {}), senderId: fileSenderId(event) });
   }));
 
+  // Round 2 review (MAJOR): lets a failed download hand its quota slot back
+  // instead of blocking every later save until the TTL expires.
+  ipcMain.handle('ichat:files:release', (event, payload) => fileEnvelope(() => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    return fileIo.releaseGrant({ ...(payload || {}), senderId: fileSenderId(event) });
+  }));
+
   ipcMain.handle('ichat:files:open-downloaded', (event, payload) => fileEnvelopeAsync(async () => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
     const target = fileIo.openTarget({ ...(payload || {}), senderId: fileSenderId(event) });

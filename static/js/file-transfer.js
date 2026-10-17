@@ -1183,6 +1183,16 @@
                 return bridge.seal({ token: target.token });
             });
         } catch (err) {
+            // Round 2 review (MAJOR): hand the quota slot back. A retry starts a
+            // fresh grant, so repeatedly failing saves (disk full, locked file)
+            // cannot lock the user out of saving anything else for 30 minutes.
+            if (typeof bridge.release === 'function') {
+                try {
+                    await callNativeFileBridge(function () {
+                        return bridge.release({ token: target.token });
+                    });
+                } catch (_) { /* best effort: the TTL reclaims it eventually */ }
+            }
             throw rewrapNativeFileError(err);
         }
         return {

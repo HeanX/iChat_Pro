@@ -5853,17 +5853,19 @@ function offerOpenSavedFile(btn, save) {
 
 function downloadActiveImageViewer() {
   if (!activeImageViewer) return;
-  // Same post-save handling as the file bubble (toast + open affordance), so
-  // the viewer does not silently swallow a failed save.
-  var target = document.createElement('div');
-  target.className = 'file-bubble-info';
+  // Round 2 review (MINOR): the earlier version appended the "open" button to
+  // a detached div, so it never appeared. The image itself is already on screen
+  // and re-openable, so the viewer only needs the save outcome reported: the
+  // success toast comes from saveOrDownloadBlob and a failure is surfaced here.
   return saveOrDownloadBlob(
     activeImageViewer.blob,
     imageViewerFilename(),
     activeImageViewer.url,
     { fileId: activeImageViewer.fileId }
   ).then(function (save) {
-    if (save && save.status === 'saved') offerOpenSavedFile(target, save);
+    if (save && save.status === 'saved' && window.showToast) {
+      window.showToast('已保存到：' + (save.fileName || imageViewerFilename()));
+    }
     return save;
   });
 }
@@ -6083,6 +6085,17 @@ function renderFileMessageBubble(div, msg, conv, groupMeta) {
             url,
             { fileId: parseInt(fid, 10) }
           ).then(function (save) {
+            // Round 2 review (MAJOR): 'unsupported' means the browser anchor
+            // already fired and the download manager owns the file. Calling
+            // offerOpenSavedFile would reset the button to "Download" and undo
+            // the Done state the browser build had before T19.
+            if (save && save.status === 'unsupported') {
+              btn.classList.remove('downloading');
+              btn.classList.add('downloaded');
+              btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
+              lucide.createIcons();
+              return save;
+            }
             offerOpenSavedFile(btn, save);
             return save;
           });

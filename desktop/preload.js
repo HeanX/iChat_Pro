@@ -12,6 +12,7 @@ const INVOKE_CHANNELS = [
   'ichat:files:pick-save-target',
   'ichat:files:write-chunk',
   'ichat:files:seal',
+  'ichat:files:release',
   'ichat:files:open-downloaded',
 ];
 
@@ -45,6 +46,7 @@ contextBridge.exposeInMainWorld('iChatDesktop', {
     pickSaveTarget: (payload) => ipcRenderer.invoke('ichat:files:pick-save-target', payload),
     writeChunk: (payload) => ipcRenderer.invoke('ichat:files:write-chunk', payload),
     seal: (payload) => ipcRenderer.invoke('ichat:files:seal', payload),
+    release: (payload) => ipcRenderer.invoke('ichat:files:release', payload),
     openDownloaded: (payload) => ipcRenderer.invoke('ichat:files:open-downloaded', payload),
   },
   __channels: INVOKE_CHANNELS,

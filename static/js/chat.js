@@ -7438,6 +7438,18 @@ async function fetchKeyTrustList({ force = false } = {}) {
   return keyTrustListCache;
 }
 
+function trustRowLabel(trust) {
+  // A changed row must still say what the current verdict is; "Changed" alone
+  // hid the fact that the new fingerprint is untrusted.
+  const status = trust.trust_status || 'untrusted';
+  const statusText = status === 'verified' || status === 'trusted'
+    ? (currentLanguage === 'zh' ? '已验证' : 'Verified')
+    : (currentLanguage === 'zh' ? '未验证' : 'Unverified');
+  if (!trust.key_changed) return statusText;
+  const changed = currentLanguage === 'zh' ? '已变更' : 'Changed';
+  return changed + ' · ' + statusText;
+}
+
 function renderTrustList(trusts) {
   const list = document.getElementById('security-trust-list');
   if (!list) return;
@@ -7449,9 +7461,13 @@ function renderTrustList(trusts) {
   trusts.forEach(trust => {
     const row = document.createElement('div');
     const changed = Boolean(trust.key_changed);
+    // The warning is about the last endorsed fingerprint, which can be older
+    // than the immediately preceding version after consecutive rotations.
+    const warnedVersion = trust.last_endorsed_key_version;
     const previousVersion = trust.previous_key_version;
-    const versionLabel = changed && previousVersion != null && previousVersion !== trust.key_version
-      ? 'v' + escapeHtml(previousVersion) + ' → v' + escapeHtml(trust.key_version)
+    const fromVersion = changed && warnedVersion != null ? warnedVersion : previousVersion;
+    const versionLabel = changed && fromVersion != null && fromVersion !== trust.key_version
+      ? 'v' + escapeHtml(fromVersion) + ' → v' + escapeHtml(trust.key_version)
       : 'v' + escapeHtml(trust.key_version);
     row.className = 'security-trust-row';
     row.innerHTML =
@@ -7460,7 +7476,7 @@ function renderTrustList(trusts) {
         '<div class="text-[10px] text-textSecondary font-mono truncate">' + versionLabel + ' ' + escapeHtml(formatFingerprint(trust.key_fingerprint)) + '</div>' +
       '</div>' +
       '<span class="' + (changed ? 'security-status-chip security-status-danger' : 'security-status-chip security-status-verified') + '">' +
-        (changed ? (currentLanguage === 'zh' ? '已变更' : 'Changed') : escapeHtml(trust.trust_status || 'trusted')) +
+        escapeHtml(trustRowLabel(trust)) +
       '</span>';
     list.appendChild(row);
   });

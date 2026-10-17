@@ -82,7 +82,7 @@
 | P4 Test T05 | WP06 | 完成群聊和文件跨端验证 | 综合测试记录 | 群消息和加密文件在各端结果一致 | P1 | P4 T19、P4 T28、P4 T37 | 未完成（[Issue #186](https://github.com/HeanX/iChat_Pro/issues/186) 开放） |
 | P4 Test T06 | WP06 | 复核三端加密协议兼容性 | 加密测试向量 | Windows、Android、浏览器对相同向量结果一致 | P0 | P4 T14、P4 T24 | 未完成（[Issue #187](https://github.com/HeanX/iChat_Pro/issues/187) 开放） |
 | P4 Test T07 | WP06 | 审计服务端密文边界 | 数据库/API/日志检查报告 | 无消息明文、私钥和文件密钥明文 | P0 | P4 T07～P4 T11 | 未完成（[Issue #188](https://github.com/HeanX/iChat_Pro/issues/188) 开放） |
-| P4 Test T08 | WP06 | 验证密钥指纹和变化提醒 | UI、接口和测试 | 新密钥不自动继承旧信任状态 | P0 | P4 Test T06 | 未完成（[Issue #189](https://github.com/HeanX/iChat_Pro/issues/189) 开放）；2026-10-18 代码与测试已就绪（accounts 133 条 + test:e2ee 70 条通过），待非作者评审确认后转完成 |
+| P4 Test T08 | WP06 | 验证密钥指纹和变化提醒 | UI、接口和测试 | 新密钥不自动继承旧信任状态 | P0 | P4 Test T06 | 未完成（[Issue #189](https://github.com/HeanX/iChat_Pro/issues/189) 开放）；2026-10-18 代码与测试已就绪（`accounts` 全绿、`npm run test:e2ee` 全绿，详见 `accounts/test_key_change_reminder.py`），待非作者评审确认与 UI 人工验收后转完成 |
 | P4 Test T09 | WP06 | 编写总体测试计划 | 测试计划 | 范围、环境、方法、人员、准入/准出标准完整 | P0 | P4 T01～P4 Test T02 | 未完成（[Issue #190](https://github.com/HeanX/iChat_Pro/issues/190) 开放） |
 | P4 Test T10 | WP06 | 设计黑盒测试 | 黑盒用例集 | 包含等价类、边界值、判定表、状态和场景法 | P0 | P4 Test T09 | 未完成（[Issue #191](https://github.com/HeanX/iChat_Pro/issues/191) 开放） |
 | P4 Test T11 | WP06 | 设计白盒测试 | 白盒用例与路径说明 | 覆盖关键条件、分支、循环和异常路径 | P0 | P4 Test T09 | 未完成（[Issue #192](https://github.com/HeanX/iChat_Pro/issues/192) 开放） |

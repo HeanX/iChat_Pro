@@ -160,6 +160,72 @@ class KeyChangeReminderTests(TestCase):
         self.assertEqual(row['previous_key_fingerprint'], self.v1['key_fingerprint'])
         self.assertEqual(row['previous_key_version'], 1)
         self.assertEqual(row['previous_trust_status'], 'verified')
+        self.assertEqual(row['last_endorsed_key_version'], 1)
+        self.assertEqual(row['last_endorsed_trust_status'], 'verified')
+
+    def test_previous_and_last_endorsed_diverge_after_consecutive_rotations(self):
+        """v1 verified -> v2 -> v3: previous is v2, the warning is about v1."""
+        self._bob_uploads(self.v1)
+        self._trust('verified')
+        self._bob_uploads(self.v2)
+        self._bob_uploads(_key_payload(3))
+
+        row = self._trust_list_row()
+        self.assertEqual(row['key_version'], 3)
+        self.assertEqual(
+            row['previous_key_version'],
+            2,
+            'previous_* must be the immediately preceding version, not the endorsed one',
+        )
+        self.assertEqual(row['previous_trust_status'], 'untrusted')
+        self.assertEqual(
+            row['last_endorsed_key_version'],
+            1,
+            'the warning is about the last endorsed fingerprint (v1)',
+        )
+        self.assertEqual(row['last_endorsed_trust_status'], 'verified')
+        self.assertTrue(row['key_changed'])
+
+    def test_contact_fingerprints_after_rotation_reports_change(self):
+        """The endpoint chat.js consults must agree with the trust list."""
+        self._bob_uploads(self.v1)
+        self._trust('verified')
+        self._bob_uploads(self.v2)
+
+        data = self._contact_keys()
+        self.assertTrue(data['key_changed'])
+        self.assertEqual(data['active_key']['key_fingerprint'], self.v2['key_fingerprint'])
+        self.assertEqual(data['previous_key_version'], 1)
+        self.assertEqual(data['last_endorsed_key_version'], 1)
+        self.assertEqual(data['keys'][0]['trust_status'], 'untrusted')
+
+    def test_contact_fingerprints_without_key_is_not_a_change(self):
+        data = self._contact_keys()
+        self.assertIsNone(data['active_key'])
+        self.assertFalse(data['key_changed'])
+        self.assertIsNone(data['previous_key_fingerprint'])
+        self.assertIsNone(data['last_endorsed_key_fingerprint'])
+
+    def test_delete_trust_clears_the_reminder(self):
+        """DELETE mirrors the client's forgetPeerKey(): the warning must clear."""
+        self._bob_uploads(self.v1)
+        self._trust('verified')
+        self._bob_uploads(self.v2)
+        self.assertTrue(self._trust_list_row()['key_changed'])
+
+        response = self.alice_client.delete(reverse('key-trust', args=[self.bob.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['deleted'])
+
+        self.assertFalse(
+            KeyTrust.objects.filter(user=self.alice, contact=self.bob).exists(),
+            'forgetting a contact drops every fingerprint row, as the client does',
+        )
+        self.assertEqual(
+            self.alice_client.get(reverse('key-trust-list')).json()['trusts'],
+            [],
+        )
+        self.assertFalse(self._contact_keys()['key_changed'])
 
     def test_trust_list_not_changed_when_current_key_is_untrusted(self):
         self._bob_uploads(self.v1)
@@ -173,6 +239,10 @@ class KeyChangeReminderTests(TestCase):
         )
         self.assertEqual(row['trust_status'], 'untrusted')
         self.assertEqual(row['previous_trust_status'], 'untrusted')
+        self.assertIsNone(
+            row['last_endorsed_key_version'],
+            'nothing was ever endorsed, so there is nothing to warn about',
+        )
 
     def test_trust_list_not_changed_after_reverification(self):
         self._bob_uploads(self.v1)

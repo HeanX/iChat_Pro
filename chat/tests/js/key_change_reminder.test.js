@@ -21,8 +21,8 @@ function functionSource(name) {
 }
 
 function chatSandbox() {
-  const context = vm.createContext({});
-  const names = ['isEndorsedTrustStatus', 'getActiveKeyStatus', 'contactKeyHasChanged'];
+  const context = vm.createContext({ currentLanguage: 'en' });
+  const names = ['isEndorsedTrustStatus', 'getActiveKeyStatus', 'contactKeyHasChanged', 'trustRowLabel'];
   vm.runInContext(names.map(functionSource).join('\n'), context);
   return context;
 }
@@ -176,4 +176,30 @@ test('stored trust records keep versions apart and never inherit', () => {
   stored = context.loadPeerTrust(7);
   assert.equal(stored.versions['1'], 'AAAA', 'the historical endorsement is preserved');
   assert.equal(stored.versions['2'], 'BBBB');
+});
+
+// ── renderTrustList label: a changed row must still state the verdict ──
+
+test('a changed row still reports the current verdict', () => {
+  const ctx = chatSandbox();
+  assert.equal(
+    ctx.trustRowLabel({ key_changed: true, trust_status: 'untrusted' }),
+    'Changed · Unverified',
+    'showing only "Changed" hid that the new fingerprint is untrusted'
+  );
+  assert.equal(ctx.trustRowLabel({ key_changed: true, trust_status: 'verified' }), 'Changed · Verified');
+});
+
+test('an unchanged row reports only its verdict', () => {
+  const ctx = chatSandbox();
+  assert.equal(ctx.trustRowLabel({ key_changed: false, trust_status: 'verified' }), 'Verified');
+  assert.equal(ctx.trustRowLabel({ key_changed: false, trust_status: 'untrusted' }), 'Unverified');
+  assert.equal(ctx.trustRowLabel({ key_changed: false }), 'Unverified', 'missing status is unverified, not trusted');
+});
+
+test('the changed-row label is localised', () => {
+  const ctx = chatSandbox();
+  ctx.currentLanguage = 'zh';
+  assert.equal(ctx.trustRowLabel({ key_changed: true, trust_status: 'untrusted' }), '已变更 · 未验证');
+  assert.equal(ctx.trustRowLabel({ key_changed: false, trust_status: 'verified' }), '已验证');
 });

@@ -127,7 +127,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 
-from chat.errors import REGISTRY
+from chat.errors import REGISTRY, UNSUPPORTED_PROTOCOL_CLOSE_CODE
 from chat.models import (
     Conversation,
     ConversationMember,
@@ -562,13 +562,14 @@ class SyncHttpTests(MessagingHttpBase):
         for i in range(3):
             self.post_private(_private_payload(self.conv_ab.pk, self.bob.pk, f"sync-{i}"))
 
-    def sync(self, *, cursor="", limit=None, client=None):
+    def sync(self, *, cursor="", limit=None, client=None, conversation_id=None):
         query = ""
         if cursor:
             query += f"?cursor={cursor}"
         if limit is not None:
             query += ("&" if query else "?") + f"limit={limit}"
-        return (client or self.client_a).get(SYNC_URL.format(cid=self.conv_ab.pk) + query)
+        cid = conversation_id or self.conv_ab.pk
+        return (client or self.client_a).get(SYNC_URL.format(cid=cid) + query)
 
     def test_sync_01_non_integer_limit_is_invalid_payload(self):
         response = self.sync(limit="ten")
@@ -582,10 +583,39 @@ class SyncHttpTests(MessagingHttpBase):
         self.assertTrue(response.json()["has_more"])
 
     def test_sync_03_limit_above_range_clamps_to_two_hundred(self):
-        response = self.sync(limit=999)
-        self.assertEqual(response.status_code, 200)
-        # 3 events fit, and the response is not rejected for exceeding 200.
-        self.assertEqual(len(response.json()["items"]), 3)
+        """The 200 upper bound must be OBSERVED, not just "not rejected".
+
+        The shared fixture only holds 3 events, so any cap >= 3 would satisfy
+        a weaker assertion. This case therefore builds its own conversation
+        with 205 events: with the clamp in place the page is exactly 200 and
+        `has_more` is true; with the clamp relaxed or removed the page would
+        be 205 and the test goes red.
+        """
+        from chat.models import ConversationEvent
+
+        conv = Conversation.objects.create(type=Conversation.Type.SINGLE, created_by=self.alice)
+        ConversationMember.objects.create(conversation=conv, user=self.alice)
+        ConversationMember.objects.create(conversation=conv, user=self.bob)
+        payload = _private_payload(conv.pk, self.bob.pk, "sync-03")
+        for i in range(205):
+            payload["client_message_id"] = f"sync-03-{i}"
+            response = self.post_private(payload, conversation_id=conv.pk)
+            self.assertEqual(response.status_code, 201, response.content)
+        conv.refresh_from_db()
+        self.assertEqual(conv.sync_sequence, 205)
+        self.assertEqual(ConversationEvent.objects.filter(conversation=conv).count(), 205)
+
+        page = self.sync(limit=999, client=self.client_a, conversation_id=conv.pk).json()
+        self.assertEqual(len(page["items"]), 200)
+        self.assertTrue(page["has_more"])
+        self.assertEqual(page["high_water"], 205)
+
+        # One more page drains the remaining 5 and releases the snapshot.
+        rest = self.sync(
+            cursor=page["next_cursor"], limit=999, client=self.client_a, conversation_id=conv.pk,
+        ).json()
+        self.assertEqual([i["sequence"] for i in rest["items"]], [201, 202, 203, 204, 205])
+        self.assertFalse(rest["has_more"])
 
     def test_sync_04_tampered_cursor_is_rejected(self):
         good = self.sync(limit=1).json()["next_cursor"]
@@ -943,9 +973,17 @@ class WsEnvelopeTests(MessagingWsBase):
                 "protocol_version": "9.9", "event": "connection.ping", "request_id": "env-6",
             })
             error = await comm.receive_json_from()
+            self.assertEqual(error["event"], "error")
             self.assertEqual(error["data"]["code"], "unsupported_protocol_version")
-            with self.assertRaises(Exception):
-                await comm.receive_json_from(timeout=2)
+
+            # Read the ACTUAL close frame. `assertRaises(Exception)` around a
+            # timeout (the old shape, still present in test_protocol.py) passes
+            # for any reason the socket goes quiet, including a wrong close
+            # code or no close at all — it cannot prove 4003.
+            message = await comm.receive_output(timeout=3)
+            self.assertEqual(message["type"], "websocket.close")
+            self.assertEqual(message["code"], UNSUPPORTED_PROTOCOL_CLOSE_CODE)
+            self.assertEqual(message["code"], 4003)
 
         async_to_sync(run)()
 

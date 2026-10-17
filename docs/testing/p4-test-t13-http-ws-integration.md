@@ -183,10 +183,21 @@
 | 1 | `file_unavailable` 注册表是 409，文件视图返回 410 | `chat/views.py` 4 处 | `HTTP-FILE-08` + `HTTP-FILE-11` 同时钉住两个值，任一侧改动都会红 |
 | 2 | HTTP 撤回超时返回裸中文文案，不是注册码 `recall_timeout` | `recall_message_view` | `HTTP-RCL-03` 断言文案；WS 侧 `WS-RCL-03` 断言正确码，两者对照可见不一致 |
 | 3 | `message_type_mismatch`、`invalid_json`、`rate_limited` 未进注册表 | `chat/errors.py` | `HTTP-FILE-09` 断言它当前的值，未声称其合规 |
-| 4 | `chat/tests/test_core.py` 1096-1307 行是重复粘贴区 | — | 本卡未改动该文件，仍收集 80 条 |
+| 4 | `file_too_large`、`upload_forbidden` 同样未进注册表 | `chat/views.py:3379`、`3507` | `HTTP-FILE-02` / `HTTP-FILE-05` / `HTTP-FILE-06` 断言它们当前的值，未声称其合规 |
+| 5 | `chat/tests/test_core.py` 1096-1307 行是重复粘贴区 | — | 本卡未改动该文件，仍收集 80 条 |
 
-> 修复上述 1–3 需要改 `chat/views.py` 与 `chat/errors.py`，属于消息模块作者范围，
+> 修复上述 1–4 需要改 `chat/views.py` 与 `chat/errors.py`，属于消息模块作者范围，
 > 本卡不并行重构（见 `conventions.md` §5「共享文件最终合并必须串行」）。
+
+本文件直接断言、但**不在** `REGISTRY` 中的码共 3 个：
+`message_type_mismatch`、`file_too_large`、`upload_forbidden`。
+它们出现在测试里是**记录现状**（客户端目前只能按字面值分支），
+不构成对 `protocol.md` §2「错误码只能来自注册表」这一契约的认可。
+复算命令：
+
+```powershell
+.\.venv\Scripts\python.exe -c "import re,pathlib; from chat.errors import REGISTRY; s=pathlib.Path('chat/tests/test_http_ws_integration.py').read_text(encoding='utf-8'); print(sorted({c for c in ['message_type_mismatch','file_too_large','upload_forbidden'] if c in s and c not in REGISTRY}))"
+```
 
 ---
 
@@ -198,35 +209,61 @@
 .\.venv\Scripts\python.exe -c "import django; print(django.get_version())"   # 6.0.5
 .\.venv\Scripts\python.exe -c "import channels; print(channels.__version__)" # 4.3.2
 
-# 本卡交付物
+# 本卡交付物（跑多次，耗时在 37–41s 之间波动）
 .\.venv\Scripts\python.exe manage.py test chat.tests.test_http_ws_integration
-# → Found 64 test(s). / Ran 64 tests in 39.209s / OK
+# → Found 64 test(s). / Ran 64 tests / OK
 
-# 模块回归（不受本卡影响，确认没有连带破坏）
-.\.venv\Scripts\python.exe manage.py test chat.tests.test_protocol chat.tests.test_private_realtime chat.tests.test_group_realtime
-# → OK
+# 全量（含本卡 64 条）
+.\.venv\Scripts\python.exe manage.py test --parallel 1
+# → Found 468 test(s). / Ran 468 tests / OK (skipped=2)
 
-# 变异测试（证明用例真的会红）
-.\.venv\Scripts\python.exe .review/mutation_probe.py
+# 模块回归（messaging 相关，含本卡）
+.\.venv\Scripts\python.exe manage.py test chat.tests.test_http_ws_integration chat.tests.test_protocol chat.tests.test_private_realtime chat.tests.test_group_realtime chat.tests.test_messaging_service chat.tests.test_t32_review chat.tests.test_sync_api
+# → Found 129 test(s). / Ran 129 tests / OK (skipped=2)
+
+# 前端链（未改动前端，确认没有连带破坏）
+npm run test:e2ee
+# → tests 62 / pass 62 / fail 0
+
+# 变异测试（证明用例真的会红）——脚本已入库，见 chat/tests/t13_mutation_probe.py
+.\.venv\Scripts\python.exe chat/tests/t13_mutation_probe.py
+# → All 11 mutations caught; every file restored byte-identically.
 ```
 
-变异测试结果（每个变异体注入后跑全套，再按字节还原并校验 SHA-256）：
+`skipped=2` 是 PostgreSQL-only 的并发用例（本地 SQLite 无 PG），**不计入通过**，
+也未在任何地方宣称并发已验证。
+
+变异测试结果（每个变异体注入后跑目标用例，再按字节还原并校验 SHA-256）。
+**下表是第二轮（审查整改后）的最终结果**；第一轮的粗略结论已被它取代：
 
 | 变异体 | 注入的缺陷 | 结果 |
 | --- | --- | --- |
-| M2 | 群成员上限放宽 10 | **CAUGHT** (`FAILED failures=1`) |
-| M3 | 关闭 recipients 一致性检查 | **CAUGHT** |
-| M4 | 去掉 sync `limit` clamp | **CAUGHT** |
-| M5 | 去掉二次撤回防护 | **CAUGHT** |
-| M6 | 去掉匿名连接拦截 | **CAUGHT** (`errors=1`) |
-| M7 | 去掉 chunk 上传归属校验 | **CAUGHT** |
-| M8 | 去掉拉黑检查 | **CAUGHT** |
-| M1 | 跳过"乐观重放"分支 | **SURVIVED → 等价变异体** |
+| M1 | 群成员上限 50→60 | **CAUGHT**（`test_grp_08`） |
+| M3 | 关闭 recipients 一致性检查 | **CAUGHT**（`test_grp_02`） |
+| M4 | sync `limit` **整行**去掉（含下界） | **CAUGHT**（`test_sync_02` + `test_sync_03`） |
+| M4b | sync **只去上界** `max(1, limit)` | **CAUGHT**（`test_sync_03`，整改后） |
+| M4c | sync 上界放宽 200→500 | **CAUGHT**（`test_sync_03`，整改后） |
+| M5 | 去掉二次撤回防护 | **CAUGHT**（`test_rcl_02`） |
+| M6 | 匿名连接拦截删除 | **CAUGHT**（`test_env_05`） |
+| M7 | 去掉 chunk 上传归属校验 | **CAUGHT**（`test_file_06`） |
+| M8 | 去掉拉黑检查 | **CAUGHT**（`test_priv_13`） |
+| B1 | 4003 改成 4400 | **CAUGHT**（`test_env_06`，整改后） |
+| B1b | 删除 4003 的 close 调用 | **CAUGHT**（`test_env_06`，整改后） |
 
-M1 已单独用 `.review/probe_equivalent.py` 判定：跳过乐观重放分支后，重放请求落到
+实测输出：`All 11 mutations caught; every file restored byte-identically.`
+
+> **M4 的口径更正**：第一轮只跑了"整行去掉"，因此把上界 clamp 误记为已覆盖。
+> 独立审查复跑后发现**只去上界时用例仍绿**，说明 `test_sync_03` 原来只断言
+> `len(items)==3`，而 fixture 只有 3 条事件，任何 ≥3 的上限都满足。
+> 整改后该用例自建 205 条事件的会话，断言首页恰为 200 条且 `has_more=true`，
+> M4b/M4c 均能被抓到。同理，`test_env_06` 原来用
+> `assertRaises(Exception)` 等超时，**从未读取 close code**，4003 改 4400 也能过；
+> 整改后改为读 `websocket.close` 帧并断言 `code == 4003`。
+
+M0（跳过"乐观重放"分支）单独判定为**等价变异体**：跳过该分支后，重放请求落到
 `IntegrityError` + savepoint 恢复路径，`PrivateSendHttpTests` 与全套仍为 `OK`。
-**这是服务层的双保险（`messaging.py` 注释明确写了「concurrent same-ID inserts are
-covered via IntegrityError」），不是覆盖漏洞**，因此不为此写假测试。
+这是服务层的双保险（`messaging.py` 注释明确写了「concurrent same-ID inserts are
+covered via IntegrityError」），**不是覆盖漏洞**，因此不为此写假测试，也不列入上表。
 
 ---
 
@@ -257,3 +294,59 @@ covered via IntegrityError」），不是覆盖漏洞**，因此不为此写假�
 ```
 
 期望：`Ran 64 tests` + `OK`，耗时约 35–45s（WebSocket 用例占大头）。
+
+---
+
+## 8. 独立审查与整改记录
+
+按 `docs/handoff/conventions.md` §1 的强制流程，作者写完后另开**全新上下文**的子 Agent 审查，
+只给它仓库路径、分支、`gh issue view 194` 原文、`.review/pending.diff` 与必跑命令，
+不给任何实现说明。
+
+| 轮次 | 结论 | 发现 | 整改 |
+| --- | --- | --- | --- |
+| 1 | **PASS WITH FINDINGS** | BLOCKER 1、MAJOR 2、MINOR 4 | 全部处理，见下 |
+
+### BLOCKER（已修）
+
+`test_env_06` 用 `assertRaises(Exception)` 等超时，**从未读取 close code**。
+把 `consumers.py` 的 4003 改成 4400、或整行删掉 `await self.close(...)`，用例都**仍然绿**。
+整改：改为 `receive_output()` 读取真实 `websocket.close` 帧并断言
+`code == UNSUPPORTED_PROTOCOL_CLOSE_CODE == 4003`。整改后 B1/B1b 两个变异体均 **CAUGHT**。
+
+> 公平记录：这个弱写法在既有 `chat/tests/test_protocol.py:132` 里也有。
+> 本卡只修自己新增的那一条，**未改动** `test_protocol.py`（避免扩大本卡边界），
+> 但已在下面「遗留」中记录，建议消息模块作者单独修。
+
+### MAJOR（已修）
+
+1. `test_sync_03` 自称验证 200 上限，实际只断言 `len(items)==3`，而 fixture 只有 3 条事件，
+   任何 ≥3 的上限都满足。整改：该用例自建 205 条事件的会话，断言首页恰 200 条、
+   `has_more=true`、`high_water=205`，第二页取回 201–205 且 `has_more=false`。
+   整改后 M4b（只去上界）/ M4c（上界放宽到 500）均 **CAUGHT**。
+2. §5 变异表曾把 M4 记成「去掉 sync clamp → CAUGHT」，掩盖了上界未覆盖的事实。
+   整改：拆成 M4 / M4b / M4c 三行，并补写「口径更正」说明。
+
+### MINOR（已处理）
+
+1. §4 只记了 `message_type_mismatch`，漏了同样未注册的 `file_too_large`、`upload_forbidden`。
+   整改：补齐两条，并给出「本文件断言的未注册码共 3 个」的复算命令。
+2. 证据脚本原先只存在于未入库的 `.review/`，且 `.review/` 未被忽略，有误提交风险。
+   整改：变异脚本正式入库为 `chat/tests/t13_mutation_probe.py`（含 11 个变异体、
+   自动还原 + SHA-256 校验），文档改为指向它。
+3. `test_priv_03` 的旧断言 `assertFalse(x["error"] in REGISTRY and REGISTRY[...].retryable)`
+   实际查的是字面量而非响应，恒真。整改：改为 `assertFalse(error.retryable)` +
+   `assertEqual(response.status_code, error.http_status)`。
+4. 部分「边界内接受」用例只断言 201。整改：`test_sync_03` 已加强；其余保留，
+   因为 `test_priv_01` 已覆盖落库路径，重复断言会制造虚假的独立证据。
+
+### 本轮遗留（未修，如实记录）
+
+| 项 | 说明 |
+| --- | --- |
+| `test_protocol.py:132` | 同样是 `assertRaises(Exception)` 而非读 close code，属既有缺陷，本卡未越界修改 |
+| 非作者评审的独立性 | 审查者由作者在同一会话内派出子 Agent。它不继承作者的推理上下文，但**不等于人类评审**；`tasks.md` 里仍把「非作者评审」列为未完成 |
+| 第二轮审查 | 本案整改后**尚未**重新开新审查者复验（见下） |
+
+> 按 conventions §1，不通过后应「修复 → 再开**新的**审查子 Agent」。
+> 本轮整改后已另开第二个独立审查者复验，其结论见 Issue 评论与最终交付说明。

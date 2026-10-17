@@ -1,0 +1,23 @@
+{
+  "name": "ichat-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "iChat Pro Android shell (P4 T22 skeleton) - Capacitor WebView wrapper around the existing Web client",
+  "scripts": {
+    "test:mobile": "node --test ./tests/mobile-config.test.js",
+    "cap:sync": "cap sync android",
+    "cap:copy": "cap copy android",
+    "cap:open": "cap open android",
+    "config:generate": "node ./scripts/write-capacitor-config.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/network": "8.0.1",
+    "@capacitor/preferences": "8.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  }
+}

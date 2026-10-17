@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>iChat Pro</title>
+  <link rel="stylesheet" href="css/mobile-shell.css">
+</head>
+<body>
+  <main class="shell" id="shell">
+    <header class="shell__header">
+      <h1 class="shell__title">iChat Pro</h1>
+      <span class="shell__badge" id="shell-state" data-state="boot">启动中</span>
+    </header>
+
+    <!--
+      P4 T22 skeleton: this page is the Android shell's own start screen. It is
+      NOT the chat UI. The chat UI is the existing Django-rendered Web client;
+      the shell navigates to it once a service origin is resolved.
+    -->
+    <section class="shell__panel" id="shell-unconfigured" hidden>
+      <h2>未配置服务地址</h2>
+      <p class="shell__hint">
+        本构建未内置服务地址。请在 <code>mobile/.env</code> 或构建环境中设置
+        <code>ICHAT_MOBILE_SERVER_URL</code>（例如 <code>https://chat.example.com:8443</code>）
+        后重新生成配置并打包。
+      </p>
+      <p class="shell__hint" id="shell-message"></p>
+    </section>
+
+    <section class="shell__panel" id="shell-ready" hidden>
+      <h2>已解析服务地址</h2>
+      <dl class="shell__facts">
+        <dt>Origin</dt><dd id="fact-origin">—</dd>
+        <dt>WebSocket</dt><dd id="fact-ws">—</dd>
+        <dt>协议版本</dt><dd id="fact-protocol">—</dd>
+      </dl>
+      <p class="shell__hint">
+        骨架阶段：只验证配置解析与工具链。登录、WS 收发与端到端加密属于
+        P4 T23/T24 之后的卡片，尚未实现。
+      </p>
+    </section>
+
+    <footer class="shell__footer">
+      <span id="shell-version">iChat Pro Android shell 0.1.0</span>
+    </footer>
+  </main>
+
+  <script src="js/mobile-config.js"></script>
+  <script src="js/shell.js"></script>
+</body>
+</html>

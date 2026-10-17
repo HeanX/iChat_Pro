@@ -42,3 +42,14 @@ desktop/node_modules/
 node_modules/
 desktop/out/
 desktop/dist/
+
+# Review scratch (handoff workflow)
+.review/
+
+# Android / Capacitor (P4 T22)
+mobile/node_modules/
+mobile/.android-sdk/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties

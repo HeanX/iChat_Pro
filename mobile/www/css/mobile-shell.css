@@ -1,0 +1,132 @@
+/**
+ * P4 T22 shell styles. Intentionally standalone: the shell must render before
+ * the Django-served chat CSS is reachable.
+ */
+
+:root {
+  --shell-bg: #0f172a;
+  --shell-fg: #e2e8f0;
+  --shell-muted: #94a3b8;
+  --shell-accent: #38bdf8;
+  --shell-warn: #f59e0b;
+  --shell-error: #f87171;
+  --shell-panel: #1e293b;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --shell-bg: #f8fafc;
+    --shell-fg: #0f172a;
+    --shell-muted: #475569;
+    --shell-accent: #0284c7;
+    --shell-panel: #ffffff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--shell-bg);
+  color: var(--shell-fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  /* Respect the Android system bars / notch. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 16px;
+  gap: 16px;
+}
+
+.shell__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shell__title {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.shell__badge {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--shell-panel);
+  color: var(--shell-muted);
+  white-space: nowrap;
+}
+
+.shell__badge[data-state="ready"] {
+  color: var(--shell-accent);
+}
+
+.shell__badge[data-state="unconfigured"],
+.shell__badge[data-state="error"] {
+  color: var(--shell-error);
+}
+
+.shell__panel {
+  background: var(--shell-panel);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.shell__panel h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.shell__hint {
+  color: var(--shell-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin: 8px 0 0;
+  /* Long origins must wrap instead of forcing horizontal scroll. */
+  overflow-wrap: anywhere;
+}
+
+.shell__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.shell__facts dt {
+  color: var(--shell-muted);
+}
+
+.shell__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.shell__footer {
+  margin-top: auto;
+  color: var(--shell-muted);
+  font-size: 0.75rem;
+}
+
+code {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.85em;
+}

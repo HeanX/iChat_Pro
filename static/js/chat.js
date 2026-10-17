@@ -7442,12 +7442,34 @@ function trustRowLabel(trust) {
   // A changed row must still say what the current verdict is; "Changed" alone
   // hid the fact that the new fingerprint is untrusted.
   const status = trust.trust_status || 'untrusted';
-  const statusText = status === 'verified' || status === 'trusted'
-    ? (currentLanguage === 'zh' ? '已验证' : 'Verified')
-    : (currentLanguage === 'zh' ? '未验证' : 'Unverified');
+  const statusText = isEndorsedTrustStatus(status)
+    ? _t4('Verified', '已验证', '已驗證', '検証済み')
+    : _t4('Unverified', '未验证', '未驗證', '未検証');
   if (!trust.key_changed) return statusText;
-  const changed = currentLanguage === 'zh' ? '已变更' : 'Changed';
+  const changed = _t4('Changed', '已变更', '已變更', '変更あり');
   return changed + ' · ' + statusText;
+}
+
+function trustRowChipClass(trust) {
+  // The chip colour must follow the verdict, not just the change flag: an
+  // unchanged but unverified contact was rendered with the green verified chip.
+  if (trust.key_changed) return 'security-status-chip security-status-danger';
+  return isEndorsedTrustStatus(trust.trust_status || 'untrusted')
+    ? 'security-status-chip security-status-verified'
+    : 'security-status-chip security-status-unverified';
+}
+
+function trustRowVersionLabel(trust) {
+  // The warning is about the last endorsed fingerprint, which can be older
+  // than the immediately preceding version after consecutive rotations.
+  const changed = Boolean(trust.key_changed);
+  const warnedVersion = trust.last_endorsed_key_version;
+  const previousVersion = trust.previous_key_version;
+  const fromVersion = changed && warnedVersion != null ? warnedVersion : previousVersion;
+  if (changed && fromVersion != null && fromVersion !== trust.key_version) {
+    return 'v' + fromVersion + ' → v' + trust.key_version;
+  }
+  return 'v' + trust.key_version;
 }
 
 function renderTrustList(trusts) {
@@ -7460,22 +7482,13 @@ function renderTrustList(trusts) {
   }
   trusts.forEach(trust => {
     const row = document.createElement('div');
-    const changed = Boolean(trust.key_changed);
-    // The warning is about the last endorsed fingerprint, which can be older
-    // than the immediately preceding version after consecutive rotations.
-    const warnedVersion = trust.last_endorsed_key_version;
-    const previousVersion = trust.previous_key_version;
-    const fromVersion = changed && warnedVersion != null ? warnedVersion : previousVersion;
-    const versionLabel = changed && fromVersion != null && fromVersion !== trust.key_version
-      ? 'v' + escapeHtml(fromVersion) + ' → v' + escapeHtml(trust.key_version)
-      : 'v' + escapeHtml(trust.key_version);
     row.className = 'security-trust-row';
     row.innerHTML =
       '<div class="min-w-0">' +
         '<div class="text-xs font-semibold text-textMain truncate">' + escapeHtml(trust.contact_username || 'Unknown') + '</div>' +
-        '<div class="text-[10px] text-textSecondary font-mono truncate">' + versionLabel + ' ' + escapeHtml(formatFingerprint(trust.key_fingerprint)) + '</div>' +
+        '<div class="text-[10px] text-textSecondary font-mono truncate">' + escapeHtml(trustRowVersionLabel(trust)) + ' ' + escapeHtml(formatFingerprint(trust.key_fingerprint)) + '</div>' +
       '</div>' +
-      '<span class="' + (changed ? 'security-status-chip security-status-danger' : 'security-status-chip security-status-verified') + '">' +
+      '<span class="' + trustRowChipClass(trust) + '">' +
         escapeHtml(trustRowLabel(trust)) +
       '</span>';
     list.appendChild(row);

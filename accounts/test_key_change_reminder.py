@@ -206,8 +206,13 @@ class KeyChangeReminderTests(TestCase):
         self.assertIsNone(data['previous_key_fingerprint'])
         self.assertIsNone(data['last_endorsed_key_fingerprint'])
 
-    def test_delete_trust_clears_the_reminder(self):
-        """DELETE mirrors the client's forgetPeerKey(): the warning must clear."""
+    def test_delete_trust_only_targets_the_active_fingerprint(self):
+        """DELETE keeps the audit trail; the reminder clears on re-verification.
+
+        The contract in docs/handoff/accounts-auth.md #4 says superseded trust
+        records are preserved for audit, so DELETE must not wipe the contact's
+        history. A post-rotation reminder is resolved by verifying the new key.
+        """
         self._bob_uploads(self.v1)
         self._trust('verified')
         self._bob_uploads(self.v2)
@@ -215,17 +220,29 @@ class KeyChangeReminderTests(TestCase):
 
         response = self.alice_client.delete(reverse('key-trust', args=[self.bob.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()['deleted'])
+        # There is no row for v2 yet, so nothing is deleted and the v1 audit
+        # row survives -- the reminder stays until the user acts on the new key.
+        self.assertFalse(response.json()['deleted'])
+        self.assertTrue(
+            KeyTrust.objects.filter(
+                user=self.alice,
+                contact=self.bob,
+                key_fingerprint=self.v1['key_fingerprint'],
+            ).exists(),
+            'the superseded verdict must be preserved for audit',
+        )
+        self.assertTrue(self._trust_list_row()['key_changed'])
 
-        self.assertFalse(
-            KeyTrust.objects.filter(user=self.alice, contact=self.bob).exists(),
-            'forgetting a contact drops every fingerprint row, as the client does',
-        )
+        # Verifying the new key is what clears it.
+        self.assertEqual(self._trust('verified').status_code, 200)
+        row = self._trust_list_row()
+        self.assertFalse(row['key_changed'])
+        self.assertEqual(row['key_version'], 2)
         self.assertEqual(
-            self.alice_client.get(reverse('key-trust-list')).json()['trusts'],
-            [],
+            KeyTrust.objects.filter(user=self.alice, contact=self.bob).count(),
+            2,
+            'both fingerprints keep their verdict',
         )
-        self.assertFalse(self._contact_keys()['key_changed'])
 
     def test_trust_list_not_changed_when_current_key_is_untrusted(self):
         self._bob_uploads(self.v1)
@@ -272,4 +289,22 @@ class KeyChangeReminderTests(TestCase):
                 key_fingerprint=self.v2['key_fingerprint'],
             ).exists(),
             'reading the trust list must never create trust rows',
+        )
+
+    def test_trust_post_rejects_malformed_json_with_400(self):
+        """A bad body must be a JSON 400, not a 500 HTML error page."""
+        self._bob_uploads(self.v1)
+        url = reverse('key-trust', args=[self.bob.pk])
+
+        for body in ('not json', '[1, 2]', 'null', '"text"'):
+            with self.subTest(body=body):
+                response = self.alice_client.post(
+                    url, data=body, content_type='application/json',
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json(), {'error': 'invalid_json'})
+
+        self.assertFalse(
+            KeyTrust.objects.filter(user=self.alice, contact=self.bob).exists(),
+            'a rejected body must not write trust rows',
         )

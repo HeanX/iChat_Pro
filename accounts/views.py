@@ -1292,7 +1292,12 @@ def key_trust_view(request, user_id):
         return JsonResponse({'error': 'Contact has no public key.'}, status=404)
 
     if request.method == 'POST':
-        trust_status = _json_body(request).get('trust_status', 'trusted')
+        payload = _json_body(request)
+        if not isinstance(payload, dict):
+            # A malformed or non-object body used to raise AttributeError and
+            # surface as a 500 HTML page instead of a JSON error.
+            return JsonResponse({'error': 'invalid_json'}, status=400)
+        trust_status = payload.get('trust_status', 'trusted')
         if trust_status not in KeyTrust.TrustStatus.values:
             return JsonResponse({'error': 'Invalid trust status.'}, status=400)
 
@@ -1314,14 +1319,16 @@ def key_trust_view(request, user_id):
         })
 
     elif request.method == 'DELETE':
-        # "Forget this contact" (T08). The client mirror is
-        # clearContactKeyTrust() -> forgetPeerKey(), which drops the whole
-        # per-contact trust record, so deleting only the active fingerprint's
-        # row would leave a post-rotation warning that the user cannot clear
-        # (there is often no row for the new fingerprint yet).
+        # Removes the verdict for the *active* fingerprint only (unchanged from
+        # T38). Older KeyTrust rows are kept for audit -- see
+        # docs/handoff/accounts-auth.md "关键契约" #4. Deleting a whole contact's
+        # history here was considered for T08 and rejected for that reason: a
+        # post-rotation reminder is cleared by verifying the new key, not by
+        # destroying the audit trail.
         deleted, _ = KeyTrust.objects.filter(
             user=request.user,
             contact=target,
+            key_fingerprint=active_key.key_fingerprint,
         ).delete()
         return JsonResponse({
             'status': 'ok',

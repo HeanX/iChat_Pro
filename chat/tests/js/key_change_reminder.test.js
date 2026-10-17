@@ -16,13 +16,33 @@ function functionSource(name) {
   const start = chatSource.indexOf('function ' + name + '(');
   assert.notEqual(start, -1, 'production function exists: ' + name);
   const tail = chatSource.slice(start);
-  const next = tail.search(/\n(?:async )?function /);
-  return next < 0 ? tail : tail.slice(0, next);
+  // Single-line helpers (e.g. _t4) end on their own line; brace matching keeps
+  // the extractor from swallowing the next declaration.
+  const endOfLine = tail.indexOf('\n');
+  const firstLine = tail.slice(0, endOfLine);
+  if (firstLine.includes('{') && firstLine.trimEnd().endsWith('}')) {
+    return firstLine;
+  }
+  let depth = 0;
+  let seenBrace = false;
+  for (let i = 0; i < tail.length; i += 1) {
+    if (tail[i] === '{') { depth += 1; seenBrace = true; }
+    if (tail[i] === '}') {
+      depth -= 1;
+      if (seenBrace && depth === 0) return tail.slice(0, i + 1);
+    }
+  }
+  return tail;
 }
 
 function chatSandbox() {
+  // _t4 is the production four-language helper; include it so the label
+  // helpers run against the real localisation path.
   const context = vm.createContext({ currentLanguage: 'en' });
-  const names = ['isEndorsedTrustStatus', 'getActiveKeyStatus', 'contactKeyHasChanged', 'trustRowLabel'];
+  const names = [
+    '_t4', 'isEndorsedTrustStatus', 'getActiveKeyStatus', 'contactKeyHasChanged',
+    'trustRowLabel', 'trustRowChipClass', 'trustRowVersionLabel',
+  ];
   vm.runInContext(names.map(functionSource).join('\n'), context);
   return context;
 }
@@ -197,9 +217,62 @@ test('an unchanged row reports only its verdict', () => {
   assert.equal(ctx.trustRowLabel({ key_changed: false }), 'Unverified', 'missing status is unverified, not trusted');
 });
 
-test('the changed-row label is localised', () => {
+test('the changed-row label is localised in all four languages', () => {
   const ctx = chatSandbox();
   ctx.currentLanguage = 'zh';
   assert.equal(ctx.trustRowLabel({ key_changed: true, trust_status: 'untrusted' }), '已变更 · 未验证');
   assert.equal(ctx.trustRowLabel({ key_changed: false, trust_status: 'verified' }), '已验证');
+  ctx.currentLanguage = 'zh-TW';
+  assert.equal(ctx.trustRowLabel({ key_changed: true, trust_status: 'untrusted' }), '已變更 · 未驗證');
+  assert.equal(ctx.trustRowLabel({ key_changed: false, trust_status: 'verified' }), '已驗證');
+  ctx.currentLanguage = 'ja';
+  assert.equal(ctx.trustRowLabel({ key_changed: true, trust_status: 'untrusted' }), '変更あり · 未検証');
+  assert.equal(ctx.trustRowLabel({ key_changed: false, trust_status: 'verified' }), '検証済み');
+});
+
+// ── chip colour and version arrow: the DOM-building helpers ──
+
+test('the chip colour follows the verdict, not just the change flag', () => {
+  const ctx = chatSandbox();
+  assert.equal(
+    ctx.trustRowChipClass({ key_changed: false, trust_status: 'untrusted' }),
+    'security-status-chip security-status-unverified',
+    'an unchanged but unverified contact must not get the green verified chip'
+  );
+  assert.equal(
+    ctx.trustRowChipClass({ key_changed: false, trust_status: 'verified' }),
+    'security-status-chip security-status-verified'
+  );
+  assert.equal(
+    ctx.trustRowChipClass({ key_changed: true, trust_status: 'untrusted' }),
+    'security-status-chip security-status-danger'
+  );
+});
+
+test('the version arrow points from the last endorsed key, not a bare version', () => {
+  const ctx = chatSandbox();
+  assert.equal(
+    ctx.trustRowVersionLabel({ key_changed: true, key_version: 3, last_endorsed_key_version: 1, previous_key_version: 2 }),
+    'v1 → v3',
+    'after consecutive rotations the warning is about the endorsed v1, not v2'
+  );
+  assert.equal(
+    ctx.trustRowVersionLabel({ key_changed: true, key_version: 2, last_endorsed_key_version: 1, previous_key_version: 1 }),
+    'v1 → v2'
+  );
+  assert.equal(
+    ctx.trustRowVersionLabel({ key_changed: false, key_version: 2, previous_key_version: 1 }),
+    'v2',
+    'an unchanged row shows just its version'
+  );
+  assert.equal(
+    ctx.trustRowVersionLabel({ key_changed: true, key_version: 2, last_endorsed_key_version: 2 }),
+    'v2',
+    'no arrow when the endorsed version is the active one'
+  );
+  assert.equal(
+    ctx.trustRowVersionLabel({ key_changed: true, key_version: 2 }),
+    'v2',
+    'no arrow without a known source version'
+  );
 });

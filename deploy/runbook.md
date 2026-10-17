@@ -52,7 +52,7 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 ## 3. 日常发布与回滚（T50 路径）
 
 - **统一入口：`/opt/ichat/bin/deploy.sh`**（仓库 checkout 之外的稳定副本）。调用仓库内副本时脚本会自动 `install` 自身到该路径并 re-exec——回滚到旧 commit 会把仓库里的 deploy.sh 一并回退，稳定副本保证工具行为不受影响。
-- 发布：`sudo ICHAT_APPROVAL='<ticket/PR>' /opt/ichat/bin/deploy.sh`（审批门禁 → 校验配置 → migrate → collectstatic → restart → readiness 门禁 → 冒烟门禁 → 审计记录）。
+- 发布：`sudo ICHAT_APPROVAL='<ticket-or-PR>' /opt/ichat/bin/deploy.sh`（审批门禁 → 校验配置 → migrate → collectstatic → restart → readiness 门禁 → 冒烟门禁 → 审计记录）。
 - **审批门禁（T50 / #177）**：发布必须带 `ICHAT_APPROVAL`（工单/PR/变更号），否则在**改动服务之前**就拒绝。回滚（`--commit`）不需要审批——逃生通道不能依赖纸面流程。`ICHAT_REQUIRE_APPROVAL=0` 是已知良好紧急发布的口子，会被记成 `approval=none` 并在 stderr 警告。
 - **readiness 门禁**：带生产 Host 头经本机 Nginx TLS（`https://127.0.0.1:8443`）请求 `/health/ready/` 并校验 JSON body——对任意被部署版本都有效（旧版本会把 http 探测 301 到 https），301/400 不会误判成功。
 - **冒烟门禁（T23 / #204）**：readiness 通过后执行 `deploy/smoke.sh`，断言 `health/live`、`health/ready`、登录表单与 CSRF、登录会话、`/api/conversations/`、`/api/profile/me/`，以及未认证 `/api/` 返回 401。任一失败则**不写 `DEPLOYMENTS.log` 并 exit 1**——"能连上但登录坏了"的版本不算发布成功。服务此时已重启，需用 `--commit <上一个SHA>` 回退。
@@ -64,10 +64,10 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
   ```
 
   - `actor` 回答"谁发布的"：`sudo` 下取 `SUDO_USER`（不是 root），否则取 `$USER`；CI 调用时用 `ICHAT_DEPLOYER`。字段经白名单清洗，注入字符会变成 `_`。
-  - `from` 取 `SSH_CONNECTION` 的客户端地址，本地控制台记 `local-console`。
-  - 服务器实际运行的 SHA 以该文件与 `git -C /opt/ichat/repo rev-parse HEAD` 为准，可能与仓库 main 不同（回滚期间）。
+  - `from` 取 `SSH_CONNECTION` 的客户端地址，本地控制台记 `local-console`。注意：sudo 默认 `env_reset` 常丢弃 `SSH_CONNECTION`，此时远程发布也会记成 `local-console`；需要精确来源时请 `sudo -E` 或从 CI 注入 `ICHAT_DEPLOYER`。
+  - 服务器实际运行的 SHA **以该日志最后一条记录为准**（每次发布成功才追加）；`git -C /opt/ichat/repo rev-parse HEAD` 仅作参考——被拒绝的发布不会改日志，但手工 checkout 会改工作树，两者可能不一致。
 - **查看发布记录**：`sudo /opt/ichat/bin/deploy.sh --status`（最近 5 条 + 最后一条成功发布的 SHA，后者才是权威的"在跑什么"）；`--status --verbose` 显示完整字段（默认视图隐藏 `via=`/`from=` 以保持可读）。行数可用 `ICHAT_STATUS_LINES` 调整。
-- **回滚应用**：`sudo /opt/ichat/bin/deploy.sh --commit <上一个SHA>`——checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记为 `kind=rollback`。恢复新版本：重跑 `deploy.sh`（不带 --commit，仍需审批）。`/opt/ichat/.deploy-state/{current,previous}` 另外记住当前与上一个 SHA。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
+- **回滚应用**：`sudo /opt/ichat/bin/deploy.sh --commit <上一个SHA>`（**必须是完整 40 位 SHA**；传分支名/短 ref 会被拒绝，因为那是伪装成回滚的前向发布）——checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记为 `kind=rollback`。恢复新版本：重跑 `deploy.sh`（不带 --commit，仍需审批）。`/opt/ichat/.deploy-state/{current,previous}` 另外记住当前与上一个 SHA。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
 - 失败排查：`journalctl -u ichat -n 100`、`tail -50 /var/log/nginx/ichat.error.log`、冒烟失败项见 deploy 输出。
 
 ## 4. 备份与恢复（T13）

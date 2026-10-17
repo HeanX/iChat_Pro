@@ -112,7 +112,7 @@ class AuditFieldTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, workdir, True)
         harness = workdir / "h.sh"
         harness.write_text(
-            "#!/usr/bin/env bash\nset -uo pipefail\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
             + helpers_block()
             + "\nprintf '%s' \"$(" + expr + ")\"\n",
             encoding="utf-8",
@@ -201,7 +201,7 @@ class ApprovalGateTests(unittest.TestCase):
         (workdir / ".env").write_text("", encoding="utf-8")
         harness = workdir / "h.sh"
         harness.write_text(
-            "#!/usr/bin/env bash\nset -uo pipefail\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
             + helpers_block()
             + "\n"
             + f"LOG_FILE={log.as_posix()!r}\n"
@@ -246,9 +246,25 @@ class ApprovalGateTests(unittest.TestCase):
 
     def test_rollback_needs_no_approval(self):
         """The escape hatch must never depend on paperwork."""
-        result, _ = self.run_gate(approval="none", commit="cafebabe")
+        sha = "cafebabe" * 5  # 40 hex chars, a real commit id shape
+        result, _ = self.run_gate(approval="none", commit=sha)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("GATE_PASSED", result.stdout)
+
+    def test_a_branch_name_is_not_a_rollback(self):
+        """`--commit main` would forward-deploy unapproved code as "rollback"."""
+        for ref in ("main", "origin/main", "HEAD", "v1.0", "cafebabe"):
+            result, _ = self.run_gate(approval="none", commit=ref)
+            self.assertNotEqual(
+                result.returncode, 0,
+                msg=f"--commit {ref!r} bypassed the approval gate",
+            )
+            self.assertIn("full 40-character commit SHA", result.stderr)
+
+    def test_a_branch_name_with_approval_still_proceeds(self):
+        """The ref is refused for its shape, not for lacking approval."""
+        result, _ = self.run_gate(approval="#177", commit="main")
+        self.assertIn("full 40-character commit SHA", result.stderr)
 
     def test_emergency_override_is_allowed_but_warned(self):
         result, _ = self.run_gate(approval="none", commit="", require="0")
@@ -335,7 +351,7 @@ class ReleaseRecordTests(unittest.TestCase):
         repo.mkdir()
         harness = workdir / "h.sh"
         harness.write_text(
-            "#!/usr/bin/env bash\nset -uo pipefail\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
             + helpers_block()
             + "\n"
             + f"LOG_FILE={log.as_posix()!r}\n"
@@ -380,7 +396,7 @@ class ReleaseRecordTests(unittest.TestCase):
             self.assertIn(field, line, msg=f"{field!r} missing from: {line}")
 
     def test_rollback_is_recorded_as_rollback(self):
-        line = self.run_record(commit="cafebabe").strip()
+        line = self.run_record(commit="cafebabe" * 5).strip()
         self.assertIn("kind=rollback", line)
 
     def test_skipped_smoke_is_visible_in_the_log(self):
@@ -404,7 +420,7 @@ class DeployStateTests(unittest.TestCase):
         log.touch()
         harness = workdir / "h.sh"
         harness.write_text(
-            "#!/usr/bin/env bash\nset -uo pipefail\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
             + helpers_block()
             + "\n"
             + f"LOG_FILE={log.as_posix()!r}\n"
@@ -468,6 +484,32 @@ class DeployStateTests(unittest.TestCase):
         result = self.run_record(state, "bbbb")
         self.assertIn("rollback target if needed: aaaa", result.stdout)
 
+    def test_unwritable_state_does_not_fail_a_recorded_release(self):
+        """The log line is already written and the release is live.
+
+        Bookkeeping must never turn that into exit 1 — under errexit an
+        unguarded mkdir/redirect here would abort the script after the
+        authoritative record exists.
+        """
+        workdir = Path(tempfile.mkdtemp(prefix="ichat-state-ro-"))
+        self.addCleanup(shutil.rmtree, workdir, True)
+        # A regular file where the state directory should be: mkdir -p fails.
+        blocker = workdir / "state"
+        blocker.write_text("not a directory", encoding="utf-8")
+
+        result = self.run_record(blocker, "aaaa")
+
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"an unwritable state dir failed a recorded release:\n{result.stderr}",
+        )
+        self.assertIn("could not update", result.stderr)
+        self.assertIn(
+            "IS recorded",
+            result.stderr,
+            msg="the operator must be told the release still counts",
+        )
+
 
 @unittest.skipUnless(HAS_BASH, "bash is not available; deploy.sh not executed")
 class StatusOutputTests(unittest.TestCase):
@@ -486,7 +528,7 @@ class StatusOutputTests(unittest.TestCase):
         )
         harness = workdir / "h.sh"
         harness.write_text(
-            "#!/usr/bin/env bash\nset -uo pipefail\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
             + f"LOG_FILE={log.as_posix()!r}\n"
             + "REPO_DIR=/nonexistent-repo\n"
             + "SHOW_STATUS=1\nVERBOSE=0\nICHAT_STATUS_LINES=5\n"

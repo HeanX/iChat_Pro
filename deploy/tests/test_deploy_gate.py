@@ -84,6 +84,7 @@ class DeployGateLoggingTests(unittest.TestCase):
             "TARGET=main\n"
             # A plain deploy: no --commit, so the record says kind=deploy.
             "COMMIT=\n"
+            "IS_ROLLBACK=0\n"
             f'ICHAT_SKIP_SMOKE={"1" if skip else "0"}\n'
             + (
                 "SMOKE_USERNAME=probe\nSMOKE_PASSWORD=secret\n"

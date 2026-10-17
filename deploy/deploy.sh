@@ -160,7 +160,7 @@ if [[ "$SHOW_STATUS" == "1" ]]; then
         tail -n "${ICHAT_STATUS_LINES:-5}" "$LOG_FILE"
     else
         tail -n "${ICHAT_STATUS_LINES:-5}" "$LOG_FILE" \
-            | sed -e 's/ via=/ /' -e 's/ from=[^ ]*//'
+            | sed -e 's/ via=[^ ]*//' -e 's/ from=[^ ]*//'
     fi
     last_sha=$(awk -F'sha=' 'NF>1 {split($2, a, " "); sha=a[1]} END {print sha}' "$LOG_FILE")
     echo
@@ -187,26 +187,42 @@ TARGET=$(sanitise "$TARGET" 96)
 #   ICHAT_APPROVAL=<ticket/PR/change-id>
 #   ICHAT_REQUIRE_APPROVAL=1|0  (1 in production; 0 only for a known-good
 #                                emergency, which is itself recorded)
-# `--commit` (a rollback to a previously approved SHA) is always allowed.
+# A ROLLBACK to an exact commit needs no approval: the escape hatch must not
+# depend on paperwork. That exemption applies only to a full 40-hex commit id
+# — a branch/ref/tag like `--commit main` is a forward release hiding in
+# rollback clothing, so it is treated as a normal deploy and needs approval.
 #
 # THIS RUNS BEFORE ANY GIT COMMAND. /opt/ichat/repo is the tree systemd runs,
 # so fetching/checking out first would leave the production tree on an
 # unapproved commit even when the release is then refused — and would make
-# `git rev-parse HEAD` (the documented evidence of what runs) point at a
-# commit that was never deployed. A refused release must not touch the tree.
+# `git rev-parse HEAD` the evidence of what runs, pointing at a commit that
+# was never deployed. A refused release must not touch the tree.
 APPROVAL=$(deploy_approval)
 REQUIRE_APPROVAL=""
 parse_require_approval
-if [[ "$APPROVAL" == "none" && "$REQUIRE_APPROVAL" == "1" && -z "$COMMIT" ]]; then
+IS_ROLLBACK=0
+if [[ -n "$COMMIT" ]]; then
+    if [[ "$COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        IS_ROLLBACK=1
+    else
+        echo "ERROR: --commit must be a full 40-character commit SHA." >&2
+        echo "       Got '$COMMIT', which names a branch/ref rather than a" >&2
+        echo "       rollback target. A branch move is a forward release:" >&2
+        echo "         sudo ICHAT_APPROVAL='#177' $BIN_COPY --branch <name>" >&2
+        echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
+        exit 1
+    fi
+fi
+if [[ "$APPROVAL" == "none" && "$REQUIRE_APPROVAL" == "1" && "$IS_ROLLBACK" != "1" ]]; then
     echo "ERROR: this release has no approval reference." >&2
     echo "       Set ICHAT_APPROVAL to the ticket/PR that approved it, e.g." >&2
-    echo "         sudo ICHAT_APPROVAL='#177 PR-42' $BIN_COPY" >&2
-    echo "       Rollbacks (--commit) do not require one." >&2
+    echo "         sudo ICHAT_APPROVAL='#177' $BIN_COPY" >&2
+    echo "       Rollbacks (--commit <40-hex sha>) do not require one." >&2
     echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
     exit 1
 fi
 if [[ "$APPROVAL" == "none" ]]; then
-    echo "WARNING: no approval reference (kind=$([[ -n "$COMMIT" ]] && echo rollback || echo deploy)); recorded as approval=none." >&2
+    echo "WARNING: no approval reference (kind=$([[ "$IS_ROLLBACK" == "1" ]] && echo rollback || echo deploy)); recorded as approval=none." >&2
 fi
 
 echo "==> Deploying iChat Pro target=$TARGET"
@@ -322,7 +338,7 @@ elif [[ "${SMOKE_ABSENT:-0}" == "1" ]]; then
     SMOKE_RESULT=skipped-no-script
 fi
 
-if [[ -n "$COMMIT" ]]; then
+if [[ "$IS_ROLLBACK" == "1" ]]; then
     RELEASE_KIND=rollback
 else
     RELEASE_KIND=deploy

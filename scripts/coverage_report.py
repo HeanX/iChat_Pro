@@ -70,10 +70,47 @@ _OPTIONAL_VALUE_FLAGS = {
     '--parallel',
 }
 
+# Short flags that always take a value. argparse accepts both ``-k value`` and
+# the attached form ``-kvalue``, so both spellings must be recognised.
+_SHORT_OPTION_MAP = {
+    '-v': '--verbosity',
+    '-t': '--top-level-directory',
+    '-p': '--pattern',
+    '-k': '-k',
+}
+
 
 def _is_optional_value(token: str) -> bool:
     """True when ``token`` is plausibly the optional value of the previous flag."""
     return token.isdigit()
+
+
+def _classify(item: str) -> tuple[str, bool]:
+    """Classify one argv token.
+
+    Returns ``(kind, consumed)`` where ``kind`` is one of ``'label'``,
+    ``'filter'`` or ``'option'`` and ``consumed`` says whether this token
+    itself also carried an option's value (so no further token is needed).
+    """
+    if not item.startswith('-') or item == '-':
+        return 'label', True
+
+    if item.startswith('--'):
+        name, sep, _ = item.partition('=')
+        if name in _FILTER_FLAGS:
+            return 'filter', True
+        return 'option', bool(sep)
+
+    # Short options: ``-k``, ``-k=value`` and ``-kvalue`` are all valid.
+    flag = item[:2]
+    rest = item[2:]
+    canonical = _SHORT_OPTION_MAP.get(flag, flag)
+    if canonical in _FILTER_FLAGS or flag in _FILTER_FLAGS:
+        return 'filter', True
+    if rest:
+        # Attached value, e.g. ``-v2`` / ``-ktest_x``.
+        return 'option', True
+    return 'option', False
 
 
 def _has_test_labels(extra_args: list[str]) -> bool:
@@ -81,38 +118,70 @@ def _has_test_labels(extra_args: list[str]) -> bool:
 
     Returns True for explicit test labels (``chat.tests.test_protocol``) and
     for any filtering option (``--tag``, ``--exclude-tag``, ``-k``,
-    ``--pattern``). Both produce a partial measurement, so neither may feed
-    the published snapshot.
+    ``--pattern``, including the attached forms ``-kfoo`` / ``--tag=foo``).
+    Both produce a partial measurement, so neither may feed the published
+    snapshot.
     """
     pending_mandatory = False
     pending_optional = False
     for item in extra_args:
         if pending_mandatory:
-            # Unconditionally consumed as the flag's value.
             pending_mandatory = False
             continue
         if pending_optional:
             pending_optional = False
-            # Optional values are seeds/counts; a real label is not numeric.
             if _is_optional_value(item):
                 continue
             return True
-        if item.startswith('-'):
-            name, has_inline_value, _ = item.partition('=')
-            if name in _FILTER_FLAGS:
-                return True
-            if has_inline_value:
-                continue
-            if name in _VALUE_FLAGS:
-                pending_mandatory = True
-            elif name in _OPTIONAL_VALUE_FLAGS:
-                pending_optional = True
+
+        kind, consumed = _classify(item)
+        if kind == 'label':
+            return True
+        if kind == 'filter':
+            return True
+        name = item.partition('=')[0] if item.startswith('--') else _SHORT_OPTION_MAP.get(item[:2], item[:2])
+        if consumed:
             continue
-        return True
+        if name in _VALUE_FLAGS:
+            pending_mandatory = True
+        elif name in _OPTIONAL_VALUE_FLAGS:
+            pending_optional = True
     return False
 
 
-def _run_coverage(extra_args: list[str]) -> tuple[int, int]:
+def _parallel_requested(extra_args: list[str]) -> int:
+    """Largest ``--parallel`` value in the arguments (0 when absent)."""
+    requested = 0
+    for index, item in enumerate(extra_args):
+        if item.startswith('--parallel='):
+            value = item.partition('=')[2]
+        elif item == '--parallel':
+            value = extra_args[index + 1] if index + 1 < len(extra_args) else ''
+        else:
+            continue
+        if value.isdigit():
+            requested = max(requested, int(value))
+    return requested
+
+
+def _safe_echo(text: str) -> None:
+    """Write to stdout without dying on a legacy console code page.
+
+    Django's test output can contain non-ASCII characters (e.g. the Greek
+    epsilon in ``failfast``'s help). Windows consoles are frequently GBK, which
+    raises ``UnicodeEncodeError`` on those. Coverage collection must never fail
+    because of how a log line renders.
+    """
+    stream = sys.stdout
+    try:
+        stream.write(text)
+    except UnicodeEncodeError:
+        encoded = text.encode(stream.encoding or 'utf-8', errors='replace')
+        stream.write(encoded.decode(stream.encoding or 'utf-8', errors='replace'))
+    stream.flush()
+
+
+def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
     """Run the suite under coverage.
 
     Returns ``(exit_code, test_count)``. The test count is parsed from Django's
@@ -145,7 +214,9 @@ def _run_coverage(extra_args: list[str]) -> tuple[int, int]:
     skip_pattern = re.compile(r'^OK \(skipped=(\d+)\)', re.MULTILINE)
     collected: list[str] = []
     for line in process.stdout:
-        sys.stdout.write(line)
+        # Echo through a UTF-8-safe writer: the console may be a legacy code
+        # page (e.g. GBK on Windows) that cannot encode Django's output.
+        _safe_echo(line)
         collected.append(line)
     exit_code = process.wait()
 
@@ -171,6 +242,17 @@ def _collect_json() -> dict:
 
 def _percent(covered: int, total: int) -> float:
     return 100.0 * covered / total if total else 100.0
+
+
+def _non_negative_int(value: str) -> int:
+    """argparse type for counts that must not be negative."""
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f'需要整数，收到 {value!r}') from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f'不能为负数，收到 {parsed}')
+    return parsed
 
 
 def _per_module(data: dict) -> list[tuple[str, dict]]:
@@ -295,6 +377,19 @@ def _render_markdown(
 
     lines += [
         '',
+        '## 与需求目标对照',
+        '',
+        '目标取自 `docs/phase4/requirements.md`（NEW-TST-006/007/008）。'
+        '本任务只负责**建立可重复统计**，阈值门禁属 P4 T46（#173）。',
+        '',
+        '| 需求 | 指标 | 目标 | 实测 | 结论 |',
+        '| --- | --- | ---: | ---: | --- |',
+        f'| NEW-TST-006 | 核心后端语句覆盖率 | ≥85% | {stmt:.2f}% | '
+        f'{"已达标" if stmt >= 85 else "**未达标**"} |',
+        f'| NEW-TST-007 | 核心后端分支覆盖率 | ≥75% | {branch:.2f}% | '
+        f'{"已达标" if branch >= 75 else "**未达标**"} |',
+        '| NEW-TST-008 | 高风险逻辑覆盖 | ≥90% | 未统计 | **未验证**（高风险面清单尚未定义，需 P4 Test T11） |',
+        '',
         '## 口径说明',
         '',
         '- 统计口径见仓库根目录 `.coveragerc`：`branch = True`，来源为 `accounts`/`chat`/`ichat_pro`。',
@@ -303,6 +398,8 @@ def _render_markdown(
         '- `ichat_pro/test_runner.py` 是线上启用的 `TEST_RUNNER`，属产品代码，**计入**统计。',
         '- 仅本机 SQLite 结果；PostgreSQL 并发用例在 SQLite 下静默 skip，'
         '因此并发分支的真实覆盖需在 CI 的 PostgreSQL job 中复核。',
+        '- 必须用 `--parallel 1`（默认）。`--parallel >1` 时测试在子进程运行，'
+        'coverage 采集不到，脚本会拒绝写快照。',
         '',
     ]
     return '\n'.join(lines)
@@ -328,10 +425,13 @@ def main() -> int:
     )
     parser.add_argument(
         '--min-tests',
-        type=int,
+        type=_non_negative_int,
         default=1,
         metavar='N',
-        help='写入 Markdown 所需的最少测试数，用于拦截被过滤成全量假象的运行（默认 1）',
+        help=(
+            '写入 Markdown 所需的最少测试数（默认 1）。这是硬性下限，'
+            '--allow-subset 不能绕过它，用于拦截被过滤成全量假象的运行。'
+        ),
     )
     parser.add_argument(
         'test_args',
@@ -349,6 +449,20 @@ def main() -> int:
     # misleading, so the documented snapshot is reserved for full runs.
     is_subset = _has_test_labels(extra)
 
+    # ``--parallel >1`` forks test processes that coverage cannot see, so the
+    # collected totals collapse to a fraction of the real suite. That is not a
+    # "subset" -- the tests all run -- it is silently wrong data, so it blocks
+    # the snapshot outright (``--allow-subset`` does not override it).
+    parallel = _parallel_requested(extra)
+    if parallel > 1:
+        print(
+            f'\n拒绝写入：--parallel {parallel} 会在子进程中运行测试，coverage 采不到覆盖率。\n'
+            '请改用 --parallel 1（默认）以获得可信数字。',
+            file=sys.stderr,
+        )
+        exit_code, test_count, skipped = _run_coverage(extra)
+        return exit_code if exit_code != 0 else 2
+
     exit_code, test_count, skipped = _run_coverage(extra)
     if exit_code != 0:
         print(f'\n测试未通过（退出码 {exit_code}），不生成覆盖率报告。', file=sys.stderr)
@@ -364,10 +478,19 @@ def main() -> int:
 
     # Second, independent guard: an unrecognised filter can make a partial run
     # look full. A suspiciously small test count refuses the snapshot as well.
-    if test_count < args.min_tests:
-        is_subset = True
+    # This is a hard minimum: ``--allow-subset`` acknowledges a *known* subset
+    # but never authorises publishing an implausibly small run.
+    too_few = test_count < args.min_tests
 
     if args.no_markdown:
+        return 0
+
+    if too_few:
+        print(
+            f'\n本次只运行了 {test_count} 个用例（低于 --min-tests {args.min_tests}），'
+            '未写入 docs/quality/coverage-report.md。',
+            file=sys.stderr,
+        )
         return 0
 
     if is_subset and not args.allow_subset:

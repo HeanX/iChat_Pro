@@ -86,7 +86,7 @@
 | P4 Test T09 | WP06 | 编写总体测试计划 | 测试计划 | 范围、环境、方法、人员、准入/准出标准完整 | P0 | P4 T01～P4 Test T02 | 未完成（[Issue #190](https://github.com/HeanX/iChat_Pro/issues/190) 开放） |
 | P4 Test T10 | WP06 | 设计黑盒测试 | 黑盒用例集 | 包含等价类、边界值、判定表、状态和场景法 | P0 | P4 Test T09 | 未完成（[Issue #191](https://github.com/HeanX/iChat_Pro/issues/191) 开放） |
 | P4 Test T11 | WP06 | 设计白盒测试 | 白盒用例与路径说明 | 覆盖关键条件、分支、循环和异常路径 | P0 | P4 Test T09 | 未完成（[Issue #192](https://github.com/HeanX/iChat_Pro/issues/192) 开放） |
-| P4 Test T12 | WP06 | 建立覆盖率统计 | coverage 配置和报告 | 语句/分支覆盖率可重复生成并达到评审目标 | P0 | P4 Test T01、P4 Test T11 | 待验收（[Issue #193](https://github.com/HeanX/iChat_Pro/issues/193) 开放）；配置与报告已落地：`.coveragerc` + `scripts/coverage_report.py`，实测语句 70.49% / 分支 54.49%（合计 66.82%），见 [覆盖率报告](../quality/coverage-report.md)。阈值门禁属 P4 T46 |
+| P4 Test T12 | WP06 | 建立覆盖率统计 | coverage 配置和报告 | 语句/分支覆盖率可重复生成并达到评审目标 | P0 | P4 Test T01、P4 Test T11 | 部分完成（[Issue #193](https://github.com/HeanX/iChat_Pro/issues/193) 开放）；统计已落地且可重复：`.coveragerc` + `scripts/coverage_report.py`，实测语句 70.49% / 分支 54.49%（合计 66.82%），见 [覆盖率报告](../quality/coverage-report.md)。**未达 requirements.md 的 85%/75% 目标**，缺口见报告对照表；阈值门禁属 P4 T46 |
 | P4 Test T13 | WP06 | 完善 HTTP/WebSocket 集成测试 | 自动化测试集 | P0 接口成功、异常、边界和越权场景有覆盖 | P0 | P4 T31～P4 T36 | 未完成（[Issue #194](https://github.com/HeanX/iChat_Pro/issues/194) 开放）；已有接口/WS 自动回归；专项 P0 用例索引与验收待完成 |
 | P4 Test T14 | WP06 | 建立 PostgreSQL/Redis 集成测试 | 测试环境与结果 | 不以 SQLite/内存通道完全替代正式依赖验证 | P0 | P4 T08、P4 T09 | 已完成（[Issue #195](https://github.com/HeanX/iChat_Pro/issues/195)）；CI PG/Redis 350 条 + 服务器实测 |
 | P4 Test T15 | WP06 | 建立浏览器/Electron E2E | Playwright 等脚本 | 失败保留截图、日志或跟踪文件 | P1 | P4 Test T03 | 未完成（[Issue #196](https://github.com/HeanX/iChat_Pro/issues/196) 开放） |

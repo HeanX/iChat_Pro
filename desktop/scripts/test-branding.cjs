@@ -35,10 +35,14 @@ async function main() {
     assert.equal(packedPkg.version, pkg.version, 'Runtime version must match package version');
     assert.equal(packedPkg.name, 'ichat-pro-desktop', 'Keep the existing user-data profile name');
     assert.ok(asar.extractFile(archive, 'app-branding.js').length, 'Branding module must ship');
+    // T19: file-io.js is a hard runtime dependency of main.js; a packaging
+    // change that dropped it would only fail at first save otherwise.
+    assert.ok(asar.extractFile(archive, 'file-io.js').length, 'File IO module must ship');
     // Exercise entry-point behavior from the archive, not just source files.
     const lifecycle = spawnSync(process.execPath, [
       '--test', path.join(desktopRoot, '../chat/tests/js/desktop_tray.test.js'),
       path.join(desktopRoot, '../chat/tests/js/desktop_notifications.test.js'),
+      path.join(desktopRoot, '../chat/tests/js/desktop_file_io.test.js'),
     ], {
       env: { ...process.env, ICHAT_DESKTOP_TEST_ARCHIVE: archive },
       encoding: 'utf8', timeout: 30000, windowsHide: true,

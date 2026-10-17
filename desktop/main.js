@@ -10,7 +10,7 @@
  *   runserver is spawned on ICHAT_HOST/ICHAT_PORT (default 127.0.0.1:8000).
  *   This branch is intentionally the only one that spawns Python.
  */
-const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu, Tray, Notification } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, Menu, Tray, Notification } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -19,6 +19,7 @@ const { spawn } = require('child_process');
 
 const { normalizeOrigin, resolveAppConfig } = require('./app-config');
 const { configureBranding, getBrandIconPath } = require('./app-branding');
+const { createFileIo, FileIoError } = require('./file-io');
 
 // T21 review: the installer carries a DEFAULT cloud address - no env var
 // needed for the normal user. ICHAT_SERVER_URL still overrides.
@@ -121,6 +122,81 @@ function registerNotificationIpc() {
     });
     notification.show();
     return true;
+  });
+}
+
+// T19: native file save/open. Deliberately NOT a general filesystem bridge:
+// the renderer never supplies a path. A save target exists only after the user
+// picked it in the OS dialog; writes are append-only and sequential; opening a
+// finished download is addressed by grant token, not by path. The policy lives
+// in file-io.js so it is testable without Electron.
+let fileIo = null;
+
+function fileSenderId(event) {
+  const id = event && event.sender && event.sender.id;
+  if (!Number.isSafeInteger(id) || id <= 0) throw new FileIoError('untrusted sender');
+  return id;
+}
+
+function registerFileIpc() {
+  const pending = new Map(); // webContents id -> number of open save dialogs
+
+  ipcMain.handle('ichat:files:pick-save-target', async (event, payload) => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    const senderId = fileSenderId(event);
+    // Validate before the dialog: an oversized or nameless request must not
+    // put a modal window in front of the user.
+    const request = fileIo.validateSaveRequest(payload);
+    const openDialogs = pending.get(senderId) || 0;
+    if (openDialogs >= 1) throw new FileIoError('dialog_in_progress');
+    pending.set(senderId, openDialogs + 1);
+    try {
+      const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+      const options = {
+        title: '保存接收的文件',
+        defaultPath: path.join(app.getPath('downloads'), request.fileName),
+        buttonLabel: '保存',
+        // No filter: a filter with an empty extension would silently append
+        // one, and the name the user sees is the name we report back.
+      };
+      const result = parent
+        ? await dialog.showSaveDialog(parent, options)
+        : await dialog.showSaveDialog(options);
+      if (!result || result.canceled || !result.filePath) {
+        return { canceled: true };
+      }
+      const grant = fileIo.createSaveGrant({
+        fileName: request.fileName,
+        totalBytes: request.totalBytes,
+        senderId,
+        filePath: result.filePath,
+      });
+      return { canceled: false, token: grant.token, fileName: grant.fileName };
+    } finally {
+      const remaining = (pending.get(senderId) || 1) - 1;
+      if (remaining <= 0) pending.delete(senderId);
+      else pending.set(senderId, remaining);
+    }
+  });
+
+  ipcMain.handle('ichat:files:write-chunk', (event, payload) => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    return fileIo.writeChunk({ ...(payload || {}), senderId: fileSenderId(event) });
+  });
+
+  ipcMain.handle('ichat:files:seal', (event, payload) => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    return fileIo.sealGrant({ ...(payload || {}), senderId: fileSenderId(event) });
+  });
+
+  ipcMain.handle('ichat:files:open-downloaded', async (event, payload) => {
+    if (!senderIsTrusted(event)) throw new Error('untrusted sender');
+    const target = fileIo.openTarget({ ...(payload || {}), senderId: fileSenderId(event) });
+    // shell.openPath resolves with an error string (empty on success); it does
+    // not throw for "no association", so the failure has to be read back.
+    const failure = await shell.openPath(target.filePath);
+    if (failure) throw new FileIoError('open_failed', failure);
+    return { opened: true, fileName: target.fileName };
   });
 }
 
@@ -455,6 +531,10 @@ if (!gotLock) {
     configureBranding(app, Menu);
     registerSecureStorageIpc();
     registerNotificationIpc();
+    // T19: created here so tests can inject a fake fs/dialog surface and so
+    // grants (and their expiry clock) belong to this app run only.
+    fileIo = createFileIo();
+    registerFileIpc();
     startDjangoServer(); // dev mode only
 
     let initiallyOffline = APP_CONFIG.mode === 'unconfigured';

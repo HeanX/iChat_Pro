@@ -11,7 +11,8 @@
     "dist": "electron-builder --win nsis",
     "test:installer": "node scripts/test-installer.cjs",
     "test:branding": "node scripts/test-branding.cjs",
-    "test:layout": "node scripts/test-sidebar-layout.cjs"
+    "test:layout": "node scripts/test-sidebar-layout.cjs",
+    "test:files": "node scripts/test-file-io.cjs"
   },
   "devDependencies": {
     "electron": "^39.0.0",
@@ -26,6 +27,7 @@
       "main.js",
       "app-config.js",
       "app-branding.js",
+      "file-io.js",
       "defaults.json",
       "preload.js",
       "offline.html"

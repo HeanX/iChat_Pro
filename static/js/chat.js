@@ -5769,14 +5769,91 @@ function closeImagePreviewViewer() {
   activeImageViewer = null;
 }
 
-function downloadActiveImageViewer() {
-  if (!activeImageViewer) return;
+// P4 T19: inside the desktop shell an <a download> is bound to the app origin,
+// so where the file lands (or whether it lands at all) is up to the browser
+// download manager. Both call sites already hold the decrypted Blob, so no
+// re-fetch happens: the bytes are handed to the native save path when it is
+// available, and the previous anchor is kept for browser builds.
+// Returns {status: 'saved'|'canceled'|'unsupported'} and never rejects for the
+// expected failures - the caller decides what to tell the user.
+function saveOrDownloadBlob(blob, filename, url, metadata) {
+  var ft = window.iChatFileTransfer;
+  var native = ft && typeof ft.nativeSaveAvailable === 'function' && ft.nativeSaveAvailable();
+  if (native && blob && blob.size > 0) {
+    return ft.saveBlobToDisk(blob, Object.assign({ original_name: filename }, metadata || {}))
+      .then(function (save) {
+        if (save && save.status === 'saved' && window.showToast) {
+          window.showToast('已保存到：' + (save.fileName || filename));
+        }
+        return save || { status: 'canceled' };
+      })
+      .catch(function (err) {
+        window.showToast && window.showToast(err.message || '保存失败');
+        return { status: 'failed' };
+      });
+  }
   var a = document.createElement('a');
-  a.href = activeImageViewer.url;
-  a.download = imageViewerFilename();
+  a.href = url;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  return Promise.resolve({ status: 'unsupported' });
+}
+
+// After a successful native save, swap the "Done" label for an opener bound to
+// the saved file. Opening is addressed by the grant token from that save, so
+// the renderer cannot ask the shell to open an arbitrary path. For file types
+// the shell refuses to execute (installers, scripts) the hint is shown and the
+// plain "Done" label stays.
+function offerOpenSavedFile(btn, save) {
+  btn.classList.remove('downloading');
+  var previousOpen = btn.parentNode && btn.parentNode.querySelector('[data-file-open]');
+  if (previousOpen) previousOpen.remove();
+  if (save && save.status === 'canceled') {
+    // The user dismissed the save dialog: nothing reached the disk, so the
+    // button must not claim success and must stay usable.
+    btn.classList.remove('downloaded');
+    btn.innerHTML = '<i data-lucide="download" class="w-4 h-4"></i> Download';
+    lucide.createIcons();
+    return;
+  }
+  btn.classList.add('downloaded');
+  btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
+  if (!save || save.status !== 'saved' || !save.token) {
+    lucide.createIcons();
+    return;
+  }
+  var open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'file-open-btn';
+  open.setAttribute('data-file-open', '');
+  open.innerHTML = '<i data-lucide="external-link" class="w-4 h-4"></i> 打开';
+  open.addEventListener('click', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    open.disabled = true;
+    window.iChatFileTransfer.openSavedFile(save.token).then(function (result) {
+      open.disabled = false;
+      if (result.status === 'opened' || result.status === 'unsupported') return;
+      window.showToast && window.showToast(result.reason || '打开失败');
+    }).catch(function () {
+      open.disabled = false;
+      window.showToast && window.showToast('打开失败');
+    });
+  });
+  btn.parentNode && btn.parentNode.appendChild(open);
+  lucide.createIcons();
+}
+
+function downloadActiveImageViewer() {
+  if (!activeImageViewer) return;
+  saveOrDownloadBlob(
+    activeImageViewer.blob,
+    imageViewerFilename(),
+    activeImageViewer.url,
+    { fileId: activeImageViewer.fileId }
+  );
 }
 
 function rotateActiveImageViewer() {
@@ -5974,32 +6051,35 @@ function renderFileMessageBubble(div, msg, conv, groupMeta) {
       btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Downloading...';
       lucide.createIcons();
       window.iChatFileTransfer.fetchAndDecryptFile(parseInt(fid), convType).then(function (result) {
+        if (!result || !result.blob) throw new Error('empty download');
+        var url = URL.createObjectURL(result.blob);
+        var previewEl = div.querySelector('.file-bubble-preview');
+        if (previewEl) {
+          // Show image preview
+          if (result.blob.type.indexOf('image/') === 0) {
+            var img = document.createElement('img');
+            img.src = url;
+            previewEl.appendChild(img);
+            previewEl.classList.remove('hidden');
+          }
+        }
+        // Trigger download for non-image files
+        if (result.blob.type.indexOf('image/') !== 0) {
+          return saveOrDownloadBlob(
+            result.blob,
+            (result.metadata && result.metadata.original_name) || 'file',
+            url,
+            { fileId: parseInt(fid, 10) }
+          ).then(function (save) {
+            offerOpenSavedFile(btn, save);
+            return save;
+          });
+        }
         btn.classList.remove('downloading');
         btn.classList.add('downloaded');
         btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
         lucide.createIcons();
-        if (result && result.blob) {
-          var url = URL.createObjectURL(result.blob);
-          var previewEl = div.querySelector('.file-bubble-preview');
-          if (previewEl) {
-            // Show image preview
-            if (result.blob.type.indexOf('image/') === 0) {
-              var img = document.createElement('img');
-              img.src = url;
-              previewEl.appendChild(img);
-              previewEl.classList.remove('hidden');
-            }
-          }
-          // Trigger download for non-image files
-          if (result.blob.type.indexOf('image/') !== 0) {
-            var a = document.createElement('a');
-            a.href = url;
-            a.download = (result.metadata && result.metadata.original_name) || 'file';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          }
-        }
+        return null;
       }).catch(function (err) {
         btn.classList.remove('downloading');
         btn.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4"></i> Failed';

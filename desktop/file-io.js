@@ -1,0 +1,297 @@
+'use strict';
+/**
+ * P4 T19: native file selection / save / open for the desktop shell.
+ *
+ * This module owns every decision that could widen filesystem access; main.js
+ * only wires it to Electron (dialog.showSaveDialog / shell.openPath) and the
+ * IPC channels. Keeping the policy here means it can be exercised under plain
+ * Node with real files in a disposable temp directory - no Electron needed.
+ *
+ * Security model (see docs/phase4/windows-files.md):
+ * - A save target is only created from a native save dialog. The renderer can
+ *   never name a path, so there is no "write anywhere" primitive.
+ * - The grant token is random (128-bit) and bound to the webContents id that
+ *   created it; another frame in the same app cannot reuse it.
+ * - Writes are append-only and strictly sequential: an offset that does not
+ *   match the bytes already written is rejected. The renderer cannot seek, so
+ *   it cannot preallocate or punch holes.
+ * - The declared total is enforced; a grant that promised N bytes refuses
+ *   N + 1. Single chunks are capped independently.
+ * - Grants expire, are capped in number, and opening a downloaded file is
+ *   keyed by token rather than by a caller-supplied path.
+ */
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
+/** Mirrors static/js/file-transfer.js MAX_FILE_SIZE so both sides agree. */
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
+/** Base64 payload cap for one write-chunk round trip. */
+const MAX_CHUNK_BYTES = 2 * 1024 * 1024;
+/** Concurrent unexpired grants allowed per app instance. */
+const MAX_GRANTS = 8;
+/** A download that stalls for this long must be restarted by the user. */
+const GRANT_TTL_MS = 30 * 60 * 1000;
+const MAX_FILE_NAME_LENGTH = 180;
+
+// Windows resolves no extension and treats these as executable. shell.openPath
+// on such a file runs code that arrived from a chat peer, so it is refused:
+// the file is still saved, the user can open it from Explorer themselves.
+const BLOCKED_OPEN_EXTENSIONS = [
+  '.exe', '.com', '.bat', '.cmd', '.msi', '.msp', '.scr', '.pif',
+  '.ps1', '.psm1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh',
+  '.hta', '.cpl', '.jar', '.lnk', '.reg', '.msc', '.gadget', '.dll',
+  '.application', '.appx', '.appxbundle', '.msix', '.msixbundle',
+];
+
+const RESERVED_FILE_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+class FileIoError extends Error {
+  constructor(code, detail) {
+    super(code);
+    this.name = 'FileIoError';
+    this.code = code;
+    if (detail !== undefined) this.detail = detail;
+  }
+}
+
+function fail(code, detail) {
+  throw new FileIoError(code, detail);
+}
+
+/**
+ * Strict non-negative integer parse. Numbers with a fraction, NaN, Infinity,
+ * negative values and non-decimal strings are all rejected instead of being
+ * silently coerced (Number('') === 0 would otherwise create a free pass).
+ */
+function toByteCount(raw) {
+  if (typeof raw === 'number') {
+    return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+  }
+  if (typeof raw === 'string' && /^\d{1,12}$/.test(raw)) {
+    const value = Number(raw);
+    return Number.isSafeInteger(value) ? value : null;
+  }
+  return null;
+}
+
+/**
+ * Reduce a peer-supplied display name to something Windows will actually
+ * create under the name the user sees. Returns null when nothing usable is
+ * left, so callers can fall back to a generic name.
+ */
+function sanitizeFileName(raw) {
+  let name = String(raw === null || raw === undefined ? '' : raw);
+  // Drop directory components from either separator family.
+  name = name.split(/[\\/]+/).pop() || '';
+  // Characters Win32 forbids in a file name (plus control characters).
+  // eslint-disable-next-line no-control-regex
+  name = name.replace(/[<>:"|?*\u0000-\u001f]/g, '_');
+  // Win32 silently strips trailing dots/spaces, which turns "a.exe " into
+  // "a.exe" and makes what we report differ from what lands on disk.
+  name = name.replace(/[. ]+$/, '');
+  if (!name || name === '.' || name === '..') return null;
+  if (RESERVED_FILE_NAMES.test(name)) name = '_' + name;
+  if (name.length > MAX_FILE_NAME_LENGTH) {
+    const dot = name.lastIndexOf('.');
+    const extension = dot > 0 && name.length - dot <= 16 ? name.slice(dot) : '';
+    name = name.slice(0, MAX_FILE_NAME_LENGTH - extension.length) + extension;
+  }
+  return name;
+}
+
+/** Strict base64: rejects wrong padding, stray characters and empty input. */
+function decodeBase64(raw) {
+  if (typeof raw !== 'string' || raw.length === 0) fail('invalid_payload', 'data');
+  if (raw.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) fail('invalid_payload', 'data');
+  const bytes = Buffer.from(raw, 'base64');
+  if (bytes.length === 0) fail('invalid_payload', 'data');
+  if (bytes.length > MAX_CHUNK_BYTES) fail('too_large', 'chunk');
+  return bytes;
+}
+
+/**
+ * @param {object} [options]
+ * @param {typeof import('node:fs')} [options.fs] - injectable for failure tests.
+ * @param {number} [options.maxGrants]
+ * @param {number} [options.maxFileBytes]
+ * @param {number} [options.grantTtlMs]
+ * @param {() => number} [options.now]
+ * @param {() => string} [options.createToken]
+ * @param {string[]} [options.blockedExtensions]
+ */
+function createFileIo(options = {}) {
+  const fileSystem = options.fs || fs;
+  const maxGrants = options.maxGrants || MAX_GRANTS;
+  const maxFileBytes = options.maxFileBytes || MAX_FILE_BYTES;
+  const grantTtlMs = options.grantTtlMs || GRANT_TTL_MS;
+  const now = options.now || (() => Date.now());
+  const createToken = options.createToken || (() => crypto.randomUUID());
+  const blockedExtensions = options.blockedExtensions || BLOCKED_OPEN_EXTENSIONS;
+
+  /** token -> grant */
+  const grants = new Map();
+
+  function prune() {
+    const at = now();
+    for (const [token, grant] of grants) {
+      if (at >= grant.expiresAt) grants.delete(token);
+    }
+  }
+
+  /** Validate what the renderer asks for BEFORE a native dialog is shown. */
+  function validateSaveRequest(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      fail('invalid_payload', 'request');
+    }
+    const fileName = sanitizeFileName(payload.fileName);
+    if (!fileName) fail('invalid_payload', 'fileName');
+    const totalBytes = toByteCount(payload.totalBytes);
+    if (totalBytes === null) fail('invalid_payload', 'totalBytes');
+    if (totalBytes > maxFileBytes) fail('too_large', 'totalBytes');
+    return { fileName, totalBytes };
+  }
+
+  /**
+   * Called after the user picked a path in the native dialog. The path is the
+   * only input that does not come from the renderer.
+   */
+  function createSaveGrant(input) {
+    const request = validateSaveRequest(input);
+    if (typeof input.senderId !== 'number' || !Number.isSafeInteger(input.senderId) || input.senderId <= 0) {
+      fail('untrusted sender');
+    }
+    const target = typeof input.filePath === 'string' ? input.filePath : '';
+    if (!target || target.length > 4096 || target.includes('\u0000')) fail('invalid_target');
+    if (!path.isAbsolute(target)) fail('invalid_target');
+    try {
+      if (fileSystem.existsSync(target) && fileSystem.statSync(target).isDirectory()) fail('invalid_target');
+    } catch (error) {
+      if (error instanceof FileIoError) throw error;
+      fail('invalid_target');
+    }
+
+    prune();
+    if (grants.size >= maxGrants) fail('too_many_grants');
+
+    const token = createToken();
+    const grant = {
+      token,
+      filePath: target,
+      fileName: request.fileName,
+      senderId: input.senderId,
+      totalBytes: request.totalBytes,
+      writtenBytes: 0,
+      sealed: false,
+      createdAt: now(),
+      expiresAt: now() + grantTtlMs,
+    };
+    grants.set(token, grant);
+    return { token, fileName: grant.fileName, totalBytes: grant.totalBytes };
+  }
+
+  function requireGrant(token, senderId) {
+    if (typeof token !== 'string' || token.length === 0 || token.length > 128) fail('invalid_payload', 'token');
+    const grant = grants.get(token);
+    if (!grant) fail('not_found');
+    if (now() >= grant.expiresAt) {
+      grants.delete(token);
+      fail('expired');
+    }
+    if (grant.senderId !== senderId) fail('wrong_sender');
+    return grant;
+  }
+
+  /**
+   * Append one chunk. `offset` must equal the bytes already accepted, so the
+   * on-disk file and the bookkeeping cannot drift apart.
+   */
+  function writeChunk(input) {
+    if (!input || typeof input !== 'object') fail('invalid_payload', 'request');
+    const grant = requireGrant(input.token, input.senderId);
+    if (grant.sealed) fail('already_sealed');
+    const offset = toByteCount(input.offset);
+    if (offset === null) fail('invalid_payload', 'offset');
+    if (offset !== grant.writtenBytes) fail('offset_mismatch');
+    const bytes = decodeBase64(input.dataBase64);
+    const next = grant.writtenBytes + bytes.length;
+    if (next > grant.totalBytes) fail('too_large', 'declared_total');
+    try {
+      if (grant.writtenBytes === 0) {
+        // First chunk opens the file: truncates an existing target the user
+        // already confirmed in the OS overwrite prompt.
+        fileSystem.writeFileSync(grant.filePath, bytes);
+      } else {
+        fileSystem.appendFileSync(grant.filePath, bytes);
+      }
+    } catch (error) {
+      // Do not count bytes that never reached the disk; the grant stays
+      // consistent and the next attempt retries the same offset.
+      fail('write_failed', error && error.code ? error.code : undefined);
+    }
+    grant.writtenBytes = next;
+    return { written: grant.writtenBytes, total: grant.totalBytes };
+  }
+
+  /** Finish the download: the declared byte count must have really arrived. */
+  function sealGrant(input) {
+    if (!input || typeof input !== 'object') fail('invalid_payload', 'request');
+    const grant = requireGrant(input.token, input.senderId);
+    if (!grant.sealed) {
+      if (grant.writtenBytes !== grant.totalBytes) fail('incomplete');
+      if (grant.writtenBytes === 0) {
+        try {
+          fileSystem.writeFileSync(grant.filePath, Buffer.alloc(0));
+        } catch (error) {
+          fail('write_failed', error && error.code ? error.code : undefined);
+        }
+      }
+      grant.sealed = true;
+    }
+    return { fileName: grant.fileName, bytes: grant.writtenBytes };
+  }
+
+  /**
+   * Resolve a token to an on-disk path that a grant in this session actually
+   * wrote completely. No caller-supplied path is ever trusted.
+   */
+  function openTarget(input) {
+    if (!input || typeof input !== 'object') fail('invalid_payload', 'request');
+    const grant = requireGrant(input.token, input.senderId);
+    if (!grant.sealed) fail('not_sealed');
+    if (grant.writtenBytes !== grant.totalBytes) fail('incomplete');
+    const extension = path.extname(grant.filePath).toLowerCase();
+    if (blockedExtensions.includes(extension)) fail('blocked_type', extension);
+    try {
+      if (!fileSystem.existsSync(grant.filePath)) fail('not_found');
+    } catch (error) {
+      if (error instanceof FileIoError) throw error;
+      fail('not_found');
+    }
+    return { filePath: grant.filePath, fileName: grant.fileName };
+  }
+
+  return {
+    validateSaveRequest,
+    createSaveGrant,
+    writeChunk,
+    sealGrant,
+    openTarget,
+    prune,
+    // Introspection for logs/tests; never exposed over IPC.
+    activeGrants: () => grants.size,
+    constants: { MAX_FILE_BYTES, MAX_CHUNK_BYTES, MAX_GRANTS, GRANT_TTL_MS },
+  };
+}
+
+module.exports = {
+  createFileIo,
+  sanitizeFileName,
+  toByteCount,
+  FileIoError,
+  BLOCKED_OPEN_EXTENSIONS,
+  MAX_FILE_BYTES,
+  MAX_CHUNK_BYTES,
+  MAX_GRANTS,
+  GRANT_TTL_MS,
+};

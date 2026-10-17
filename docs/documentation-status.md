@@ -10,6 +10,8 @@
 
 2026-10-13 增补：[第四次实验-单元测试与代码评审报告](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.md) 与 [项目中期完成情况报告](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.md)。测试与评审数据为本机实测，评审统计取自 Git 提交历史；同时修复了头像测试向仓库 `media/` 写入真实文件的测试污染缺陷。
 
+2026-10-18 增补：[ADR-P4-04 跨平台 E2EE 威胁模型与数据流](phase4/e2ee-threat-model.md)（P4 T38 / #165）。覆盖现有 Web 与 Windows 实现，含资产表、信任边界、DFD、攻击面、威胁清单与"不可保存数据"硬约束；Android 与设备级密钥明确标为未覆盖。代码基线 `cfe53be`，文中每条现行实现均标注 `文件:行`。**该文档不构成安全验收结论**，#165 仍保持开放。
+
 | 文档 | 用途与本次维护 |
 | --- | --- |
 | [.github/ISSUE_TEMPLATE/task.md](../.github/ISSUE_TEMPLATE/task.md) | 提交/任务模板；补文档与真实验收证据约束 |
@@ -75,6 +77,7 @@
 | [docs/phase4/baseline-report.md](phase4/baseline-report.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/completion-audit-20261007.md](phase4/completion-audit-20261007.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/deploy-architecture.md](phase4/deploy-architecture.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/e2ee-threat-model.md](phase4/e2ee-threat-model.md) | 现行说明/专题；ADR-P4-04 跨平台 E2EE 威胁模型与数据流（资产/攻击面/信任边界/不可保存数据），2026-10-18 新增 |
 | [docs/phase4/protocol.md](phase4/protocol.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/requirements.md](phase4/requirements.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/risk-register.md](phase4/risk-register.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |

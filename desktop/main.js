@@ -138,10 +138,38 @@ function fileSenderId(event) {
   return id;
 }
 
+// T19 review round 1 (BLOCKER): `ipcMain.handle` only carries `message` across
+// the process boundary - a thrown error arrives at the renderer as
+// "Error invoking remote method 'x': Error: write_failed" with `code` gone.
+// Verified against Electron 39.8.10. Every expected failure is therefore
+// RESOLVED as a typed envelope instead of thrown; only a programmer error or
+// an untrusted sender still rejects, and those are not user-facing paths.
+function fileEnvelope(operation) {
+  try {
+    return { ok: true, value: operation() };
+  } catch (error) {
+    if (error instanceof FileIoError) {
+      return { ok: false, code: error.code, detail: error.detail };
+    }
+    throw error;
+  }
+}
+
+async function fileEnvelopeAsync(operation) {
+  try {
+    return { ok: true, value: await operation() };
+  } catch (error) {
+    if (error instanceof FileIoError) {
+      return { ok: false, code: error.code, detail: error.detail };
+    }
+    throw error;
+  }
+}
+
 function registerFileIpc() {
   const pending = new Map(); // webContents id -> number of open save dialogs
 
-  ipcMain.handle('ichat:files:pick-save-target', async (event, payload) => {
+  ipcMain.handle('ichat:files:pick-save-target', (event, payload) => fileEnvelopeAsync(async () => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
     const senderId = fileSenderId(event);
     // Validate before the dialog: an oversized or nameless request must not
@@ -177,19 +205,19 @@ function registerFileIpc() {
       if (remaining <= 0) pending.delete(senderId);
       else pending.set(senderId, remaining);
     }
-  });
+  }));
 
-  ipcMain.handle('ichat:files:write-chunk', (event, payload) => {
+  ipcMain.handle('ichat:files:write-chunk', (event, payload) => fileEnvelope(() => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
     return fileIo.writeChunk({ ...(payload || {}), senderId: fileSenderId(event) });
-  });
+  }));
 
-  ipcMain.handle('ichat:files:seal', (event, payload) => {
+  ipcMain.handle('ichat:files:seal', (event, payload) => fileEnvelope(() => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
     return fileIo.sealGrant({ ...(payload || {}), senderId: fileSenderId(event) });
-  });
+  }));
 
-  ipcMain.handle('ichat:files:open-downloaded', async (event, payload) => {
+  ipcMain.handle('ichat:files:open-downloaded', (event, payload) => fileEnvelopeAsync(async () => {
     if (!senderIsTrusted(event)) throw new Error('untrusted sender');
     const target = fileIo.openTarget({ ...(payload || {}), senderId: fileSenderId(event) });
     // shell.openPath resolves with an error string (empty on success); it does
@@ -197,7 +225,7 @@ function registerFileIpc() {
     const failure = await shell.openPath(target.filePath);
     if (failure) throw new FileIoError('open_failed', failure);
     return { opened: true, fileName: target.fileName };
-  });
+  }));
 }
 
 function localPythonCandidates() {

@@ -5779,7 +5779,9 @@ function closeImagePreviewViewer() {
 function saveOrDownloadBlob(blob, filename, url, metadata) {
   var ft = window.iChatFileTransfer;
   var native = ft && typeof ft.nativeSaveAvailable === 'function' && ft.nativeSaveAvailable();
-  if (native && blob && blob.size > 0) {
+  // A 0-byte file is legitimate and must take the native path too; only a
+  // missing blob falls back to the anchor.
+  if (native && blob && typeof blob.size === 'number') {
     return ft.saveBlobToDisk(blob, Object.assign({ original_name: filename }, metadata || {}))
       .then(function (save) {
         if (save && save.status === 'saved' && window.showToast) {
@@ -5810,17 +5812,20 @@ function offerOpenSavedFile(btn, save) {
   btn.classList.remove('downloading');
   var previousOpen = btn.parentNode && btn.parentNode.querySelector('[data-file-open]');
   if (previousOpen) previousOpen.remove();
-  if (save && save.status === 'canceled') {
-    // The user dismissed the save dialog: nothing reached the disk, so the
-    // button must not claim success and must stay usable.
+  // Review round 1 (BLOCKER): "Done" may only mean the bytes are on disk. A
+  // canceled dialog leaves nothing behind, and a failed save must be retryable
+  // rather than looking successful next to an error toast.
+  if (!save || save.status !== 'saved') {
     btn.classList.remove('downloaded');
-    btn.innerHTML = '<i data-lucide="download" class="w-4 h-4"></i> Download';
+    btn.innerHTML = save && save.status === 'failed'
+      ? '<i data-lucide="alert-circle" class="w-4 h-4"></i> Retry'
+      : '<i data-lucide="download" class="w-4 h-4"></i> Download';
     lucide.createIcons();
     return;
   }
   btn.classList.add('downloaded');
   btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
-  if (!save || save.status !== 'saved' || !save.token) {
+  if (!save.token) {
     lucide.createIcons();
     return;
   }
@@ -5848,12 +5853,19 @@ function offerOpenSavedFile(btn, save) {
 
 function downloadActiveImageViewer() {
   if (!activeImageViewer) return;
-  saveOrDownloadBlob(
+  // Same post-save handling as the file bubble (toast + open affordance), so
+  // the viewer does not silently swallow a failed save.
+  var target = document.createElement('div');
+  target.className = 'file-bubble-info';
+  return saveOrDownloadBlob(
     activeImageViewer.blob,
     imageViewerFilename(),
     activeImageViewer.url,
     { fileId: activeImageViewer.fileId }
-  );
+  ).then(function (save) {
+    if (save && save.status === 'saved') offerOpenSavedFile(target, save);
+    return save;
+  });
 }
 
 function rotateActiveImageViewer() {

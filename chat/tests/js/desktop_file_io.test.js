@@ -11,6 +11,8 @@
  *  3. desktop/preload.js + static/js/file-transfer.js - the bridge and the
  *                             renderer streaming path (chunking, offsets,
  *                             failure messages)
+ *  4. static/js/chat.js     - the save/save-failed/save-canceled button states,
+ *                             which round 1 found completely uncovered
  *
  * Native acceptance that needs an installed build and a human at the dialog is
  * NOT covered here and is listed as unverified in docs/phase4/windows-files.md.
@@ -180,14 +182,15 @@ test('a failed write does not advance the offset, so a retry lands on the same b
   const target = tempPath('retry.bin');
   let failuresLeft = 1;
   const flaky = Object.create(fs);
-  flaky.writeFileSync = (...args) => {
+  // Production writes positionally (writeSync), so the fault is injected there.
+  flaky.writeSync = (...args) => {
     if (failuresLeft > 0) {
       failuresLeft -= 1;
       const error = new Error('no space left on device');
       error.code = 'ENOSPC';
       throw error;
     }
-    return fs.writeFileSync(...args);
+    return fs.writeSync(...args);
   };
   const api = io.createFileIo({ fs: flaky });
   const grant = api.createSaveGrant({ fileName: 'retry.bin', totalBytes: 3, senderId: 1, filePath: target });
@@ -197,6 +200,51 @@ test('a failed write does not advance the offset, so a retry lands on the same b
   assert.deepEqual(api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'AAAA' }),
     { written: 3, total: 3 }, 'the retry is accepted at the same offset');
   assert.deepEqual(fs.readFileSync(target), Buffer.from([0, 0, 0]));
+});
+
+test('a chunk that fails partway is repaired by the retry, not appended twice', () => {
+  // Review round 1 (MAJOR): the naive append path would duplicate the bytes
+  // that reached the disk before the error. The second chunk (offset 3) is the
+  // one that matters - a retry must overwrite those bytes, so the file ends up
+  // exactly 6 bytes no matter how many times the write is repeated.
+  const target = tempPath('partial.bin');
+  let failSecondChunk = true;
+  const partial = Object.create(fs);
+  partial.writeSync = (...args) => {
+    const position = args[4];
+    const result = fs.writeSync(...args);
+    if (position === 3 && failSecondChunk) {
+      failSecondChunk = false;
+      const error = new Error('no space left on device');
+      error.code = 'ENOSPC';
+      throw error;
+    }
+    return result;
+  };
+  const api = io.createFileIo({ fs: partial });
+  const grant = api.createSaveGrant({ fileName: 'partial.bin', totalBytes: 6, senderId: 1, filePath: target });
+
+  assert.deepEqual(api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'QUJD' }),
+    { written: 3, total: 6 });
+  assert.throws(() => api.writeChunk({ token: grant.token, senderId: 1, offset: 3, dataBase64: 'REVG' }),
+    (error) => error.code === 'write_failed');
+  // The failed chunk still reached the disk, but the offset did not advance.
+  assert.equal(fs.statSync(target).size, 6);
+
+  assert.deepEqual(api.writeChunk({ token: grant.token, senderId: 1, offset: 3, dataBase64: 'REVG' }),
+    { written: 6, total: 6 });
+  assert.equal(fs.statSync(target).size, 6, 'the retry overwrote instead of appending');
+  assert.equal(fs.readFileSync(target, 'utf8'), 'ABCDEF');
+});
+
+test('replacing a longer file trims it to the declared size', () => {
+  const target = tempPath('replaced.txt');
+  fs.writeFileSync(target, 'a much longer previous file that must not survive');
+  const api = io.createFileIo();
+  const grant = api.createSaveGrant({ fileName: 'replaced.txt', totalBytes: 3, senderId: 1, filePath: target });
+  api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'QUJD' });
+  api.sealGrant({ token: grant.token, senderId: 1 });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'ABC', 'no tail from the overwritten file');
 });
 
 test('sealing refuses a short file and opening requires a finished download', () => {
@@ -425,9 +473,9 @@ test('a trusted save request reaches the dialog with the sanitised default name'
   const h = launch({ dialogPath: target });
   await h.started();
   const handler = h.handlers.get('ichat:files:pick-save-target');
-  const result = await invoke(handler, frameAt(h.origin()), {
+  const result = (await invoke(handler, frameAt(h.origin()), {
     fileName: '..\\..\\invoice.pdf', totalBytes: 5,
-  });
+  })).value;
   assert.equal(result.canceled, false);
   assert.equal(result.fileName, 'invoice.pdf');
   assert.equal(typeof result.token, 'string');
@@ -448,23 +496,19 @@ test('untrusted frames, bad payloads and oversized files never open a dialog', a
       { fileName: 'a.txt', totalBytes: 1 }),
     /untrusted sender/,
   );
-  await assert.rejects(
-    () => invoke(handler, { senderFrame: { url: 'https://evil.example/x' }, sender: { id: 1 } },
-      { fileName: 'a.txt', totalBytes: 1 }),
-    /untrusted sender/,
-  );
+  // Expected failures come back as a typed envelope, not as a rejection. The
+  // `detail` field names the offending field, so only the code is fixed here.
   for (const payload of [null, { fileName: '', totalBytes: 1 }, { fileName: 'a.txt', totalBytes: -1 }]) {
-    await assert.rejects(() => invoke(handler, frameAt(h.origin()), payload), /invalid_payload/);
+    const envelope = await invoke(handler, frameAt(h.origin()), payload);
+    assert.equal(envelope.ok, false, JSON.stringify(payload));
+    assert.equal(envelope.code, 'invalid_payload', JSON.stringify(payload));
   }
-  await assert.rejects(
-    () => invoke(handler, frameAt(h.origin()), { fileName: 'huge.bin', totalBytes: io.MAX_FILE_BYTES + 1 }),
-    /too_large/,
-  );
-  // A frame without a sender id cannot own a grant.
-  await assert.rejects(
-    () => invoke(handler, { senderFrame: { url: h.origin() + '/login/' } }, { fileName: 'a.txt', totalBytes: 1 }),
-    /untrusted sender/,
-  );
+  sameShape(await invoke(handler, frameAt(h.origin()), { fileName: 'huge.bin', totalBytes: io.MAX_FILE_BYTES + 1 }),
+    { ok: false, code: 'too_large', detail: 'totalBytes' });
+  // A frame without a sender id cannot own a grant. This is a FileIoError, so
+  // it is reported through the same envelope rather than as a throw.
+  sameShape(await invoke(handler, { senderFrame: { url: h.origin() + '/login/' } },
+    { fileName: 'a.txt', totalBytes: 1 }), failed('untrusted sender'));
   assert.equal(h.dialogs.length, 0, 'validation must happen before the modal dialog');
   h.app.quit();
 });
@@ -474,7 +518,7 @@ test('cancelling the dialog creates no grant and writes nothing', async () => {
   await h.started();
   const handler = h.handlers.get('ichat:files:pick-save-target');
   sameShape(await invoke(handler, frameAt(h.origin()), { fileName: 'a.txt', totalBytes: 4 }),
-    { canceled: true });
+    ok({ canceled: true }));
   assert.equal(h.dialogs.length, 1);
   h.app.quit();
 });
@@ -487,12 +531,10 @@ test('a second dialog for the same frame is refused while the first is open', as
   const first = invoke(handler, frameAt(h.origin()), { fileName: 'a.txt', totalBytes: 1 });
   // The first request is parked inside showSaveDialog at this point.
   while (!options.releaseDialog) await new Promise((resolve) => setImmediate(resolve));
-  await assert.rejects(
-    () => invoke(handler, frameAt(h.origin()), { fileName: 'b.txt', totalBytes: 1 }),
-    /dialog_in_progress/,
-  );
+  sameShape(await invoke(handler, frameAt(h.origin()), { fileName: 'b.txt', totalBytes: 1 }),
+    failed('dialog_in_progress'));
   options.releaseDialog();
-  assert.equal((await first).canceled, false);
+  assert.equal((await first).value.canceled, false);
   assert.equal(h.dialogs.length, 1);
 
   // After that dialog closed, another save is allowed again.
@@ -500,7 +542,7 @@ test('a second dialog for the same frame is refused while the first is open', as
   while (!options.releaseDialog || h.dialogs.length < 2) await new Promise((resolve) => setImmediate(resolve));
   options.dialogPath = tempPath('concurrent-two.txt');
   options.releaseDialog();
-  assert.equal((await second).canceled, false);
+  assert.equal((await second).value.canceled, false);
   assert.equal(h.dialogs.length, 2);
   h.app.quit();
 });
@@ -509,19 +551,19 @@ test('end to end: dialog, two chunks, seal, then open the exact saved file', asy
   const target = tempPath('e2e-report.pdf');
   const h = launch({ dialogPath: target });
   await h.started();
-  const pick = await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin()),
-    { fileName: 'e2e-report.pdf', totalBytes: 6 });
+  const pick = (await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin()),
+    { fileName: 'e2e-report.pdf', totalBytes: 6 })).value;
   const write = (offset, dataBase64) => invoke(h.handlers.get('ichat:files:write-chunk'),
     frameAt(h.origin()), { token: pick.token, offset, dataBase64 });
 
-  sameShape(await write(0, 'QUJD'), { written: 3, total: 6 });
-  sameShape(await write(3, 'REVG'), { written: 6, total: 6 });
+  sameShape(await write(0, 'QUJD'), ok({ written: 3, total: 6 }));
+  sameShape(await write(3, 'REVG'), ok({ written: 6, total: 6 }));
   sameShape(await invoke(h.handlers.get('ichat:files:seal'), frameAt(h.origin()),
-    { token: pick.token }), { fileName: 'e2e-report.pdf', bytes: 6 });
+    { token: pick.token }), ok({ fileName: 'e2e-report.pdf', bytes: 6 }));
 
   assert.equal(fs.readFileSync(target, 'utf8'), 'ABCDEF');
   sameShape(await invoke(h.handlers.get('ichat:files:open-downloaded'), frameAt(h.origin()),
-    { token: pick.token }), { opened: true, fileName: 'e2e-report.pdf' });
+    { token: pick.token }), ok({ opened: true, fileName: 'e2e-report.pdf' }));
   assert.deepEqual(h.opened, [target], 'openPath receives the dialog path, never a renderer path');
   h.app.quit();
 });
@@ -530,14 +572,11 @@ test('writes and opens are refused for other senders and for executables', async
   const textTarget = tempPath('shared.txt');
   const h = launch({ dialogPath: textTarget });
   await h.started();
-  const pick = await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin(), 1),
-    { fileName: 'shared.txt', totalBytes: 3 });
+  const pick = (await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin(), 1),
+    { fileName: 'shared.txt', totalBytes: 3 })).value;
   // Another webContents in the same app instance cannot use the token.
-  await assert.rejects(
-    () => invoke(h.handlers.get('ichat:files:write-chunk'), frameAt(h.origin(), 2),
-      { token: pick.token, offset: 0, dataBase64: 'QUJD' }),
-    /wrong_sender/,
-  );
+  sameShape(await invoke(h.handlers.get('ichat:files:write-chunk'), frameAt(h.origin(), 2),
+    { token: pick.token, offset: 0, dataBase64: 'QUJD' }), failed('wrong_sender'));
   await invoke(h.handlers.get('ichat:files:write-chunk'), frameAt(h.origin(), 1),
     { token: pick.token, offset: 0, dataBase64: 'QUJD' });
   await invoke(h.handlers.get('ichat:files:seal'), frameAt(h.origin(), 1), { token: pick.token });
@@ -546,16 +585,14 @@ test('writes and opens are refused for other senders and for executables', async
   const exeTarget = tempPath('received-setup.exe');
   const h2 = launch({ dialogPath: exeTarget });
   await h2.started();
-  const exe = await invoke(h2.handlers.get('ichat:files:pick-save-target'), frameAt(h2.origin()),
-    { fileName: 'received-setup.exe', totalBytes: 2 });
+  const exe = (await invoke(h2.handlers.get('ichat:files:pick-save-target'), frameAt(h2.origin()),
+    { fileName: 'received-setup.exe', totalBytes: 2 })).value;
   await invoke(h2.handlers.get('ichat:files:write-chunk'), frameAt(h2.origin()),
     { token: exe.token, offset: 0, dataBase64: 'TVo=' });
   await invoke(h2.handlers.get('ichat:files:seal'), frameAt(h2.origin()), { token: exe.token });
   assert.equal(fs.readFileSync(exeTarget, 'utf8'), 'MZ');
-  await assert.rejects(
-    () => invoke(h2.handlers.get('ichat:files:open-downloaded'), frameAt(h2.origin()), { token: exe.token }),
-    /blocked_type/,
-  );
+  sameShape(await invoke(h2.handlers.get('ichat:files:open-downloaded'), frameAt(h2.origin()),
+    { token: exe.token }), failed('blocked_type', '.exe'));
   assert.deepEqual(h2.opened, [], 'openPath is never called for an executable');
   h.app.quit();
   h2.app.quit();
@@ -565,15 +602,13 @@ test('an OS-level open failure is reported instead of swallowed', async () => {
   const target = tempPath('no-association.dat');
   const h = launch({ dialogPath: target, openPathError: 'No application is associated with this file' });
   await h.started();
-  const pick = await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin()),
-    { fileName: 'no-association.dat', totalBytes: 2 });
+  const pick = (await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin()),
+    { fileName: 'no-association.dat', totalBytes: 2 })).value;
   await invoke(h.handlers.get('ichat:files:write-chunk'), frameAt(h.origin()),
     { token: pick.token, offset: 0, dataBase64: 'QUI=' });
   await invoke(h.handlers.get('ichat:files:seal'), frameAt(h.origin()), { token: pick.token });
-  await assert.rejects(
-    () => invoke(h.handlers.get('ichat:files:open-downloaded'), frameAt(h.origin()), { token: pick.token }),
-    /open_failed/,
-  );
+  sameShape(await invoke(h.handlers.get('ichat:files:open-downloaded'), frameAt(h.origin()),
+    { token: pick.token }), { ok: false, code: 'open_failed', detail: 'No application is associated with this file' });
   h.app.quit();
 });
 
@@ -602,13 +637,22 @@ function loadFileTransfer(bridge) {
   return { ft, exposed, calls, context };
 }
 
+// Mirrors what main.js actually resolves: the `{ok, value|code}` envelope.
+// Test round 1 finding: a fake bridge that *threw* a coded error made the
+// renderer suite pass while real Electron dropped the code entirely.
+const ok = (value) => ({ ok: true, value });
+// main.js omits `detail` when the policy did not supply one.
+const failed = (code, detail) => (detail === undefined
+  ? { ok: false, code }
+  : { ok: false, code, detail });
+
 function fakeBridge(overrides = {}) {
   const calls = { pick: [], write: [], seal: [], open: [] };
   const files = {
-    pickSaveTarget: async (payload) => { calls.pick.push(payload); return { canceled: false, token: 'tok-1', fileName: payload.fileName }; },
-    writeChunk: async (payload) => { calls.write.push(payload); return { written: payload.offset + Buffer.from(payload.dataBase64, 'base64').length, total: 0 }; },
-    seal: async (payload) => { calls.seal.push(payload); return { fileName: 'x', bytes: 0 }; },
-    openDownloaded: async (payload) => { calls.open.push(payload); return { opened: true, fileName: 'x' }; },
+    pickSaveTarget: async (payload) => { calls.pick.push(payload); return ok({ canceled: false, token: 'tok-1', fileName: payload.fileName }); },
+    writeChunk: async (payload) => { calls.write.push(payload); return ok({ written: payload.offset + Buffer.from(payload.dataBase64, 'base64').length, total: 0 }); },
+    seal: async (payload) => { calls.seal.push(payload); return ok({ fileName: 'x', bytes: 0 }); },
+    openDownloaded: async (payload) => { calls.open.push(payload); return ok({ opened: true, fileName: 'x' }); },
     ...overrides,
   };
   return { bridge: { isElectron: true, files }, calls };
@@ -641,7 +685,7 @@ test('a 5 MiB blob is streamed as 2 MiB chunks with exact offsets and bytes', as
 });
 
 test('cancelling the native dialog writes nothing and reports canceled', async () => {
-  const { bridge, calls } = fakeBridge({ pickSaveTarget: async (payload) => { calls.pick.push(payload); return { canceled: true }; } });
+  const { bridge, calls } = fakeBridge({ pickSaveTarget: async (payload) => { calls.pick.push(payload); return ok({ canceled: true }); } });
   const { ft } = loadFileTransfer(bridge);
   sameShape(await ft.saveBlobToDisk(new Blob(['abc']), { original_name: 'a.txt' }),
     { status: 'canceled', canceled: true });
@@ -650,37 +694,194 @@ test('cancelling the native dialog writes nothing and reports canceled', async (
 });
 
 test('main-process failures surface as messages a user can act on', async () => {
-  const failure = (code) => fakeBridge({
-    writeChunk: async () => { const error = new Error(code); error.code = code; throw error; },
-  });
+  // Review round 1: the bridge RESOLVES a coded envelope, exactly like the real
+  // ipcMain.handle path does now. Throwing here would hide the very bug this
+  // covers (Electron drops `code` from rejected errors).
+  const failure = (code, detail) => fakeBridge({ writeChunk: async () => failed(code, detail) });
   const cases = [
-    ['write_failed', /磁盘已满|被占用/],
-    ['offset_mismatch', /写入位置不一致/],
-    ['expired', /超时/],
-    ['not_found', /凭证已失效/],
+    ['write_failed', 'ENOSPC', /磁盘已满|被占用/],
+    ['offset_mismatch', undefined, /写入位置不一致/],
+    ['expired', undefined, /超时/],
+    ['not_found', undefined, /凭证已失效/],
+    ['incomplete', undefined, /没有接收完整/],
+    ['too_many_grants', undefined, /同时进行的下载过多/],
+    ['too_large', 'chunk', /超过允许的大小上限/],
+    ['invalid_target', undefined, /所选位置不可用/],
   ];
-  for (const [code, expected] of cases) {
-    const { ft } = loadFileTransfer(failure(code).bridge);
+  for (const [code, detail, expected] of cases) {
+    const { ft } = loadFileTransfer(failure(code, detail).bridge);
     await assert.rejects(() => ft.saveBlobToDisk(new Blob(['abc']), { original_name: 'a.txt' }),
       (error) => expected.test(error.message) && error.nativeCode === code, code);
   }
 
-  const blocked = fakeBridge({ openDownloaded: async () => { const error = new Error('blocked'); error.code = 'blocked_type'; throw error; } });
+  const blocked = fakeBridge({ openDownloaded: async () => failed('blocked_type', '.exe') });
   const { ft } = loadFileTransfer(blocked.bridge);
   const refused = await ft.openSavedFile('tok-1');
   assert.equal(refused.status, 'failed');
   assert.match(refused.reason, /安装包和脚本/);
 
-  const missing = fakeBridge({ openDownloaded: async () => { const error = new Error('x'); error.code = 'not_found'; throw error; } });
+  const missing = fakeBridge({ openDownloaded: async () => failed('not_found') });
   const { ft: ft2 } = loadFileTransfer(missing.bridge);
   assert.match((await ft2.openSavedFile('tok-1')).reason, /凭证已失效/);
 });
 
 test('a truncated write is rejected instead of reported as saved', async () => {
   const { bridge } = fakeBridge({
-    writeChunk: async () => ({ written: 0, total: 4 }), // main never advanced
+    writeChunk: async () => ok({ written: 0, total: 4 }), // main never advanced
   });
   const { ft } = loadFileTransfer(bridge);
   await assert.rejects(() => ft.saveBlobToDisk(new Blob(['abcd']), { original_name: 'a.bin' }),
     /写入位置不一致/);
+});
+
+test('a 0-byte file still goes through the native save dialog', async () => {
+  // Review round 1 (MAJOR): file-io.js seals empty files, so the renderer must
+  // not bounce them back into the invisible browser download.
+  const { bridge, calls } = fakeBridge();
+  const { ft } = loadFileTransfer(bridge);
+  sameShape(await ft.saveBlobToDisk(new Blob([]), { original_name: 'empty.txt' }),
+    { status: 'saved', token: 'tok-1', fileName: 'empty.txt' });
+  sameShape(calls.pick, [{ fileName: 'empty.txt', totalBytes: 0 }]);
+  assert.equal(calls.write.length, 0, 'no chunks for an empty file');
+  sameShape(calls.seal, [{ token: 'tok-1' }]);
+});
+
+// ── Layer 4: the button state machine in chat.js ──────────────────────────
+//
+// Review round 1 (BLOCKER): offerOpenSavedFile showed a green "Done" for a
+// failed save, and nothing covered this function at all. These tests run the
+// real functions out of chat.js against a minimal DOM stub.
+
+const chatSource = fs.readFileSync(
+  path.resolve(desktopRoot, '../static/js/chat.js'), 'utf8');
+
+/** Extract a top-level function by brace matching (no DOM/JSX surprises). */
+function extractFunction(source, name) {
+  const start = source.indexOf('function ' + name + '(');
+  assert.ok(start >= 0, 'chat.js must define ' + name);
+  let depth = 0;
+  let index = source.indexOf('{', start);
+  const bodyStart = index;
+  for (; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    else if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error('unbalanced braces in ' + name + ' (from ' + bodyStart + ')');
+}
+
+function makeButton() {
+  const classes = new Set(['file-download-btn']);
+  const children = [];
+  const button = {
+    innerHTML: '',
+    parentNode: {
+      querySelector: () => children.find((child) => child.__open) || null,
+      appendChild: (child) => { children.push(child); return child; },
+    },
+    classList: {
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name),
+    },
+    children,
+  };
+  return button;
+}
+
+/**
+ * Load `offerOpenSavedFile` plus its two collaborators from the real chat.js.
+ * `saveOrDownloadBlob` is stubbed with an injectable outcome so the test drives
+ * the state machine rather than the network.
+ */
+function loadOfferOpenSavedFile(saveOutcome) {
+  const created = [];
+  const context = vm.createContext({
+    console, Promise, Object, String, Number, JSON, Error,
+    document: {
+      createElement: (tag) => {
+        const element = {
+          tagName: tag.toUpperCase(),
+          type: '',
+          className: '',
+          innerHTML: '',
+          disabled: false,
+          attributes: {},
+          listeners: {},
+          setAttribute(name, value) { this.attributes[name] = value; },
+          addEventListener(name, handler) { this.listeners[name] = handler; },
+          remove() {},
+        };
+        created.push(element);
+        return element;
+      },
+    },
+    lucide: { createIcons() {} },
+    window: { showToast() {} },
+    saveOrDownloadBlob: () => Promise.resolve(saveOutcome),
+  });
+  context.window.iChatFileTransfer = {
+    openSavedFile: async () => ({ status: 'opened' }),
+  };
+  vm.runInContext(
+    extractFunction(chatSource, 'offerOpenSavedFile'),
+    context, { filename: 'chat.js:offerOpenSavedFile' },
+  );
+  vm.runInContext('this.offerOpenSavedFile = offerOpenSavedFile;', context);
+  return { offer: context.offerOpenSavedFile, created, context };
+}
+
+test('a saved file shows Done plus an opener bound to its token', () => {
+  const { offer, created, context } = loadOfferOpenSavedFile({ status: 'saved' });
+  const button = makeButton();
+  offer(button, { status: 'saved', token: 'tok-1', fileName: 'a.txt' });
+  assert.ok(button.classList.contains('downloaded'), 'saved is the only Done state');
+  assert.match(button.innerHTML, /Done/);
+  const opener = created.find((element) => element.attributes && element.attributes['data-file-open'] !== undefined);
+  assert.ok(opener, 'an open button is appended');
+  assert.match(opener.innerHTML, /打开/);
+  // Clicking it opens the saved file by token, never by path.
+  opener.listeners.click({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(opener.disabled, true, 'the opener is disabled while in flight');
+  assert.ok(context.window.iChatFileTransfer, 'bridge still reachable');
+});
+
+test('a failed save is retryable and never claims success', () => {
+  const { offer, created } = loadOfferOpenSavedFile({ status: 'failed' });
+  const button = makeButton();
+  button.classList.add('downloaded'); // stale state from an earlier success
+  offer(button, { status: 'failed' });
+  assert.equal(button.classList.contains('downloaded'), false, 'must not keep the Done style');
+  assert.match(button.innerHTML, /Retry/);
+  assert.equal(created.length, 0, 'no opener for a file that is not on disk');
+});
+
+test('a cancelled save returns the button to Download', () => {
+  const { offer, created } = loadOfferOpenSavedFile({ status: 'canceled' });
+  const button = makeButton();
+  button.classList.add('downloaded');
+  offer(button, { status: 'canceled' });
+  assert.equal(button.classList.contains('downloaded'), false);
+  assert.match(button.innerHTML, /Download/);
+  assert.equal(created.length, 0);
+});
+
+test('a repeated download does not stack openers', () => {
+  const children = [];
+  const button = makeButton();
+  button.parentNode.querySelector = () => children.find((child) => child.attributes
+    && child.attributes['data-file-open'] !== undefined) || null;
+  button.parentNode.appendChild = (child) => { children.push(child); child.__open = true; return child; };
+  const { offer } = loadOfferOpenSavedFile({ status: 'saved' });
+
+  offer(button, { status: 'saved', token: 'tok-1', fileName: 'a.txt' });
+  const first = children.filter((child) => child.attributes && child.attributes['data-file-open'] !== undefined);
+  assert.equal(first.length, 1);
+  first[0].remove = function remove() { children.splice(children.indexOf(this), 1); };
+
+  offer(button, { status: 'saved', token: 'tok-2', fileName: 'a.txt' });
+  const second = children.filter((child) => child.attributes && child.attributes['data-file-open'] !== undefined);
+  assert.equal(second.length, 1, 'exactly one opener remains');
 });

@@ -1073,15 +1073,26 @@
             : null;
     }
 
+    // Error text keyed by the codes desktop/file-io.js raises. "交付" wording
+    // for the codes a user can actually act on; everything else falls back.
+    const NATIVE_FILE_MESSAGES = {
+        not_found: '上次的保存凭证已失效，请重新下载。',
+        expired: '下载超时，请重新下载。',
+        offset_mismatch: '写入位置不一致，已中止，请重新下载。',
+        write_failed: '写入失败：磁盘已满或文件被占用。',
+        blocked_type: '出于安全考虑，安装包和脚本不能直接打开，请在下载目录中查看。',
+        open_failed: '打开失败：系统没有关联的应用。文件已保存，可在下载目录中打开。',
+        incomplete: '文件没有接收完整，已中止，请重新下载。',
+        too_many_grants: '同时进行的下载过多，请等待其他下载完成或稍后重试。',
+        too_large: '文件超过允许的大小上限，无法保存。',
+        invalid_target: '所选位置不可用，请换一个目录再试。',
+        dialog_in_progress: '已有一个保存对话框打开，请先处理它。',
+    };
+
     function describeNativeFileError(err) {
-        const detail = err && (err.message || err.toString());
-        if (err && err.code === 'not_found') return '上次的保存凭证已失效，请重新下载。';
-        if (err && err.code === 'expired') return '下载超时，请重新下载。';
-        if (err && err.code === 'offset_mismatch') return '写入位置不一致，已中止，请重新下载。';
-        if (err && err.code === 'write_failed') return '写入失败：磁盘已满或文件被占用。';
-        if (err && err.code === 'blocked_type') return '出于安全考虑，安装包和脚本不能直接打开，请在下载目录中查看。';
-        if (err && err.code === 'open_failed') return '打开失败：系统没有关联的应用。文件已保存，可在下载目录中打开。';
-        return '保存失败：' + (detail || '未知错误');
+        const code = err && err.code;
+        if (code && NATIVE_FILE_MESSAGES[code]) return NATIVE_FILE_MESSAGES[code];
+        return '保存失败：' + ((err && (err.message || err.toString())) || '未知错误');
     }
 
     function rewrapNativeFileError(err) {
@@ -1089,6 +1100,29 @@
         wrapped.cause = err;
         wrapped.nativeCode = err && err.code;
         return wrapped;
+    }
+
+    /**
+     * Unwrap the `{ok, value|code}` envelope main.js resolves with.
+     *
+     * `ipcMain.handle` only carries `message` across the process boundary, so a
+     * thrown error would lose its code and every message above would collapse
+     * into "Error invoking remote method ...". Expected failures therefore come
+     * back as data and are re-thrown here, inside the renderer, where the code
+     * is still intact (review round 1, verified on Electron 39.8.10).
+     */
+    async function callNativeFileBridge(operation) {
+        const envelope = await operation();
+        if (envelope && envelope.ok === false) {
+            const error = new Error(envelope.code);
+            error.code = envelope.code;
+            if (envelope.detail !== undefined) error.detail = envelope.detail;
+            throw error;
+        }
+        if (!envelope || envelope.ok !== true) {
+            throw new Error('保存通道返回了无法识别的响应。');
+        }
+        return envelope.value;
     }
 
     /**
@@ -1101,15 +1135,20 @@
     async function saveBlobToDisk(blob, metadata) {
         const bridge = nativeFileBridge();
         if (!bridge) return { status: 'canceled', canceled: true };
-        if (!blob || typeof blob.size !== 'number' || blob.size === 0) {
-            throw new Error('文件内容为空，无法保存。');
+        // Review round 1 (MAJOR): a 0-byte file is legitimate (file-io.js seals
+        // it), so it must take the native path too instead of being pushed back
+        // into the invisible browser download.
+        if (!blob || typeof blob.size !== 'number') {
+            throw new Error('文件内容不可用，无法保存。');
         }
         const fileName = String((metadata && (metadata.original_name || metadata.name)) || '')
             .replace(/[\\/]+$/, '') || 'download';
 
         let target;
         try {
-            target = await bridge.pickSaveTarget({ fileName: fileName, totalBytes: blob.size });
+            target = await callNativeFileBridge(function () {
+                return bridge.pickSaveTarget({ fileName: fileName, totalBytes: blob.size });
+            });
         } catch (err) {
             throw rewrapNativeFileError(err);
         }
@@ -1126,17 +1165,23 @@
                 for (let i = 0; i < chunk.length; i += 0x8000) {
                     binary += String.fromCharCode.apply(null, chunk.subarray(i, i + 0x8000));
                 }
-                const result = await bridge.writeChunk({
-                    token: target.token,
-                    offset: offset,
-                    dataBase64: btoa(binary),
+                const result = await callNativeFileBridge(function () {
+                    return bridge.writeChunk({
+                        token: target.token,
+                        offset: offset,
+                        dataBase64: btoa(binary),
+                    });
                 });
                 if (!result || result.written !== offset + chunk.length) {
-                    throw new Error('写入位置不一致，已中止。');
+                    const mismatch = new Error('offset_mismatch');
+                    mismatch.code = 'offset_mismatch';
+                    throw mismatch;
                 }
                 offset = result.written;
             }
-            await bridge.seal({ token: target.token });
+            await callNativeFileBridge(function () {
+                return bridge.seal({ token: target.token });
+            });
         } catch (err) {
             throw rewrapNativeFileError(err);
         }
@@ -1149,14 +1194,15 @@
 
     /**
      * Open a file this session saved. Resolves to a status instead of throwing
-     * for the expected "the OS refused" cases so callers can show a hint and
-     * fall back to the browser download.
+     * for the expected "the OS refused" cases so callers can show a hint.
      */
     async function openSavedFile(token) {
         const bridge = nativeFileBridge();
         if (!bridge) return { status: 'unsupported' };
         try {
-            const result = await bridge.openDownloaded({ token: token });
+            const result = await callNativeFileBridge(function () {
+                return bridge.openDownloaded({ token: token });
+            });
             return { status: 'opened', fileName: result && result.fileName };
         } catch (err) {
             return { status: 'failed', reason: describeNativeFileError(err), code: err && err.code };

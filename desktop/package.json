@@ -12,7 +12,7 @@
     "test:installer": "node scripts/test-installer.cjs",
     "test:branding": "node scripts/test-branding.cjs",
     "test:layout": "node scripts/test-sidebar-layout.cjs",
-    "test:files": "node scripts/test-file-io.cjs"
+    "test:files": "node --test ../chat/tests/js/desktop_file_io.test.js"
   },
   "devDependencies": {
     "electron": "^39.0.0",

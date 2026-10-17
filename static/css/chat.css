@@ -6476,6 +6476,33 @@ input:checked + .slider:before {
   background: rgba(51, 144, 236, 0.16);
 }
 
+/* P4 T19: opens a file this session saved. Matches the download button so the
+   two actions read as one control in the file bubble. */
+.file-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #3390ec;
+  background: rgba(51, 144, 236, 0.08);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.file-open-btn:hover {
+  background: rgba(51, 144, 236, 0.16);
+}
+
+.file-open-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .file-download-btn.downloading {
   color: #999;
   background: rgba(153, 153, 153, 0.08);

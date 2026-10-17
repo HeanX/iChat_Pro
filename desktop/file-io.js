@@ -139,6 +139,16 @@ function createFileIo(options = {}) {
     }
   }
 
+  /** Count only grants that can still accept bytes. */
+  function liveGrantCount() {
+    prune();
+    let live = 0;
+    for (const grant of grants.values()) {
+      if (!grant.sealed) live += 1;
+    }
+    return live;
+  }
+
   /** Validate what the renderer asks for BEFORE a native dialog is shown. */
   function validateSaveRequest(payload) {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -172,7 +182,11 @@ function createFileIo(options = {}) {
     }
 
     prune();
-    if (grants.size >= maxGrants) fail('too_many_grants');
+    // Review round 1 (BLOCKER): a finished download must not occupy a slot
+    // for the rest of its TTL, otherwise the 9th save in 30 minutes fails for
+    // a user who did nothing wrong. Only grants still able to accept bytes
+    // count against the cap; sealed ones stay resolvable for "open".
+    if (liveGrantCount() >= maxGrants) fail('too_many_grants');
 
     const token = createToken();
     const grant = {
@@ -216,21 +230,54 @@ function createFileIo(options = {}) {
     const bytes = decodeBase64(input.dataBase64);
     const next = grant.writtenBytes + bytes.length;
     if (next > grant.totalBytes) fail('too_large', 'declared_total');
-    try {
-      if (grant.writtenBytes === 0) {
-        // First chunk opens the file: truncates an existing target the user
-        // already confirmed in the OS overwrite prompt.
-        fileSystem.writeFileSync(grant.filePath, bytes);
-      } else {
-        fileSystem.appendFileSync(grant.filePath, bytes);
-      }
-    } catch (error) {
-      // Do not count bytes that never reached the disk; the grant stays
-      // consistent and the next attempt retries the same offset.
-      fail('write_failed', error && error.code ? error.code : undefined);
-    }
+    // Review round 1 (MAJOR): appending blindly is unsafe. If a previous
+    // attempt wrote part of a chunk and then threw (disk full, killed), the
+    // bookkeeping still points at the old offset, and appending again would
+    // duplicate those bytes. Positional writes make a retry idempotent: the
+    // same offset is overwritten with the same bytes instead of appended.
+    writeAt(grant, bytes, grant.writtenBytes);
     grant.writtenBytes = next;
     return { written: grant.writtenBytes, total: grant.totalBytes };
+  }
+
+  /**
+   * Write `bytes` at absolute `position`. On a real fd this truncates nothing
+   * and seeks explicitly, so a partially written chunk is repaired by the
+   * retry rather than duplicated.
+   */
+  function writeAt(grant, bytes, position) {
+    try {
+      if (typeof fileSystem.openSync === 'function' &&
+          typeof fileSystem.writeSync === 'function' &&
+          typeof fileSystem.closeSync === 'function') {
+        // 'w+' on the first chunk creates the file and truncates a target the
+        // user already agreed to overwrite; later chunks seek with 'r+'.
+        const fd = fileSystem.openSync(grant.filePath, position === 0 ? 'w+' : 'r+');
+        try {
+          let written = 0;
+          while (written < bytes.length) {
+            const chunk = fileSystem.writeSync(
+              fd, bytes, written, bytes.length - written, position + written,
+            );
+            if (!chunk || chunk <= 0) {
+              const error = new Error('short write');
+              error.code = 'EIO';
+              throw error;
+            }
+            written += chunk;
+          }
+        } finally {
+          fileSystem.closeSync(fd);
+        }
+        return;
+      }
+      // Fallback for an injected/limited fs: first write creates the file.
+      if (position === 0) fileSystem.writeFileSync(grant.filePath, bytes);
+      else fileSystem.appendFileSync(grant.filePath, bytes);
+    } catch (error) {
+      // The offset is deliberately NOT advanced, so the same chunk is retried.
+      fail('write_failed', error && error.code ? error.code : undefined);
+    }
   }
 
   /** Finish the download: the declared byte count must have really arrived. */
@@ -239,12 +286,16 @@ function createFileIo(options = {}) {
     const grant = requireGrant(input.token, input.senderId);
     if (!grant.sealed) {
       if (grant.writtenBytes !== grant.totalBytes) fail('incomplete');
-      if (grant.writtenBytes === 0) {
-        try {
+      try {
+        if (grant.writtenBytes === 0) {
           fileSystem.writeFileSync(grant.filePath, Buffer.alloc(0));
-        } catch (error) {
-          fail('write_failed', error && error.code ? error.code : undefined);
+        } else if (typeof fileSystem.truncateSync === 'function') {
+          // A positional write over a longer existing file leaves the old
+          // tail behind; the saved file must be exactly the declared size.
+          fileSystem.truncateSync(grant.filePath, grant.writtenBytes);
         }
+      } catch (error) {
+        fail('write_failed', error && error.code ? error.code : undefined);
       }
       grant.sealed = true;
     }
@@ -260,7 +311,10 @@ function createFileIo(options = {}) {
     const grant = requireGrant(input.token, input.senderId);
     if (!grant.sealed) fail('not_sealed');
     if (grant.writtenBytes !== grant.totalBytes) fail('incomplete');
-    const extension = path.extname(grant.filePath).toLowerCase();
+    // Review round 1 (MINOR): Win32 strips trailing dots/spaces, so
+    // "evil.exe " would otherwise land as "evil.exe" while extname() reports
+    // ".exe " and slips past the blocklist. Normalise before checking.
+    const extension = path.extname(String(grant.filePath).replace(/[. ]+$/, '')).toLowerCase();
     if (blockedExtensions.includes(extension)) fail('blocked_type', extension);
     try {
       if (!fileSystem.existsSync(grant.filePath)) fail('not_found');

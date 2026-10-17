@@ -1405,12 +1405,26 @@ function getActiveKeyStatus(contactStatus) {
   };
 }
 
+function isEndorsedTrustStatus(status) {
+  return status === 'trusted' || status === 'verified';
+}
+
 function contactKeyHasChanged(contactStatus) {
-  if (!contactStatus || !contactStatus.active_key || !Array.isArray(contactStatus.keys)) return false;
-  return contactStatus.keys.some(key =>
-    key.trust_status &&
-    key.trust_status !== 'untrusted' &&
-    key.key_fingerprint !== contactStatus.active_key.key_fingerprint
+  if (!contactStatus || !contactStatus.active_key) return false;
+  // The server computes this from the same rule and is the source of truth
+  // whenever it answered; fall back to the payload only for older responses.
+  if (typeof contactStatus.key_changed === 'boolean') {
+    return contactStatus.key_changed;
+  }
+  const active = contactStatus.active_key;
+  const keys = Array.isArray(contactStatus.keys) ? contactStatus.keys : [];
+  const activeRecord = keys.find(key => key.key_fingerprint === active.key_fingerprint);
+  // Once the current fingerprint carries a verdict the reminder is resolved:
+  // re-verifying must clear it instead of leaving a permanent warning.
+  if (activeRecord && isEndorsedTrustStatus(activeRecord.trust_status)) return false;
+  return keys.some(key =>
+    isEndorsedTrustStatus(key.trust_status) &&
+    key.key_fingerprint !== active.key_fingerprint
   );
 }
 
@@ -7435,11 +7449,15 @@ function renderTrustList(trusts) {
   trusts.forEach(trust => {
     const row = document.createElement('div');
     const changed = Boolean(trust.key_changed);
+    const previousVersion = trust.previous_key_version;
+    const versionLabel = changed && previousVersion != null && previousVersion !== trust.key_version
+      ? 'v' + escapeHtml(previousVersion) + ' → v' + escapeHtml(trust.key_version)
+      : 'v' + escapeHtml(trust.key_version);
     row.className = 'security-trust-row';
     row.innerHTML =
       '<div class="min-w-0">' +
         '<div class="text-xs font-semibold text-textMain truncate">' + escapeHtml(trust.contact_username || 'Unknown') + '</div>' +
-        '<div class="text-[10px] text-textSecondary font-mono truncate">v' + escapeHtml(trust.key_version) + ' ' + escapeHtml(formatFingerprint(trust.key_fingerprint)) + '</div>' +
+        '<div class="text-[10px] text-textSecondary font-mono truncate">' + versionLabel + ' ' + escapeHtml(formatFingerprint(trust.key_fingerprint)) + '</div>' +
       '</div>' +
       '<span class="' + (changed ? 'security-status-chip security-status-danger' : 'security-status-chip security-status-verified') + '">' +
         (changed ? (currentLanguage === 'zh' ? '已变更' : 'Changed') : escapeHtml(trust.trust_status || 'trusted')) +

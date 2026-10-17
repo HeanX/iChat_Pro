@@ -80,6 +80,7 @@
 | [docs/phase4/risk-register.md](phase4/risk-register.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/t20-late-ack-validation.md](phase4/t20-late-ack-validation.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/tasks.md](phase4/tasks.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |
+| [docs/testing/p4-test-t13-http-ws-integration.md](testing/p4-test-t13-http-ws-integration.md) | 现行说明/专题；P4 Test T13（#194）的用例索引与验收记录，改动测试或错误码时同步 |
 | [docs/phase4/technical-design.md](phase4/technical-design.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/traceability-matrix.md](phase4/traceability-matrix.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |
 | [docs/phase4/windows-branding.md](phase4/windows-branding.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |

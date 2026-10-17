@@ -317,7 +317,11 @@ class PrivateSendHttpTests(MessagingHttpBase):
         )
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error"], "idempotency_conflict")
-        self.assertFalse(response.json()["error"] in REGISTRY and REGISTRY["idempotency_conflict"].retryable)
+        # Clients must not retry a conflict: the registry declares it
+        # non-retryable and the status must match the registry, not a literal.
+        error = REGISTRY["idempotency_conflict"]
+        self.assertFalse(error.retryable)
+        self.assertEqual(response.status_code, error.http_status)
 
     def test_priv_04_malformed_payload_is_invalid_payload(self):
         cases = {

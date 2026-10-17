@@ -85,7 +85,7 @@ flowchart LR
     subgraph B1["B1 浏览器/Electron 渲染进程（不可信同源脚本可及）"]
         KM["key-manager<br/>IndexedDB 私钥"]
         E2EE["private/group E2EE<br/>AES-256-GCM"]
-        KV["localStorage<br/>草稿/AI 历史/草稿信任"]
+        KV["localStorage<br/>草稿 / AI 历史 / 对端信任"]
         DOM["已解密 DOM"]
     end
 
@@ -151,7 +151,7 @@ sequenceDiagram
     participant DB as PG B5
     participant R as 接收方 B6
 
-    S->>K: 取对端公钥（缓存 / GET /api/keys/<id>/）
+    S->>K: 取对端公钥（缓存 / GET /api/keys/{id}/）
     Note over S: ECDH(P-256) → HKDF-SHA256<br/>info="chat-message-encryption-v1"<br/>salt=SHA256(上下文串)
     S->>S: AES-256-GCM 加密<br/>nonce 12B / tag 16B
     S->>S: 另生成 sender_copy（供本人多设备）

@@ -321,6 +321,87 @@ class ReleaseRecordTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_BASH, "bash is not available; deploy.sh not executed")
+class DeployStateTests(unittest.TestCase):
+    """current/previous must follow deployments, not git reflog.
+
+    The rollback target an operator is told to use has to be the release that
+    was superseded, so the state file is updated from its own previous
+    contents rather than from HEAD@{1} (which tracks fetches and checkouts).
+    """
+
+    def run_record(self, state_dir, sha):
+        workdir = Path(tempfile.mkdtemp(prefix="ichat-state-"))
+        self.addCleanup(shutil.rmtree, workdir, True)
+        log = workdir / "DEPLOYMENTS.log"
+        log.touch()
+        harness = workdir / "h.sh"
+        harness.write_text(
+            "#!/usr/bin/env bash\nset -uo pipefail\n"
+            + helpers_block()
+            + "\n"
+            + f"LOG_FILE={log.as_posix()!r}\n"
+            + f"REPO_DIR={(workdir / 'repo').as_posix()!r}\n"
+            + f"STATE_DIR={state_dir.as_posix()!r}\n"
+            + f"DEPLOYED_SHA={sha!r}\n"
+            + "TARGET=main\nCOMMIT=\nSMOKE_RESULT=passed\nICHAT_DEPLOYER=tester\n"
+            + (
+                "RELEASE_KIND=deploy\n"
+            )
+            + extract(RECORD_START, "exit 0")
+            + "\nexit 0\n",
+            encoding="utf-8",
+        )
+        harness.chmod(0o755)
+        result = subprocess.run(
+            [BASH, str(harness)],
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "TMPDIR": os.environ.get("TMPDIR") or os.environ.get("TEMP") or "",
+                "USER": "tester",
+            },
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        return result
+
+    def test_previous_follows_the_last_deployed_sha(self):
+        workdir = Path(tempfile.mkdtemp(prefix="ichat-state-root-"))
+        self.addCleanup(shutil.rmtree, workdir, True)
+        state = workdir / "state"
+
+        self.run_record(state, "aaaa")
+        self.assertEqual((state / "current").read_text().strip(), "aaaa")
+        self.assertFalse((state / "previous").exists())
+
+        self.run_record(state, "bbbb")
+        self.assertEqual((state / "current").read_text().strip(), "bbbb")
+        self.assertEqual((state / "previous").read_text().strip(), "aaaa")
+
+    def test_redeploying_the_same_sha_does_not_invent_a_previous(self):
+        workdir = Path(tempfile.mkdtemp(prefix="ichat-state-same-"))
+        self.addCleanup(shutil.rmtree, workdir, True)
+        state = workdir / "state"
+        self.run_record(state, "aaaa")
+        self.run_record(state, "aaaa")
+        self.assertEqual((state / "current").read_text().strip(), "aaaa")
+        self.assertFalse(
+            (state / "previous").exists(),
+            msg="resetting to the running SHA is not a rollback target",
+        )
+
+    def test_rollback_target_is_printed_for_the_operator(self):
+        workdir = Path(tempfile.mkdtemp(prefix="ichat-state-print-"))
+        self.addCleanup(shutil.rmtree, workdir, True)
+        state = workdir / "state"
+        self.run_record(state, "aaaa")
+        result = self.run_record(state, "bbbb")
+        self.assertIn("rollback target if needed: aaaa", result.stdout)
+
+
+@unittest.skipUnless(HAS_BASH, "bash is not available; deploy.sh not executed")
 class StatusOutputTests(unittest.TestCase):
     """--status must answer "what is running" and "what came before"."""
 

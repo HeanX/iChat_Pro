@@ -280,11 +280,17 @@ printf 'ts=%s sha=%s target=%s kind=%s actor=%s via=%s from=%s smoke=%s approval
     >> "$LOG_FILE"
 
 # Remember the SHA that is now running and the one it replaced, so a rollback
-# target is always available even after the log is rotated.
+# target is always available even after the log is rotated. The previous SHA
+# is whatever the state file said before this run — NOT git reflog, which
+# reflects fetches/checkouts rather than deployments.
 mkdir -p "$STATE_DIR"
-PREVIOUS=$(git -C "$REPO_DIR" rev-parse 'HEAD@{1}' 2>/dev/null || true)
-[[ -n "$PREVIOUS" && "$PREVIOUS" == "$DEPLOYED_SHA" ]] && PREVIOUS=
+PREVIOUS=""
+if [[ -s "$STATE_DIR/current" ]]; then
+    PREVIOUS=$(cat "$STATE_DIR/current")
+    [[ "$PREVIOUS" == "$DEPLOYED_SHA" ]] && PREVIOUS=
+fi
 printf '%s\n' "$DEPLOYED_SHA" > "$STATE_DIR/current"
 [[ -n "$PREVIOUS" ]] && printf '%s\n' "$PREVIOUS" > "$STATE_DIR/previous"
 echo "==> Recorded: actor=$(deploy_actor) kind=$RELEASE_KIND approval=$(deploy_approval)"
+[[ -n "$PREVIOUS" ]] && echo "    rollback target if needed: $PREVIOUS"
 exit 0

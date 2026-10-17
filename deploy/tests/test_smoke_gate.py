@@ -216,3 +216,47 @@ class SmokeGateCatchesRedirectedApiTests(unittest.TestCase):
         self.assertIn("readiness: GET /health/ready/ -> 200", output)
         self.assertIn("login form: GET /login/", output)
         self.assertIn("Smoke FAILED", output)
+
+
+class SiteOriginTests(unittest.TestCase):
+    """AUTO_BASE_URL builds the Referer Django's CSRF check will compare.
+
+    This path is only exercised on the server, so a mistake here would make
+    every real deploy fail its own smoke gate (CSRF rejects the login POST).
+    Sourcing the script would run it, so the origin logic is reproduced and
+    pinned against the values deploy.sh relies on.
+    """
+
+    def _origin(self, base_url, host_name):
+        # Mirrors deploy/smoke.sh's configuration block.
+        rest = base_url.split("://", 1)[1]
+        auth = rest.split("/", 1)[0]
+        port = ":" + auth.rsplit(":", 1)[1] if ":" in auth else ""
+        scheme = "https" if base_url.startswith("https://") else "http"
+        return f"{scheme}://{host_name}{port}"
+
+    def test_tls_front_door_keeps_the_port(self):
+        self.assertEqual(
+            self._origin("https://127.0.0.1:8443", "chat.example.com"),
+            "https://chat.example.com:8443",
+        )
+
+    def test_loopback_fallback_keeps_the_port(self):
+        self.assertEqual(
+            self._origin("http://127.0.0.1:8000", "chat.example.com"),
+            "http://chat.example.com:8000",
+        )
+
+    def test_default_port_is_omitted(self):
+        self.assertEqual(
+            self._origin("https://127.0.0.1", "chat.example.com"),
+            "https://chat.example.com",
+        )
+
+    def test_script_matches_these_expectations(self):
+        """Guard against the script drifting from the pinned logic above."""
+        source = SMOKE_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('BASE_REST=${BASE_URL#*://}', source)
+        self.assertIn('PORT_PART=":${BASE_AUTH##*:}"', source)
+        # The old broken form put the whole URL into PORT_PART.
+        self.assertNotIn('PORT_PART=${BASE_URL#"${BASE_URL%%:*}"}', source)

@@ -12,7 +12,13 @@
 #   sudo /opt/ichat/bin/deploy.sh --commit <sha>      # ROLLBACK: deploys an
 #       exact commit and stays pinned (no reset back to origin/main)
 #
-# Every successful deploy appends "<utc> <sha> <target>" to
+# Two gates must pass before a deploy counts as successful:
+#   1. readiness  — /health/ready/ answers 200 with {"status": "ok"}
+#   2. smoke      — deploy/smoke.sh proves login + core APIs still work
+#                   (P4 Test T23 / #204). Failing either exits non-zero and
+#                   appends NOTHING to DEPLOYMENTS.log.
+#
+# Every successful deploy appends "<utc> <sha> <target> <runtime>" to
 # /opt/ichat/DEPLOYMENTS.log — the server-side deployed SHA is recorded
 # there, independently of the repository's main branch.
 set -euo pipefail
@@ -109,11 +115,44 @@ for i in $(seq 1 30); do
             http://127.0.0.1:8000/health/ready/ 2>/dev/null || true)
     fi
     if [[ "$BODY" == *'"status": "ok"'* ]]; then
-        echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness: db+cache ok)"
-        printf '%s  %s  %s\n' "$(date -u +%FT%TZ)" "$DEPLOYED_SHA" "$TARGET" >> "$LOG_FILE"
-        exit 0
+        echo "==> Readiness OK: db+cache reachable"
+        READY=1
+        break
     fi
     sleep 1
 done
-echo "ERROR: readiness probe failed after restart (last body: ${BODY:-none}); check 'journalctl -u ichat -n 50'" >&2
-exit 1
+if [[ "${READY:-0}" != "1" ]]; then
+    echo "ERROR: readiness probe failed after restart (last body: ${BODY:-none}); check 'journalctl -u ichat -n 50'" >&2
+    exit 1
+fi
+
+# --- smoke gate (P4 Test T23 / #204) ---
+# Readiness only proves the process answers; it does not prove login, CSRF,
+# sessions or the authenticated APIs work. A release that cannot log in is a
+# failed release, so it must not be recorded in DEPLOYMENTS.log.
+# Opt out only for a known-broken hotfix: ICHAT_SKIP_SMOKE=1 (logged loudly).
+if [[ "${ICHAT_SKIP_SMOKE:-0}" == "1" ]]; then
+    echo "WARNING: ICHAT_SKIP_SMOKE=1 — login/core-API smoke gate SKIPPED for this deploy." >&2
+else
+    if [[ -z "${SMOKE_USERNAME:-}" || -z "${SMOKE_PASSWORD:-}" ]]; then
+        echo "ERROR: SMOKE_USERNAME/SMOKE_PASSWORD are not set in $APP_DIR/.env." >&2
+        echo "       The post-deploy smoke gate cannot authenticate, so the release" >&2
+        echo "       is not recorded. Create the dedicated smoke account (runbook §7)" >&2
+        echo "       or set ICHAT_SKIP_SMOKE=1 for a known-broken hotfix." >&2
+        exit 1
+    fi
+    echo "==> Post-deploy smoke gate"
+    AUTO_BASE_URL=1 SMOKE_INSECURE_TLS=1 \
+        bash "$REPO_DIR/deploy/smoke.sh" || {
+        echo "ERROR: post-deploy smoke gate FAILED — release $DEPLOYED_SHA is NOT recorded." >&2
+        echo "       The service was restarted, so the old process is already gone." >&2
+        echo "       Roll back with: sudo $BIN_COPY --commit <previous-sha>" >&2
+        exit 1
+    }
+fi
+
+echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness: db+cache ok; smoke: passed)"
+printf '%s  %s  %s  %s\n' "$(date -u +%FT%TZ)" "$DEPLOYED_SHA" "$TARGET" \
+    "$([[ "${ICHAT_SKIP_SMOKE:-0}" == "1" ]] && echo 'smoke=skipped' || echo 'smoke=passed')" \
+    >> "$LOG_FILE"
+exit 0

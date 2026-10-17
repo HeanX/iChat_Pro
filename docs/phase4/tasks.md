@@ -97,7 +97,7 @@
 | P4 Test T20 | WP06 | 执行兼容性测试 | Windows/Android/浏览器矩阵 | 指定环境核心流程均有结论 | P1 | P4 Test T03、P4 Test T04 | 未完成（[Issue #201](https://github.com/HeanX/iChat_Pro/issues/201) 开放） |
 | P4 Test T21 | WP06 | 建立缺陷管理与回归流程 | 缺陷清单、修复和回归记录 | 缺陷关联需求、用例、提交和复测结果 | P0 | P4 Test T09 | 已完成（[Issue #202](https://github.com/HeanX/iChat_Pro/issues/202)）；缺陷→需求/PR/用例→独立复核→生产复验的流程与实际闭环；见 [完成索引](completion-audit-20261007.md) |
 | P4 Test T22 | WP06 | 编写最终测试总结 | 完整测试报告 | 数据可由原始执行结果复核，无虚构结果 | P0 | P4 Test T10～P4 Test T21 | 未完成（[Issue #203](https://github.com/HeanX/iChat_Pro/issues/203) 开放） |
-| P4 Test T23 | WP07 | 部署后冒烟测试 | 冒烟脚本 | 健康、登录和核心接口失败时阻断发布 | P0 | P4 Test T14、P4 T49 | 未完成（[Issue #204](https://github.com/HeanX/iChat_Pro/issues/204) 开放）；readiness 自动门禁已有；登录/核心 API 冒烟失败阻断未实现 |
+| P4 Test T23 | WP07 | 部署后冒烟测试 | 冒烟脚本 | 健康、登录和核心接口失败时阻断发布 | P0 | P4 Test T14、P4 T49 | 代码已实现，待评审与真机证据（[Issue #204](https://github.com/HeanX/iChat_Pro/issues/204) 开放）；`deploy/smoke.sh` 断言 health/readiness/登录表单+会话/`api/conversations/`+`api/profile/me/`/未认证 401，`deploy.sh` 在其失败时不写入 `DEPLOYMENTS.log` 并 exit 1；`deploy/tests/test_smoke_gate.py` 7 条用例在本地 SQLite 通过。**未在生产或独立环境验证**，独立审查未完成前不算验收 |
 | P4 Test T24 | WP08 | AI 辅助需求与用例评审 | 评审记录 | AI 建议经人工确认，不直接作为结论 | P1 | P4 Test T02、P4 Test T09 | 未完成（[Issue #205](https://github.com/HeanX/iChat_Pro/issues/205) 开放） |
 
 ## 验收与维护

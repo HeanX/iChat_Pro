@@ -15,7 +15,7 @@
    需要 token 的情形与前置条件见 §4.3。
 3. **工程骨架已落地并可构建**：`mobile/` 可 `npm install` + `npx cap sync` + Gradle 构建，
    `mobile/android/` 是 Capacitor CLI **真实生成**（非手写）的原生工程；
-   **`app-debug.apk` 已真实产出**（3.94 MB，SHA256 见 §5）。
+   **`app-debug.apk` 已真实产出**（最终产物 4.22 MB / `0D05C92B…4B4976`，SHA256 与构建命令见 §5）。
 4. **本机工具链**：JDK 17+ 与 **Android SDK Platform 36 缺失**（系统只有 JDK 1.8 与 SDK 33/34）。
    已通过 **workspace 内可写 SDK 根目录**（`mobile/.android-sdk`）+ 本机已有的 **OpenJDK 23** 补齐，
    构建成功。**真机 / 模拟器安装与启动未执行**（无设备、无 emulator 包、无 Hyper-V），属"未验证"。

@@ -17,7 +17,7 @@
   mobile/android/             Capacitor CLI 真实生成的 Android 工程（不是占位目录）
   mobile/tests/               node:test 配置契约测试（10 条，纯 Node，无需模拟器）
   docs/phase4/adr-p4-03-*.md  技术决策记录
-  app-debug.apk               已构建成功（3.94 MB，SHA256 F10D3570…CDFCD2，见 ADR §5.1）
+  app-debug.apk               已构建成功（4.22 MB，SHA256 0D05C92B…4B4976，见 ADR §5.1）
 仓库里仍然没有：
   提交进库的 APK / AAB          （产物在 build/ 下，已 gitignore；不可安装到设备）
   真机或模拟器的运行记录        （0 次：adb devices 为空，无 emulator 包，无 Hyper-V）

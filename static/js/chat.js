@@ -5851,23 +5851,35 @@ function offerOpenSavedFile(btn, save) {
   lucide.createIcons();
 }
 
+// Round 3 review (MAJOR): the "browser build keeps its Done state" rule lived
+// inline inside renderFileMessageBubble, where no test could reach it. It is a
+// separate function now so the branch is directly covered.
+// 'unsupported' means the browser anchor already fired and the download
+// manager owns the file: the button must keep the pre-T19 Done state instead of
+// being reset by offerOpenSavedFile.
+function applySaveResultToDownloadButton(btn, save) {
+  if (save && save.status === 'unsupported') {
+    btn.classList.remove('downloading');
+    btn.classList.add('downloaded');
+    btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
+    lucide.createIcons();
+    return;
+  }
+  offerOpenSavedFile(btn, save);
+}
+
 function downloadActiveImageViewer() {
   if (!activeImageViewer) return;
   // Round 2 review (MINOR): the earlier version appended the "open" button to
-  // a detached div, so it never appeared. The image itself is already on screen
-  // and re-openable, so the viewer only needs the save outcome reported: the
-  // success toast comes from saveOrDownloadBlob and a failure is surfaced here.
+  // a detached div, so it never appeared. Round 3 (MINOR): saveOrDownloadBlob
+  // already shows the "saved to" toast, so doing it again here doubled it.
+  // The viewer only reports failures; the success toast is shared.
   return saveOrDownloadBlob(
     activeImageViewer.blob,
     imageViewerFilename(),
     activeImageViewer.url,
     { fileId: activeImageViewer.fileId }
-  ).then(function (save) {
-    if (save && save.status === 'saved' && window.showToast) {
-      window.showToast('已保存到：' + (save.fileName || imageViewerFilename()));
-    }
-    return save;
-  });
+  );
 }
 
 function rotateActiveImageViewer() {
@@ -6085,18 +6097,7 @@ function renderFileMessageBubble(div, msg, conv, groupMeta) {
             url,
             { fileId: parseInt(fid, 10) }
           ).then(function (save) {
-            // Round 2 review (MAJOR): 'unsupported' means the browser anchor
-            // already fired and the download manager owns the file. Calling
-            // offerOpenSavedFile would reset the button to "Download" and undo
-            // the Done state the browser build had before T19.
-            if (save && save.status === 'unsupported') {
-              btn.classList.remove('downloading');
-              btn.classList.add('downloaded');
-              btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
-              lucide.createIcons();
-              return save;
-            }
-            offerOpenSavedFile(btn, save);
+            applySaveResultToDownloadButton(btn, save);
             return save;
           });
         }

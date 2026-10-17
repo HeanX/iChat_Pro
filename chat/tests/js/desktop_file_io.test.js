@@ -2,7 +2,7 @@
 /**
  * P4 T19 (issue #146): native file selection / save / open.
  *
- * Three layers are exercised against the shipped code, not copies:
+ * Four layers are exercised against the shipped code, not copies:
  *  1. desktop/file-io.js    - the access policy, with real bytes in a temp dir
  *  2. desktop/main.js       - the real entry point under a vm harness, so the
  *                             IPC contract (trust check, dialog-before-grant,
@@ -457,7 +457,10 @@ const invoke = (handler, event, payload) => Promise.resolve().then(() => handler
 test('the file channels are registered with the narrow preload surface', async () => {
   const h = launch();
   await h.started();
-  const channels = ['ichat:files:pick-save-target', 'ichat:files:write-chunk', 'ichat:files:seal', 'ichat:files:open-downloaded'];
+  // Round 3 (MAJOR): `release` was missing here, so deleting its registration
+  // left the suite green.
+  const channels = ['ichat:files:pick-save-target', 'ichat:files:write-chunk', 'ichat:files:seal',
+    'ichat:files:release', 'ichat:files:open-downloaded'];
   for (const channel of channels) assert.ok(h.handlers.get(channel), 'missing handler: ' + channel);
   // The bridge must expose exactly these and nothing path-shaped.
   const preloadSource = fs.readFileSync(path.join(desktopRoot, 'preload.js'), 'utf8');
@@ -1006,4 +1009,53 @@ test('a release that itself fails does not mask the original error', async () =>
   await assert.rejects(() => ft.saveBlobToDisk(new Blob(['abc']), { original_name: 'a.txt' }),
     (error) => error.nativeCode === 'write_failed',
     'the user must still see why the save failed');
+});
+
+test('the browser fallback keeps its Done state instead of reverting to Download', () => {
+  // Round 3 (MAJOR): this branch was inline in renderFileMessageBubble, so
+  // turning it off left the suite green. applySaveResultToDownloadButton is
+  // now a named function and this test pins the browser behaviour.
+  const context = vm.createContext({
+    console, Promise, Object, String, Number, JSON, Error,
+    lucide: { createIcons() {} },
+    window: { showToast() {} },
+  });
+  context.applySaveResultToDownloadButton = undefined;
+  vm.runInContext(extractFunction(chatSource, 'applySaveResultToDownloadButton'), context,
+    { filename: 'chat.js:applySaveResultToDownloadButton' });
+  vm.runInContext('this.apply = applySaveResultToDownloadButton;', context);
+
+  const button = makeButton();
+  button.classList.add('downloading');
+  context.apply(button, { status: 'unsupported' });
+  assert.ok(button.classList.contains('downloaded'), 'the browser build must keep Done');
+  assert.equal(button.classList.contains('downloading'), false);
+  assert.match(button.innerHTML, /Done/);
+});
+
+test('the main process registers the release channel', async () => {
+  const h = launch({ dialogPath: tempPath('release-channel.txt') });
+  await h.started();
+  assert.ok(h.handlers.get('ichat:files:release'), 'ichat:files:release must be registered');
+  const pick = (await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin()),
+    { fileName: 'release-channel.txt', totalBytes: 4 })).value;
+  sameShape(await invoke(h.handlers.get('ichat:files:release'), frameAt(h.origin()),
+    { token: pick.token }), ok({ released: true, fileName: 'release-channel.txt', discardedBytes: 0 }));
+  // After release the token is dead, so a retry cannot silently append.
+  sameShape(await invoke(h.handlers.get('ichat:files:write-chunk'), frameAt(h.origin()),
+    { token: pick.token, offset: 0, dataBase64: 'QUJD' }), failed('not_found'));
+  h.app.quit();
+});
+
+test('SVG is not auto-opened even though it looks like an image', () => {
+  // Round 3 (MAJOR): a shell-opened local SVG runs its own script in a file://
+  // origin (verified on Electron 39.8.10). It stays saved but must not be
+  // launched by the app; the in-app preview still renders it.
+  const api = io.createFileIo();
+  const filePath = tempPath('chart.svg');
+  const grant = api.createSaveGrant({ fileName: 'chart.svg', totalBytes: 6, senderId: 1, filePath });
+  api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'PHN2Zy8+' });
+  api.sealGrant({ token: grant.token, senderId: 1 });
+  assert.ok(fs.existsSync(filePath), 'the file is still saved');
+  assert.throws(() => api.openTarget({ token: grant.token, senderId: 1 }), /blocked_type/);
 });

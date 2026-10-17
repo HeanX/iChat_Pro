@@ -41,13 +41,20 @@ const MAX_FILE_NAME_LENGTH = 180;
 // .js, .jse, .wsf, .hta, .jar, .pif, .msix... Enumerating them is a losing
 // game. Only known-safe *document* types are opened automatically; everything
 // else is saved normally and the user opens it from Explorer themselves.
+// Round 3 review (MAJOR): .svg is NOT on this list, even though it is an
+// "image". A local SVG opened by the shell runs its own <script> in a file://
+// origin (verified against Electron 39.8.10: a bundled SVG set
+// document.title from script). That is not the same as arbitrary code
+// execution, but it is active content arriving from a chat peer, so it is not
+// something this app launches on the user's behalf. The in-app image preview
+// still renders SVG safely inside the chat page.
 const OPENABLE_EXTENSIONS = [
   // plain text / data
   '.txt', '.log', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.md', '.ini', '.cfg', '.conf',
   // documents
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', '.rtf', '.epub',
-  // images
-  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tif', '.tiff', '.svg', '.ico', '.heic',
+  // images (passive raster formats only - no SVG, see above)
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tif', '.tiff', '.ico', '.heic',
   // audio / video
   '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma',
   '.mp4', '.mkv', '.mov', '.avi', '.webm', '.wmv', '.flv', '.m4v',
@@ -311,7 +318,13 @@ function createFileIo(options = {}) {
     }
   }
 
-  /** Finish the download: the declared byte count must have really arrived. */
+  /**
+   * Finish the download: the declared byte count must have really arrived.
+   *
+   * Round 3 review (MINOR): the truncate that used to live here was dead code -
+   * the first chunk opens the target with 'w+', which already discards the old
+   * contents - so it is gone rather than kept as an untestable branch.
+   */
   function sealGrant(input) {
     if (!input || typeof input !== 'object') fail('invalid_payload', 'request');
     const grant = requireGrant(input.token, input.senderId);
@@ -319,11 +332,8 @@ function createFileIo(options = {}) {
       if (grant.writtenBytes !== grant.totalBytes) fail('incomplete');
       try {
         if (grant.writtenBytes === 0) {
+          // Nothing was written, so 'w+' never ran; create the empty file.
           fileSystem.writeFileSync(grant.filePath, Buffer.alloc(0));
-        } else if (typeof fileSystem.truncateSync === 'function') {
-          // A positional write over a longer existing file leaves the old
-          // tail behind; the saved file must be exactly the declared size.
-          fileSystem.truncateSync(grant.filePath, grant.writtenBytes);
         }
       } catch (error) {
         fail('write_failed', error && error.code ? error.code : undefined);

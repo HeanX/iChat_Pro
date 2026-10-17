@@ -17,6 +17,7 @@
 | `ichat:files:pick-save-target` | invoke | `{fileName, totalBytes}` | 打开系统保存对话框，返回一次性授权令牌 |
 | `ichat:files:write-chunk` | invoke | `{token, offset, dataBase64}` | 追加写入，偏移必须等于已写入字节数 |
 | `ichat:files:seal` | invoke | `{token}` | 校验声明大小已到齐，收尾 |
+| `ichat:files:release` | invoke | `{token}` | 放弃本次下载并归还配额（失败重试时调用） |
 | `ichat:files:open-downloaded` | invoke | `{token}` | `shell.openPath`，只认令牌，不认路径 |
 
 **返回值约定（审查第 1 轮 BLOCKER 后修改）**：`ipcMain.handle` 跨进程只透传 `message`，自定义 `code` 会丢（Electron 39.8.10 实测：渲染端只拿到 `Error invoking remote method '...': Error: write_failed`）。因此预期失败一律 **resolve** 为 `{ok:false, code, detail}`，成功为 `{ok:true, value}`；只有未受信发送者与程序缺陷才 reject。渲染端在 `callNativeFileBridge` 里拆包并复原 `code`，中文提示才真正可达。
@@ -26,11 +27,11 @@
 代码分布：
 
 ```
-desktop/file-io.js       +385 行  访问策略（纯 Node 可测，不 import electron）
+desktop/file-io.js       +395 行  访问策略（纯 Node 可测，不 import electron）
 desktop/main.js          +116 行  五条 IPC + 对话框 + shell.openPath
 desktop/preload.js        +17 行  iChatDesktop.files.{pickSaveTarget,writeChunk,seal,release,openDownloaded}
 static/js/file-transfer.js +168 行 saveBlobToDisk / openSavedFile / nativeSaveAvailable
-static/js/chat.js        +131/-26 行 saveOrDownloadBlob / offerOpenSavedFile 与两处调用点
+static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile 与两处调用点
 ```
 
 ---
@@ -43,7 +44,7 @@ static/js/chat.js        +131/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 4. **声明大小强制。** `seal` 要求 `written === total`，否则 `incomplete`；单块上限 2 MiB，总大小上限 100 MiB（与 `file-transfer.js` 的 `MAX_FILE_SIZE` 一致）。
 5. **令牌会过期、有数量上限。** 30 分钟 TTL；同时最多 8 个**尚未收尾**的授权（已 `seal` 的下载不再占配额，否则 30 分钟内保存第 9 个文件就会无故失败）。已收尾的授权继续保留，供“打开”使用直到 TTL 到期。
 6. **打开只认令牌。** `openTarget` 从令牌反查路径，并要求该授权已 `seal`、大小吻合、文件仍存在。
-7. **打开走白名单，不是黑名单。** 只有已知的文档/图片/音视频/压缩包类型允许 `shell.openPath` 一键打开；其余一律保存成功但拒绝自动打开（`blocked_type`）。
+7. **打开走白名单，不是黑名单。** 只有已知的文档/**被动**图片/音视频/压缩包类型允许 `shell.openPath` 一键打开；其余一律保存成功但拒绝自动打开（`blocked_type`）。**`.svg` 不在白名单**：本地 SVG 被 Shell 打开时会在 `file://` 起源里执行自带脚本（Electron 39.8.10 实测可改 `document.title`），它仍是活动内容；应用内预览会正常渲染 SVG，只是不替用户去启动它。
    黑名单在这里是错的形状：文件名来自对端加密元数据，而 Windows Shell 会执行的东西远比 `.exe/.bat` 多——`.scf`、`.url`、`.pyw`、`.py`、`.sh`、`.pl`、`.rb` 都属于"双击即执行"。枚举不完，所以反过来只放行确定的文档类型。这仍然不阻止用户自己在资源管理器里打开这些文件，只是**应用不会替他执行对端代码**。
 8. **文件名净化。** 去掉目录部分、Win32 非法字符替换为 `_`、去掉尾随点与空格、`CON/PRN/AUX/NUL/COM1-9/LPT1-9` 加前缀、长度截到 180 且保留扩展名。
 
@@ -86,13 +87,13 @@ static/js/chat.js        +131/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- |
 | `.\.venv\Scripts\python.exe manage.py check` | `System check identified no issues (0 silenced).` |
 | `.\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run` | `No changes detected` |
-| `npm run test:e2ee` | **97 tests / 97 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 35 条） |
+| `npm run test:e2ee` | **100 tests / 100 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 38 条） |
 | `cd desktop && npm run test:layout` | `Sidebar layout: 36/36 browser checks passed` |
-| `cd desktop && npm run test:branding` | 打包 asar 内 **57 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
+| `cd desktop && npm run test:branding` | 打包 asar 内 **60 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
 | `cd desktop && npm run test:installer` | `NSIS runtime: 24/24 assertions passed` |
-| `cd desktop && npm run test:files` | **35 tests / 35 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
+| `cd desktop && npm run test:files` | **38 tests / 38 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
 
-新增套件 `chat/tests/js/desktop_file_io.test.js` 共 35 条，分四层：
+新增套件 `chat/tests/js/desktop_file_io.test.js` 共 38 条，分四层：
 
 1. **策略层**（`desktop/file-io.js`）：真实临时目录里写字节，覆盖文件名净化、严格字节数解析、顺序追加、越界、重放、过期、绑定发送者、授权上限、失败不推进偏移、**写一半失败后重试不重复追加**、**覆盖更长旧文件后按声明大小截断**、空文件、**白名单外一律拒绝打开**（`.scf/.url/.pyw/.py/.sh/.pl/.rb/.exe/'无扩展名'/双扩展名`）、**已 seal 不占配额**、**失败后可释放配额**、**对话框路径尾随点/空格不绕过白名单（且合法文档仍可打开）**。
 2. **主进程层**（真实 `main.js` 在 vm 沙箱里跑，只替换 OS 网络/对话框）：四条通道注册、非受信 frame 拒绝、**校验先于弹框**、取消不建授权、同 frame 并发对话框拒绝、端到端（对话框→两块→seal→打开）、跨 sender 拒绝、可执行不调用 `openPath`、`openPath` 返回错误串时上报。
@@ -134,7 +135,7 @@ static/js/chat.js        +131/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- | --- | --- | --- |
 | 1 | 独立子 Agent（无作者上下文） | PASS WITH FINDINGS | 3 / 8 / 5 | `8b3038a` |
 | 2 | 另一个独立子 Agent（全新上下文，不复用第 1 轮） | FAIL | 1 / 3 / 5 | `78f1d13` |
-| 3 | 待第 2 轮问题修复后重新开审查 | — | — | — |
+| 3 | 第三个独立子 Agent（全新上下文，不复用前两轮） | PASS WITH FINDINGS | 0 / 3 / 5 | 4549f80 |
 
 ### 第 1 轮发现与处置
 
@@ -166,7 +167,7 @@ static/js/chat.js        +131/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- | --- |
 | BLOCKER | 打开黑名单不完整：`.scf/.url/.pyw/.py/.sh/.pl/.rb` 全部放行，对端可用一个文件名换来一键执行 | 改为**白名单**（仅文档/图片/音视频/压缩包）；补 29 个拒绝用例 + 6 个放行用例 |
 | MAJOR | 写入失败后授权永久占配额，连续 8 次失败后 30 分钟内所有保存都失败 | 新增 `ichat:files:release`，渲染端失败时归还；补 3 条断言 |
-| MAJOR | 浏览器版下载成功后按钮被重置回 `Download`（与 §6"行为不变"矛盾） | `unsupported` 分支保留 `Done`；补断言 |
+| MAJOR | 浏览器版下载成功后按钮被重置回 `Download`（与 §6"行为不变"矛盾） | `unsupported` 分支保留 `Done`；断言**当时未补上**，第 3 轮发现后已补（分支抽成 `applySaveResultToDownloadButton`） |
 | MAJOR | 文档声称的"已 seal 不占配额""尾随空格绕过"实际无测试（变异存活） | 两条都补了能真正失败的用例 |
 | MINOR | 图片查看器的"打开"按钮被 append 到游离 div，永不显示 | 查看器只保留保存结果提示（图片已在屏幕上） |
 | MINOR | 代码量表、测试条数、"打包 asar 内 57 tests"表述过期/不准 | 全部按 `git diff --numstat` 与实测输出更正；明确新增套件读源码而非 asar |
@@ -174,20 +175,39 @@ static/js/chat.js        +131/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 
 第 2 轮后再次真跑 7 条命令：`test:e2ee` 97/97、`test:files` 35/35、`test:branding` 57/57、`test:layout` 36/36、`test:installer` 24/24，`check` 与 `makemigrations --check` 无问题。
 
-### 变异测试结果（第 2 轮问题修复后复验）
+### 第 3 轮发现与处置
+
+第 3 轮用真实 Electron 探针确认前两轮修复在生产代码中确实成立（白名单拦截、配额释放、信封语义、按钮三态），剩下的是**测试回归保护缺口**与**文档把没测的写成测了**：
+
+| 严重度 | 问题 | 处置 |
+| --- | --- | --- |
+| MAJOR | `ichat:files:release` 未列入通道断言，删掉注册仍 35/35 全绿 | 通道列表补上 release，并断言释放后令牌失效 |
+| MAJOR | 文档称浏览器 `unsupported` 分支"已补断言"，实际没有；变异存活 | 分支抽成 `applySaveResultToDownloadButton` 并补 DOM 断言 |
+| MAJOR | 白名单放行 `.svg`，而本地 SVG 被 Shell 打开会执行自带脚本 | 移出白名单；补断言；应用内预览仍渲染 SVG |
+| MINOR | IPC 表漏 release | 补上 |
+| MINOR | 图片查看器保存成功弹两次 toast | 去掉重复提示 |
+| MINOR | 测试头注释写"Three layers"实为四层 | 更正 |
+| MINOR | seal 里的 `truncateSync` 分支不可达（首块 `w+` 已截断） | 删除死代码 |
+
+第 3 轮后真跑 7 条命令：`test:e2ee` 100/100、`test:files` 38/38、`test:branding` 60/60、`test:layout` 36/36、`test:installer` 24/24，`check` 与 `makemigrations --check` 无问题。第 3 轮存活的三条变异（关掉 `unsupported` 分支、删除 release 注册、SVG 放回白名单）现已各自被抓到。
+
+### 变异测试结果（三轮问题修复后复验）
 
 每个修复都做过"改回去看测试是否失败"的验证：
 
 | 变异 | 结果 |
 | --- | --- |
-| 已 seal 的授权重新占配额 | 35 中 1 条失败 ✔ |
-| 去掉尾随点/空格归一化 | 35 中 1 条失败 ✔ |
-| 白名单改回黑名单 | 35 中 3 条失败 ✔ |
-| 失败时不释放授权 | 35 中 1 条失败 ✔ |
-| 信封改回 throw（第 1 轮 BLOCKER 退化） | 35 中 1 条失败 ✔ |
-| 裸 append + 去 offset 校验 | 35 中 4 条失败 ✔ |
-| 按钮恒显示 Done | 35 中 2 条失败 ✔ |
-| 去掉 pick 的发送者校验 | 35 中 1 条失败 ✔ |
+| 已 seal 的授权重新占配额 | 1 条失败 ✔ |
+| 去掉尾随点/空格归一化 | 1 条失败 ✔ |
+| 白名单改回黑名单 | 3 条失败 ✔ |
+| 失败时不释放授权 | 1 条失败 ✔ |
+| 信封改回 throw（第 1 轮 BLOCKER 退化） | 1 条失败 ✔ |
+| 裸 append + 去 offset 校验 | 4 条失败 ✔ |
+| 按钮恒显示 Done | 2 条失败 ✔ |
+| 去掉 pick 的发送者校验 | 1 条失败 ✔ |
+| 关掉浏览器 `unsupported` 分支（第 3 轮补测） | 1 条失败 ✔ |
+| 删除 `ichat:files:release` 注册（第 3 轮补测） | 2 条失败 ✔ |
+| `.svg` 放回白名单（第 3 轮补测） | 1 条失败 ✔ |
 
 ---
 

@@ -78,9 +78,12 @@ class DeployGateLoggingTests(unittest.TestCase):
             f'LOG_FILE={log_file.as_posix()!r}\n'
             f'APP_DIR={workdir.as_posix()!r}\n'
             f'VENV_DIR={(workdir / ".venv").as_posix()!r}\n'
+            f'STATE_DIR={(workdir / ".deploy-state").as_posix()!r}\n'
             f'BIN_COPY=/opt/ichat/bin/deploy.sh\n'
             "DEPLOYED_SHA=deadbeef\n"
             "TARGET=main\n"
+            # A plain deploy: no --commit, so the record says kind=deploy.
+            "COMMIT=\n"
             f'ICHAT_SKIP_SMOKE={"1" if skip else "0"}\n'
             + (
                 "SMOKE_USERNAME=probe\nSMOKE_PASSWORD=secret\n"

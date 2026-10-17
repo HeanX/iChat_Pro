@@ -7,6 +7,8 @@
 
 2026-10-18（#204 / P4 Test T23）：发布流程在 readiness 之后加了一道**冒烟门禁** `deploy/smoke.sh`，覆盖登录、CSRF、会话与核心 API；失败不写 `DEPLOYMENTS.log` 且 deploy 退出非零。新增第 7 节说明冒烟账号策略与前置条件。该门禁目前只在本地 SQLite + Django live server 下验证过（19 条用例，其中 6 条锚定 deploy.sh 的日志语义），**未在生产验证**。
 
+2026-10-18（#177 / P4 T50）：发布加入**审批门禁**与**审计记录**。`DEPLOYMENTS.log` 由旧的 4 字段格式升级为结构化单行（`ts/sha/target/kind/actor/via/from/smoke/approval`），新增 `--status` 查询与 `/opt/ichat/.deploy-state` 状态目录。旧日志行仍是原样前缀，但字段不再对齐——解析旧行请按空格切分取前 4 段。36 条用例覆盖审计字段与审批语义，**未在生产验证**。
+
 现行生产入口 chat.20060810.xyz:8443；代码与部署基线 f2f60ec，最后核对 DEPLOYMENTS.log 为 2026-10-07T13:42:16Z。live/ready/login HTTPS 200，readiness 自动检查 DB+cache JSON，登录/核心接口冒烟失败阻断已实现代码（#204 待真实环境证据）；监控告警（#139）和完整发布审批（#177）仍待验收。服务器 SHA、GitHub main 和安装包 SHA 分别记录，回滚不自动降级数据库。
 
 > 适用主机：AWS ap-northeast-1d / t3.small / Amazon Linux 2023 / EIP `13.158.121.80`。
@@ -50,11 +52,22 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 ## 3. 日常发布与回滚（T50 路径）
 
 - **统一入口：`/opt/ichat/bin/deploy.sh`**（仓库 checkout 之外的稳定副本）。调用仓库内副本时脚本会自动 `install` 自身到该路径并 re-exec——回滚到旧 commit 会把仓库里的 deploy.sh 一并回退，稳定副本保证工具行为不受影响。
-- 发布：`sudo /opt/ichat/bin/deploy.sh`（校验配置 → migrate → collectstatic → restart → readiness 门禁 → 冒烟门禁）。
+- 发布：`sudo ICHAT_APPROVAL='<ticket/PR>' /opt/ichat/bin/deploy.sh`（审批门禁 → 校验配置 → migrate → collectstatic → restart → readiness 门禁 → 冒烟门禁 → 审计记录）。
+- **审批门禁（T50 / #177）**：发布必须带 `ICHAT_APPROVAL`（工单/PR/变更号），否则在**改动服务之前**就拒绝。回滚（`--commit`）不需要审批——逃生通道不能依赖纸面流程。`ICHAT_REQUIRE_APPROVAL=0` 是已知良好紧急发布的口子，会被记成 `approval=none` 并在 stderr 警告。
 - **readiness 门禁**：带生产 Host 头经本机 Nginx TLS（`https://127.0.0.1:8443`）请求 `/health/ready/` 并校验 JSON body——对任意被部署版本都有效（旧版本会把 http 探测 301 到 https），301/400 不会误判成功。
-- **冒烟门禁（T23 / #204）**：readiness 通过后执行 `deploy/smoke.sh`，断言 `health/live`、`health/ready`、登录表单与 CSRF、登录会话、`/api/conversations/`、`/api/profile/me/`，以及未认证 `/api/` 返回 401。任一失败则**不写 `DEPLOYMENTS.log` 并 exit 1**——"能连上但登录坏了"的版本不算发布成功。服务此时已重启，需用 `--commit <上一个SHA>` 回退，见下方"回滚应用"。
-- **每次部署把 `<UTC时间> <commit SHA> <目标> smoke=passed|skipped|skipped-no-script` 追加到 `/opt/ichat/DEPLOYMENTS.log`**；服务器实际运行的 SHA 以该文件和 `git -C /opt/ichat/repo rev-parse HEAD` 为准，可能与仓库 main 不同（回滚期间）。`skipped` 只能由 `ICHAT_SKIP_SMOKE=1` 产生，`skipped-no-script` 出现在回滚到 #204 之前的版本时。
-- **回滚应用**：`sudo /opt/ichat/bin/deploy.sh --commit <上一个SHA>`——checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记录日志。恢复新版本：重跑 `deploy.sh`（不带 --commit）。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
+- **冒烟门禁（T23 / #204）**：readiness 通过后执行 `deploy/smoke.sh`，断言 `health/live`、`health/ready`、登录表单与 CSRF、登录会话、`/api/conversations/`、`/api/profile/me/`，以及未认证 `/api/` 返回 401。任一失败则**不写 `DEPLOYMENTS.log` 并 exit 1**——"能连上但登录坏了"的版本不算发布成功。服务此时已重启，需用 `--commit <上一个SHA>` 回退。
+- **审计记录（T50 / #177）**：每次成功发布向 `/opt/ichat/DEPLOYMENTS.log` 追加**一行**结构化记录：
+
+  ```text
+  ts=<UTC> sha=<sha> target=<branch[@commit]> kind=<deploy|rollback> \
+  actor=<发布人> via=<sudo|direct> from=<来源IP> smoke=<passed|skipped|skipped-no-script> approval=<引用>
+  ```
+
+  - `actor` 回答"谁发布的"：`sudo` 下取 `SUDO_USER`（不是 root），否则取 `$USER`；CI 调用时用 `ICHAT_DEPLOYER`。字段经白名单清洗，注入字符会变成 `_`。
+  - `from` 取 `SSH_CONNECTION` 的客户端地址，本地控制台记 `local-console`。
+  - 服务器实际运行的 SHA 以该文件与 `git -C /opt/ichat/repo rev-parse HEAD` 为准，可能与仓库 main 不同（回滚期间）。
+- **查看发布记录**：`sudo /opt/ichat/bin/deploy.sh --status`（最近 5 条 + 当前运行的 SHA）；`--status --verbose` 显示完整字段。行数可用 `ICHAT_STATUS_LINES` 调整。
+- **回滚应用**：`sudo /opt/ichat/bin/deploy.sh --commit <上一个SHA>`——checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记为 `kind=rollback`。恢复新版本：重跑 `deploy.sh`（不带 --commit，仍需审批）。`/opt/ichat/.deploy-state/{current,previous}` 另外记住当前与上一个 SHA。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
 - 失败排查：`journalctl -u ichat -n 100`、`tail -50 /var/log/nginx/ichat.error.log`、冒烟失败项见 deploy 输出。
 
 ## 4. 备份与恢复（T13）

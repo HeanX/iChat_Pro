@@ -284,7 +284,7 @@ sequenceDiagram
 | 数据 | 允许条件 | 违反即缺陷 |
 | --- | --- | --- |
 | 待导出私钥 JWK | 仅 `sessionStorage`（tab 作用域）+ 桌面必须 DPAPI 密文 | Web 明文是**已知限制**，不得扩展为 localStorage；桌面明文**不允许** |
-| 草稿、AI 历史 | 桌面：DPAPI 密文；Web：明文（已知限制） | 桌面出现明文 `enc:` 以外的记录即缺陷 |
+| 草稿、AI 历史 | 桌面：DPAPI 密文（`enc:` 前缀）；Web：明文（已知限制） | 桌面端出现不带 `enc:` 前缀的记录即缺陷 |
 | 解密后的明文 | 仅内存与已渲染 DOM | 落 localStorage/IndexedDB 即缺陷 |
 | 公钥、指纹、key_version | 明文可存 | 不得被当作"身份已核实"的证据 |
 | 同步游标 | 明文可存（带 HMAC 签名，服务端不可伪造） | — |

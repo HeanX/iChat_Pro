@@ -1,4 +1,4 @@
-# 模块 8：Android / 移动端（从零立项）
+﻿# 模块 8：Android / 移动端（从零立项）
 
 > 交接对象：负责在 Windows/Web 之外增加 Android 端的 Agent。
 > 核对日期 2026-10-18，基线 `cfe53be`。规范见 [conventions.md](conventions.md)。
@@ -17,7 +17,7 @@
   mobile/android/             Capacitor CLI 真实生成的 Android 工程（不是占位目录）
   mobile/tests/               node:test 配置契约测试（10 条，纯 Node，无需模拟器）
   docs/phase4/adr-p4-03-*.md  技术决策记录
-  app-debug.apk               已构建成功（4.22 MB，SHA256 0D05C92B…4B4976，见 ADR §5.1）
+  app-debug.apk               已构建成功（4.22 MB，SHA256 FCE3182E…66C7AE6，见 ADR §5.1）
 仓库里仍然没有：
   提交进库的 APK / AAB          （产物在 build/ 下，已 gitignore；不可安装到设备）
   真机或模拟器的运行记录        （0 次：adb devices 为空，无 emulator 包，无 Hyper-V）
@@ -148,7 +148,8 @@ Origin 必须通过 AllowedHostsOriginValidator → 需要把 App 的 Origin 加
 > [ADR-P4-03 §5/§6](../phase4/adr-p4-03-mobile-tech-stack.md)。
 
 ```powershell
-# 前置：JDK 17+（本机实测 OpenJDK 23 可用）、Android SDK Platform 36、Gradle
+# 前置：JDK 21+（不是 17；Capacitor 8 的 capacitor.build.gradle 固定 VERSION_21）、
+#       Android SDK Platform 36、Gradle。本机实测 OpenJDK 23.0.1 可用。
 java -version
 adb devices
 

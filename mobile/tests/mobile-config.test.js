@@ -105,5 +105,18 @@ test('live reload is opt-in and only then emits server.url', () => {
   assert.strictEqual(out.serverUrl, 'https://chat.20060810.xyz:8443');
   const capCfg = buildCapacitorConfig(out);
   assert.strictEqual(capCfg.server.url, 'https://chat.20060810.xyz:8443');
-  assert.strictEqual(capCfg.server.cleartext, false);
+  assert.strictEqual(capCfg.server.cleartext, false, 'https live reload is not cleartext');
+});
+
+test('live reload over loopback http sets cleartext so the WebView can load it', () => {
+  // Hardcoding cleartext:false made http://localhost live reload silently fail:
+  // the WebView refused the cleartext URL. It must mirror the scheme.
+  const out = resolveMobileConfig(
+    { ICHAT_MOBILE_SERVER_URL: 'http://localhost:8000' },
+    { liveReload: true },
+  );
+  assert.strictEqual(out.mode, 'configured');
+  const capCfg = buildCapacitorConfig(out);
+  assert.strictEqual(capCfg.server.url, 'http://localhost:8000');
+  assert.strictEqual(capCfg.server.cleartext, true, 'loopback http live reload needs cleartext');
 });

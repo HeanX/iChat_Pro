@@ -21,6 +21,9 @@ public class ExampleInstrumentedTest {
         // Context of the app under test.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
-        assertEquals("com.getcapacitor.app", appContext.getPackageName());
+        // P4 T22 review fix: the template shipped the Capacitor sample package
+        // name, so this failed for anyone running connectedAndroidTest against
+        // the real applicationId (com.ichat.pro).
+        assertEquals("com.ichat.pro", appContext.getPackageName());
     }
 }

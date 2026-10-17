@@ -145,7 +145,10 @@ function buildCapacitorConfig(resolved) {
     },
   };
   if (resolved && resolved.mode === 'configured' && resolved.serverUrl) {
-    cfg.server = { url: resolved.serverUrl, cleartext: false };
+    // `cleartext` must mirror the scheme. Hardcoding false made live reload
+    // silently fail over http://localhost, because the WebView refused to load
+    // a cleartext URL. Allow it only when the origin really is loopback http.
+    cfg.server = { url: resolved.serverUrl, cleartext: resolved.insecure === true };
   }
   return cfg;
 }

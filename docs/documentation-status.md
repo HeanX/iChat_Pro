@@ -1,4 +1,4 @@
-# 全部文档维护索引
+﻿# 全部文档维护索引
 
 > 复核日期：2026-10-13（事实快照 2026-10-07）。代码基线 f2f60ec：本地 HEAD 与基线之间只有文档改动与测试隔离修复，无产品代码逻辑差异。所有受版本控制的 Markdown 已复核并更新，原二进制课程归档保留。
 
@@ -10,7 +10,7 @@
 
 2026-10-13 增补：[第四次实验-单元测试与代码评审报告](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.md) 与 [项目中期完成情况报告](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.md)。测试与评审数据为本机实测，评审统计取自 Git 提交历史；同时修复了头像测试向仓库 `media/` 写入真实文件的测试污染缺陷。
 
-2026-10-18 增补：[ADR-P4-03 移动端技术路线与工程骨架](phase4/adr-p4-03-mobile-tech-stack.md)（P4 T22 / #149）。记录 Capacitor 8 混合路线、转原生的三条触发条件、Session 认证复用、固定工具链版本与本机构建环境缺口；同步更新 [Android/移动端交接文档](handoff/android-mobile.md) §1 与 [docs/phase4/tasks.md](phase4/tasks.md) T22 行。**未产出 APK，无真机运行记录。**
+2026-10-18 增补：[ADR-P4-03 移动端技术路线与工程骨架](phase4/adr-p4-03-mobile-tech-stack.md)（P4 T22 / #149）。记录 Capacitor 8 混合路线、转原生的三条触发条件、Session 认证复用、固定工具链版本与本机构建环境缺口；同步更新 [Android/移动端交接文档](handoff/android-mobile.md) §1 与 [docs/phase4/tasks.md](phase4/tasks.md) T22 行。**debug APK 已构建**（4.22 MB，SHA256 `FCE3182E…66C7AE6`，manifest 已禁用备份）；**真机/模拟器安装与启动、WebView 加载 Django 页面均未执行，不计为通过。**
 
 | 文档 | 用途与本次维护 |
 | --- | --- |

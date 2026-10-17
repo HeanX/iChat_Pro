@@ -9,14 +9,18 @@
 
 ## 0. 结论先行
 
-1. **技术路线**：采用 **Capacitor 8 混合外壳**（WebView 加载仓库已有的 Django 模板页面），**不重写 UI**。
-   理由与否决理由见 §2；**若 §2.3 的三个验证问题中任何一个不通过，立即转原生 Kotlin + Compose**，转向前不投入 T25–T30。
-2. **认证方式**：**不新增 token 端点**。Android 复用现有 **Django Session + CSRF Cookie**，WebView 与 Web 同源。
-   需要 token 的情形与前置条件见 §4.3。
+1. **技术路线**：采用 **Capacitor 8 混合外壳**（**目标**是 WebView 加载仓库已有的 Django 模板页面），
+   **不重写 UI**。理由与否决理由见 §2；**若 §2.3 的三个验证问题中任何一个不通过，立即转原生
+   Kotlin + Compose**，转向前不投入 T25–T30。
+   > 注意：T22 只落地了工程骨架与配置解析，**当前构建尚未加载任何 Django 页面**（加载的是本地 assets
+   > 启动页），"复用现有页面"的接通属 T24。见 §3.1 的更正说明。
+2. **认证方式**：**不新增 token 端点**。**目标形态**是 Android 复用现有 **Django Session + CSRF Cookie**，
+   WebView 与 Web 同源；**该形态需 T24 接通同源加载后才成立**，目前未实现也未实测。
+   需要 token 的情形与前置条件见 §3.3。
 3. **工程骨架已落地并可构建**：`mobile/` 可 `npm install` + `npx cap sync` + Gradle 构建，
    `mobile/android/` 是 Capacitor CLI **真实生成**（非手写）的原生工程；
-   **`app-debug.apk` 已真实产出**（最终产物 4.22 MB / `0D05C92B…4B4976`，SHA256 与构建命令见 §5）。
-4. **本机工具链**：JDK 17+ 与 **Android SDK Platform 36 缺失**（系统只有 JDK 1.8 与 SDK 33/34）。
+   **`app-debug.apk` 已真实产出**（最终产物 4.22 MB / `FCE3182E…66C7AE6`，SHA256 与构建命令见 §5）。
+4. **本机工具链**：JDK 21+ 与 **Android SDK Platform 36 缺失**（系统只有 JDK 1.8 与 SDK 33/34）。
    已通过 **workspace 内可写 SDK 根目录**（`mobile/.android-sdk`）+ 本机已有的 **OpenJDK 23** 补齐，
    构建成功。**真机 / 模拟器安装与启动未执行**（无设备、无 emulator 包、无 Hyper-V），属"未验证"。
 5. **一处工具链偏差（必须披露）**：`gradle-wrapper.properties` 指定 Gradle **8.14.3**，但该发行版托管在
@@ -94,12 +98,21 @@ T24 出包后，**必须先做**下列三项验证；任何一项失败，**停�
 
 ### 3.1 决策：复用 Django Session，不新增 token 端点
 
-Capacitor 外壳在**发布模式**下从 `https://<服务器>` 加载页面（同源），Cookie 由 WebView 的
-CookieManager 自动管理，`wss://` 握手复用同一 Cookie。这与 Web 端行为一致，**服务端零改动**。
+**目标形态（T24 之后）**：Capacitor 外壳在发布模式下从 `https://<服务器>` 加载 Django 页面（同源），
+Cookie 由 WebView 的 CookieManager 自动管理，`wss://` 握手复用同一 Cookie。这与 Web 端行为一致，
+**服务端零改动**。
+
+> **当前骨架不是这个形态。** T22 的发布构建 `server.url` 为 `null`，WebView 加载的是打包进 APK 的
+> 本地 assets（`mobile/www/index.html` 启动页），`shell.js` 里没有任何 `location`/`navigate`/WebSocket
+> 代码，APK 内也没有注入 `window.ICHAT_MOBILE_ENV` 的代码。也就是说 **"同源加载 Django 页面"是
+> T24 要接通的目标，不是本卡已实现的事实**。本卡只落地了"服务地址如何解析、如何校验"这一层。
+> 上一版 ADR 在这里用了现在时，属表述错误，已更正。
 
 关键约束（写进 `mobile/www/js/mobile-config.js` 并由 `mobile/tests/mobile-config.test.js` 守护）：
 
 1. 非 loopback 必须 HTTPS。`http://` 远程地址直接判 `unconfigured`。
+   实测未被绕过：大小写 scheme、`localhost.evil.com`、`127.0.0.1.nip.io`、`localhost@evil.com`
+   全部落 `unconfigured`；`0x7f.0.0.1`/`2130706433` 会被 `URL` 归一化成 `127.0.0.1`，语义上确为 loopback。
 2. `server.url`（热重载）**只允许开发模式显式开启**；发布构建解析结果为 `null`，
    `capacitor.config.json` 不带 `server` 块——避免把开发机地址打进 APK。
 3. Origin 归一化必须与 `desktop/app-config.js` 一致（小写 host、去默认端口），否则跨端测试无法比较。
@@ -108,10 +121,11 @@ CookieManager 自动管理，`wss://` 握手复用同一 Cookie。这与 Web 端
 
 | 客户端 | `Origin` 头 | 结论 |
 | --- | --- | --- |
-| WebView（同源加载页面） | 自动带 `https://<origin>` | 与 Web 相同，服务端现有 `ALLOWED_HOSTS` / Origin 校验直接放行 |
+| WebView（**T24 之后**同源加载页面） | 预期自动带 `https://<origin>` | 与 Web 相同，服务端现有 `ALLOWED_HOSTS` / Origin 校验应直接放行——**尚未实测** |
 | 原生 OkHttp（若将来转原生） | **默认不发** | `AllowedHostsOriginValidator` 对缺失 `Origin` 的处理需实测；转原生时必须单独验证 |
 
-**本卡未验证**：WebView 在 `wss://` 下的真实 `Origin` 行为（需要 T24 出包 + 真机）。
+**本卡未验证**：WebView 在 `wss://` 下的真实 `Origin` 行为。当前构建根本不加载远端页面，
+所以这一条**连测试的前提都不存在**，要等 T24 接通同源加载后才谈得上验证。
 交付里按"未验证"记，不写"已通过"。
 
 ### 3.3 何时才需要 token 端点（记录，不在本卡实施）
@@ -156,13 +170,19 @@ mobile/
 | `@capacitor/app` | 8.1.2 | 同上 |
 | `@capacitor/network` | 8.0.1 | 同上 |
 | `@capacitor/preferences` | 8.0.1 | 同上 |
-| Gradle | **wrapper 8.14.3**（本次实际用 9.5.1，见 §5 偏差） | `mobile/android/gradle/wrapper/gradle-wrapper.properties`（CLI 生成） |
+| Gradle | wrapper 期望 **8.14.3** | `mobile/android/gradle/wrapper/gradle-wrapper.properties`（CLI 生成） |
+| Gradle（本次实际使用） | **9.5.1**（本机已缓存；wrapper 8.14.3 下载被阻断，见 §5.3） | 非固定版本，CI 须用 `./gradlew` 复跑 |
 | Android Gradle Plugin | 8.13.0 | `mobile/android/build.gradle`（CLI 生成） |
 | compileSdk / targetSdk | 36 | `mobile/android/variables.gradle` |
 | minSdk | 24 | 同上 |
-| JDK | **17+ 必需**（AGP 8.13 要求）；本次用 **OpenJDK 23.0.1** 完成构建 | §5 |
+| JDK | **21+ 必需** | `mobile/android/app/capacitor.build.gradle:5-6` 硬编码 `JavaVersion.VERSION_21` |
+| JDK（本次实际使用） | **OpenJDK 23.0.1** | §5 |
 | Android SDK | Platform 36 + Build-Tools 36.0.0，安装在 `mobile/.android-sdk`（已被 gitignore） | §5 |
 
+> **JDK 版本是 21，不是 17。** AGP 8.13 本身只要 17，但 Capacitor 8 生成的
+> `app/capacitor.build.gradle` 把 `sourceCompatibility`/`targetCompatibility` 都写成
+> `JavaVersion.VERSION_21`。装 JDK 17 会在 `compileJava` 阶段失败。§6 的复现步骤已按此更正。
+>
 > 依赖**故意不用 `^`**：`package-lock.json` 已提交，`^` 会让构建机在 lock 缺失时漂移。
 
 ### 4.3 与现有代码的接口面
@@ -204,18 +224,23 @@ cd android
 gradle assembleDebug --no-daemon --console=plain
 # -> BUILD SUCCESSFUL in 2m 23s
 #    183 actionable tasks: 183 executed
+
+# manifest 加固（禁用备份）后重新构建并复验
+gradle assembleDebug --no-daemon --console=plain
+# -> BUILD SUCCESSFUL in 14s  （183 tasks: 13 executed, 170 up-to-date）
 ```
 
-产物与校验（manifest 加固后的最终构建）：
+产物与校验（审查整改后重新构建的最终产物）：
 
 ```
 mobile/android/app/build/outputs/apk/debug/app-debug.apk
-  大小    4.22 MB
-  SHA256  0D05C92BFF2183BD97B0CE560E41C6BD5331E8A958CB00F0935428E58C4B4976
+  大小    4.22 MB (4,424,830 bytes)
+  SHA256  FCE3182ED2200D1B747C7DB060176B55BB0BF40AFDC34B04EBFC8D55866C7AE6
 ```
 
-> 首次构建（未加固 manifest）为 3.94 MB / `F10D3570…CDFCD2`。加固后重新构建并复验，
-> 以上为当前提交对应的产物。**产物不入库**（`build/` 已 gitignore）。
+> 构建历史：① 初版 3.94 MB / `F10D3570…CDFCD2`；② manifest 禁用备份后 4.22 MB / `0D05C92B…4B4976`；
+> ③ 审查整改（收窄 FileProvider、修正仪器化测试断言）后为上面的 `FCE3182E…66C7AE6`。
+> **产物不入库**（`build/` 已 gitignore）。
 
 APK 内容核验（`aapt2 dump badging` + `aapt2 dump xmltree` + zip 目录，**真实输出**）：
 
@@ -274,16 +299,17 @@ T29 仍需在 §2.3 的 (a)/(b)/(c) 中做出选择。
 | 两个 API Level / 两种设备配置的运行记录 | 同上，无任何可运行目标 |
 | WebView 内登录 → WS → 收发一条消息 | 属 T24 及之后范围，本卡不含 |
 | 用固定 wrapper Gradle 8.14.3 构建 | 该发行版在 GitHub Releases，本机到该主机连接被重置；改用本机缓存的 Gradle 9.5.1。**CI 必须用 `./gradlew` 复跑** |
-| WebView 实际 `Origin` 头行为 | 需设备抓包，见 §3.2 |
+| WebView 实际 `Origin` 头行为 | 当前构建不加载远端页面，测试前提不存在；需 T24 接通同源加载 + 设备抓包，见 §3.2 |
+| **debug APK 含 `debuggable=true`** | debug 构建标志位。`capacitor.config.json` 的 `webContentsDebuggingEnabled:false` **压不住它**——`CapConfig.java` 的 fallback 是 `isDebug`，读的正是 `FLAG_DEBUGGABLE`。**该 APK 可被 Chromium DevTools 远程调试，不得分发给任何人试用。** release 构建 `debuggable=false`，无此问题 |
 
 ---
 
 ## 6. 复现构建的步骤（下一位接手者 / CI 执行）
 
 ```powershell
-# 1) JDK 17 或 21（AGP 8.13 不支持 1.8；本机实测 23 可用）
-$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-17'
-java -version          # 期望 17.x / 21.x
+# 1) JDK 21 或更高（不是 17！Capacitor 8 的 capacitor.build.gradle 固定 VERSION_21）
+$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21'
+java -version          # 期望 21.x+；本机实测 OpenJDK 23.0.1 可用
 
 # 2) Android SDK Platform 36 + Build-Tools 36（Capacitor 8 的 compileSdk=36）
 #    注意：C:\Program Files (x86)\Android\android-sdk 不可写且只有 33/34，
@@ -330,7 +356,7 @@ adb shell am start -n com.ichat.pro/.MainActivity
 | 后台 WS 被系统杀 | 断线期间收不到推送 | 前台服务（T27）+ 补取接口（已有 `sync`）兜底 |
 | 备份带走 WebView 私钥 | 私钥随 `adb backup` / 云备份泄露 | **本卡已挡**：`allowBackup=false` + `dataExtractionRules` 全 exclude（§5.1.1）。仍不覆盖 root/运行时读取，最终由 T29 决定 |
 | WebView 版本碎片（minSdk 24 对应 WebView 可能很旧） | WebCrypto / ES2020 能力不足 | T24 出包后按 WebView 版本设下限 |
-| 本机无 JDK 17 / SDK 36 / 真机 | 构建与安装证据缺失 | 已用 OpenJDK 23 + 可写 SDK 补上构建；**真机仍缺失**，见 §5.3 |
+| 本机无 JDK 21 / SDK 36 / 真机 | 构建与安装证据缺失 | 已用 OpenJDK 23 + 可写 SDK 补上构建；**真机仍缺失**，见 §5.3 |
 | wrapper Gradle 版本无法下载 | 产物非固定版本构建 | §5.3；CI 必须用 `./gradlew` 复跑 |
 | 生成的模板代码未被替换 | `MainActivity.java`、launcher 图标仍是 Capacitor 默认 | T24 会用正式图标/品牌替换（参考 Windows `windows-branding.md` 的做法） |
 
@@ -338,8 +364,29 @@ adb shell am start -n com.ichat.pro/.MainActivity
 
 ## 8. 审查记录
 
-| 轮次 | 审查者 | 结论 | BLOCKER/MAJOR/MINOR | 修复提交 |
+| 轮次 | 审查者 | 结论 | 发现项 | 整改 |
 | --- | --- | --- | --- | --- |
-| 1 | 独立审查子 Agent（非作者上下文） | 见交付说明 | 见交付说明 | — |
+| 1 | 独立审查子 Agent（非作者上下文，只给 Issue 原文 + diff + 命令） | **PASS WITH FINDINGS** | 2 BLOCKER / 5 MAJOR / 6 MINOR | 见下表 |
+
+### 8.1 第 1 轮发现项与整改
+
+| 级别 | 问题 | 整改 |
+| --- | --- | --- |
+| BLOCKER | `mobile/android/gradlew` 以 mode `100644` 入库（Windows `core.filemode=false`），Linux/macOS CI 的 `./gradlew` 会 permission denied | `git update-index --chmod=+x`，现为 `100755` |
+| BLOCKER | ADR 写"JDK 17+ 必需"，但 Capacitor 8 生成的 `app/capacitor.build.gradle` 硬编码 `JavaVersion.VERSION_21`，JDK 17 会在 `compileJava` 失败 | §0/§4.2/§6/§7 与本模块交接文档统一改为 **JDK 21+**，并注明依据 |
+| MAJOR | `docs/documentation-status.md` 仍写"未产出 APK"，与 ADR/handoff 矛盾 | 已改为"APK 已构建 + 真机未执行" |
+| MAJOR | `tasks.md` T22 行写"APK 产物…未执行 / 缺 JDK 17+"，与事实冲突；链接错指 §6 | 重写该行，链接改 §5.3 |
+| MAJOR | §0 结论 2 与 §3.1 把"同源加载 Django 页面"写成现在时，实际 `server.url=null` 只加载本地 assets | §0/§3.1 改为"目标形态"，明确 T22 未接通、属 T24 |
+| MAJOR | debug APK 含 `debuggable=true`，`webContentsDebuggingEnabled:false` 压不住（`CapConfig` fallback 是 `isDebug`） | §5.3 增列：该 APK 可被 DevTools 远程调试，**不得分发试用** |
+| MAJOR | `write-capacitor-config.js` 失败时仍写文件，可能覆盖受版本控制的 `capacitor.config.json` | 失败路径改为**先退出、不写文件**（实测 exit 1 且文件未变） |
+| MINOR | 仪器化测试断言 `com.getcapacitor.app`，与 `applicationId=com.ichat.pro` 不符，首跑必红 | 改为 `com.ichat.pro` |
+| MINOR | `file_paths.xml` 的 `external-path path="."` 把整个外部存储暴露给 FileProvider | 收窄为 `ichat/` 子目录的 cache/files/external-files 三条 |
+| MINOR | live-reload 配 `http://localhost` 却写 `cleartext:false`，WebView 会拒绝加载 | `cleartext` 改为镜像 scheme；新增第 11 条测试守护 |
+| MINOR | `@capacitor/cli` 仅 devDependency，`npm ci --omit=dev` 下 `cap` 不可用 | 脚本改用 `npx --no-install cap`，失败时明确报错而非静默装包 |
+| MINOR | `data_extraction_rules.xml` 是否漏 `device_*` | 复查结论：**未漏**，前五个 domain 是官方最小写法，保留 |
+
+整改后复验：`node --test` **11/11 通过**；重新构建 `BUILD SUCCESSFUL`，并从 APK 二进制清单反查确认
+`allowBackup=false`、`dataExtractionRules` 生效、FileProvider 仅三条收窄路径。
 
 > 按 `conventions.md` §1：审查者只拿到 Issue 原文 + diff + 命令，不给作者说明。
+> 第 1 轮已用尽一轮，**整改后需开新的审查子 Agent 复核**（不复用本轮会话）。

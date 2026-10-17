@@ -1,0 +1,8 @@
+# Development / CI-only tooling. Not required to run the application.
+#
+# Install alongside the runtime requirements:
+#   .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+
+# P4 Test T12 (#193): statement/branch coverage collection.
+coverage==7.16.2

@@ -1,0 +1,45 @@
+# Coverage configuration — P4 Test T12 (#193).
+#
+# Usage:
+#   .\.venv\Scripts\python.exe -m coverage run manage.py test --parallel 1
+#   .\.venv\Scripts\python.exe -m coverage report -m
+#
+# `--parallel 1` keeps the Django runner in-process, so no data-file
+# concurrency handling is required. If the suite is ever run with
+# --parallel >1, enable `parallel = True` below and merge before reporting.
+
+[run]
+branch = True
+source = accounts
+         chat
+         ichat_pro
+
+# Migrations are generated code and carry no runtime branch logic worth
+# gating on; test modules would inflate the number by counting assertions as
+# covered lines. Neither is part of the product surface.
+#
+# Deliberately NOT using a `test_*.py` glob here: `ichat_pro/test_runner.py`
+# is shipped production code (the configured TEST_RUNNER), and that glob
+# would silently drop it from the report.
+omit =
+    */migrations/*
+    */tests/*
+    */tests.py
+    manage.py
+    ichat_pro/wsgi.py
+    ichat_pro/asgi.py
+
+
+[report]
+# Total-only summary keeps the console output readable in CI logs.
+show_missing = True
+skip_covered = False
+precision = 2
+
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    @(abc\.)?abstractmethod
+    if TYPE_CHECKING:
+    \.\.\.

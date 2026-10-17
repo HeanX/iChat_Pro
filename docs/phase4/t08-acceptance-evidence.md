@@ -1,22 +1,26 @@
 # #189 P4 Test T08 验收证据（本机实测）
 
 > 采集时间：2026-10-18（Asia/Shanghai）
-> 分支：`fix/p4-test-t08-key-reminder-189`，代码提交 `f203988`（在基线 `cfe53be` 之上）
+> 分支：`fix/p4-test-t08-key-reminder-189`；数字采集于本卡最后一个提交（基线 `cfe53be` 之上第 7 个）。
+> 复验时请先跑 `git log --oneline cfe53be..HEAD` 确认实际 HEAD；本节数字随代码演进会变，以当次输出为准。刻意不写死 commit SHA——本卡经多轮修订，写死反而容易过期。
 > 环境：Windows；Python 3.13.12 / Django 6.0.5；Node v24.14.1 / npm 11.13.0；SQLite
 > 说明：**CI 未运行**（该分支未推送、无 upstream、无 PR）。以下均为**本机**实测，不代表 CI 或跨端验收。
 
 ## 0. 如何复现（重要）
 
-本卡在**独立 git worktree** 中开发（`git worktree add`），该目录**没有自己的 `.venv`**。
-所有 Python 命令都借用主仓库的虚拟环境，并且**工作目录必须是 worktree**，
-`manage.py` 必须写成相对路径，否则 `accounts` 会被解析到主仓库、报
-`ImportError: 'tests' module incorrectly imported from ...`。
+本卡在**独立 git worktree** 中开发（`git worktree add`），该目录**没有自己的 `.venv`**，
+所以解释器要借用主仓库的虚拟环境。
+
+**真正的约束是「当前工作目录必须在 worktree 内」。** 若 cwd 落在主仓库，
+Python 会把 `accounts` 解析到主仓库那一份（主仓库当前在别的分支、没有本卡改动），
+报 `ImportError: 'tests' module incorrectly imported from ...`。
+`manage.py` 用相对路径或绝对路径都可以，cwd 对了就不会串。
 
 ```powershell
 # 解释器：主仓库 venv 的绝对路径
 $py = 'D:\Code\PythonProjects\PythonWeb\DjangoProject\iChat_Pro\.venv\Scripts\python.exe'
 
-# 工作目录：本 worktree
+# 工作目录：本 worktree（必须）
 Set-Location 'D:\Code\PythonProjects\PythonWeb\DjangoProject\iChat_Pro_wt_t08'
 
 & $py manage.py check
@@ -24,9 +28,11 @@ Set-Location 'D:\Code\PythonProjects\PythonWeb\DjangoProject\iChat_Pro_wt_t08'
 npm run test:e2ee
 ```
 
-在主仓库根目录直接执行时，把 `$py` 换成相对路径 `.\.venv\Scripts\python.exe` 即可。
+> **不要在只用主仓库复现本节数字**：主仓库当前分支不含本卡改动，
+> `manage.py test accounts` 只有 127 条，且 `accounts.test_key_change_reminder` 会
+> `ModuleNotFoundError`。本节所有数字都来自上面的 worktree。
 
-> 下方命令块为简洁起见仍写作 `.\.venv\Scripts\python.exe`，**执行时请按上面 §0 替换**。
+> 下方命令块为简洁起见仍写作 `.\.venv\Scripts\python.exe`，**执行时请按 §0 替换**。
 
 PowerShell 中 Django 把进度写到 stderr，Django 命令的 `$LASTEXITCODE` 可能为 1；
 判断是否通过请看尾部 `OK` / `FAILED` / `Ran N tests`，不要只看退出码。
@@ -47,11 +53,11 @@ No changes detected
 
 ```text
 $ .\.venv\Scripts\python.exe manage.py test accounts --parallel 1
-Ran 139 tests in 33.327s
+Ran 141 tests in 34.973s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test accounts.test_key_change_reminder
-Ran 12 tests in 4.273s
+Ran 14 tests in 5.128s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test chat.tests.test_phase2_issues
@@ -59,11 +65,11 @@ Ran 47 tests in 22.433s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test --parallel 1
-Ran 416 tests in 150.825s
+Ran 418 tests in 147.050s
 OK (skipped=2)
 ```
 
-`accounts` 由 127 条增至 139 条（本卡新增 12 条，见 `accounts/test_key_change_reminder.py`）。
+`accounts` 由 127 条增至 141 条（本卡新增 14 条，见 `accounts/test_key_change_reminder.py`）。
 
 **2 条 skip 明细**（本机无 PostgreSQL，属预期）：
 

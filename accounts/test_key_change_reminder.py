@@ -275,6 +275,40 @@ class KeyChangeReminderTests(TestCase):
         self.assertEqual(row['trust_status'], 'untrusted')
         self.assertEqual(row['last_endorsed_key_version'], 1)
 
+    def test_last_endorsed_survives_reverification(self):
+        """The endorsed history is reported even after the new key is verified.
+
+        ``last_endorsed_*`` describes the fingerprint a rotation moved *away*
+        from, so it stays available once the warning is resolved; only the
+        never-endorsed case is null.
+        """
+        self._bob_uploads(self.v1)
+        self._trust('verified')
+        self._bob_uploads(self.v2)
+        self.assertTrue(self._trust_list_row()['key_changed'])
+
+        self.assertEqual(self._trust('verified').status_code, 200)
+        row = self._trust_list_row()
+        self.assertFalse(row['key_changed'])
+        self.assertEqual(row['trust_status'], 'verified')
+        self.assertEqual(
+            row['last_endorsed_key_version'],
+            1,
+            'the previously endorsed v1 is still reported after re-verifying v2',
+        )
+        self.assertEqual(row['last_endorsed_key_fingerprint'], self.v1['key_fingerprint'])
+        self.assertEqual(row['last_endorsed_trust_status'], 'verified')
+
+    def test_last_endorsed_is_null_when_nothing_else_was_endorsed(self):
+        """A first key with its own untrusted verdict has no earlier endorsement."""
+        self._bob_uploads(self.v1)
+        self._trust('untrusted')
+
+        row = self._trust_list_row()
+        self.assertFalse(row['key_changed'])
+        self.assertIsNone(row['last_endorsed_key_version'])
+        self.assertIsNone(row['last_endorsed_key_fingerprint'])
+
     def test_trust_list_not_changed_when_current_key_is_untrusted(self):
         self._bob_uploads(self.v1)
         self._trust('untrusted')

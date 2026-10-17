@@ -1151,13 +1151,26 @@ def _summarize_key_trust(trust_records, active_key, previous_key=None):
 
     * ``trust_status`` / ``verified_at`` -- the verdict for the active key;
     * ``key_changed`` -- whether the user should be warned;
-    * ``previous`` -- the preceding key version's fingerprint/version, if the
-      contact has rotated and we still know about it (audit context);
-    * ``endorsed`` -- the most recent trust record the user actually endorsed,
-      i.e. what a warning is about. May be older than ``previous`` after
-      several consecutive rotations.
+    * ``previous`` -- the preceding key version, if the contact has rotated and
+      we still know about it (audit context);
+    * ``endorsed`` -- the last trust record the user endorsed
+      (``trusted``/``verified``) for a fingerprint *other than* the active one,
+      i.e. what a rotation moved away from. Reported regardless of whether the
+      active key already has a verdict, so a client can still show history
+      after re-verification. ``None`` when no other fingerprint was endorsed.
     """
     records = list(trust_records)
+
+    def _endorsed_elsewhere():
+        return next(
+            (
+                record for record in records
+                if record.trust_status in ENDORSED_TRUST_STATUSES
+                and (active_key is None
+                     or record.key_fingerprint != active_key.key_fingerprint)
+            ),
+            None,
+        )
 
     if active_key is None:
         newest = records[0] if records else None
@@ -1174,18 +1187,17 @@ def _summarize_key_trust(trust_records, active_key, previous_key=None):
         None,
     )
     if matching is not None:
+        # The active key has its own verdict, so the warning is resolved; the
+        # previous endorsement is still reported so the history stays visible.
         return {
             'trust_status': matching.trust_status,
             'verified_at': matching.verified_at,
             'key_changed': False,
             'previous': previous_key,
-            'endorsed': None,
+            'endorsed': _endorsed_elsewhere(),
         }
 
-    endorsed = next(
-        (record for record in records if record.trust_status in ENDORSED_TRUST_STATUSES),
-        None,
-    )
+    endorsed = _endorsed_elsewhere()
     return {
         'trust_status': KeyTrust.TrustStatus.UNTRUSTED,
         'verified_at': None,
@@ -1320,11 +1332,12 @@ def key_trust_view(request, user_id):
 
     elif request.method == 'DELETE':
         # Removes the verdict for the *active* fingerprint only (unchanged from
-        # T38). Older KeyTrust rows are kept for audit -- see
-        # docs/handoff/accounts-auth.md "关键契约" #4. Deleting a whole contact's
-        # history here was considered for T08 and rejected for that reason: a
-        # post-rotation reminder is cleared by verifying the new key, not by
-        # destroying the audit trail.
+        # T38). Older KeyTrust rows are kept for audit, matching the "trust is
+        # not inherited, old records are kept" rule in docs/phase4/agent-handoff.md
+        # and the T08 acceptance evidence (docs/phase4/t08-acceptance-evidence.md).
+        # Deleting a whole contact's history was considered for T08 and rejected
+        # for that reason: a post-rotation reminder is cleared by verifying the
+        # new key, not by destroying the audit trail.
         deleted, _ = KeyTrust.objects.filter(
             user=request.user,
             contact=target,

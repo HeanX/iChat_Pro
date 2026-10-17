@@ -206,9 +206,17 @@
 | `key_changed` | bool | 当前有效指纹是否处于"待重新验证"状态：用户曾对旧指纹做出过 `trusted`/`verified` 判定，而当前指纹还没有判定。重新验证当前指纹后立即变为 `false`。 |
 | `previous_key_fingerprint` / `previous_key_version` | string / int | 紧邻当前版本的上一个公钥版本（取自 `UserPublicKey` 历史，可能从未被信任过）。无更早版本时为 `null`。 |
 | `previous_trust_status` | string | 上一版公钥的判定；上一版从未被判定过时为 `untrusted`，没有更早版本时为 `null`。 |
-| `last_endorsed_key_fingerprint` / `last_endorsed_key_version` / `last_endorsed_trust_status` | string / int / string | 用户**最后一次背书**的那个指纹（`trusted` 或 `verified`），即提醒所指的对象。经过多次轮换时它可能比 `previous_*` 更旧，例如 v1 已验证 → v2 → v3 时 `previous_key_version=2`、`last_endorsed_key_version=1`。从未背书时为 `null`。 |
+| `last_endorsed_key_fingerprint` / `last_endorsed_key_version` / `last_endorsed_trust_status` | string / int / string | 用户**最后一次背书**的、且**与当前指纹不同**的那个指纹（`trusted` 或 `verified`），即提醒所指的对象。经过多次轮换时它可能比 `previous_*` 更旧，例如 v1 已验证 → v2 → v3 时 `previous_key_version=2`、`last_endorsed_key_version=1`。重新验证当前指纹后**仍然返回**（告警已消除，但历史仍可见）。只有"从未对其它指纹背书过"时为 `null`。 |
 
 > 约定：信任**按指纹**生效，不按账号继承。对端轮换后新指纹一律从 `untrusted` 开始。
+
+> 层级说明：`GET /api/keys/trust/` 返回 `{"trusts": [ ... ]}`，上表字段位于**数组的每个元素内**；
+> 该元素另含 `contact_id`、`contact_username`、`key_fingerprint`、`key_version`、`trust_status`、
+> `verified_at`、`active_key_fingerprint`。`GET /api/keys/contacts/<user_id>/fingerprints/` 则把这些
+> 字段放在**响应顶层的同级位置**（与 `active_key`、`keys[]` 并列）。
+
+> 补记：`POST /api/keys/contacts/<user_id>/trust/` 的请求体为空或 `{}` 时，服务端按 T38 的既有行为
+> 默认写入 `trusted`。要显式表达"不信任"请传 `{"trust_status": "untrusted"}`。
 
 ## 4. 会话 API
 

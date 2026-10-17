@@ -251,7 +251,7 @@ sequenceDiagram
 | T-04 | 群公告、举报正文明文落库 | B5 | 无 | **高**：用户预期与实际不符 | `chat/models.py:577`、`:482` |
 | T-05 | 删除不留痕的误判 | B5 | 无 | **中**：软删除，管理员可恢复 | `chat/models.py:753-760` |
 | T-06 | 消息未绑定 `key_version`/指纹 | B4 | 仅校验正整数与长度 | **中**：服务端无法发现"用旧版本密钥加密的新消息" | `messaging.py:95-96`；`chat/` 产品代码内 `fingerprint` 0 命中 |
-| T-07 | 换钥后旧信任被沿用（服务端判定） | S9、B1 | 客户端按指纹判等；服务端 `KeyTrust` 按 `(user, contact, fingerprint)` 存 | **中**：基线 `cfe53be` 的 `key_trust_list_view`（`accounts/views.py:1247-1272`）**每个历史 trust 记录各出一行**，同一联系人会出现多行，且行内 `trust_status` 可能是**旧指纹**的结论；`contact_fingerprints_view`（`:1164-1173`）同样以历史行为准。二者都未把判定绑定到当前 active key。另：`private-chat-e2ee.js:282` 在遇到新 key_version 时提前返回，不自动采纳 | `accounts/views.py:1247-1272`、`:1164-1173`；`private-chat-e2ee.js:282` |
+| T-07 | 换钥后旧信任被沿用（服务端判定） | S9、B1 | 客户端按指纹判等；服务端 `KeyTrust` 按 `(user, contact, fingerprint)` 存 | **中**：基线 `cfe53be` 的 `key_trust_list_view`（`accounts/views.py:1247-1272`）**每个历史 trust 记录各出一行**，同一联系人会出现多行，且行内 `trust_status` 可能是**旧指纹**的结论；`contact_fingerprints_view`（`:1164-1173`）虽单独返回顶层 `active_key` 字段（`:1185`），但其 **`trust_map` 判定键仍按历史指纹**，未把判定绑定到 active key。另：`private-chat-e2ee.js:282` 在遇到新 key_version 时提前返回，不自动采纳 | `accounts/views.py:1247-1272`、`:1164-1173`；`private-chat-e2ee.js:282` |
 | T-07b | 上述服务端缺陷的修复状态 | S9 | 分支 `fix/p4-test-t08-key-reminder-189` 的 `bfe6076`（"never inherit key trust across fingerprint rotation"）重写了这两个视图 | **本文基线未包含该修复**（`git merge-base --is-ancestor bfe6076 cfe53be` 为假）。评审时不得把 `bfe6076` 的修复当成基线事实 | `accounts/views.py:1247-1272`（基线原文） |
 | T-08 | 多设备缺 `sender_copy` 时只见一侧 | B1 | 发送方另存 `sender_copy` | **中**：省略该字段的调用路径只能解一侧 | `chat/models.py:255-258` |
 | T-09 | 桌面桥不可用时的明文回退 | B1/B2 | 桌面**不写新明文**并失效旧 pending | **低**（桌面）；**中**（Web 仍明文，见 T-10） | `key-manager.js:46-53`、`:56-57` |
@@ -339,7 +339,7 @@ sequenceDiagram
 | 服务端密文边界校验 | `\.venv\Scripts\python.exe manage.py test chat`（在仓库根、能访问主仓库 `.venv` 的 shell 里执行；git worktree 默认不含 `.venv`） |
 | 密钥信任与指纹 | `\.venv\Scripts\python.exe manage.py test accounts`（同上） |
 
-聚合命令：`npm run test:e2ee`（本文基线 `cfe53be` 上实测 11 个测试文件、`node --test` 部分 **62 项通过 / 0 失败**）。
+聚合命令：`npm run test:e2ee` = 11 个测试文件（4 个以裸 `node` 执行、7 个以 `node --test` 执行），其中 `node --test` 部分 **62 项通过 / 0 失败**。上表只点出与本威胁模型直接相关的入口；其余 5 个（`desktop_branding`、`desktop_config`、`desktop_tray`、`desktop_notifications`、`chat_notifications`）属桌面/通知类，**不**计入 E2EE 覆盖。
 
 > **基线注记**：`chat/tests/js/key_change_reminder.test.js`（对应 §5 T-07"新密钥不继承旧信任"）**不在本文基线 `cfe53be` 上**，它在后续提交 `bfe6076`（P4 Test T08）才引入。该文件存在时 `npm run test:e2ee` 的 `node --test` 部分为 70 项。引用"70 项"的表述必须同时说明基线，否则不可复现。
 

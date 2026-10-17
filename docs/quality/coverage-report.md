@@ -1,7 +1,10 @@
 # 覆盖率报告（P4 Test T12 / #193）
 
 > 本文件由 `scripts/coverage_report.py` 生成，**不要手工编辑**。
-> 生成时间：2026-10-17T18:34:29Z
+> 生成时间：2026-10-17T19:06:41Z
+> 代码版本：`20ccc659f797`（提交前生成时该值为工作区 HEAD）
+> 环境：Python 3.13.12 / Django 6.0.5 / coverage 7.16.2 / DB `sqlite3`
+> 用例数：404（skip 2）
 > 测试命令：`python -m coverage run manage.py test --parallel 1`
 > 测试结果：退出码 0
 

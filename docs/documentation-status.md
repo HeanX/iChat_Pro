@@ -70,6 +70,7 @@
 | [docs/iChat Pro 需求文档_修订版.md](iChat%20Pro%20%E9%9C%80%E6%B1%82%E6%96%87%E6%A1%A3_%E4%BF%AE%E8%AE%A2%E7%89%88.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/p3_t01_regression_report.md](p3_t01_regression_report.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase2_test_coverage.md](phase2_test_coverage.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
+| [docs/quality/coverage-report.md](quality/coverage-report.md) | 覆盖率快照；由 `scripts/coverage_report.py` 生成，勿手工编辑 |
 | [docs/phase4/README.md](phase4/README.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/agent-handoff.md](phase4/agent-handoff.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/baseline-report.md](phase4/baseline-report.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |

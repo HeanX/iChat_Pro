@@ -88,6 +88,14 @@ trap cleanup EXIT
 pass() { printf '  [PASS] %s\n' "$1"; }
 fail() { printf '  [FAIL] %s\n' "$1" >&2; FAILURES=$((FAILURES + 1)); }
 
+# True when the cookie jar holds a real sessionid cookie. The jar's own header
+# comments also mention cookie names, so match the tab-separated name field
+# rather than a bare substring anywhere in the file.
+has_session_cookie() {
+    awk -F'\t' 'NF >= 7 && $6 == "sessionid" { found = 1 } END { exit !found }' \
+        "$COOKIE_JAR"
+}
+
 # --- configuration -------------------------------------------------------
 HOST_HEADER=()
 if [[ "${AUTO_BASE_URL:-0}" == "1" ]]; then
@@ -113,12 +121,23 @@ if [[ -z "${SMOKE_USERNAME:-}" || -z "${SMOKE_PASSWORD:-}" ]]; then
     exit 2
 fi
 
-# Django's CSRF check for a secure request compares the Referer host against
-# the request host, and behind Nginx the request host is the Host header we
-# inject — not the 127.0.0.1 we dial. Build the origin Django will see.
+# Django's CSRF check compares the Referer origin against the request host and
+# scheme. Behind Nginx the request host is the Host header we inject and the
+# scheme is the one Nginx forwards — not the 127.0.0.1 we dial. Rebuild the
+# origin Django will actually see, keeping only the port out of BASE_URL.
 if [[ ${#HOST_HEADER[@]} -gt 0 ]]; then
-    PORT_PART=${BASE_URL#"${BASE_URL%%:*}"}   # "" or ":8443"
-    SITE_ORIGIN="https://${HOST_NAME}${PORT_PART}"
+    BASE_REST=${BASE_URL#*://}          # strip scheme
+    BASE_AUTH=${BASE_REST%%/*}          # host[:port], drop any path
+    if [[ "$BASE_AUTH" == *:* ]]; then
+        PORT_PART=":${BASE_AUTH##*:}"
+    else
+        PORT_PART=""
+    fi
+    if [[ "$BASE_URL" == https://* ]]; then
+        SITE_ORIGIN="https://${HOST_NAME}${PORT_PART}"
+    else
+        SITE_ORIGIN="http://${HOST_NAME}${PORT_PART}"
+    fi
 else
     SITE_ORIGIN=$BASE_URL
 fi
@@ -187,7 +206,7 @@ if [[ -z "$CSRF_TOKEN" ]]; then
     echo "==> Smoke FAILED: $FAILURES check(s) failed." >&2
     exit 1
 fi
-if grep -q 'sessionid' "$COOKIE_JAR"; then
+if has_session_cookie; then
     fail "csrf: GET /login/ issued a sessionid before authentication"
 else
     pass "csrf: token rendered, no session before login"
@@ -232,7 +251,7 @@ if [[ "$login_post" == "302" ]]; then
 else
     fail "login: POST /login/ -> ${login_post:-no-response} (expected 302; wrong credentials, CSRF rejection or broken auth)"
 fi
-if grep -q 'sessionid' "$COOKIE_JAR"; then
+if has_session_cookie; then
     pass "session: sessionid cookie issued"
 else
     fail "session: no sessionid cookie after login"

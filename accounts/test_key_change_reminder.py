@@ -209,9 +209,9 @@ class KeyChangeReminderTests(TestCase):
     def test_delete_trust_only_targets_the_active_fingerprint(self):
         """DELETE keeps the audit trail; the reminder clears on re-verification.
 
-        The contract in docs/handoff/accounts-auth.md #4 says superseded trust
-        records are preserved for audit, so DELETE must not wipe the contact's
-        history. A post-rotation reminder is resolved by verifying the new key.
+        Superseded trust records are preserved for audit (the "trust is not
+        inherited" contract), so DELETE must not wipe the contact's history.
+        A post-rotation reminder is resolved by verifying the new key.
         """
         self._bob_uploads(self.v1)
         self._trust('verified')

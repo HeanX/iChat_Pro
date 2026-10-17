@@ -206,15 +206,18 @@ gradle assembleDebug --no-daemon --console=plain
 #    183 actionable tasks: 183 executed
 ```
 
-产物与校验：
+产物与校验（manifest 加固后的最终构建）：
 
 ```
 mobile/android/app/build/outputs/apk/debug/app-debug.apk
-  大小    3.94 MB (4,134,284 bytes)
-  SHA256  F10D3570F502117674B6A556B3456925A85E90E6C1AA645A929A1B1EC8CDFCD2
+  大小    4.22 MB
+  SHA256  0D05C92BFF2183BD97B0CE560E41C6BD5331E8A958CB00F0935428E58C4B4976
 ```
 
-APK 内容核验（`aapt2 dump badging` + zip 目录，**真实输出**）：
+> 首次构建（未加固 manifest）为 3.94 MB / `F10D3570…CDFCD2`。加固后重新构建并复验，
+> 以上为当前提交对应的产物。**产物不入库**（`build/` 已 gitignore）。
+
+APK 内容核验（`aapt2 dump badging` + `aapt2 dump xmltree` + zip 目录，**真实输出**）：
 
 ```
 package: name='com.ichat.pro' versionCode='1' versionName='1.0'
@@ -226,6 +229,11 @@ uses-permission: name='android.permission.ACCESS_NETWORK_STATE'
 application-label:'iChat Pro'
 launchable-activity: name='com.ichat.pro.MainActivity'  label='iChat Pro'
 
+AndroidManifest 中被加固的三项（从 APK 内反查，不是看源码）：
+  android:allowBackup=false
+  android:fullBackupContent=false
+  android:dataExtractionRules=@0x7f100001
+
 assets/public/index.html           1962
 assets/public/js/mobile-config.js  5152
 assets/public/js/shell.js          1646
@@ -233,6 +241,21 @@ assets/public/css/mobile-shell.css 2346
 ```
 
 → 说明 `webDir: www` 生效，`www/` 里的骨架页确实被打进 APK。
+
+### 5.1.1 骨架阶段就做掉的加固：禁用备份
+
+Capacitor CLI 生成的 `AndroidManifest.xml` 默认 `android:allowBackup="true"`。结合本 ADR §2.3
+的结论（长期 E2EE 私钥在 WebView 存储、**不受 Keystore 保护**），默认值意味着 `adb backup`
+或云备份可以直接把私钥带离设备。本卡已改为：
+
+- `android:allowBackup="false"`
+- `android:fullBackupContent="false"`
+- `android:dataExtractionRules="@xml/data_extraction_rules"`，其中 root/file/database/sharedpref/external
+  全部 `exclude`（覆盖 Android 12+ 的云备份与设备间迁移）
+
+这是**降低风险**，不是解决 T29：它挡的是"备份带走密钥"，挡不了"设备已 root"或"WebView 存储被读取"。
+T29 仍需在 §2.3 的 (a)/(b)/(c) 中做出选择。
+
 
 ### 5.2 四条验收逐项对齐
 
@@ -305,7 +328,7 @@ adb shell am start -n com.ichat.pro/.MainActivity
 | 无非导出私钥的 Keystore 保护 | T29 可能不达"普通存储读不到"的严格口径 | §2.3 方案 (b)，需与 #166 串行 |
 | 无设备身份模型（#167） | Android 与 Windows 共用同一 `UserPublicKey`；新设备解不开旧消息；撤销只到账号级 | 本 ADR 记录为产品限制，不做假的设备级承诺 |
 | 后台 WS 被系统杀 | 断线期间收不到推送 | 前台服务（T27）+ 补取接口（已有 `sync`）兜底 |
-| 备份带走 WebView 私钥 | 私钥随 `adb backup` / 云备份泄露 | `android:allowBackup="false"`（T29 落地） |
+| 备份带走 WebView 私钥 | 私钥随 `adb backup` / 云备份泄露 | **本卡已挡**：`allowBackup=false` + `dataExtractionRules` 全 exclude（§5.1.1）。仍不覆盖 root/运行时读取，最终由 T29 决定 |
 | WebView 版本碎片（minSdk 24 对应 WebView 可能很旧） | WebCrypto / ES2020 能力不足 | T24 出包后按 WebView 版本设下限 |
 | 本机无 JDK 17 / SDK 36 / 真机 | 构建与安装证据缺失 | 已用 OpenJDK 23 + 可写 SDK 补上构建；**真机仍缺失**，见 §5.3 |
 | wrapper Gradle 版本无法下载 | 产物非固定版本构建 | §5.3；CI 必须用 `./gradlew` 复跑 |

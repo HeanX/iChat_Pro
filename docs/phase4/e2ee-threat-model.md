@@ -57,7 +57,7 @@
 | 群资料 | 群名、头像、群主 | `Conversation` | `chat/models.py:21-29` |
 | **群公告正文** | `content`（**明文 TextField**） | `GroupAnnouncement` | `chat/models.py:577` |
 | **举报正文** | `details`（**明文 TextField**） | `ChatReport` | `chat/models.py:482` |
-| **LLM API Key** | 服务端用 `SECRET_KEY` 派生的 Fernet 加密，**服务端可解** | `UserLLMConfig` | `chat/models.py:763`、`:777`、`:796` |
+| **LLM API Key** | 服务端用 `SECRET_KEY` 派生的 Fernet 加密，**服务端可解** | `UserLLMConfig` | `chat/models.py:777`（字段）、`:796`（Fernet 派生） |
 | 身份公钥与指纹 | `identity_public_key`、`key_fingerprint`、`key_version` | `accounts.UserPublicKey` | `accounts/models.py:293`、`:308-312` |
 | 信任记录 | 谁在何时验证了哪个指纹 | `accounts.KeyTrust` | `accounts/models.py:335`、`:358-365` |
 
@@ -197,7 +197,7 @@ sequenceDiagram
                  → 同一 JWK 的明文副本进 sessionStorage 作为"一次性备份"（桌面为 DPAPI 密文）
                  → 公钥 + SHA-256(SPKI) 指纹上传服务端
 换钥（resetIdentityKey）→ 生成全新身份，新 key_version，存入 <userId>:v<n>
-                 → 旧信任记录**不继承**（见 §5 T-07）
+                 → 服务端信任记录按 (user, contact, fingerprint) 各存一条，客户端不自动采纳新版本（见 §5 T-07）
 ```
 
 **备份只有一次机会**：`key-manager.js:321` 在私钥不可导出时直接抛错，说明 JSON 备份只能在创建/导入/迁移后立即导出。
@@ -251,7 +251,8 @@ sequenceDiagram
 | T-04 | 群公告、举报正文明文落库 | B5 | 无 | **高**：用户预期与实际不符 | `chat/models.py:577`、`:482` |
 | T-05 | 删除不留痕的误判 | B5 | 无 | **中**：软删除，管理员可恢复 | `chat/models.py:753-760` |
 | T-06 | 消息未绑定 `key_version`/指纹 | B4 | 仅校验正整数与长度 | **中**：服务端无法发现"用旧版本密钥加密的新消息" | `messaging.py:95-96`；`chat/` 产品代码内 `fingerprint` 0 命中 |
-| T-07 | 换钥后旧信任被沿用 | B1 | 客户端按指纹判等，新 key_version 不继承 | **低**：`private-chat-e2ee.js:282` 新版本时提前返回，需人工确认 | `private-chat-e2ee.js:282`；`accounts/models.py:338-340` |
+| T-07 | 换钥后旧信任被沿用（服务端判定） | S9、B1 | 客户端按指纹判等；服务端 `KeyTrust` 按 `(user, contact, fingerprint)` 存 | **中**：基线 `cfe53be` 的 `key_trust_list_view`（`accounts/views.py:1247-1272`）**每个历史 trust 记录各出一行**，同一联系人会出现多行，且行内 `trust_status` 可能是**旧指纹**的结论；`contact_fingerprints_view`（`:1164-1173`）同样以历史行为准。二者都未把判定绑定到当前 active key。另：`private-chat-e2ee.js:282` 在遇到新 key_version 时提前返回，不自动采纳 | `accounts/views.py:1247-1272`、`:1164-1173`；`private-chat-e2ee.js:282` |
+| T-07b | 上述服务端缺陷的修复状态 | S9 | 分支 `fix/p4-test-t08-key-reminder-189` 的 `bfe6076`（"never inherit key trust across fingerprint rotation"）重写了这两个视图 | **本文基线未包含该修复**（`git merge-base --is-ancestor bfe6076 cfe53be` 为假）。评审时不得把 `bfe6076` 的修复当成基线事实 | `accounts/views.py:1247-1272`（基线原文） |
 | T-08 | 多设备缺 `sender_copy` 时只见一侧 | B1 | 发送方另存 `sender_copy` | **中**：省略该字段的调用路径只能解一侧 | `chat/models.py:255-258` |
 | T-09 | 桌面桥不可用时的明文回退 | B1/B2 | 桌面**不写新明文**并失效旧 pending | **低**（桌面）；**中**（Web 仍明文，见 T-10） | `key-manager.js:46-53`、`:56-57` |
 | T-10 | Web 端草稿与 AI 历史明文 | S8 | 桌面 DPAPI；Web 无 | **中**：同源脚本/共用电脑可读 | `chat.js:259-260` |
@@ -277,7 +278,8 @@ sequenceDiagram
 | 私钥 / `session_key` / `file_key` 上传服务端 | 服务端不得具备解密能力 | `accounts/views.py:1061-1063` 显式拒绝这三个字段 |
 | 消息明文写入服务端任何列 | 破坏 E2EE | `EncryptedMessage` 注释 "NO plaintext fields allowed"（`chat/models.py:218`） |
 | Cookie、CSRF Token、`SECRET_KEY` 进日志 | 会话劫持 | `messaging.py` / `consumers.py` 无 `logging`；settings 无 `LOGGING` 字典 |
-| 密文载荷 / 完整请求体进日志 | 元数据与流量分析 | 同上；nginx 只记访问日志 |
+| 密文载荷 / 完整请求体进日志 | 元数据与流量分析 | 消息路径同上；nginx 只记访问日志 |
+| **上游 API 错误体进日志** | 第三方响应可能回显请求片段 | **无护栏**：`chat/llm.py:226`、`:268`、`:314`、`:372` 把 `error_body` 原样写进 `logger.error`。注意 `api_key` 走 header/请求体，正常不会出现在响应体里，但**未做脱敏审计** |
 
 ### 6.2 条件允许（必须写明条件）
 
@@ -320,6 +322,8 @@ sequenceDiagram
 | IndexedDB 记录的抗篡改能力 | 代码用普通字符串键存 CryptoKey，无 MAC；OS 层保护未知 |
 | `file://` 被 `senderIsTrusted` 接受的可利用性 | 需要构造"应用加载任意本地文件"的前提，未做实验 |
 | 中间盒/企业代理对 TLS 的影响 | 超出威胁模型边界 |
+| 上游 API 错误体的日志脱敏 | `chat/llm.py:226/268/314/372` 原样记录 `error_body`；是否含 `api_key` 或用户提示词**未做实测**，仅确认了写入行为本身 |
+| 基线信任 API 的实际影响面 | T-07 的服务端沿用缺陷已从代码确认，但**未在真实 UI 上复现**"同一联系人出现多行/旧结论被展示" |
 
 ---
 
@@ -332,10 +336,10 @@ sequenceDiagram
 | 内嵌设置与通知门控 | `node --test chat/tests/js/notification_integration.test.js` |
 | 消息应用与迟到 ACK | `node --test chat/tests/js/message_accepted.test.js` |
 | 连接状态机与退避 | `node chat/tests/js/chat_connection.test.js` |
-| 服务端密文边界校验 | `.\.venv\Scripts\python.exe manage.py test chat` |
-| 密钥信任与指纹 | `.\.venv\Scripts\python.exe manage.py test accounts` |
+| 服务端密文边界校验 | `\.venv\Scripts\python.exe manage.py test chat`（在仓库根、能访问主仓库 `.venv` 的 shell 里执行；git worktree 默认不含 `.venv`） |
+| 密钥信任与指纹 | `\.venv\Scripts\python.exe manage.py test accounts`（同上） |
 
-聚合命令：`npm run test:e2ee`（本文基线 `cfe53be` 上实测 12 个文件、`node --test` 部分 **62 项通过 / 0 失败**）。
+聚合命令：`npm run test:e2ee`（本文基线 `cfe53be` 上实测 11 个测试文件、`node --test` 部分 **62 项通过 / 0 失败**）。
 
 > **基线注记**：`chat/tests/js/key_change_reminder.test.js`（对应 §5 T-07"新密钥不继承旧信任"）**不在本文基线 `cfe53be` 上**，它在后续提交 `bfe6076`（P4 Test T08）才引入。该文件存在时 `npm run test:e2ee` 的 `node --test` 部分为 70 项。引用"70 项"的表述必须同时说明基线，否则不可复现。
 

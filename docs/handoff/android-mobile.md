@@ -17,16 +17,19 @@
   mobile/android/             Capacitor CLI 真实生成的 Android 工程（不是占位目录）
   mobile/tests/               node:test 配置契约测试（10 条，纯 Node，无需模拟器）
   docs/phase4/adr-p4-03-*.md  技术决策记录
+  app-debug.apk               已构建成功（3.94 MB，SHA256 F10D3570…CDFCD2，见 ADR §5.1）
 仓库里仍然没有：
-  *.apk / *.aab               （安装包未产出）
-  真机或模拟器的运行记录        （0 次）
+  提交进库的 APK / AAB          （产物在 build/ 下，已 gitignore；不可安装到设备）
+  真机或模拟器的运行记录        （0 次：adb devices 为空，无 emulator 包，无 Hyper-V）
   任何 Android 仪器化/UI 测试   （0 测试）
 ```
 
 WP04 的 9 项任务（#149–#157）中 **仅 #149 部分完成**；#150–#157 为 0/9。
 
-**构建前置（本机不具备，见 ADR §6）**：JDK 17+（本机只有 1.8）、Android SDK Platform 36 +
-Build-Tools 36（本机 SDK 目录是 Program Files 只读，且只有 33/34）、真机或模拟器。
+**构建前置（本机已用替代方案补齐，细节见 ADR §5.3/§6）**：系统 JDK 只有 1.8，已改用本机
+OpenJDK 23.0.1；系统 SDK 目录是 Program Files 只读且只有 33/34，已用 `--sdk_root` 装到
+`mobile/.android-sdk`（含 Platform 36 + Build-Tools 36，已 gitignore）。
+**真机/模拟器仍然缺失**，这是下一张卡（T24）的硬阻塞点。
 
 可复用的是：
 
@@ -40,7 +43,19 @@ Build-Tools 36（本机 SDK 目录是 Program Files 只读，且只有 33/34）�
 
 ---
 
-## 2. 必须先做的技术决策（#149）
+## 2. 技术决策（#149）——**已决策，见 ADR-P4-03**
+
+> 2026-10-18 更新：本节原写的是"建议先做技术验证原型"。**该决策已经做出**，结论与理由见
+> [ADR-P4-03](../phase4/adr-p4-03-mobile-tech-stack.md)。下表保留为决策依据，不要再当作"待决"。
+
+**结论：采用 Capacitor 8 混合外壳。** 决定性理由是 E2EE 与连接算法已在 JS 中实现并通过测试，
+原生重写必须与 Web/Windows 逐字节等价（属 Test T06 范围），成本远高于混合路线。
+
+**转原生的触发条件（ADR §2.3，任一不通过即转向）**——这三条仍然是"未验证"，必须在 T24 出包后补做：
+
+1. WebView 内 WebCrypto 生成的 ECDH 私钥能否受 Android Keystore 保护（大概率**不能**按原生口径通过，ADR 给了三条出路）。
+2. WS 在后台/息屏时的存活与重连表现。
+3. Cookie/Session 在 WebView 与 `wss://` 下是否正常工作。
 
 Issue #149 的验收是"能复用现有页面并生成 Android 工程"。两条路线的真实差异：
 
@@ -128,29 +143,36 @@ Origin 必须通过 AllowedHostsOriginValidator → 需要把 App 的 Origin 加
 
 ## 6. 本地环境（Windows 开发 Android）
 
+> 2026-10-18 更新：以下命令**已在仓库落地并真实执行过**（T22）。完整步骤、实测版本与
+> 本机的三处环境坑（JDK 1.8、Program Files 只读 SDK、wrapper 发行版下载被阻断）见
+> [ADR-P4-03 §5/§6](../phase4/adr-p4-03-mobile-tech-stack.md)。
+
 ```powershell
-# 前置：JDK 17+、Android SDK、Gradle
+# 前置：JDK 17+（本机实测 OpenJDK 23 可用）、Android SDK Platform 36、Gradle
 java -version
 adb devices
 
-# Capacitor 路线（示例，尚未在仓库落地）
-npm create @capacitor/app
-npx cap add android
-npx cap sync
-npx cap open android
+# 本仓库的实际入口（不要用 npm create，工程已存在）
+cd mobile
+npm install
+npx cap sync android
+cd android
+.\gradlew.bat assembleDebug      # 产物 app/build/outputs/apk/debug/app-debug.apk
 ```
 
 **不要**把 `capacitor.config.json` 的 `server.url` 热重载配置当成正式方案——它会让 App 依赖开发机。
+骨架已用 `mobile/www/js/mobile-config.js` + 10 条测试把这条规则固化：发布解析结果恒为
+`serverUrl: null`，生成的 `capacitor.config.json` 不含 `server` 块，只有显式 `--live-reload` 才会写入。
 
 ---
 
 ## 7. 交付要求（来自 `agent-handoff.md` WP04）
 
-- 固定工具链版本（JDK / Gradle / Android SDK / Capacitor 或 AGP）。
-- 生成可安装的 APK 或 AAB。
-- 提交**两个 API Level 或两种设备配置**的实际执行记录（不是"编译成功"）。
-- 未测试项明确列出，不能以"编写了脚本"代替实测。
-- 连接算法复用 WP02 的共享实现，不各维护一套状态机。
+- 固定工具链版本（JDK / Gradle / Android SDK / Capacitor 或 AGP）。→ T22 已完成，见 ADR §4.2。
+- 生成可安装的 APK 或 AAB。→ **debug APK 已构建**，但**未安装到任何设备**，因此"可安装"未经验证。
+- 提交**两个 API Level 或两种设备配置**的实际执行记录（不是"编译成功"）。→ **未完成，0 条记录。**
+- 未测试项明确列出，不能以"编写了脚本"代替实测。→ ADR §5.3 已列。
+- 连接算法复用 WP02 的共享实现，不各维护一套状态机。→ 混合路线天然复用 `chat-connection.js`。
 
 ---
 
@@ -168,6 +190,10 @@ npx cap open android
 ---
 
 ## 9. 给下一个 Agent 的提示词
+
+> T22 已完成，下面的提示词是**历史记录**（写它的时候工程还不存在）。
+> 下一张卡应从 **#151 T24 生成 APK/AAB** 或 **#150 T23 响应式适配**（后者不依赖 Android 工程，可并行）开始。
+> 当前状态以 §1 与 [ADR-P4-03](../phase4/adr-p4-03-mobile-tech-stack.md) 为准。
 
 ```text
 你在 iChat_Pro 仓库负责【Android 移动端】，从零立项。

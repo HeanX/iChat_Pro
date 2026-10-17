@@ -1,9 +1,35 @@
 # #189 P4 Test T08 验收证据（本机实测）
 
 > 采集时间：2026-10-18（Asia/Shanghai）
-> 分支：`fix/p4-test-t08-key-reminder-189`，代码提交 `4321962`（在基线 `cfe53be` 之上）
-> 环境：Windows；Python 3.13.12 / Django 6.0.5（仓库内 `.venv`）；Node v24.14.1 / npm 11.13.0；SQLite
+> 分支：`fix/p4-test-t08-key-reminder-189`，代码提交 `f203988`（在基线 `cfe53be` 之上）
+> 环境：Windows；Python 3.13.12 / Django 6.0.5；Node v24.14.1 / npm 11.13.0；SQLite
 > 说明：**CI 未运行**（该分支未推送、无 upstream、无 PR）。以下均为**本机**实测，不代表 CI 或跨端验收。
+
+## 0. 如何复现（重要）
+
+本卡在**独立 git worktree** 中开发（`git worktree add`），该目录**没有自己的 `.venv`**。
+所有 Python 命令都借用主仓库的虚拟环境，并且**工作目录必须是 worktree**，
+`manage.py` 必须写成相对路径，否则 `accounts` 会被解析到主仓库、报
+`ImportError: 'tests' module incorrectly imported from ...`。
+
+```powershell
+# 解释器：主仓库 venv 的绝对路径
+$py = 'D:\Code\PythonProjects\PythonWeb\DjangoProject\iChat_Pro\.venv\Scripts\python.exe'
+
+# 工作目录：本 worktree
+Set-Location 'D:\Code\PythonProjects\PythonWeb\DjangoProject\iChat_Pro_wt_t08'
+
+& $py manage.py check
+& $py manage.py test accounts --parallel 1
+npm run test:e2ee
+```
+
+在主仓库根目录直接执行时，把 `$py` 换成相对路径 `.\.venv\Scripts\python.exe` 即可。
+
+> 下方命令块为简洁起见仍写作 `.\.venv\Scripts\python.exe`，**执行时请按上面 §0 替换**。
+
+PowerShell 中 Django 把进度写到 stderr，Django 命令的 `$LASTEXITCODE` 可能为 1；
+判断是否通过请看尾部 `OK` / `FAILED` / `Ran N tests`，不要只看退出码。
 
 ## 1. 构建与迁移
 
@@ -21,11 +47,11 @@ No changes detected
 
 ```text
 $ .\.venv\Scripts\python.exe manage.py test accounts --parallel 1
-Ran 138 tests in 34.073s
+Ran 139 tests in 33.327s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test accounts.test_key_change_reminder
-Ran 11 tests in 4.265s
+Ran 12 tests in 4.273s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test chat.tests.test_phase2_issues
@@ -33,11 +59,11 @@ Ran 47 tests in 22.433s
 OK
 
 $ .\.venv\Scripts\python.exe manage.py test --parallel 1
-Ran 415 tests in 153.711s
+Ran 416 tests in 150.825s
 OK (skipped=2)
 ```
 
-`accounts` 由 127 条增至 138 条（本卡新增 11 条，见 `accounts/test_key_change_reminder.py`）。
+`accounts` 由 127 条增至 139 条（本卡新增 12 条，见 `accounts/test_key_change_reminder.py`）。
 
 **2 条 skip 明细**（本机无 PostgreSQL，属预期）：
 
@@ -75,9 +101,9 @@ $ git status --short -- media/
 | 验收项 | 状态 | 证据 |
 | --- | --- | --- |
 | 新密钥不自动继承旧信任状态 | 通过（本机实测） | §2 三条 `test_rotated_key_is_untrusted_and_old_record_is_kept` / `test_trust_list_after_rotation_reports_current_key` / `test_previous_and_last_endorsed_diverge_after_consecutive_rotations` |
-| 相关代码或配置经过非作者成员评审 | **部分**：已做 2 轮独立子 Agent 审查（非同一上下文），但审查者为 AI 子 Agent，**非人类成员**，且无 PR 评审记录 | 见 §6 |
+| 相关代码或配置经过非作者成员评审 | **未满足**：已做 3 轮独立子 Agent 审查（每轮新上下文），但审查者是 **AI 子 Agent，不是人类成员**，且分支未推送、无 PR 评审记录 | 见 §6 |
 | 适用的自动化或人工测试已执行并保存证据 | 自动化：已执行（§1–§3）；**人工 UI 验收：未执行** | 本文件 |
-| 需求、部署或测试文档已同步更新 | 已更新 `docs/phase4/tasks.md`、`docs/phase4/traceability-matrix.md`、`docs/handoff/accounts-auth.md` | 见 `git diff cfe53be..HEAD` |
+| 需求、部署或测试文档已同步更新 | **部分**：已更新本分支内的 `docs/phase4/tasks.md`、`docs/phase4/traceability-matrix.md`、`docs/phase4/t08-acceptance-evidence.md`。`docs/handoff/accounts-auth.md` **不在本分支**（该目录属另一分支的未跟踪内容），相关结论只写在本分支外，合并时需单独落地 | `git diff cfe53be..HEAD --stat` |
 
 ## 6. 独立审查记录
 
@@ -85,6 +111,7 @@ $ git status --short -- media/
 | --- | --- | --- | --- | --- |
 | 1 | 独立子 Agent（新上下文，仅给 diff + Issue 原文 + 命令） | PASS WITH FINDINGS | 3 MAJOR + 若干 MINOR | 全部修复或说明 |
 | 2 | 独立子 Agent（新上下文，复审修复） | PASS WITH FINDINGS | 确认 3 条 MAJOR 已修复；新增 2 MAJOR（其中 1 条为我引入的 DELETE 契约回归）+ 5 MINOR | 已回滚 DELETE 改动，其余修复 |
+| 3 | 独立子 Agent（新上下文，末轮复审） | PASS WITH FINDINGS | 前两轮 9 项确认修复；M1 证据命令不可复现、M2 handoff 文档不在分支、M4 API 文档缺新字段 | 已修 M1/M2/M4，并补 DELETE 正路用例 |
 
 **未验证范围**（不得当作通过）：
 
@@ -92,4 +119,4 @@ $ git status --short -- media/
 - 跨端：未在 Windows 安装版、Electron、Android 上验证；
 - 真实依赖：未在 PostgreSQL / Redis 下复跑，2 条并发用例 skipped；
 - CI：分支未推送，无 CI run 记录；
-- 非作者人类评审：仓库内无第二位提交者，无法自证。
+- 非作者**人类**评审：仓库内无第二位提交者，无法自证。

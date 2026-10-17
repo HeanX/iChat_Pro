@@ -244,6 +244,37 @@ class KeyChangeReminderTests(TestCase):
             'both fingerprints keep their verdict',
         )
 
+    def test_delete_trust_removes_only_the_active_row(self):
+        """The happy path: both rows exist, DELETE clears v2 and keeps v1."""
+        self._bob_uploads(self.v1)
+        self._trust('verified')
+        self._bob_uploads(self.v2)
+        self._trust('verified')
+        self.assertEqual(KeyTrust.objects.filter(user=self.alice, contact=self.bob).count(), 2)
+
+        response = self.alice_client.delete(reverse('key-trust', args=[self.bob.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['deleted'])
+
+        remaining = list(
+            KeyTrust.objects
+            .filter(user=self.alice, contact=self.bob)
+            .values_list('key_fingerprint', flat=True)
+        )
+        self.assertEqual(
+            remaining,
+            [self.v1['key_fingerprint']],
+            'only the active fingerprint loses its verdict; the audit row survives',
+        )
+        self.assertEqual(KeyTrust.objects.get(user=self.alice, contact=self.bob).trust_status,
+                         KeyTrust.TrustStatus.VERIFIED)
+
+        # Losing the verdict for the current key brings the reminder back.
+        row = self._trust_list_row()
+        self.assertTrue(row['key_changed'])
+        self.assertEqual(row['trust_status'], 'untrusted')
+        self.assertEqual(row['last_endorsed_key_version'], 1)
+
     def test_trust_list_not_changed_when_current_key_is_untrusted(self):
         self._bob_uploads(self.v1)
         self._trust('untrusted')

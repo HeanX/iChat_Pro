@@ -188,7 +188,27 @@
 }
 ```
 
-`trust_status` 使用 `KeyTrust.TrustStatus` 枚举，当前常见值包括 `trusted`、`untrusted`。
+`trust_status` 使用 `KeyTrust.TrustStatus` 枚举，取值 `trusted`、`untrusted`、`verified`。
+请求体不是 JSON 对象（非法 JSON、数组、`null`）时返回 `400 {"error": "invalid_json"}`。
+
+`DELETE /api/keys/contacts/<user_id>/trust/` **只删除当前有效公钥指纹的那一条判定**，
+其它历史指纹的判定保留用于审计。对端轮换公钥后，新指纹通常还没有记录，此时该请求返回
+`{"status": "ok", "deleted": false}`，属于预期行为——轮换后的安全提醒应当通过
+「验证新指纹」清除，而不是靠删除记录。
+
+### 密钥指纹与信任状态字段（P4 Test T08）
+
+`GET /api/keys/contacts/<user_id>/fingerprints/` 与 `GET /api/keys/trust/` 在原有字段之外
+返回以下字段，用于向用户提示"联系人密钥已变更"：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `key_changed` | bool | 当前有效指纹是否处于"待重新验证"状态：用户曾对旧指纹做出过 `trusted`/`verified` 判定，而当前指纹还没有判定。重新验证当前指纹后立即变为 `false`。 |
+| `previous_key_fingerprint` / `previous_key_version` | string / int | 紧邻当前版本的上一个公钥版本（取自 `UserPublicKey` 历史，可能从未被信任过）。无更早版本时为 `null`。 |
+| `previous_trust_status` | string | 上一版公钥的判定；上一版从未被判定过时为 `untrusted`，没有更早版本时为 `null`。 |
+| `last_endorsed_key_fingerprint` / `last_endorsed_key_version` / `last_endorsed_trust_status` | string / int / string | 用户**最后一次背书**的那个指纹（`trusted` 或 `verified`），即提醒所指的对象。经过多次轮换时它可能比 `previous_*` 更旧，例如 v1 已验证 → v2 → v3 时 `previous_key_version=2`、`last_endorsed_key_version=1`。从未背书时为 `null`。 |
+
+> 约定：信任**按指纹**生效，不按账号继承。对端轮换后新指纹一律从 `untrusted` 开始。
 
 ## 4. 会话 API
 

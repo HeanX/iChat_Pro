@@ -103,10 +103,11 @@
 ### 2.4b 群聊分支：撤回 / 状态 / 删除（HTTP）
 
 这三个端点都按 `conversation.type` 分支。第 3 轮审查实测：把三个视图的群聊
-`else:` 分支整体改成不可达（`elif False:`），当时的全量 470 条仍然全绿——也就是说
-整改前的 66 条里**没有任何一条**守卫群聊分支。下面 8 条每条都以
+`else:` 分支整体改成不可达（`elif False:`），**整改当时的全量 470 条仍然全绿**——
+也就是说整改前的 66 条里没有任何一条守卫群聊分支（历史实验陈述；
+当前全量为 483 条，含本轮新增的 13 条群聊用例）。下面 8 条每条都以
 「群聊分支被删即红」为设计目标（变异验证 GRP-RECALL / GRP-STATUS / GRP-DELETE，
-已复测全部 CAUGHT）。
+已复测全部 CAUGHT；第 4 轮审查者用同样的变异独立复验，同样全部 CAUGHT）。
 
 | id | 类别 | 断言要点 | 方法 |
 | --- | --- | --- | --- |
@@ -344,6 +345,7 @@ covered via IntegrityError」），**不是覆盖漏洞**，因此不为此写�
 | 1 | PASS WITH FINDINGS | BLOCKER 1（close code 未真断言）、MAJOR 2（sync 200 上界未覆盖、变异表口径不实）、MINOR 4 | 全部整改 |
 | 2 | PASS WITH FINDINGS | MAJOR 1（`file_type_mismatch` 未覆盖的理由写错）、MINOR 9（含 2 处文档事实错误、1 处自相矛盾） | 全部整改 |
 | 3 | **FAIL** | BLOCKER 3（**群聊 recall/status/delete 三个分支与 WS 群聊撤回可整体删除仍全绿**；第三轮记录预设结论）、MAJOR 6、MINOR 3 | 全部整改，见「第 3 轮」 |
+| 4 | **PASS WITH FINDINGS** | BLOCKER 0、MAJOR 0、MINOR 3（环境/信息性） | 无需改代码；记录见「第 4 轮」 |
 
 ### 第 1 轮
 
@@ -451,3 +453,34 @@ covered via IntegrityError」），**不是覆盖漏洞**，因此不为此写�
 | `test_protocol.py:132` | 同样是 `assertRaises(Exception)` 而非读 close code，属既有缺陷，本卡未越界修改 |
 | 评审独立性 | 审查者由作者派出子 Agent，**不继承作者推理上下文，但不等于人类评审**；`tasks.md` 仍把「非作者评审」列为未完成 |
 | `message.group.send` 的 WS 侧新增用例 | 本卡 0 条：WS 群聊发送在基线 `test_group_realtime.py` 已有 7 处断言（含成功、非成员、版本冲突、重放），本卡只补了它没有的群聊**撤回**；重复补发送路径不产生新证据 |
+
+### 第 4 轮（最终轮，无 BLOCKER / 无 MAJOR）
+
+第四轮审查者独立复算了全部声称的数字（79 条、分类 18/27/12/21/1、HTTP 61 / WS 18、
+REGISTRY 25 断言 22、未覆盖 3 码及理由），并自选 12 个变异点验证——其中 10 个 CAUGHT、
+2 个 SURVIVED（均为可解释的等价变异体，见下）。要点：
+
+| 审查者变异 | 注入 | 结果 |
+| --- | --- | --- |
+| V1/V2/V3 | 三个视图的群聊 `else:` 分支 → `elif False:` | **CAUGHT**（HTTP-GOPS） |
+| V4 | WS 群聊撤回 `'group'` → `'group-off'` | **CAUGHT**（WS-GOPS 3 条全红） |
+| V4b | 同 V4，但只跑私聊 `WsRecallTests` | SURVIVED → **隔离性证明**：群聊与私聊用例互不搭便车 |
+| V5 | 删群聊重放快路径（`messaging.py:637-640`） | SURVIVED → 等价变异体：`IntegrityError` 兜底第二层接住（服务层注释已声明的双保险） |
+| V6 | 删共享 helper 的 `file_forbidden` 守卫 A | **CAUGHT**，且恰好只有 `test_file_12b` 红——精确复现本文 R2 整改的声称 |
+| V7 | 删群聊撤回的级联 `update` | **CAUGHT**（gops_01） |
+| V8/V12 | `_replay_or_conflict` 的 `created=False` → `True` | **CAUGHT**（grp_10 与 priv_02 双红）——零写契约是真断言 |
+| V9 | 群聊逐收件人密文 → 共享同一密文 | **CAUGHT**（grp_01）——E2EE 每人一份副本是真断言 |
+| V10 | 删 `message_kind != message_type` 检查 | **CAUGHT**（file_11） |
+
+**MINOR（本轮 3 条，均不需改代码）**
+
+1. `.review/pending.diff` 曾是主工作区另一分支的陈旧产物（环境问题，非交付物缺陷）。
+   已在 worktree 内重新生成：7 文件、+2262/−3、SHA-256 前 16 位 `28DA1BD8DEF0534F`。
+2. §2.4b/§8 里的「整改前全量 470 条仍全绿」是**历史实验陈述**，在当前 HEAD 上不可原样复现
+   （470 = 当前 483 − 13 条群聊用例；提交历史 2e09122=66 条 → 04a6840=79 条支持该叙事）。
+   保留原文并在此注明口径，避免被当作可复现断言。
+3. 上述 V4b / V5 两条等价变异体作为隔离性与双保险的正面证据记录在案。
+
+**结论**：第 4 轮以 `PASS WITH FINDINGS` 收敛（无 BLOCKER、无 MAJOR）。
+按 conventions §1，合并前最后一轮的 PASS 须来自**非作者**——本轮仍是同一会话派出的
+子 Agent，因此 `tasks.md` 的「非作者人类评审」仍保持未勾选，交由用户/小组完成。

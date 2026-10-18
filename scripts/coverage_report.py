@@ -35,19 +35,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN_PATH = REPO_ROOT / 'docs' / 'quality' / 'coverage-report.md'
 
-# ``manage.py test`` options that narrow the suite to a subset instead of
-# merely configuring the run. ``--tag=x`` and ``--tag x`` are both matched.
+# Options that narrow the suite to a subset instead of merely configuring the
+# run. Compared against the *resolved* option name (see ``_resolve_option``) so
+# that argparse abbreviations such as ``--pat`` / ``--patt`` for ``--pattern``
+# and the attached short forms ``-kfoo`` / ``-pfoo`` are all caught.
 _FILTER_FLAGS = {
     '--tag',
     '--exclude-tag',
     '--pattern',
-    '-p',
     '-k',
 }
 
-# Options that consume the following token as their mandatory value, so that a
-# value such as ``2`` in ``-v 2`` is not mistaken for a test label.
-# Keep in sync with ``manage.py test --help``.
+# Options that consume the following token as their mandatory value, so a value
+# such as ``2`` in ``-v 2`` is not mistaken for a test label.
 _VALUE_FLAGS = {
     '-v', '--verbosity',
     '-t', '--top-level-directory',
@@ -62,22 +62,69 @@ _VALUE_FLAGS = {
     '--durations',
 }
 
-# Options whose value is optional (``nargs='?'``). Django reads the next token
-# as the value only when it is not itself an option; ``--shuffle 1234`` and
-# ``--parallel 1`` both do so, and a real test label never looks numeric.
+# Options whose value is optional (``nargs='?'``).
 _OPTIONAL_VALUE_FLAGS = {
     '--shuffle',
     '--parallel',
 }
 
-# Short flags that always take a value. argparse accepts both ``-k value`` and
-# the attached form ``-kvalue``, so both spellings must be recognised.
-_SHORT_OPTION_MAP = {
-    '-v': '--verbosity',
-    '-t': '--top-level-directory',
-    '-p': '--pattern',
-    '-k': '-k',
-}
+# Exact option strings accepted by ``manage.py test``. argparse allows
+# unambiguous prefixes of long options, so membership must be decided by
+# prefix resolution rather than by an equality check -- otherwise ``--pat``
+# silently bypasses a guard keyed on ``--pattern``.
+_KNOWN_LONG_OPTIONS = (
+    '--help',
+    '--failfast',
+    '--top-level-directory',
+    '--pattern',
+    '--keepdb',
+    '--shuffle',
+    '--reverse',
+    '--debug-mode',
+    '--debug-sql',
+    '--parallel',
+    '--tag',
+    '--exclude-tag',
+    '--pdb',
+    '--buffer',
+    '--no-faulthandler',
+    '--timing',
+    '--durations',
+    '--noinput',
+    '--no-input',
+    '--testrunner',
+    '--settings',
+    '--pythonpath',
+    '--traceback',
+    '--no-color',
+    '--force-color',
+    '--verbosity',
+    '--version',
+)
+
+# Short option characters that take a value (attached or separated).
+_SHORT_VALUE_FLAGS = {'-v', '-t', '-p', '-k'}
+# Short option characters that narrow the suite.
+_SHORT_FILTER_FLAGS = {'-p', '-k'}
+
+# Sentinel returned by ``_parallel_requested`` for ``--parallel=auto`` / bare
+# ``--parallel``: Django then picks its own process count, which is >1.
+_AUTO_PARALLEL = 1_000
+
+
+def _resolve_option(name: str) -> str:
+    """Resolve a long option name the way argparse does.
+
+    ``--pat`` and ``--patt`` both resolve to ``--pattern``; an unknown or
+    ambiguous spelling resolves to itself so the caller treats it as unknown
+    rather than silently assuming it is harmless.
+    """
+    if not name.startswith('--') or '=' in name:
+        return name
+    candidates = [option for option in _KNOWN_LONG_OPTIONS if option.startswith(name)]
+    if len(candidates) == 1:
+        return candidates[0]
+    return name
 
 
 def _is_optional_value(token: str) -> bool:
@@ -97,18 +144,17 @@ def _classify(item: str) -> tuple[str, bool]:
 
     if item.startswith('--'):
         name, sep, _ = item.partition('=')
-        if name in _FILTER_FLAGS:
+        if _resolve_option(name) in _FILTER_FLAGS:
             return 'filter', True
         return 'option', bool(sep)
 
     # Short options: ``-k``, ``-k=value`` and ``-kvalue`` are all valid.
     flag = item[:2]
     rest = item[2:]
-    canonical = _SHORT_OPTION_MAP.get(flag, flag)
-    if canonical in _FILTER_FLAGS or flag in _FILTER_FLAGS:
+    if flag in _SHORT_FILTER_FLAGS:
         return 'filter', True
-    if rest:
-        # Attached value, e.g. ``-v2`` / ``-ktest_x``.
+    if rest and flag in _SHORT_VALUE_FLAGS:
+        # Attached value, e.g. ``-v2``; no further token is consumed.
         return 'option', True
     return 'option', False
 
@@ -139,7 +185,10 @@ def _has_test_labels(extra_args: list[str]) -> bool:
             return True
         if kind == 'filter':
             return True
-        name = item.partition('=')[0] if item.startswith('--') else _SHORT_OPTION_MAP.get(item[:2], item[:2])
+        if item.startswith('--'):
+            name = _resolve_option(item.partition('=')[0])
+        else:
+            name = item[:2]
         if consumed:
             continue
         if name in _VALUE_FLAGS:
@@ -150,15 +199,28 @@ def _has_test_labels(extra_args: list[str]) -> bool:
 
 
 def _parallel_requested(extra_args: list[str]) -> int:
-    """Largest ``--parallel`` value in the arguments (0 when absent)."""
+    """How many test processes ``--parallel`` asks for (0 when absent).
+
+    Handles every spelling Django accepts: ``--parallel`` (bare, ``const`` is
+    ``"auto"``), ``--parallel=N``, ``--parallel N``, the abbreviated
+    ``--para=N``, and the value ``auto`` which Django expands to its computed
+    default (>1 unless the suite is tiny). ``auto`` is reported as a large
+    sentinel so callers treat it as "not measured".
+    """
     requested = 0
     for index, item in enumerate(extra_args):
-        if item.startswith('--parallel='):
-            value = item.partition('=')[2]
-        elif item == '--parallel':
-            value = extra_args[index + 1] if index + 1 < len(extra_args) else ''
-        else:
+        name, sep, inline = item.partition('=')
+        if not item.startswith('--') or _resolve_option(name) != '--parallel':
             continue
+        if sep:
+            value = inline
+        elif index + 1 < len(extra_args) and not extra_args[index + 1].startswith('-'):
+            value = extra_args[index + 1]
+        else:
+            # Bare ``--parallel`` -> const="auto".
+            return _AUTO_PARALLEL
+        if value == 'auto':
+            return _AUTO_PARALLEL
         if value.isdigit():
             requested = max(requested, int(value))
     return requested
@@ -226,6 +288,46 @@ def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
     skip_match = skip_pattern.search(output)
     skipped = int(skip_match.group(1)) if skip_match else 0
     return exit_code, test_count, skipped
+
+
+def _snapshot_decision(
+    *,
+    is_subset: bool,
+    allow_subset: bool,
+    test_count: int,
+    min_tests: int,
+    parallel: int = 1,
+) -> tuple[str, str]:
+    """Decide whether a run may overwrite the published coverage snapshot.
+
+    Pure so the guards can be tested without running the whole suite.
+
+    Returns ``('write', '')`` or ``('refuse', reason)``. The ``min_tests`` floor
+    is absolute: it protects against a run that executed nothing at all, so
+    neither ``--allow-subset`` nor ``--min-tests 0`` can get past it. A
+    ``parallel`` above 1 is refused outright -- the tests do run, but coverage
+    cannot see the worker processes, so the totals would be silently wrong.
+    """
+    if parallel > 1:
+        return (
+            'refuse',
+            f'拒绝写入：--parallel {parallel} 会在子进程中运行测试，'
+            'coverage 采不到覆盖率。\n请改用 --parallel 1（默认）以获得可信数字。',
+        )
+    floor = max(min_tests, 1)
+    if test_count < floor:
+        return (
+            'refuse',
+            f'本次只运行了 {test_count} 个用例（低于下限 {floor}），'
+            '未写入 docs/quality/coverage-report.md。',
+        )
+    if is_subset and not allow_subset:
+        return (
+            'refuse',
+            f'本次只运行了 {test_count} 个用例，未写入 docs/quality/coverage-report.md。\n'
+            '如需强制写入，加 --allow-subset。',
+        )
+    return 'write', ''
 
 
 def _collect_json() -> dict:
@@ -335,7 +437,8 @@ def _render_markdown(
         '',
         '> 本文件由 `scripts/coverage_report.py` 生成，**不要手工编辑**。',
         f'> 生成时间：{generated_at}',
-        f'> 代码版本：`{_git_sha()}`（提交前生成时该值为工作区 HEAD）',
+        f'> 代码版本：`{_git_sha()}`（被测代码所在提交；本报告随其后的提交一并'
+        '入库，两者 accounts/chat/ichat_pro 代码一致）',
         f'> 环境：{_environment_line()}',
         f'> 用例数：{test_count if test_count is not None else "未知"}'
         f'（skip {skipped}）',
@@ -398,8 +501,11 @@ def _render_markdown(
         '- `ichat_pro/test_runner.py` 是线上启用的 `TEST_RUNNER`，属产品代码，**计入**统计。',
         '- 仅本机 SQLite 结果；PostgreSQL 并发用例在 SQLite 下静默 skip，'
         '因此并发分支的真实覆盖需在 CI 的 PostgreSQL job 中复核。',
-        '- 必须用 `--parallel 1`（默认）。`--parallel >1` 时测试在子进程运行，'
-        'coverage 采集不到，脚本会拒绝写快照。',
+        '- 必须用 `--parallel 1`（默认）。`--parallel`（含 `auto`、缩写 `--para=N`）'
+        '会让测试在子进程运行，coverage 采集不到，脚本会拒绝写快照。',
+        '- 带测试标签或过滤选项（`--tag`/`--exclude-tag`/`-k`/`--pattern`，含 '
+        '`--pat` 这类前缀缩写与 `-kfoo` 这类紧凑写法）的运行只代表子集，'
+        '默认不写快照。',
         '',
     ]
     return '\n'.join(lines)
@@ -452,15 +558,19 @@ def main() -> int:
     # ``--parallel >1`` forks test processes that coverage cannot see, so the
     # collected totals collapse to a fraction of the real suite. That is not a
     # "subset" -- the tests all run -- it is silently wrong data, so it blocks
-    # the snapshot outright (``--allow-subset`` does not override it).
+    # the snapshot outright (``--allow-subset`` does not override it). The run
+    # is still executed so the user sees the real test result.
     parallel = _parallel_requested(extra)
     if parallel > 1:
-        print(
-            f'\n拒绝写入：--parallel {parallel} 会在子进程中运行测试，coverage 采不到覆盖率。\n'
-            '请改用 --parallel 1（默认）以获得可信数字。',
-            file=sys.stderr,
+        _decision, reason = _snapshot_decision(
+            is_subset=is_subset,
+            allow_subset=args.allow_subset,
+            test_count=0,
+            min_tests=args.min_tests,
+            parallel=parallel,
         )
-        exit_code, test_count, skipped = _run_coverage(extra)
+        print(f'\n{reason}', file=sys.stderr)
+        exit_code, _test_count, _skipped = _run_coverage(extra)
         return exit_code if exit_code != 0 else 2
 
     exit_code, test_count, skipped = _run_coverage(extra)
@@ -477,28 +587,20 @@ def main() -> int:
         return report.returncode
 
     # Second, independent guard: an unrecognised filter can make a partial run
-    # look full. A suspiciously small test count refuses the snapshot as well.
-    # This is a hard minimum: ``--allow-subset`` acknowledges a *known* subset
-    # but never authorises publishing an implausibly small run.
-    too_few = test_count < args.min_tests
-
+    # look full, so the snapshot decision is a pure function that both the
+    # script and its tests call.
     if args.no_markdown:
         return 0
 
-    if too_few:
-        print(
-            f'\n本次只运行了 {test_count} 个用例（低于 --min-tests {args.min_tests}），'
-            '未写入 docs/quality/coverage-report.md。',
-            file=sys.stderr,
-        )
-        return 0
-
-    if is_subset and not args.allow_subset:
-        print(
-            f'\n本次只运行了 {test_count} 个用例，未写入 docs/quality/coverage-report.md。\n'
-            '如需强制写入，加 --allow-subset。',
-            file=sys.stderr,
-        )
+    decision, reason = _snapshot_decision(
+        is_subset=is_subset,
+        allow_subset=args.allow_subset,
+        test_count=test_count,
+        min_tests=args.min_tests,
+        parallel=parallel,
+    )
+    if decision == 'refuse':
+        print(f'\n{reason}', file=sys.stderr)
         return 0
 
     data = _collect_json()

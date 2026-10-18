@@ -106,10 +106,10 @@ $ git status --short -- media/
 
 | 验收项 | 状态 | 证据 |
 | --- | --- | --- |
-| 新密钥不自动继承旧信任状态 | 通过（本机实测） | §2 三条 `test_rotated_key_is_untrusted_and_old_record_is_kept` / `test_trust_list_after_rotation_reports_current_key` / `test_previous_and_last_endorsed_diverge_after_consecutive_rotations` |
-| 相关代码或配置经过非作者成员评审 | **未满足**：已做 3 轮独立子 Agent 审查（每轮新上下文），但审查者是 **AI 子 Agent，不是人类成员**，且分支未推送、无 PR 评审记录 | 见 §6 |
+| 新密钥不自动继承旧信任状态 | 通过（本机实测 + 6 轮独立审查） | §2 三条 `test_rotated_key_is_untrusted_and_old_record_is_kept` / `test_trust_list_after_rotation_reports_current_key` / `test_previous_and_last_endorsed_diverge_after_consecutive_rotations`；第 5 轮审查另以 10 场景矩阵（S1–S10）独立验证两端点逐字段一致 |
+| 相关代码或配置经过非作者成员评审 | **部分**：6 轮独立子 Agent 审查，第 6 轮（重开）给出无保留 **PASS**（无 BLOCKER/MAJOR/MINOR）；但审查者是 **AI 子 Agent，不是人类成员**，分支未推送、无 PR 评审记录，人类评审仍缺 | 见 §6 |
 | 适用的自动化或人工测试已执行并保存证据 | 自动化：已执行（§1–§3）；**人工 UI 验收：未执行** | 本文件 |
-| 需求、部署或测试文档已同步更新 | **部分**：已更新本分支内的 `docs/phase4/tasks.md`、`docs/phase4/traceability-matrix.md`、`docs/phase4/t08-acceptance-evidence.md`。`docs/handoff/accounts-auth.md` **不在本分支**（该目录属另一分支的未跟踪内容），相关结论只写在本分支外，合并时需单独落地 | `git diff cfe53be..HEAD --stat` |
+| 需求、部署或测试文档已同步更新 | **部分**：已更新本分支内的 `docs/phase4/tasks.md`、`docs/phase4/traceability-matrix.md`、`docs/iChat Pro API 接口文档.md`、`docs/phase4/t08-acceptance-evidence.md`。`docs/handoff/accounts-auth.md` **不在本分支**（该目录在所有分支上都未被跟踪），相关结论写在主仓库工作区，合并时需单独落地 | `git diff cfe53be..HEAD --stat` |
 
 ## 6. 独立审查记录
 
@@ -117,7 +117,10 @@ $ git status --short -- media/
 | --- | --- | --- | --- | --- |
 | 1 | 独立子 Agent（新上下文，仅给 diff + Issue 原文 + 命令） | PASS WITH FINDINGS | 3 MAJOR + 若干 MINOR | 全部修复或说明 |
 | 2 | 独立子 Agent（新上下文，复审修复） | PASS WITH FINDINGS | 确认 3 条 MAJOR 已修复；新增 2 MAJOR（其中 1 条为我引入的 DELETE 契约回归）+ 5 MINOR | 已回滚 DELETE 改动，其余修复 |
-| 3 | 独立子 Agent（新上下文，末轮复审） | PASS WITH FINDINGS | 前两轮 9 项确认修复；M1 证据命令不可复现、M2 handoff 文档不在分支、M4 API 文档缺新字段 | 已修 M1/M2/M4，并补 DELETE 正路用例 |
+| 3 | 独立子 Agent（新上下文） | PASS WITH FINDINGS | 前两轮 9 项确认修复；M1 证据命令不可复现、M2 handoff 文档不在分支、M4 API 文档缺新字段 | 已修 M1/M2/M4，并补 DELETE 正路用例 |
+| 4 | 独立子 Agent（新上下文） | PASS WITH FINDINGS | M1 证据文件 3 处残留错误、M2 措辞已修；**MAJOR：API 文档 `last_endorsed_*` 的 null 规则与代码不符** | 改代码使语义与字段名一致（`_endorsed_elsewhere()`），另修证据文件 |
+| 5 | 独立子 Agent（新上下文，10 场景矩阵） | PASS WITH FINDINGS | 语义变更正确、无回归；MAJOR：DELETE 注释引用了 `agent-handoff.md` 里不存在的规则 | 删除虚构引用，改注释放置位置，补"显式 untrusted"用例 |
+| 6 | 独立子 Agent（重开，新上下文） | **PASS**（无 BLOCKER / MAJOR / MINOR） | 仅 2 条过程记录：审查区间口径（ff3ea42..d80c836）、worktree 内 `.review/` 为审查痕迹 | 无需处理 |
 
 **未验证范围**（不得当作通过）：
 

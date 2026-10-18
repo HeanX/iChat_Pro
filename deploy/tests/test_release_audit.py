@@ -304,7 +304,7 @@ class ApprovalGateTests(unittest.TestCase):
         """Position matters: the refusal must precede migrate/restart."""
         text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         gate_at = text.index(APPROVAL_START)
-        for later in ("migrate --noinput", "systemctl restart ichat.service"):
+        for later in ("migrate --noinput", 'systemctl restart "$SERVICE_NAME.service"'):
             self.assertLess(
                 gate_at,
                 text.index(later),

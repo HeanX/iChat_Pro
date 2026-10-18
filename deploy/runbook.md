@@ -7,6 +7,8 @@
 
 2026-10-18（#204 / P4 Test T23）：发布流程在 readiness 之后加了一道**冒烟门禁** `deploy/smoke.sh`，覆盖登录、CSRF、会话与核心 API；失败不写 `DEPLOYMENTS.log` 且 deploy 退出非零。新增第 7 节说明冒烟账号策略与前置条件。该门禁目前只在本地 SQLite + Django live server 下验证过（19 条用例，其中 6 条锚定 deploy.sh 的日志语义），**未在生产验证**。
 
+2026-10-18（#176 / P4 T49）：deploy.sh 路径/服务名参数化（ICHAT_APP_DIR/ICHAT_MEDIA_DIR/ICHAT_SERVICE_NAME/ICHAT_SERVICE_USER），新增 deploy/staging/（env.staging.example、ichat-staging.service、check_isolation.sh）与第 3c 节；11 条隔离断言用例本地通过。**staging 实机未搭建，未在生产验证**。
+
 2026-10-18（#139 / P4 T12）：新增 `deploy/monitor.sh`（readiness 连续失败/PG 磁盘与连接数/Redis 内存/证书余期/journal 错误，webhook 告警带限频），见第 3b 节；18 条用例在本地通过（第 2 轮审查后补 4 条不可观测场景）。**未在生产验证**。
 
 2026-10-18（#177 / P4 T50）：发布加入**审批门禁**与**审计记录**。`DEPLOYMENTS.log` 由旧的 4 字段格式升级为结构化单行（`ts/sha/target/kind/actor/via/from/smoke/approval`），新增 `--status` 查询与 `/opt/ichat/.deploy-state` 状态目录。旧日志行仍是原样前缀，但字段不再对齐——解析旧行请按空格切分取前 4 段。43 条用例覆盖审计字段、审批语义、注入防护与状态跟踪，**未在生产验证**。
@@ -100,6 +102,47 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 
 说明：证书检查**不跑** `certbot renew --dry-run`（它请求 LE staging 且有速率限制），而是读已装证书的 `notAfter`——若余额跌破 14 天，说明续期链路已静默失败，告警里会指向 letsencrypt 日志。状态计数在 `/var/lib/ichat/monitor`，"连续失败"跨 cron 轮次累计。
 
+## 3c. 独立测试环境（T49 / #176）
+
+staging 与生产共用一台 t3.small，但**不共享任何配置、数据、密钥或运行时**。`deploy.sh` 的路径/服务名已可经环境变量注入（`ICHAT_APP_DIR`/`ICHAT_MEDIA_DIR`/`ICHAT_SERVICE_NAME`/`ICHAT_SERVICE_USER`），同一脚本既能发布生产也能发布 staging。
+
+布局（全部独立于生产）：
+
+| 项 | 生产 | staging |
+| --- | --- | --- |
+| 代码树 | `/opt/ichat` | `/opt/ichat-staging` |
+| systemd 单元 | `ichat.service`（Daphne 127.0.0.1:8000） | `ichat-staging.service`（Daphne 127.0.0.1:8001） |
+| 数据库 | `ichat`（角色 ichat） | `ichat_staging`（角色 ichat_staging，独立密码） |
+| Redis 逻辑库 | db 0 | db 1 |
+| media | `/var/lib/ichat/media` | `/var/lib/ichat-staging/media` |
+| 秘密 | `/opt/ichat/.env` | `/opt/ichat-staging/.env`（**全新 SECRET_KEY，绝不复制生产**） |
+| 入口 | `https://chat.20060810.xyz:8443` | staging 专用 origin:8444（nginx server 块单独配） |
+
+搭建（首次）：
+
+```bash
+sudo useradd -r -s /sbin/nologin ichat-staging
+sudo install -d -o ichat-staging -g ichat-staging /opt/ichat-staging /var/lib/ichat-staging
+sudo -u postgres psql -c "CREATE ROLE ichat_staging LOGIN;"   # 交互 \password，勿进 shell 历史
+sudo -u postgres psql -c "CREATE DATABASE ichat_staging OWNER ichat_staging;"
+# 填 deploy/staging/env.staging.example -> /opt/ichat-staging/.env (600, ichat-staging)
+sudo cp deploy/staging/ichat-staging.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo ICHAT_APP_DIR=/opt/ichat-staging ICHAT_MEDIA_DIR=/var/lib/ichat-staging/media \
+     ICHAT_SERVICE_NAME=ichat-staging ICHAT_SERVICE_USER=ichat-staging \
+     ICHAT_REQUIRE_APPROVAL=0 \
+     sudo -E /opt/ichat-staging/bin/deploy.sh --branch main
+```
+
+隔离证据（每次 staging 变更后复跑，可归档进 Issue）：
+
+```bash
+sudo deploy/staging/check_isolation.sh --check-data
+```
+
+它逐项断言：SECRET_KEY/DATABASE_URL/CSRF origin 与生产不同、staging 库名为 `ichat_staging`、Redis 逻辑库不同、media/static 路径互不嵌套、代码树/服务单元/端口不同、（`--check-data` 时）活库与 Redis 实例隔离。任一违反即 exit 1 并列出违规项；秘密值只以 SHA-256 前缀形式出现，绝不明文打印。
+
+staging 的发布走同一条 deploy.sh（审批门禁可用 `ICHAT_REQUIRE_APPROVAL=0`，因为 staging 本身就是审批前验证环节），冒烟门禁照常运行（staging 有自己的 `SMOKE_USERNAME/SMOKE_PASSWORD`）。
 ## 4. 备份与恢复（T13）
 
 - 每日备份（root crontab）：`30 17 * * * /opt/ichat/repo/deploy/backup.sh`（UTC 17:30 = 东京 02:30）。

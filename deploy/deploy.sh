@@ -35,10 +35,15 @@
 # running", independent of what main says.
 set -euo pipefail
 
-APP_DIR=/opt/ichat
+# Directory layout. Every path can be overridden through the environment so
+# the SAME script can drive a staging install (deploy/staging/, P4 T49):
+# a staging host sets ICHAT_APP_DIR / ICHAT_MEDIA_DIR / ICHAT_SERVICE_NAME
+# and lands in its own tree, database, media root and service unit. Defaults
+# are the production paths and change nothing for existing usage.
+APP_DIR=${ICHAT_APP_DIR:-/opt/ichat}
+MEDIA_DIR=${ICHAT_MEDIA_DIR:-/var/lib/ichat/media}
 REPO_DIR=$APP_DIR/repo
 VENV_DIR=$APP_DIR/.venv
-MEDIA_DIR=/var/lib/ichat/media
 LOG_FILE=$APP_DIR/DEPLOYMENTS.log
 BIN_COPY=$APP_DIR/bin/deploy.sh
 # Where the previous release is remembered so `--status` can name a rollback
@@ -252,7 +257,9 @@ DEPLOYED_SHA=$(git -C "$REPO_DIR" rev-parse HEAD)
 "$VENV_DIR/bin/pip" install --quiet -r "$REPO_DIR/requirements.txt"
 
 # --- state dirs ---
-install -d -o ichat -g ichat "$MEDIA_DIR" "$MEDIA_DIR/avatars" "$MEDIA_DIR/uploads"
+SERVICE_USER=${ICHAT_SERVICE_USER:-ichat}
+SERVICE_NAME=${ICHAT_SERVICE_NAME:-ichat}
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$MEDIA_DIR" "$MEDIA_DIR/avatars" "$MEDIA_DIR/uploads"
 
 # --- config validation before touching the running service ---
 set -a; source "$APP_DIR/.env"; set +a
@@ -264,8 +271,8 @@ set -a; source "$APP_DIR/.env"; set +a
 "$VENV_DIR/bin/python" "$REPO_DIR/manage.py" collectstatic --noinput --clear
 
 echo "==> Restarting service"
-systemctl restart ichat.service
-systemctl enable ichat.service >/dev/null 2>&1 || true
+systemctl restart "$SERVICE_NAME.service"
+systemctl enable "$SERVICE_NAME.service" >/dev/null 2>&1 || true
 
 # --- readiness gate ---
 # Primary: probe through the local Nginx TLS front door — works for ANY
@@ -295,7 +302,7 @@ for i in $(seq 1 30); do
     sleep 1
 done
 if [[ "${READY:-0}" != "1" ]]; then
-    echo "ERROR: readiness probe failed after restart (last body: ${BODY:-none}); check 'journalctl -u ichat -n 50'" >&2
+    echo "ERROR: readiness probe failed after restart (last body: ${BODY:-none}); check 'journalctl -u $SERVICE_NAME -n 50'" >&2
     exit 1
 fi
 

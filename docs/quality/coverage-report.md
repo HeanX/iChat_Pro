@@ -1,8 +1,8 @@
 # 覆盖率报告（P4 Test T12 / #193）
 
 > 本文件由 `scripts/coverage_report.py` 生成，**不要手工编辑**。
-> 生成时间：2026-10-17T20:01:38Z
-> 代码版本：`624f4c39672c`（提交前生成时该值为工作区 HEAD）
+> 生成时间：2026-10-18T03:01:12Z
+> 代码版本：`42e4ad699469`（被测代码所在提交；本报告随其后的提交一并入库，两者 accounts/chat/ichat_pro 代码一致）
 > 环境：Python 3.13.12 / Django 6.0.5 / coverage 7.16.2 / DB `sqlite3`
 > 用例数：404（skip 2）
 > 测试命令：`python -m coverage run manage.py test --parallel 1`
@@ -40,4 +40,5 @@
 - 已排除：`*/migrations/*`（生成代码）、`*/tests/*`、`*/tests.py`（测试自身）、`manage.py`、`ichat_pro/wsgi.py`、`ichat_pro/asgi.py`。
 - `ichat_pro/test_runner.py` 是线上启用的 `TEST_RUNNER`，属产品代码，**计入**统计。
 - 仅本机 SQLite 结果；PostgreSQL 并发用例在 SQLite 下静默 skip，因此并发分支的真实覆盖需在 CI 的 PostgreSQL job 中复核。
-- 必须用 `--parallel 1`（默认）。`--parallel >1` 时测试在子进程运行，coverage 采集不到，脚本会拒绝写快照。
+- 必须用 `--parallel 1`（默认）。`--parallel`（含 `auto`、缩写 `--para=N`）会让测试在子进程运行，coverage 采集不到，脚本会拒绝写快照。
+- 带测试标签或过滤选项（`--tag`/`--exclude-tag`/`-k`/`--pattern`，含 `--pat` 这类前缀缩写与 `-kfoo` 这类紧凑写法）的运行只代表子集，默认不写快照。

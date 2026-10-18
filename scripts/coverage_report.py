@@ -14,9 +14,11 @@ Both statement and branch coverage are collected (``branch = True`` in
 ``.coveragerc``). Platform-independent on purpose so the same command can be
 wired into CI later without a PowerShell dependency.
 
-Exit code is the test run's exit code, so a failing suite still fails the
-caller. The Markdown snapshot is only written when the tests pass, so a red
-run can never overwrite a green baseline with misleading numbers.
+Exit codes:
+  * tests fail            -> the test run's exit code, no snapshot written
+  * --parallel >1 / auto  -> 2, the run still executes but is not traceable
+  * subset without opt-in -> 0, snapshot untouched
+  * success (full run)    -> 0, snapshot updated
 """
 
 from __future__ import annotations
@@ -104,6 +106,10 @@ def _is_subset_run(options: argparse.Namespace, unknown: list[str]) -> bool:
     if pattern is not None and pattern != _DEFAULT_PATTERN:
         # ``--pattern`` defaults to ``test*.py`` (matches every test file), so
         # only an explicit, different pattern narrows discovery.
+        return True
+    if getattr(options, 'testrunner', None):
+        # A swapped test runner can change what "the whole suite" means, so a
+        # non-default runner is treated as a suspicious partial run.
         return True
     return False
 
@@ -360,8 +366,8 @@ def _render_markdown(
         '',
         '## 分模块',
         '',
-        '| 模块 | 语句 | 分支 | 合计 |',
-        '| --- | ---: | ---: | ---: |',
+        '| 模块 | 语句 covered/total | 语句 | 分支 covered/total | 分支 | 合计 |',
+        '| --- | ---: | ---: | ---: | ---: | ---: |',
     ]
     for package, bucket in _per_module(data):
         module_stmt = _percent(bucket['covered_lines'], bucket['num_statements'])
@@ -371,7 +377,9 @@ def _render_markdown(
             bucket['num_statements'] + bucket['num_branches'],
         )
         lines.append(
-            f'| `{package}` | {module_stmt:.2f}% | {module_branch:.2f}% '
+            f'| `{package}` '
+            f'| {bucket["covered_lines"]}/{bucket["num_statements"]} | {module_stmt:.2f}% '
+            f'| {bucket["covered_branches"]}/{bucket["num_branches"]} | {module_branch:.2f}% '
             f'| {module_total:.2f}% |'
         )
 
@@ -401,8 +409,9 @@ def _render_markdown(
         '- 必须用 `--parallel 1`（默认）。`--parallel`（含 `auto`、缩写 `--para=N`）'
         '会让测试在子进程运行，coverage 采集不到，脚本会拒绝写快照。',
         '- 带测试标签或过滤选项（`--tag`/`--exclude-tag`/`-k`/`--pattern`，含 '
-        '`--pat` 这类前缀缩写与 `-kfoo` 这类紧凑写法）的运行只代表子集，'
-        '默认不写快照。',
+        '`--pat` 这类前缀缩写与 `-kfoo` 这类紧凑写法）或自定义 `--testrunner` '
+        '的运行只代表子集，默认不写快照。',
+        '- 分支覆盖率原始数见"分模块"表的 covered/total 列，可单独核算。',
         '',
     ]
     return '\n'.join(lines)
@@ -412,8 +421,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog=(
-            '注意：--no-markdown / --allow-subset 必须写在 -- 之前；'
-            '-- 之后的参数会原样透传给 manage.py test。'
+            '注意：所有脚本自有选项（--no-markdown / --allow-subset / --min-tests）'
+            '必须写在 -- 之前且不带位置参数；-- 之后的内容原样透传给 manage.py test。'
+            '写错位置会被 Django 以 exit 2 拒绝，不会写快照。'
         ),
     )
     parser.add_argument(

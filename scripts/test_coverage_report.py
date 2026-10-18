@@ -172,6 +172,18 @@ class SubsetDetectionTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 self.assertTrue(_is_subset(*arguments))
 
+    def test_custom_testrunner_is_treated_as_a_subset(self):
+        # A swapped runner changes what "the whole suite" means, so an
+        # explicit --testrunner must not feed the published snapshot.
+        # Abbreviations of --testrunner must behave identically.
+        for arguments in (
+            ['--testrunner', 'xxx.YRunner'],
+            ['--testrunner=xxx.YRunner'],
+            ['--testr', 'xxx.YRunner'],
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertTrue(_is_subset(*arguments))
+
     def test_unknown_options_are_treated_as_subsets(self):
         # Django itself would exit 2; refuse rather than guess.
         self.assertTrue(_is_subset('--definitely-not-an-option'))

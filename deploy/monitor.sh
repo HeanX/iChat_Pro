@@ -196,6 +196,10 @@ check_readiness() {
 check_disk() {
     local pg_dir=$PG_DATA_DIR
     [[ -d "$pg_dir" ]] || pg_dir=/var
+    command -v df >/dev/null 2>&1 || {
+        check_failed "disk" "df not installed; cannot read usage for $pg_dir"
+        return 0
+    }
     local pct
     pct=$(df -P "$pg_dir" 2>/dev/null | awk 'NR==2 {gsub(/%/,""); print $5}')
     if [[ -z "$pct" || ! "$pct" =~ ^[0-9]+$ ]]; then
@@ -294,21 +298,29 @@ check_redis() {
 # renewal window is being missed (default renew happens at <30 days).
 check_certificate() {
     local cert_dir end days_left
-    cert_dir=$(ls -1d "$LETLS_DIR"/*/ 2>/dev/null | head -1)
-    if [[ -z "$cert_dir" ]]; then
-        check_failed "cert" "no certificate directory under $LETLS_DIR"
-        return 0
-    fi
-    end=$(openssl x509 -enddate -noout -in "${cert_dir}cert.pem" 2>/dev/null | cut -d= -f2)
-    if [[ -z "$end" ]]; then
-        check_failed "cert" "could not read expiry from ${cert_dir}cert.pem"
-        return 0
-    fi
-    days_left=$(( ($(date -d "$end" +%s) - NOW) / 86400 ))
-    if (( days_left < CERT_MIN_DAYS )); then
-        send_alert "cert" "TLS cert expires in ${days_left} day(s) (< $CERT_MIN_DAYS); certbot renew is not succeeding — check /var/log/letsencrypt/letsencrypt.log"
-    else
-        log "cert: expires in ${days_left} days (ok)"
+    # Check EVERY installed lineage: a second live directory after the first
+    # would otherwise be silently unmonitored.
+    local remaining=0
+    for cert_dir in $(ls -1d "$LETLS_DIR"/*/ 2>/dev/null); do
+        end=$(openssl x509 -enddate -noout -in "${cert_dir}cert.pem" 2>/dev/null | cut -d= -f2)
+        if [[ -z "$end" ]]; then
+            check_failed "cert" "could not read expiry from ${cert_dir}cert.pem"
+            continue
+        fi
+        days_left=$(( ($(date -d "$end" +%s) - NOW) / 86400 ))
+        if (( days_left < CERT_MIN_DAYS )); then
+            send_alert "cert" "TLS cert ${cert_dir} expires in ${days_left} day(s) (< $CERT_MIN_DAYS); certbot renew is not succeeding — check /var/log/letsencrypt/letsencrypt.log"
+        else
+            log "cert: ${cert_dir} expires in ${days_left} days (ok)"
+        fi
+        remaining=$(( remaining + 1 ))
+    done
+    if (( remaining == 0 )); then
+        # The loop above already reported unreadable certs; reaching here with
+        # zero readable lineages means there was nothing to check at all.
+        if ! ls -1d "$LETLS_DIR"/*/ >/dev/null 2>&1; then
+            check_failed "cert" "no certificate directory under $LETLS_DIR"
+        fi
     fi
 }
 

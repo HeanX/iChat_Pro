@@ -7,7 +7,7 @@
 
 2026-10-18（#204 / P4 Test T23）：发布流程在 readiness 之后加了一道**冒烟门禁** `deploy/smoke.sh`，覆盖登录、CSRF、会话与核心 API；失败不写 `DEPLOYMENTS.log` 且 deploy 退出非零。新增第 7 节说明冒烟账号策略与前置条件。该门禁目前只在本地 SQLite + Django live server 下验证过（19 条用例，其中 6 条锚定 deploy.sh 的日志语义），**未在生产验证**。
 
-2026-10-18（#139 / P4 T12）：新增 `deploy/monitor.sh`（readiness 连续失败/PG 磁盘与连接数/Redis 内存/证书余期/journal 错误，webhook 告警带限频），见第 3b 节；14 条用例在本地通过。**未在生产验证**。
+2026-10-18（#139 / P4 T12）：新增 `deploy/monitor.sh`（readiness 连续失败/PG 磁盘与连接数/Redis 内存/证书余期/journal 错误，webhook 告警带限频），见第 3b 节；18 条用例在本地通过（第 2 轮审查后补 4 条不可观测场景）。**未在生产验证**。
 
 2026-10-18（#177 / P4 T50）：发布加入**审批门禁**与**审计记录**。`DEPLOYMENTS.log` 由旧的 4 字段格式升级为结构化单行（`ts/sha/target/kind/actor/via/from/smoke/approval`），新增 `--status` 查询与 `/opt/ichat/.deploy-state` 状态目录。旧日志行仍是原样前缀，但字段不再对齐——解析旧行请按空格切分取前 4 段。43 条用例覆盖审计字段、审批语义、注入防护与状态跟踪，**未在生产验证**。
 

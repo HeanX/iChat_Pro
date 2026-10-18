@@ -55,7 +55,7 @@
 | P4 T37 | WP02 | 完成 Windows—Android 跨端聊天 | 综合演示与结果记录 | 两台独立设备双向文本消息通过 | P0 | P4 T20、P4 T26、P4 T31～P4 T36 | 未完成（[Issue #164](https://github.com/HeanX/iChat_Pro/issues/164) 开放） |
 | P4 T38 | WP05 | 编写 E2EE 威胁模型和数据流 | 威胁模型、数据流图 | 明确资产、攻击面、信任边界和不可保存数据 | P0 | P4 T01、P4 T04 | 未完成（[Issue #165](https://github.com/HeanX/iChat_Pro/issues/165) 开放）；浏览器文档已更新；完整跨平台威胁模型与数据流验收仍待做 |
 | P4 T39 | WP05 | 适配平台安全存储 | Windows/Android 密钥存储实现 | 普通存储或日志中无可直接读取私钥 | P0 | P4 T21、P4 T29 | 未完成（[Issue #166](https://github.com/HeanX/iChat_Pro/issues/166) 开放）；跨平台/设备增强待验收 |
-| P4 T40 | WP05 | 设计并实现设备身份模型 | 模型、迁移、接口 | 同一账号不同设备可独立识别 | P1 | P4 T38 | 未完成（[Issue #167](https://github.com/HeanX/iChat_Pro/issues/167) 开放）；跨平台/设备增强待验收 |
+| P4 T40 | WP05 | 设计并实现设备身份模型 | 模型、迁移、接口 | 同一账号不同设备可独立识别 | P1 | P4 T38 | 未完成（[Issue #167](https://github.com/HeanX/iChat_Pro/issues/167) 开放）；2026-10-18 设计阶段已交：ADR-P4-05（`docs/phase4/adr-p4-05-device-identity.md`）含 Device 模型设计、两阶段切分与待决问题 Q1–Q5，待迁移负责人会签后进入实现；跨平台/设备增强待验收 |
 | P4 T41 | WP05 | 实现设备列表与撤销 | 设置页面、接口和测试 | 被撤销设备不接收后续消息密钥 | P1 | P4 T40 | 未完成（[Issue #168](https://github.com/HeanX/iChat_Pro/issues/168) 开放）；跨平台/设备增强待验收 |
 | P4 T42 | WP05 | 实现多设备新消息密钥分发 | 协议、代码和测试 | 每个有效设备可解密新消息 | P1 | P4 T40、P4 T41 | 未完成（[Issue #169](https://github.com/HeanX/iChat_Pro/issues/169) 开放）；跨平台/设备增强待验收 |
 | P4 T43 | WP05 | 研究历史密钥迁移 | 设计文档或安全原型 | 仅经用户授权，失败和撤销路径明确 | P2 | P4 T42 | 未完成（[Issue #170](https://github.com/HeanX/iChat_Pro/issues/170) 开放）；跨平台/设备增强待验收 |

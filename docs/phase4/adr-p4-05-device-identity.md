@@ -164,14 +164,25 @@ opaque UUID，服务端只做唯一性约束。**不**用 fingerprint、不用 I
 - `revoked_at` 在阶段 1 只落库、不参与任何鉴权判断（避免"看似撤销、实则无效"的假安全）；
 - 日志不记录 `device_id` 全文与用户代理串（安全红线 §6）。
 
-### 4.5 对 #169 的额外提醒（来自风险登记册）
+### 4.5 对 #169 的额外提醒（`sender_copy` 判定有两份同规则副本）
 
-`sender_copy` 的投影在服务端有 **REST 与 WS consumer 两条规则不同的路径**
-（risk-register.md **R-03**："HTTP 与 WS 私聊序列化路径漂移"，已标注"双路径单边修改易泄漏"，
-附代码证据 `chat/consumers.py:120-135`、`chat/views.py:2457-2477`）。#169 把它从"发给自己账号"
-细化为"发给自己的其它未撤销设备"时，**两条路径必须同一 PR 内一起改**，否则出现
-"WS 能解、REST 不能解"的设备级泄漏。R-03 的既有处置建议（统一服务层返回 `{viewer payloads}`）
-与 #169 的改造方向一致，宜合并实施。
+**当前代码状态**（T36 已完成，HTTP 与 WS 的投影**规则**已统一，但实现是两份字面重复的副本）：
+
+- WS 路径：`ChatConsumer.serialize_private_message`（`chat/consumers.py:700` 起）——
+  `use_sender_copy` 判定在 L701-707；
+- HTTP 路径：服务层 `_private_message_payload_for_viewer`（`chat/views.py:4101` 起）——
+  同样的 `use_sender_copy` 判定在 L4102-4107；HTTP 视图 `send_private_message_view`
+  （`chat/views.py:2246` 起）注释明确"T36/R-03/R-04: same projection rules as the WebSocket path"。
+
+> 勘误说明：risk-register.md **R-03**（"HTTP 与 WS 私聊序列化路径漂移"）记载的代码行号
+> （`chat/consumers.py:120-135`、`chat/views.py:2457-2477`）基于**较早的代码快照，已随 T36 重构漂移**——
+> 现在分别指向连接计数器与清缓存 stub，与 `sender_copy` 无关。R-03 记录的"两条规则不同的路径"也已被
+> T36 消解。本 ADR 初稿曾照抄那组行号，属事实错误，特此更正。
+
+**对 #169 的实际提醒**：把 `sender_copy` 从"发给自己账号"细化为"发给自己的其它未撤销设备"时，
+`use_sender_copy` 的判定逻辑要**同时改两处**（consumers.py 与 views.py 的两个函数）。
+更稳妥的做法是借 #169 把两份副本合并为单一服务层实现——这正是 R-03 处置建议的初衷
+（统一服务层返回 viewer payloads），建议与 #169 合并实施，避免下一次语义变更再漏改一处。
 
 ## 5. 验收对照（#167 验收原句）
 
@@ -221,7 +232,8 @@ opaque UUID，服务端只做唯一性约束。**不**用 fingerprint、不用 I
 
 | 轮次 | 审查者 | 结论 | 发现项与处理 |
 | --- | --- | --- | --- |
-| 1 | 独立子 Agent（全新上下文，仅给文档路径 + Issue 原文 + 核对清单） | PASS WITH FINDINGS | 6 条事实性声明全部属实（`UserPublicKey`/`KeyTrust` 模型与约束位置、`sender_copy` 字段、迁移编号 0015/0021、`rate_limited` 未注册、session 不是设备）。**MAJOR-1**：§5 把"非作者评审"全部推给实现阶段，与 conventions §1"独立评审已完成即构成证据"矛盾——已按建议拆分为"ADR 阶段 / 实现阶段"两列并补本节。MINOR：设备表缺公钥指纹冗余列（已采纳，见 D1）、缺撤销审计字段（已列为 #168 待补）、缺每账号设备数上限（已采纳进 §7 清单与 §4.4）、跨账号 device_id 409 信息泄露未定义（已采纳进 §4.4）、错误码注册不应进阶段 1 清单（已采纳，见上方说明）、Q 漏数据保留问题（已补 Q5）并充实 Q1。 |
+| 1 | 独立子 Agent（全新上下文，仅给文档路径 + Issue 原文 + 核对清单） | PASS WITH FINDINGS | 6 条事实性声明全部属实（`UserPublicKey`/`KeyTrust` 模型与约束位置、`sender_copy` 字段、迁移编号 0015/0021、`rate_limited` 未注册、session 不是设备）。**MAJOR-1**：§5 把"非作者评审"全部推给实现阶段，与 conventions §1"独立评审已完成即构成证据"矛盾——已按建议拆分为"ADR 阶段 / 实现阶段"两列并补本节。MINOR：设备表缺公钥指纹冗余列（已采纳，见 D1）、缺撤销审计字段（**处理方式 = 有意不立字段，延后理由见 D1 字段树注释**：阶段 1 无撤销入口，先立只会造出永远为空的列；#168 实施时随迁移补 `revoked_by`/`revoked_reason`）、缺每账号设备数上限（已采纳进 §7 清单与 §4.4）、跨账号 device_id 409 信息泄露未定义（已采纳进 §4.4）、错误码注册不应进阶段 1 清单（已采纳，见 §7 下方说明）、Q 漏数据保留问题（已补 Q5）并充实 Q1。 |
+| 2 | 独立子 Agent（全新上下文，复审第一轮处理 + 新增内容事实核对） | PASS WITH FINDINGS | 第一轮 7 项处理中 5 项确认已修复、MINOR-2 延后处理判定合理。**MAJOR-2（本轮新引入）**：§4.5 曾照抄 risk-register.md R-03 的代码行号（`consumers.py:120-135`、`views.py:2457-2477`），经逐行核实分别指向连接计数器与清缓存 stub、与 `sender_copy` 无关——那组行号基于 T36 重构前的快照已漂移；且 R-03 所述"两条规则不同的路径"已被 T36 消解（`views.py:2246` 注释自证同规则）。**已按当前代码改写 §4.5**：真正的残留风险是 `serialize_private_message`（consumers.py:700 起）与 `_private_message_payload_for_viewer`（views.py:4101 起）两份**同规则副本**需同步修改，并建议借 #169 合并为单一实现。**流程项**：documentation-status/tasks/traceability 的登记改动当时未提交（已随本提交补上）。MINOR-A（评审记录回链延后理由，见本轮第 1 行括注）与 MINOR-B（提交登记文件）一并处理。 |
 | 待定 | 单一迁移负责人（会签） | — | 回答 Q1–Q5 后进入实现 |
 
 > 本次评审由 AI 子 Agent 完成，构成 conventions §1 意义上的独立技术评审记录；

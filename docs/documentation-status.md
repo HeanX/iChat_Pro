@@ -77,6 +77,7 @@
 | [docs/phase4/deploy-architecture.md](phase4/deploy-architecture.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/protocol.md](phase4/protocol.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/requirements.md](phase4/requirements.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/t43-historical-key-migration-study.md](phase4/t43-historical-key-migration-study.md) | 现行说明/研究；P4 T43 历史密钥迁移的方案评估与失败/撤销路径；随方案 A 产品化或方案 B 立项进展更新 |
 | [docs/phase4/risk-register.md](phase4/risk-register.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/t20-late-ack-validation.md](phase4/t20-late-ack-validation.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/tasks.md](phase4/tasks.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |

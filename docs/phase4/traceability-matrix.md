@@ -111,7 +111,7 @@
 | NEW-DEV-006 | 新设备限制 | P0 | P4 T21、T29、T38、T39 | P4 Test T07 | 部分：新身份不能自动读取旧历史；跨设备策略/测试 #188 待完成 |
 | NEW-DEV-007 | 密钥变化提示 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
 | NEW-DEV-008 | 安全存储适配 | P0 | P4 T21、T29、T38、T39 | P4 Test T07、T17 | 部分：Windows safeStorage 已验收 #148；Android/平台统一契约待 #156/#166 |
-| NEW-DEV-009 | 历史迁移 | P2 | P4 T43 | P4 Test T06 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
+| NEW-DEV-009 | 历史迁移 | P2 | P4 T43 | P4 Test T06 | 设计已交：`t43-historical-key-migration-study.md`（[#170](https://github.com/HeanX/iChat_Pro/issues/170)，2026-10-18：v1=人工备份迁移、v2=在线交接、拒绝服务端托管），待人类确认；实现待 #167–#169 |
 
 ## TST — 测试与质量（26 条）
 

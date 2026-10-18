@@ -92,7 +92,11 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 
 配置（写入 `/opt/ichat/.env`）：`ICHAT_ALERT_WEBHOOK`（Slack/Discord/通用 webhook，缺省时只进 syslog 与 stderr，不算告警通道）；`ICHAT_ALERT_MIN_SECS=1800`（同一 key 限频，防告警风暴）；上表阈值均可覆盖（`ICHAT_DISK_PCT`/`ICHAT_PG_MAX_CONN`/`ICHAT_REDIS_MAX_MB`/`ICHAT_READY_MAX_FAILS`/`ICHAT_CERT_MIN_DAYS`）。
 
-自检：`ICHAT_ALERT_TEST=1 /opt/ichat/repo/deploy/monitor.sh` 发一条测试告警，用于验证 webhook 连通。
+'自检：`ICHAT_ALERT_TEST=1 /opt/ichat/repo/deploy/monitor.sh` 发一条测试告警，用于验证 webhook 连通。
+
+**pg-conn 的认证前提**：root 的 cron 环境走 peer 认证不会映射到 `ichat` 角色，所以脚本从 `.env` 的 `DATABASE_URL`（或 `ICHAT_DB_URL`）解析连接参数，经 `PGPASSWORD` 环境变量交给 libpq（密码不进 argv/ps）。若该项缺失或认证失败，该轮以 `CHECK FAILED: pg-conn` 告警并以 exit 1 结束——"查不到连接数"不会伪装成"一切正常"。**任何检查跑不成**（工具缺失、证书不可读、状态目录不可写）都会触发 `monitor` 告警并 exit 1。
+
+投递失败的补偿：限频时间戳只在 webhook **成功**后写入，投递失败下一轮会重试（日志模式下仍写入时间戳，避免每 5 分钟刷屏）。'
 
 说明：证书检查**不跑** `certbot renew --dry-run`（它请求 LE staging 且有速率限制），而是读已装证书的 `notAfter`——若余额跌破 14 天，说明续期链路已静默失败，告警里会指向 letsencrypt 日志。状态计数在 `/var/lib/ichat/monitor`，"连续失败"跨 cron 轮次累计。
 

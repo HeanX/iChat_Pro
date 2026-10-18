@@ -13,6 +13,7 @@ cron scheduling.
 
 import os
 import shutil
+import sys
 import subprocess
 import tempfile
 import threading
@@ -56,14 +57,59 @@ class MonitorTestBase(unittest.TestCase):
             'echo "used_memory:104857600"',  # 100 MB: under the threshold
         )
         make_stub_bin(
-            self.bindir, "openssl",
-            'echo "notAfter=$($STUB_DATE)"',
-        )
-        make_stub_bin(
             self.bindir, "journalctl",
             'echo "header line 1"; echo "header line 2"\n',  # zero real errors
         )
         make_stub_bin(self.bindir, "logger", ":")  # swallow syslog calls
+        make_stub_bin(self.bindir, "df", ":")  # replaced by prepare_disk()
+
+        # A fully observable host by default; individual tests override the
+        # bit they are pinning (openssl stub below, thresholds, failures).
+        self.cert_days = "3650"
+        self.pgdata = self.workdir / "pgdata"
+        self.pgdata.mkdir(exist_ok=True)
+        self.live = self.workdir / "letsencrypt" / "live"
+        (self.live / "chat.example.com").mkdir(parents=True, exist_ok=True)
+        (self.live / "chat.example.com" / "cert.pem").write_text("stub", encoding="utf-8")
+        # A syntactically valid postgres URL (never dialed: psql is stubbed)
+        # so the pg-conn check counts as runnable. Written to the env file the
+        # way production would.
+        self.env_file = self.workdir / "monitor.env"
+        self.env_file.write_text(
+            "DATABASE_URL=postgres://ichat:secret@127.0.0.1:5432/ichat\n",
+            encoding="utf-8",
+        )
+
+    def prepare_disk(self, pct):
+        stub = self.bindir / "df"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            'echo "Filesystem 1024-blocks Used Available Capacity Mounted on"\n'
+            f'echo "/dev/vda1    83886080   10000000   73886080      {pct}% /pgdata"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        return {"ICHAT_PG_DATA_DIR": str(self.pgdata)}
+
+    def prepare_openssl(self):
+        # The stub takes the offset in days via $STUB_DAYS and computes the
+        # date itself — a pre-built date string would carry quotes that bash
+        # passes literally inside $(...).
+        stub = self.bindir / "openssl"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            'echo "notAfter=$(date -u -d "+$STUB_DAYS days" "+%b %e %H:%M:%S %Y GMT")"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        return {"ICHAT_LETLS_DIR": str(self.live)}
+
+    def observable_env(self):
+        """Env additions that make every check runnable (nothing skipped)."""
+        return {
+            "ICHAT_PG_DATA_DIR": str(self.pgdata),
+            "ICHAT_LETLS_DIR": str(self.live),
+        }
 
     def tearDown(self):
         if getattr(self, "server", None) is not None:
@@ -102,12 +148,13 @@ class MonitorTestBase(unittest.TestCase):
             "PATH": os.environ.get("PATH", ""),
             "TMPDIR": os.environ.get("TMPDIR") or os.environ.get("TEMP") or "",
             "ICHAT_MONITOR_STATE": str(state_dir or self.state),
-            "ICHAT_ENV_FILE": str(self.workdir / "missing.env"),  # no webhook
+            "ICHAT_ENV_FILE": str(self.env_file),
             "ICHAT_ALERT_WEBHOOK": "",
             # Windows form; converted by cygpath inside the wrapper.
             "ICHAT_STUB_WIN": str(self.bindir),
             # Consumed by the openssl stub; defaults to a far-future expiry.
             "STUB_DAYS": getattr(self, "cert_days", "3650"),
+            "ICHAT_PYTHON": sys.executable,
         }
         if live_url:
             env["ICHAT_BASE_URL"] = live_url
@@ -149,7 +196,9 @@ class _DeadReadiness(BaseHTTPRequestHandler):
 class HealthyHostTests(MonitorTestBase):
     def test_all_checks_quiet_when_everything_is_fine(self):
         url = self.start_server(_HealthyReadiness)
-        result = self.run_monitor(live_url=url)
+        result = self.run_monitor(
+            live_url=url, extra_env={**self.observable_env(), **self.prepare_openssl(), **self.prepare_disk(12)}
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, msg=output)
         self.assertIn("checks complete", output)
@@ -244,7 +293,8 @@ class ResourceThresholdTests(MonitorTestBase):
         url = self.start_server(_HealthyReadiness)
         (self.bindir / "psql").write_text("echo 55\n", encoding="utf-8")
         result = self.run_monitor(
-            live_url=url, extra_env={"ICHAT_PG_MAX_CONN": "40"}
+            live_url=url,
+            extra_env={"ICHAT_PG_MAX_CONN": "40", **self.observable_env(), **self.prepare_openssl()},
         )
         self.assertIn("ALERT [pg-conn]", result.stdout + result.stderr)
 
@@ -254,7 +304,8 @@ class ResourceThresholdTests(MonitorTestBase):
             'echo "used_memory:639631360"', encoding="utf-8"  # 610 MB
         )
         result = self.run_monitor(
-            live_url=url, extra_env={"ICHAT_REDIS_MAX_MB": "512"}
+            live_url=url,
+            extra_env={"ICHAT_REDIS_MAX_MB": "512", **self.observable_env(), **self.prepare_openssl()},
         )
         self.assertIn("ALERT [redis-mem]", result.stdout + result.stderr)
 
@@ -308,6 +359,58 @@ class CertificateAndLogTests(MonitorTestBase):
         )
         result = self.run_monitor(live_url=url)
         self.assertIn("ALERT [journal]", result.stdout + result.stderr)
+
+
+@unittest.skipUnless(HAS_BASH, "bash is not available; monitor.sh not executed")
+class UnobservableHostTests(MonitorTestBase):
+    """A check that cannot run must be visible, never read as "all fine"."""
+
+    def test_missing_tool_is_a_check_failure_not_ok(self):
+        url = self.start_server(_HealthyReadiness)
+        (self.bindir / "redis-cli").unlink()  # tool gone
+        result = self.run_monitor(
+            live_url=url, extra_env={**self.observable_env(), **self.prepare_openssl(), **self.prepare_disk(12)}
+        )
+        output = result.stdout + result.stderr
+        self.assertIn("CHECK FAILED: redis-mem", output)
+        self.assertIn("UNMONITORED", output)
+        self.assertNotIn("redis memory:", output.replace("redis-cli not installed", ""))
+
+    def test_unobservable_run_exits_nonzero(self):
+        url = self.start_server(_HealthyReadiness)
+        (self.bindir / "redis-cli").unlink()
+        result = self.run_monitor(
+            live_url=url, extra_env={**self.observable_env(), **self.prepare_openssl(), **self.prepare_disk(12)}
+        )
+        self.assertEqual(
+            result.returncode, 1,
+            msg="a run with unrunnable checks must exit 1 so cron logs show it",
+        )
+
+    def test_missing_db_url_fails_the_pg_check_loudly(self):
+        url = self.start_server(_HealthyReadiness)
+        self.env_file.write_text("", encoding="utf-8")  # no DATABASE_URL
+        result = self.run_monitor(
+            live_url=url, extra_env={**self.observable_env(), **self.prepare_openssl(), **self.prepare_disk(12)}
+        )
+        output = result.stdout + result.stderr
+        self.assertIn("CHECK FAILED: pg-conn", output)
+        self.assertIn("peer auth", output)
+        self.assertEqual(result.returncode, 1)
+
+    def test_unwritable_state_is_reported(self):
+        url = self.start_server(_DeadReadiness)
+        # A regular file where the state directory should be.
+        blocker = self.workdir / "state-blocker"
+        blocker.write_text("not a dir", encoding="utf-8")
+        result = self.run_monitor(
+            live_url=url, state_dir=blocker,
+            extra_env={**self.observable_env(), **self.prepare_openssl(), **self.prepare_disk(12)},
+        )
+        output = result.stdout + result.stderr
+        self.assertIn("CHECK FAILED: ready", output)
+        self.assertIn("not writable", output)
+        self.assertEqual(result.returncode, 1)
 
 
 @unittest.skipUnless(HAS_BASH, "bash is not available; monitor.sh not executed")

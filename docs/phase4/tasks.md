@@ -27,7 +27,7 @@
 | P4 T09 | WP01 | 接入 Redis Channel Layer | Redis 与实时通信配置 | 多客户端消息可正确分发，Redis 不开放公网 | P0 | P4 T07 | 已完成（[Issue #136](https://github.com/HeanX/iChat_Pro/issues/136)）；2026-10-01 |
 | P4 T10 | WP01 | 配置持久化文件存储 | 媒体/密文文件存储方案 | 服务重启或升级后文件仍可访问 | P0 | P4 T07 | 已完成（[Issue #137](https://github.com/HeanX/iChat_Pro/issues/137)）；2026-10-01 |
 | P4 T11 | WP01 | 配置环境变量和秘密管理 | 生产配置清单 | 仓库、安装包和日志中无生产密钥 | P0 | P4 T07 | 已完成（[Issue #138](https://github.com/HeanX/iChat_Pro/issues/138)）；2026-10-01 |
-| P4 T12 | WP01 | 配置健康检查、日志和监控 | 监控面板或记录 | 能发现服务、资源、证书和关键错误状态 | P1 | P4 T07～P4 T11 | 代码已实现，待真实环境证据（[Issue #139](https://github.com/HeanX/iChat_Pro/issues/139) 开放）；`deploy/monitor.sh` 覆盖 readiness 连续失败/PG 磁盘+连接数/Redis 内存/证书余期/journal 错误，webhook 告警带限频；本地用例验证判定与限频逻辑。**未在生产验证** |
+| P4 T12 | WP01 | 配置健康检查、日志和监控 | 监控面板或记录 | 能发现服务、资源、证书和关键错误状态 | P1 | P4 T07～P4 T11 | 代码已实现，待真实环境证据（[Issue #139](https://github.com/HeanX/iChat_Pro/issues/139) 开放）；`deploy/monitor.sh` 覆盖 readiness 连续失败/PG 磁盘+连接数/Redis 内存/证书余期/journal 错误，webhook 告警带限频、投递失败重试；检查跑不成（工具缺失/认证失败/状态目录不可写）会触发 `monitor` 告警并 exit 1，不与"一切正常"混淆；18 条本地用例覆盖判定/限频/不可观测场景。**未在生产验证** |
 | P4 T13 | WP01 | 实现备份、恢复和回滚 | 脚本/手册及演练记录 | 独立环境恢复成功，版本可回退 | P0 | P4 T08、P4 T10 | 已完成（[Issue #140](https://github.com/HeanX/iChat_Pro/issues/140)）；复审两项补齐：首次部署回归修复 + 可复跑恢复演练，二次复验通过 |
 | P4 T14 | WP03 | 将 Electron 默认目标切换为云服务 | 环境化服务地址配置 | 无需本地 Django 即可使用核心功能 | P0 | P4 T06～P4 T11 | 已完成（[Issue #141](https://github.com/HeanX/iChat_Pro/issues/141)）；两轮复审整改后闭环，默认云地址已内建，T15 生命周期实测确认无需本地 Django 即可启动云端登录页 |
 | P4 T15 | WP03 | 完成 Windows 打包配置 | `.exe` 安装包 | 干净 Windows 环境可安装、启动和卸载 | P0 | P4 T14 | 已完成（[Issue #142](https://github.com/HeanX/iChat_Pro/issues/142)）；四轮复审整改后复验闭环：安装/云端启动/双路径卸载/注册表清理，NSIS 断言 24/24 |

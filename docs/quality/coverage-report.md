@@ -1,8 +1,8 @@
 # 覆盖率报告（P4 Test T12 / #193）
 
 > 本文件由 `scripts/coverage_report.py` 生成，**不要手工编辑**。
-> 生成时间：2026-10-18T04:18:46Z
-> 代码版本：`0865f6f02383`（被测代码所在提交；本报告随其后的提交一并入库，两者 accounts/chat/ichat_pro 代码一致）
+> 生成时间：2026-10-18T05:06:36Z
+> 代码版本：`772d936896f7`（被测代码所在提交；本报告随其后的提交一并入库，两者 accounts/chat/ichat_pro 代码一致）
 > 环境：Python 3.13.12 / Django 6.0.5 / coverage 7.16.2 / DB `sqlite3`
 > 用例数：404（skip 2）
 > 测试命令：`python -m coverage run manage.py test --parallel 1`
@@ -18,11 +18,11 @@
 
 ## 分模块
 
-| 模块 | 语句 | 分支 | 合计 |
-| --- | ---: | ---: | ---: |
-| `accounts` | 81.87% | 69.31% | 79.44% |
-| `chat` | 66.60% | 51.16% | 62.83% |
-| `ichat_pro` | 74.07% | 47.50% | 69.92% |
+| 模块 | 语句 covered/total | 语句 | 分支 covered/total | 分支 | 合计 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `accounts` | 989/1208 | 81.87% | 201/290 | 69.31% | 79.44% |
+| `chat` | 2487/3734 | 66.60% | 618/1208 | 51.16% | 62.83% |
+| `ichat_pro` | 160/216 | 74.07% | 19/40 | 47.50% | 69.92% |
 
 ## 与需求目标对照
 
@@ -41,4 +41,5 @@
 - `ichat_pro/test_runner.py` 是线上启用的 `TEST_RUNNER`，属产品代码，**计入**统计。
 - 仅本机 SQLite 结果；PostgreSQL 并发用例在 SQLite 下静默 skip，因此并发分支的真实覆盖需在 CI 的 PostgreSQL job 中复核。
 - 必须用 `--parallel 1`（默认）。`--parallel`（含 `auto`、缩写 `--para=N`）会让测试在子进程运行，coverage 采集不到，脚本会拒绝写快照。
-- 带测试标签或过滤选项（`--tag`/`--exclude-tag`/`-k`/`--pattern`，含 `--pat` 这类前缀缩写与 `-kfoo` 这类紧凑写法）的运行只代表子集，默认不写快照。
+- 带测试标签或过滤选项（`--tag`/`--exclude-tag`/`-k`/`--pattern`，含 `--pat` 这类前缀缩写与 `-kfoo` 这类紧凑写法）或自定义 `--testrunner` 的运行只代表子集，默认不写快照。
+- 分支覆盖率原始数见"分模块"表的 covered/total 列，可单独核算。

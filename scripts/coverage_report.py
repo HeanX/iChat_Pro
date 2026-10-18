@@ -35,211 +35,108 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN_PATH = REPO_ROOT / 'docs' / 'quality' / 'coverage-report.md'
 
-# Options that narrow the suite to a subset instead of merely configuring the
-# run. Compared against the *resolved* option name (see ``_resolve_option``) so
-# that argparse abbreviations such as ``--pat`` / ``--patt`` for ``--pattern``
-# and the attached short forms ``-kfoo`` / ``-pfoo`` are all caught.
-_FILTER_FLAGS = {
-    '--tag',
-    '--exclude-tag',
-    '--pattern',
-    '-k',
-}
+# ``--pattern``'s argparse default: it matches every test file, so only an
+# explicitly different value narrows the run.
+_DEFAULT_PATTERN = 'test*.py'
 
-# Options that consume the following token as their mandatory value, so a value
-# such as ``2`` in ``-v 2`` is not mistaken for a test label.
-_VALUE_FLAGS = {
-    '-v', '--verbosity',
-    '-t', '--top-level-directory',
-    '--pattern',
-    '-p',
-    '--tag',
-    '--exclude-tag',
-    '-k',
-    '--settings',
-    '--pythonpath',
-    '--testrunner',
-    '--durations',
-}
 
-# Options whose value is optional (``nargs='?'``).
-_OPTIONAL_VALUE_FLAGS = {
-    '--shuffle',
-    '--parallel',
-}
-
-# Exact option strings accepted by ``manage.py test``. argparse allows
-# unambiguous prefixes of long options, so membership must be decided by
-# prefix resolution rather than by an equality check -- otherwise ``--pat``
-# silently bypasses a guard keyed on ``--pattern``.
-_KNOWN_LONG_OPTIONS = (
-    '--help',
-    '--failfast',
-    '--top-level-directory',
-    '--pattern',
-    '--keepdb',
-    '--shuffle',
-    '--reverse',
-    '--debug-mode',
-    '--debug-sql',
-    '--parallel',
-    '--tag',
-    '--exclude-tag',
-    '--pdb',
-    '--buffer',
-    '--no-faulthandler',
-    '--timing',
-    '--durations',
-    '--noinput',
-    '--no-input',
-    '--testrunner',
-    '--settings',
-    '--pythonpath',
-    '--traceback',
-    '--no-color',
-    '--force-color',
-    '--verbosity',
-    '--version',
-)
-
-# Short option characters that take a value (attached or separated).
-_SHORT_VALUE_FLAGS = {'-v', '-t', '-p', '-k'}
-# Short option characters that narrow the suite.
-_SHORT_FILTER_FLAGS = {'-p', '-k'}
-
-# Sentinel returned by ``_parallel_requested`` for ``--parallel=auto`` / bare
-# ``--parallel``: Django then picks its own process count, which is >1.
+# Sentinel for "Django picks its own process count" (bare ``--parallel`` or the
+# value ``auto``). Always larger than any real process count.
 _AUTO_PARALLEL = 1_000
 
 
-def _resolve_option(name: str) -> str:
-    """Resolve a long option name the way argparse does.
+def _django_test_parser():
+    """The exact argparse parser ``manage.py test`` uses.
 
-    ``--pat`` and ``--patt`` both resolve to ``--pattern``; an unknown or
-    ambiguous spelling resolves to itself so the caller treats it as unknown
-    rather than silently assuming it is harmless.
+    Reusing it is the whole point: hand-rolled argv classification kept losing
+    to argparse syntax (prefix abbreviations, bundled short options, ``int()``
+    coercions) across four review rounds. Parsing with Django's own parser
+    makes every spelling behave identically to the real command.
     """
-    if not name.startswith('--') or '=' in name:
-        return name
-    candidates = [option for option in _KNOWN_LONG_OPTIONS if option.startswith(name)]
-    if len(candidates) == 1:
-        return candidates[0]
-    return name
+    import django
+    from django.core.management.commands.test import Command
+
+    # ``create_parser`` reads settings.TEST_RUNNER, which needs configured
+    # settings -- the script normally runs before Django is set up.
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ichat_pro.settings')
+    if not django.conf.settings.configured:
+        django.setup()
+    return Command().create_parser('manage.py', 'test')
 
 
-def _is_optional_value(token: str) -> bool:
-    """True when ``token`` is plausibly the optional value of the previous flag."""
-    return token.isdigit()
+def _parse_test_args(extra_args: list[str]) -> tuple[argparse.Namespace, list[str]]:
+    """Parse pass-through arguments with Django's own ``test`` parser.
 
-
-def _classify(item: str) -> tuple[str, bool]:
-    """Classify one argv token.
-
-    Returns ``(kind, consumed)`` where ``kind`` is one of ``'label'``,
-    ``'filter'`` or ``'option'`` and ``consumed`` says whether this token
-    itself also carried an option's value (so no further token is needed).
+    Returns ``(namespace, unknown)``. Unknown options are reported instead of
+    raising, so a caller can refuse them rather than guess.
     """
-    if not item.startswith('-') or item == '-':
-        return 'label', True
-
-    if item.startswith('--'):
-        name, sep, _ = item.partition('=')
-        if _resolve_option(name) in _FILTER_FLAGS:
-            return 'filter', True
-        return 'option', bool(sep)
-
-    # Short options: ``-k``, ``-k=value`` and ``-kvalue`` are all valid.
-    flag = item[:2]
-    rest = item[2:]
-    if flag in _SHORT_FILTER_FLAGS:
-        return 'filter', True
-    if rest and flag in _SHORT_VALUE_FLAGS:
-        # Attached value, e.g. ``-v2``; no further token is consumed.
-        return 'option', True
-    return 'option', False
+    parser = _django_test_parser()
+    # ``create_parser`` wires Django's add_subparsers-style handling for
+    # ``--settings`` etc.; add_argument_defaults keeps this list short.
+    parser.add_argument('--ichat-coverage-marker', action='store_true',
+                        help=argparse.SUPPRESS)
+    return parser.parse_known_args(list(extra_args))
 
 
-def _has_test_labels(extra_args: list[str]) -> bool:
-    """True when the arguments narrow the run instead of exercising everything.
+def _is_subset_run(options: argparse.Namespace, unknown: list[str]) -> bool:
+    """True when the parsed arguments narrow the suite to a partial run.
 
-    Returns True for explicit test labels (``chat.tests.test_protocol``) and
-    for any filtering option (``--tag``, ``--exclude-tag``, ``-k``,
-    ``--pattern``, including the attached forms ``-kfoo`` / ``--tag=foo``).
-    Both produce a partial measurement, so neither may feed the published
-    snapshot.
+    Judged on *parsed* values, so every spelling argparse accepts is handled by
+    construction: labels, ``--tag``/``--exclude-tag``/``-k`` in any spelling,
+    an explicitly given ``--pattern`` (whose default ``test*.py`` matches
+    everything), and any unrecognised option (which Django itself would reject
+    with exit 2).
     """
-    pending_mandatory = False
-    pending_optional = False
-    for item in extra_args:
-        if pending_mandatory:
-            pending_mandatory = False
-            continue
-        if pending_optional:
-            pending_optional = False
-            if _is_optional_value(item):
-                continue
-            return True
-
-        kind, consumed = _classify(item)
-        if kind == 'label':
-            return True
-        if kind == 'filter':
-            return True
-        if item.startswith('--'):
-            name = _resolve_option(item.partition('=')[0])
-        else:
-            name = item[:2]
-        if consumed:
-            continue
-        if name in _VALUE_FLAGS:
-            pending_mandatory = True
-        elif name in _OPTIONAL_VALUE_FLAGS:
-            pending_optional = True
+    if unknown:
+        # An option Django does not know would exit 2 at run time; refuse here
+        # too rather than trying to interpret it.
+        return True
+    if getattr(options, 'args', None):
+        return True
+    # dest names are Django's own (verified against DiscoverRunner.add_arguments).
+    if getattr(options, 'tags', None) or getattr(options, 'exclude_tags', None):
+        return True
+    if getattr(options, 'test_name_patterns', None):
+        return True
+    pattern = getattr(options, 'pattern', None)
+    if pattern is not None and pattern != _DEFAULT_PATTERN:
+        # ``--pattern`` defaults to ``test*.py`` (matches every test file), so
+        # only an explicit, different pattern narrows discovery.
+        return True
     return False
 
 
-def _parallel_requested(extra_args: list[str]) -> int:
-    """How many test processes ``--parallel`` asks for (0 when absent).
+def _parallel_requested(options: argparse.Namespace) -> int:
+    """How many test processes the parsed arguments ask for (0 when absent).
 
-    Handles every spelling Django accepts: ``--parallel`` (bare, ``const`` is
-    ``"auto"``), ``--parallel=N``, ``--parallel N``, the abbreviated
-    ``--para=N``, and the value ``auto`` which Django expands to its computed
-    default (>1 unless the suite is tiny). ``auto`` is reported as a large
-    sentinel so callers treat it as "not measured".
+    Values come straight from Django's ``parallel_type`` conversion, so
+    ``+2``, ``2_0`` and ``auto`` all behave exactly like the real command.
+    ``auto`` (bare ``--parallel`` or the literal string) is reported as a
+    sentinel because Django then picks its own count, which is >1.
     """
-    requested = 0
-    for index, item in enumerate(extra_args):
-        name, sep, inline = item.partition('=')
-        if not item.startswith('--') or _resolve_option(name) != '--parallel':
-            continue
-        if sep:
-            value = inline
-        elif index + 1 < len(extra_args) and not extra_args[index + 1].startswith('-'):
-            value = extra_args[index + 1]
-        else:
-            # Bare ``--parallel`` -> const="auto".
-            return _AUTO_PARALLEL
-        if value == 'auto':
-            return _AUTO_PARALLEL
-        if value.isdigit():
-            requested = max(requested, int(value))
-    return requested
+    value = getattr(options, 'parallel', 0)
+    if value in (None, 0):
+        return 0
+    if value == 'auto':
+        return _AUTO_PARALLEL
+    return int(value)
 
 
-def _safe_echo(text: str) -> None:
-    """Write to stdout without dying on a legacy console code page.
+def _safe_echo(text: str, stream=None) -> None:
+    """Write to a console stream without dying on a legacy code page.
 
-    Django's test output can contain non-ASCII characters (e.g. the Greek
-    epsilon in ``failfast``'s help). Windows consoles are frequently GBK, which
-    raises ``UnicodeEncodeError`` on those. Coverage collection must never fail
-    because of how a log line renders.
+    Django's test output and the guard messages contain non-ASCII characters
+    that GBK consoles cannot encode. A refusal reason is the one thing the
+    operator must be able to read, so both stdout and stderr go through here.
     """
-    stream = sys.stdout
+    stream = stream or sys.stdout
     try:
         stream.write(text)
     except UnicodeEncodeError:
-        encoded = text.encode(stream.encoding or 'utf-8', errors='replace')
-        stream.write(encoded.decode(stream.encoding or 'utf-8', errors='replace'))
+        encoding = stream.encoding or 'utf-8'
+        stream.write(text.encode(encoding, errors='replace').decode(encoding, errors='replace'))
     stream.flush()
 
 
@@ -550,17 +447,18 @@ def main() -> int:
     if not extra:
         extra = ['--parallel', '1']
 
-    # A run that names test labels or passes a filtering option measures only
-    # a slice of the suite. Publishing that as "the" coverage number would be
-    # misleading, so the documented snapshot is reserved for full runs.
-    is_subset = _has_test_labels(extra)
+    # Classify the pass-through arguments with Django's own parser, so every
+    # argparse spelling (abbreviations, bundled short options, int coercions)
+    # means exactly what it means in the real command.
+    options, unknown = _parse_test_args(extra)
+    is_subset = _is_subset_run(options, unknown)
+    parallel = _parallel_requested(options)
 
     # ``--parallel >1`` forks test processes that coverage cannot see, so the
     # collected totals collapse to a fraction of the real suite. That is not a
     # "subset" -- the tests all run -- it is silently wrong data, so it blocks
     # the snapshot outright (``--allow-subset`` does not override it). The run
     # is still executed so the user sees the real test result.
-    parallel = _parallel_requested(extra)
     if parallel > 1:
         _decision, reason = _snapshot_decision(
             is_subset=is_subset,
@@ -569,7 +467,7 @@ def main() -> int:
             min_tests=args.min_tests,
             parallel=parallel,
         )
-        print(f'\n{reason}', file=sys.stderr)
+        _safe_echo(f'\n{reason}\n', sys.stderr)
         exit_code, _test_count, _skipped = _run_coverage(extra)
         return exit_code if exit_code != 0 else 2
 
@@ -600,7 +498,7 @@ def main() -> int:
         parallel=parallel,
     )
     if decision == 'refuse':
-        print(f'\n{reason}', file=sys.stderr)
+        _safe_echo(f'\n{reason}\n', sys.stderr)
         return 0
 
     data = _collect_json()

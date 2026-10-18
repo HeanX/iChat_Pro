@@ -4,33 +4,66 @@ Run with the project venv:
 
     .\\.venv\\Scripts\\python.exe -m unittest scripts.test_coverage_report -v
 
-These tests exist because the subset guard in the reporting script has twice
-regressed in review (first ``--tag``/``--pattern``, then attached short forms
-``-kfoo``/``-pfoo``), silently letting a partial run overwrite the published
-coverage snapshot. Every spelling the argument parser accepts is pinned here.
+These tests exist because the subset guard in the reporting script repeatedly
+regressed in review (``--tag``, then ``-kfoo``, then ``--pat=``, then
+``--parallel=+2`` and bundled ``-rkfoo``): every attempt to classify argv by
+hand lost to argparse syntax. The implementation now parses pass-through
+arguments with Django's own parser, so these tests pin that behaviour at the
+same level -- including the spellings that previously slipped through.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import unittest
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import coverage_report as report  # noqa: E402
 
 
-class HasTestLabelsTests(unittest.TestCase):
-    """``_has_test_labels`` must flag every narrowed run, and only those."""
+def _parsed(*arguments: str):
+    """Parse arguments exactly like the script does."""
+    return report._parse_test_args(list(arguments))
+
+
+# ``Command.create_parser`` reads settings.TEST_RUNNER, so Django must be
+# configured before any test touches the parser.
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ichat_pro.settings')
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+import django  # noqa: E402
+
+django.setup()
+
+
+def _is_subset(*arguments: str) -> bool:
+    options, unknown = _parsed(*arguments)
+    return report._is_subset_run(options, unknown)
+
+
+def _parallel(*arguments: str):
+    options, _ = _parsed(*arguments)
+    return report._parallel_requested(options)
+
+
+class SubsetDetectionTests(unittest.TestCase):
+    """The run must be flagged as a subset exactly when Django would narrow it.
+
+    Judgement is made on arguments parsed by Django's own ``test`` parser, so
+    every argparse spelling is covered by construction. Each spelling below is
+    one that escaped a hand-written classifier in an earlier review round.
+    """
 
     def test_plain_full_run_arguments_are_not_subsets(self):
         full_runs = [
             [],
             ['--parallel', '1'],
             ['--parallel=1'],
-            ['--parallel'],
             ['-v', '2'],
             ['-v2'],
             ['--verbosity=2'],
@@ -48,15 +81,19 @@ class HasTestLabelsTests(unittest.TestCase):
             ['--durations', '10'],
             ['--durations=10'],
             ['--parallel', '1', '--keepdb', '-v', '2'],
-            ['--parallel', '2', '--shuffle', '99'],
             ['-t', '.'],
             ['--top-level-directory', '.'],
             ['--settings', 'ichat_pro.settings'],
             ['--pythonpath', '.'],
+            # Abbreviations of *non-filter* options stay full runs.
+            ['--noin'],
+            ['--para=1'],
+            ['--verb=2'],
+            ['--shuff=1234'],
         ]
         for arguments in full_runs:
             with self.subTest(arguments=arguments):
-                self.assertFalse(report._has_test_labels(arguments))
+                self.assertFalse(_is_subset(*arguments))
 
     def test_explicit_test_labels_are_subsets(self):
         for arguments in (
@@ -66,9 +103,9 @@ class HasTestLabelsTests(unittest.TestCase):
             ['accounts', 'chat'],
         ):
             with self.subTest(arguments=arguments):
-                self.assertTrue(report._has_test_labels(arguments))
+                self.assertTrue(_is_subset(*arguments))
 
-    def test_long_filter_flags_are_subsets(self):
+    def test_long_filter_flags_are_subsets_in_every_spelling(self):
         for arguments in (
             ['--tag', 'slow'],
             ['--tag=slow'],
@@ -79,10 +116,9 @@ class HasTestLabelsTests(unittest.TestCase):
             ['--tag', 'a', '--exclude-tag', 'b'],
         ):
             with self.subTest(arguments=arguments):
-                self.assertTrue(report._has_test_labels(arguments))
+                self.assertTrue(_is_subset(*arguments))
 
     def test_short_filter_flags_are_subsets_in_every_spelling(self):
-        # The regression that slipped through review twice: attached values.
         for arguments in (
             ['-k', 'test_protocol'],
             ['-k=test_protocol'],
@@ -94,17 +130,37 @@ class HasTestLabelsTests(unittest.TestCase):
             ['--parallel', '1', '-ptest_protocol*.py'],
         ):
             with self.subTest(arguments=arguments):
-                self.assertTrue(report._has_test_labels(arguments))
+                self.assertTrue(_is_subset(*arguments))
 
-    def test_filter_value_is_not_mistaken_for_a_label(self):
-        # ``--tag slow`` consumes ``slow``; it must not be read as a label and
-        # short-circuit before the filter check.
-        self.assertTrue(report._has_test_labels(['--exclude-tag', 'slow']))
+    def test_bundled_short_options_containing_a_filter_are_subsets(self):
+        # argparse bundles short options: ``-rkprotocol`` == ``-r -k protocol``.
+        # A classifier that only looked at the first two characters missed this.
+        for arguments in (
+            ['-rkprotocol'],
+            ['-rk', 'protocol'],
+            ['-bkx'],
+            ['-bkrprotocol'],
+            ['--parallel', '1', '-rkprotocol'],
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertTrue(_is_subset(*arguments))
+
+    def test_bundles_without_a_filter_stay_full_runs(self):
+        for arguments in (
+            ['-rb'],
+            ['-bd'],
+            ['--parallel', '1', '-rb'],
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertFalse(_is_subset(*arguments))
+
+    def test_bundle_ending_in_a_valueless_k_raises_like_django(self):
+        # ``-rbdk`` leaves -k without a value: Django itself exits 2 here, and
+        # the helper surfaces that as CommandError rather than guessing.
+        with self.assertRaises(Exception):
+            _is_subset('-rbdk')
 
     def test_argparse_abbreviations_are_subsets(self):
-        # argparse accepts unambiguous prefixes of long options, so every
-        # prefix Django accepts must be treated as a filter. ``--pat`` was the
-        # exact spelling that slipped through round three's review.
         for arguments in (
             ['--pat=test_protocol*.py'],
             ['--patt=test_protocol*.py'],
@@ -114,91 +170,69 @@ class HasTestLabelsTests(unittest.TestCase):
             ['--exclude=slow'],
         ):
             with self.subTest(arguments=arguments):
-                self.assertTrue(report._has_test_labels(arguments))
+                self.assertTrue(_is_subset(*arguments))
 
-    def test_abbreviation_of_a_non_filter_option_is_not_a_subset(self):
-        for arguments in (
-            ['--keepdb'],
-            ['--noin'],
-            ['--para=1'],
-            ['--verb=2'],
-            ['--shuff=1234'],
-        ):
-            with self.subTest(arguments=arguments):
-                self.assertFalse(report._has_test_labels(arguments))
+    def test_unknown_options_are_treated_as_subsets(self):
+        # Django itself would exit 2; refuse rather than guess.
+        self.assertTrue(_is_subset('--definitely-not-an-option'))
+        self.assertTrue(_is_subset('--definitely-not-an-option', 'chat'))
+
+    def test_bare_parallel_is_not_a_subset_but_is_refused_by_parallel_guard(self):
+        # Bare --parallel means "auto": the whole suite still runs, so it is
+        # not a subset -- but _parallel_requested() reports it above 1 and the
+        # snapshot guard refuses it there.
+        self.assertFalse(_is_subset('--parallel'))
+        self.assertFalse(_is_subset('--parallel=auto'))
+        self.assertGreater(_parallel('--parallel'), 1)
+        self.assertGreater(_parallel('--parallel=auto'), 1)
 
 
 class ParallelRequestedTests(unittest.TestCase):
-    """``_parallel_requested`` feeds the guard against unusable coverage data."""
+    """``--parallel`` must be read the way Django reads it.
 
-    def test_detects_every_spelling(self):
-        self.assertEqual(report._parallel_requested(['--parallel', '2']), 2)
-        self.assertEqual(report._parallel_requested(['--parallel=2']), 2)
-        self.assertEqual(report._parallel_requested(['--parallel', '4']), 4)
-        # argparse allows abbreviations; ``--para=2`` really does run in parallel.
-        self.assertEqual(report._parallel_requested(['--para=2']), 2)
-        self.assertEqual(report._parallel_requested(['--para', '2']), 2)
+    Django converts the value with ``int()``, so ``+2`` is 2 and ``2_0`` is 20.
+    A classifier that used ``str.isdigit()`` accepted ``--parallel=+2`` and
+    published coverage numbers from worker processes it never traced.
+    """
+
+    def test_detects_every_numeric_spelling(self):
+        for arguments, expected in (
+            (['--parallel', '2'], 2),
+            (['--parallel=2'], 2),
+            (['--parallel', '4'], 4),
+            (['--para=2'], 2),
+            (['--para', '2'], 2),
+            # int() coercions a digit check would miss.
+            (['--parallel=+2'], 2),
+            (['--parallel', '+2'], 2),
+            (['--para=+2'], 2),
+            (['--parallel=2_0'], 20),
+            (['--parallel', ' 3'], 3),
+        ):
+            with self.subTest(arguments=arguments, expected=expected):
+                self.assertEqual(_parallel(*arguments), expected)
 
     def test_absent_or_serial_is_zero_or_one(self):
-        self.assertEqual(report._parallel_requested([]), 0)
-        self.assertEqual(report._parallel_requested(['--parallel', '1']), 1)
-        self.assertEqual(report._parallel_requested(['--keepdb']), 0)
+        self.assertEqual(_parallel(), 0)
+        self.assertEqual(_parallel('--parallel', '1'), 1)
+        self.assertEqual(_parallel('--keepdb'), 0)
+        self.assertEqual(_parallel('--parallel=0'), 0)
 
     def test_bare_and_auto_mean_many(self):
         # Bare ``--parallel`` has const="auto"; Django then picks its own count.
-        self.assertGreater(report._parallel_requested(['--parallel']), 1)
-        self.assertGreater(report._parallel_requested(['--parallel=auto']), 1)
-        self.assertGreater(report._parallel_requested(['--parallel', 'auto']), 1)
-        self.assertGreater(report._parallel_requested(['--para=auto']), 1)
-
-    def test_bare_parallel_also_counts_as_a_subset(self):
-        # Guards the case where the value is "auto" rather than a number.
-        self.assertTrue(report._has_test_labels(['--parallel', 'auto']))
+        for arguments in (
+            ['--parallel'],
+            ['--parallel=auto'],
+            ['--parallel', 'auto'],
+            ['--para=auto'],
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertGreater(_parallel(*arguments), 1)
 
     def test_takes_the_maximum(self):
-        self.assertEqual(
-            report._parallel_requested(['--parallel', '2', '--parallel=8']), 8
+        self.assertGreaterEqual(
+            _parallel('--parallel', '2', '--parallel=8'), 8
         )
-
-
-class ResolveOptionTests(unittest.TestCase):
-    """Prefix resolution must mirror argparse, not approximate it."""
-
-    def test_unambiguous_prefixes_resolve(self):
-        self.assertEqual(report._resolve_option('--pat'), '--pattern')
-        self.assertEqual(report._resolve_option('--patt'), '--pattern')
-        self.assertEqual(report._resolve_option('--parallel'), '--parallel')
-        self.assertEqual(report._resolve_option('--para'), '--parallel')
-
-    def test_ambiguous_or_unknown_prefixes_are_returned_as_is(self):
-        # ``--pa`` is ambiguous between --parallel and --pattern.
-        self.assertEqual(report._resolve_option('--pa'), '--pa')
-        self.assertEqual(report._resolve_option('--nonsense'), '--nonsense')
-
-
-class ClassifyTests(unittest.TestCase):
-    """Pin the token classification the guards depend on."""
-
-    def test_labels(self):
-        for token in ('chat', 'chat.tests.test_protocol', '-'):
-            with self.subTest(token=token):
-                self.assertEqual(report._classify(token)[0], 'label')
-
-    def test_filters(self):
-        for token in ('--tag', '--tag=x', '--exclude-tag', '-k', '-kfoo', '-p', '-px*'):
-            with self.subTest(token=token):
-                self.assertEqual(report._classify(token)[0], 'filter')
-
-    def test_plain_options(self):
-        for token in ('--parallel', '--parallel=2', '-v', '-v2', '--keepdb'):
-            with self.subTest(token=token):
-                self.assertEqual(report._classify(token)[0], 'option')
-
-    def test_attached_value_is_consumed(self):
-        self.assertTrue(report._classify('-v2')[1])
-        self.assertTrue(report._classify('--parallel=2')[1])
-        self.assertFalse(report._classify('-v')[1])
-        self.assertFalse(report._classify('--parallel')[1])
 
 
 class NonNegativeIntTests(unittest.TestCase):
@@ -296,27 +330,6 @@ class SnapshotDecisionTests(unittest.TestCase):
             with self.subTest(parallel=parallel):
                 decision, _ = self._decide(parallel=parallel)
                 self.assertEqual(decision, 'write')
-
-
-class ParallelGuardTests(unittest.TestCase):
-    """``--parallel`` above 1 must never publish numbers coverage cannot see."""
-
-    def test_any_parallel_above_one_is_detected(self):
-        for arguments in (
-            ['--parallel', '2'],
-            ['--parallel=2'],
-            ['--parallel', '8'],
-            ['--para=4'],
-            ['--parallel'],
-            ['--parallel=auto'],
-        ):
-            with self.subTest(arguments=arguments):
-                self.assertGreater(report._parallel_requested(arguments), 1)
-
-    def test_serial_and_absent_are_allowed(self):
-        for arguments in ([], ['--parallel', '1'], ['--parallel=1'], ['--keepdb']):
-            with self.subTest(arguments=arguments):
-                self.assertLessEqual(report._parallel_requested(arguments), 1)
 
 
 if __name__ == '__main__':

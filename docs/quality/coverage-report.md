@@ -1,8 +1,8 @@
 # 覆盖率报告（P4 Test T12 / #193）
 
 > 本文件由 `scripts/coverage_report.py` 生成，**不要手工编辑**。
-> 生成时间：2026-10-18T03:01:12Z
-> 代码版本：`42e4ad699469`（被测代码所在提交；本报告随其后的提交一并入库，两者 accounts/chat/ichat_pro 代码一致）
+> 生成时间：2026-10-18T04:18:46Z
+> 代码版本：`0865f6f02383`（被测代码所在提交；本报告随其后的提交一并入库，两者 accounts/chat/ichat_pro 代码一致）
 > 环境：Python 3.13.12 / Django 6.0.5 / coverage 7.16.2 / DB `sqlite3`
 > 用例数：404（skip 2）
 > 测试命令：`python -m coverage run manage.py test --parallel 1`

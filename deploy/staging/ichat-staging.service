@@ -3,9 +3,10 @@ Description=iChat Pro ASGI (Daphne) - STAGING (P4 T49)
 After=network-online.target postgresql.service redis6.service
 Wants=network-online.target
 
-# Staging twin of ichat.service: own user, own tree, own port (8444 loopback),
-# own media volume. Never run both units with the same values — the isolation
-# check (deploy/staging/check_isolation.sh) asserts they differ.
+# Staging twin of ichat.service: own user, own tree, own loopback port (8001;
+# nginx exposes staging on 8444), own media volume. Never run both units with
+# the same values — the isolation check (deploy/staging/check_isolation.sh)
+# asserts they differ.
 
 [Service]
 Type=exec

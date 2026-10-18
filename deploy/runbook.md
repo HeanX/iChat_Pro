@@ -140,7 +140,7 @@ sudo ICHAT_APP_DIR=/opt/ichat-staging ICHAT_MEDIA_DIR=/var/lib/ichat-staging/med
 sudo deploy/staging/check_isolation.sh --check-data
 ```
 
-它逐项断言：SECRET_KEY/DATABASE_URL/CSRF origin 与生产不同、staging 库名为 `ichat_staging`、Redis 逻辑库不同、media/static 路径互不嵌套、代码树/服务单元/端口不同、（`--check-data` 时）活库与 Redis 实例隔离。任一违反即 exit 1 并列出违规项；秘密值只以 SHA-256 前缀形式出现，绝不明文打印。
+它逐项断言：SECRET_KEY/DATABASE_URL/CSRF origin 与生产不同、staging 库名（从 URL path 解析）为 `ichat_staging`、Redis 逻辑库不同、media/static 路径互不嵌套（先做 `/`/`..` 规范化，尾斜杠与相对跳转绕不过）、代码树/服务单元/服务用户不同、daphne 端口非 8000（unit 找不到时报 "port UNVERIFIED" 而非静默通过）、（`--check-data` 时）活库与 Redis 实例隔离。任何 key 缺失都会报告而不是静默中断；秘密值只以 SHA-256 前缀形式出现，绝不明文打印。
 
 staging 的发布走同一条 deploy.sh（审批门禁可用 `ICHAT_REQUIRE_APPROVAL=0`，因为 staging 本身就是审批前验证环节），冒烟门禁照常运行（staging 有自己的 `SMOKE_USERNAME/SMOKE_PASSWORD`）。
 ## 4. 备份与恢复（T13）

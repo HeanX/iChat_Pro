@@ -29,12 +29,56 @@ Evidence for the docs/testing/p4-test-t13-*.md table.
 """
 
 import hashlib
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PYTHON = sys.executable
+
+# Pin the repo venv. Running this under PATH's bare `python` (3.13.1 +
+# Django 2.2.4) makes every run crash on import, and a naive "non-zero exit
+# means CAUGHT" rule would then report every mutation as caught. The venv is
+# a hard requirement, not a preference.
+#
+# Worktrees have no .venv of their own, so the main checkout's interpreter is
+# accepted as a fallback: it is the same interpreter the suite is documented
+# against, and it is verified by requiring the run to actually execute tests
+# (see the `ran` check below) rather than by path alone.
+_CANDIDATES = [
+    REPO_ROOT / ".venv" / "Scripts" / "python.exe",
+    REPO_ROOT / ".venv" / "bin" / "python",
+]
+_env = os.environ.get("ICHAT_VENV_PYTHON", "").strip()
+if _env:
+    _CANDIDATES.append(Path(_env))
+# A git worktree has no .venv of its own (it is untracked); fall back to the
+# main checkout the worktree was created from, when it is a sibling.
+if REPO_ROOT.name.startswith("wt-"):
+    _main = REPO_ROOT.parent.parent
+    _CANDIDATES.append(_main / ".venv" / "Scripts" / "python.exe")
+    _CANDIDATES.append(_main / ".venv" / "bin" / "python")
+PYTHON = next((str(p) for p in _CANDIDATES if p.exists()), None)
+if not PYTHON:
+    sys.exit(
+        "t13_mutation_probe: no trusted interpreter found. Use the repository "
+        ".venv (or set ICHAT_VENV_PYTHON to its python.exe). Bare PATH python "
+        "(3.13.1 + Django 2.2.4) breaks imports and would fake results."
+    )
+
+# Belt and braces: the chosen interpreter must report Django 6.x. This stops
+# a PATH straggler that merely happens to be called python(.exe) from
+# producing a run where every mutation "fails" on an import error.
+_check = subprocess.run(
+    [PYTHON, "-c", "import django; print(django.get_version())"],
+    capture_output=True, text=True, timeout=60,
+)
+_version = (_check.stdout or "").strip()
+if _check.returncode != 0 or not _version.startswith("6."):
+    sys.exit(
+        f"t13_mutation_probe: {PYTHON} reports django {_version or '<import error>'}; "
+        "the probe requires the repository venv (Django 6.x)."
+    )
 
 SUITE = "chat.tests.test_http_ws_integration"
 
@@ -173,11 +217,23 @@ def main():
             path.write_bytes(original)
 
         restored = _digest(path) == before
-        verdict = "CAUGHT" if code != 0 else "SURVIVED"
+
+        # Distinguish "the suite went red" from "the run blew up for an
+        # unrelated reason" (bad env, collection error, ...). Only a run that
+        # actually executed tests and reported FAILED counts as caught; an
+        # exit code without a FAILED line is an environment error.
+        failed = any(line.startswith("FAILED") for line in tail)
+        ran = any(line.startswith("Ran ") for line in tail)
+        if failed and ran:
+            verdict = "CAUGHT"
+        elif ran and code == 0:
+            verdict = "SURVIVED"
+        else:
+            verdict = "ERROR"
         print(f"[{mutation['id']}] {verdict:<8} restored={restored}  {mutation['why']}")
         for line in tail:
             print(f"        {line}")
-        if code == 0 or not restored:
+        if verdict != "CAUGHT" or not restored:
             survivors.append(mutation["id"])
 
     print()

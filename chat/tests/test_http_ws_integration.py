@@ -23,7 +23,7 @@ correct — see ``test_file_unavailable_status_mismatch_is_still_open``.
 
 Case index
 ----------
-64 test methods. Every id below maps to exactly one method named
+79 test methods. Every id below maps to exactly one method named
 ``test_<id lowercased>_...``; the same table is mirrored in
 ``docs/testing/p4-test-t13-http-ws-integration.md``. The ``-02`` id in some
 families is intentionally absent — it lives in an existing suite and is
@@ -47,7 +47,7 @@ Private send (HTTP) — 16
   HTTP-PRIV-15  GET on the send endpoint -> 405
   HTTP-PRIV-16  unauthenticated -> 401 authentication_required (JSON)
 
-Group send (HTTP) — 9
+Group send (HTTP) — 10
   HTTP-GRP-01   success: per-recipient copies + 201
   HTTP-GRP-02   recipients_mismatch -> 409
   HTTP-GRP-03   duplicated receiver -> 400 invalid_payload
@@ -57,6 +57,7 @@ Group send (HTTP) — 9
   HTTP-GRP-07   member cap boundary: 50 members OK
   HTTP-GRP-08   member cap boundary: 51 members -> 400 group_too_large
   HTTP-GRP-09   越权 non-member -> 403 conversation_forbidden
+  HTTP-GRP-10   replay is a zero-write op: no rows, unread, sequence or event
 
 Sync catch-up (HTTP) — 6
   HTTP-SYNC-01  non-integer limit -> 400 invalid_payload
@@ -75,7 +76,17 @@ Recall / status / delete (HTTP) — 7
   HTTP-MSG-01   status endpoint visible to both participants
   HTTP-DEL-01   per-user delete only affects the caller
 
-File API — 11
+Group branch of recall / status / delete (HTTP) — 8
+  HTTP-GOPS-01  owner recalls a group message, per-recipient copies flip
+  HTTP-GOPS-02  second group recall -> 409
+  HTTP-GOPS-03  越权 non-sender -> 403, status unchanged
+  HTTP-GOPS-04  group recall after the window -> 400
+  HTTP-GOPS-05  status lists every recipient with its status
+  HTTP-GOPS-06  status visible to a plain member
+  HTTP-GOPS-07  delete recorded as a GROUP deletion, row survives
+  HTTP-GOPS-08  message id from another group -> 404
+
+File API — 14
   HTTP-FILE-01  upload session: missing metadata -> 400
   HTTP-FILE-02  upload session: over the per-kind size limit -> 400 file_too_large
   HTTP-FILE-03  越权 upload into a conversation you are not in -> 403
@@ -86,8 +97,10 @@ File API — 11
   HTTP-FILE-08  deleted file -> 410 (KNOWN DEVIATION vs registry 409)
   HTTP-FILE-09  send_file_message: message_kind mismatch -> 400
   HTTP-FILE-10  send_file_message: unknown file -> 404 file_not_found
-  HTTP-FILE-11  pins the 409-vs-410 drift so it cannot change silently
-
+  HTTP-FILE-11  unified service path -> 400 registered file_type_mismatch
+  HTTP-FILE-12  both file_forbidden guards (shared helper + metadata view)
+  HTTP-FILE-12b shared helper guard pinned through the download path
+  HTTP-FILE-13  pins the 409-vs-410 drift so it cannot change silently
 WebSocket envelope — 5
   WS-ENV-01     server envelope carries protocol_version/event/request_id/sent_at
   WS-ENV-03     unknown event -> 501 not_implemented
@@ -101,7 +114,7 @@ WebSocket receipts — 3
   WS-RCP-02     receipt with an invalid status -> invalid_payload
   WS-RCP-03     read receipt zeroes unread, sender is notified
 
-WebSocket recall — 4
+WebSocket recall (single) — 4
   WS-RCL-01     message.recall by sender -> message.recalled
   WS-RCL-02     message.recall twice -> already_recalled
   WS-RCL-03     message.recall after the window -> recall_timeout
@@ -111,6 +124,11 @@ WebSocket typing — 3
   WS-TYP-01     typing.start / typing.stop acks and peer indicator
   WS-TYP-02     typing without conversation_id -> invalid_payload
   WS-TYP-03     越权 typing in a foreign conversation -> conversation_forbidden
+
+WebSocket group recall — 3
+  WS-GOPS-01    sender recalls a group message over WS, copies flip
+  WS-GOPS-02    越权 group recall by non-sender -> message_not_found
+  WS-GOPS-03    recall frame reaches the other members
 """
 
 import base64
@@ -544,6 +562,34 @@ class GroupSendHttpTests(MessagingHttpBase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["error"], "conversation_forbidden")
 
+    def test_grp_10_replay_is_a_zero_write_operation(self):
+        """Group replay must not re-create rows, re-count unread or re-sequence."""
+        payload = _group_payload(self.group.pk, self.group_member_ids(), "grp-10")
+        first = self.post_group(payload)
+        self.assertEqual(first.status_code, 201, first.content)
+        message_id = first.json()["message_id"]
+        unread_before = ConversationMember.objects.get(
+            conversation=self.group, user=self.bob,
+        ).unread_count
+        self.group.refresh_from_db()
+        sequence_before = self.group.sync_sequence
+        self.assertEqual(sequence_before, 1)
+
+        second = self.post_group(payload)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertFalse(second.json()["created"])
+        self.assertEqual(second.json()["message_id"], message_id)
+
+        self.assertEqual(GroupMessage.objects.filter(client_message_id="grp-10").count(), 1)
+        self.assertEqual(GroupMessageRecipient.objects.filter(group_message_id=message_id).count(), 2)
+        self.assertEqual(
+            ConversationMember.objects.get(conversation=self.group, user=self.bob).unread_count,
+            unread_before,
+        )
+        self.group.refresh_from_db()
+        self.assertEqual(self.group.sync_sequence, sequence_before)
+        self.assertEqual(ConversationEvent.objects.filter(conversation=self.group).count(), 1)
+
     def _group_with_members(self, total):
         """Owner is alice; fill up to *total* active members with fresh users."""
         group = Conversation.objects.create(
@@ -724,7 +770,121 @@ class RecallAndDeleteHttpTests(MessagingHttpBase):
         self.assertTrue(EncryptedMessage.objects.filter(pk=self.message_id).exists())
 
 
-# ── File API (HTTP) ──────────────────────────────────────────────────────
+class GroupMessageOpsHttpTests(MessagingHttpBase):
+    """HTTP-GOPS-* — the GROUP branch of recall / status / delete.
+
+    These three endpoints branch on ``conversation.type``. Until T13 only the
+    private branch was covered, so the whole group branch could be made
+    unreachable (``elif False:``) with the entire suite still green. Each test
+    below is written so that deleting the group branch fails it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client_a = self.client_for(self.alice)
+        payload = _group_payload(self.group.pk, self.group_member_ids(), "gops-1")
+        response = self.post_group(payload)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.message_id = response.json()["message_id"]
+
+    def _recipient(self, user):
+        return GroupMessageRecipient.objects.get(
+            group_message_id=self.message_id, receiver=user,
+        )
+
+    def test_gops_01_owner_can_recall_a_group_message(self):
+        response = self.client_a.post(
+            RECALL_URL.format(cid=self.group.pk, mid=self.message_id)
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["status"], "recalled")
+
+        group_message = GroupMessage.objects.get(pk=self.message_id)
+        self.assertEqual(group_message.status, GroupMessage.Status.RECALLED)
+        self.assertIsNotNone(group_message.recalled_at)
+        # Every per-recipient copy is recalled too (the group-only side effect
+        # that has no private equivalent).
+        statuses = set(
+            GroupMessageRecipient.objects.filter(group_message_id=self.message_id)
+            .values_list("status", flat=True)
+        )
+        self.assertEqual(statuses, {GroupMessageRecipient.Status.RECALLED})
+
+    def test_gops_02_second_group_recall_is_a_conflict(self):
+        self.client_a.post(RECALL_URL.format(cid=self.group.pk, mid=self.message_id))
+        second = self.client_a.post(RECALL_URL.format(cid=self.group.pk, mid=self.message_id))
+        self.assertEqual(second.status_code, 409)
+
+    def test_gops_03_group_recall_by_non_sender_is_forbidden(self):
+        response = self.client_for(self.bob).post(
+            RECALL_URL.format(cid=self.group.pk, mid=self.message_id)
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            GroupMessage.objects.get(pk=self.message_id).status, GroupMessage.Status.ACTIVE,
+        )
+
+    def test_gops_04_group_recall_after_the_window_fails(self):
+        from django.utils import timezone as dj_timezone
+
+        GroupMessage.objects.filter(pk=self.message_id).update(
+            created_at=dj_timezone.now() - dj_timezone.timedelta(minutes=31)
+        )
+        response = self.client_a.post(
+            RECALL_URL.format(cid=self.group.pk, mid=self.message_id)
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Recall time limit exceeded", response.json()["error"])
+
+    def test_gops_05_group_status_lists_every_recipient(self):
+        response = self.client_a.get(
+            STATUS_URL.format(cid=self.group.pk, mid=self.message_id)
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["conversation_type"], "group")
+        self.assertEqual(body["message_id"], self.message_id)
+        self.assertEqual(body["status"], GroupMessage.Status.ACTIVE)
+        self.assertEqual(
+            {r["user_id"] for r in body["recipients"]},
+            {self.alice.pk, self.bob.pk},
+        )
+        self.assertTrue(all(r["status"] for r in body["recipients"]))
+
+    def test_gops_06_group_status_is_visible_to_a_plain_member(self):
+        response = self.client_for(self.bob).get(
+            STATUS_URL.format(cid=self.group.pk, mid=self.message_id)
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["conversation_type"], "group")
+
+    def test_gops_07_group_delete_is_recorded_as_a_group_deletion(self):
+        response = self.client_for(self.bob).delete(
+            DELETE_URL.format(cid=self.group.pk, mid=self.message_id)
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(
+            UserMessageDeletion.objects.filter(
+                user=self.bob, message_id=self.message_id,
+                message_type=UserMessageDeletion.MessageType.GROUP,
+            ).exists()
+        )
+        # The shared row survives; only Bob's view changes.
+        self.assertTrue(GroupMessage.objects.filter(pk=self.message_id).exists())
+
+    def test_gops_08_group_message_not_found_in_this_conversation(self):
+        other_group = Conversation.objects.create(
+            type=Conversation.Type.GROUP, name="gops-other", created_by=self.alice,
+            membership_version=1,
+        )
+        ConversationMember.objects.create(
+            conversation=other_group, user=self.alice, role=ConversationMember.Role.OWNER,
+        )
+        response = self.client_a.get(
+            STATUS_URL.format(cid=other_group.pk, mid=self.message_id)
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 class FileApiHttpTests(MessagingHttpBase):
@@ -901,19 +1061,37 @@ class FileApiHttpTests(MessagingHttpBase):
         self.assertFalse(EncryptedMessage.objects.filter(client_message_id="t13-reg-kind-1").exists())
 
     def test_file_12_non_holder_cannot_read_metadata_without_a_key(self):
-        """Second `file_forbidden` guard: the caller may reach the record but
-        holds no wrapped key (``get_file_metadata_view``'s own check)."""
+        """Both `file_forbidden` guards, not just one of them.
+
+        Guard A lives in the shared ``_get_encrypted_file_or_error`` helper
+        (non-holder without a key row); guard B is ``get_file_metadata_view``'s
+        own key check (a user who passes the helper but has no key row). The
+        reviewer showed that deleting guard A left the suite green, so both
+        halves are asserted here.
+        """
         ef = self.create_available_file(client_file_id="t13-noKey2")
-        # carol is not the owner and has no key -> rejected by the shared
-        # helper; give her nothing so the guard under test is the one hit.
+
+        # Guard A: carol is neither the owner nor a key holder.
         response = self.client_for(self.carol).get(f"/api/files/{ef.pk}/")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["error"], "file_forbidden")
 
-        # The owner passes the helper but the metadata view still requires a
-        # file key row, so an owner whose key row is missing is refused too.
+        # Guard B: the owner passes the helper, but without a key row the
+        # metadata view must still refuse.
         EncryptedFileKey.objects.all().delete()
         response = self.client_for(self.alice).get(f"/api/files/{ef.pk}/")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "file_forbidden")
+
+    def test_file_12b_shared_helper_rejects_a_keyless_member_for_download(self):
+        """Pins guard A through the *download* path as well.
+
+        If the shared helper's final ``file_forbidden`` return is replaced by
+        a success value, this case fails because carol would then reach the
+        storage check instead of being refused outright.
+        """
+        ef = self.create_available_file(client_file_id="t13-noKey3")
+        response = self.client_for(self.carol).get(f"/api/files/{ef.pk}/download/")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["error"], "file_forbidden")
 
@@ -1279,3 +1457,99 @@ class WsTypingTests(MessagingWsBase):
             await comm.disconnect()
 
         async_to_sync(run)()
+
+
+class WsGroupRecallTests(MessagingWsBase):
+    """WS-GOPS-* — `message.recall` with conversation_type=group."""
+
+    def setUp(self):
+        super().setUp()
+        member_ids = [self.alice.pk, self.bob.pk]
+        self.payload = _group_payload(
+            self.group.pk, member_ids, "wsg-1", membership_version=1,
+        )
+        Conversation.objects.filter(pk=self.group.pk).update(membership_version=1)
+
+    async def send_group_message(self, comm):
+        await comm.send_json_to({
+            "event": "message.group.send", "request_id": "wsg-send", "data": self.payload,
+        })
+        accepted = await comm.receive_json_from()
+        self.assertEqual(accepted["event"], "message.group.accepted")
+        # The sender is also an active member, so it receives its own
+        # `message.group.new` push; drain it before asserting on the recall.
+        pushed = await comm.receive_json_from()
+        self.assertEqual(pushed["event"], "message.group.new")
+        return accepted["data"]["message_id"]
+
+    def test_gops_ws_01_recall_group_message_over_websocket(self):
+        async def run():
+            comm = await self.connect(self.alice)
+            message_id = await self.send_group_message(comm)
+            await comm.send_json_to({
+                "event": "message.recall", "request_id": "wsg-1",
+                "data": {"conversation_type": "group", "message_id": message_id},
+            })
+            recalled = await comm.receive_json_from()
+            self.assertEqual(recalled["event"], "message.recalled")
+            self.assertEqual(recalled["data"]["conversation_type"], "group")
+            self.assertEqual(recalled["data"]["message_id"], message_id)
+            statuses = await database_sync_to_async(
+                lambda: set(
+                    GroupMessageRecipient.objects.filter(group_message_id=message_id)
+                    .values_list("status", flat=True)
+                )
+            )()
+            self.assertEqual(statuses, {GroupMessageRecipient.Status.RECALLED})
+            await comm.disconnect()
+
+        async_to_sync(run)()
+
+    def test_gops_ws_02_group_recall_by_non_sender_reports_not_found(self):
+        async def run():
+            sender = await self.connect(self.alice)
+            message_id = await self.send_group_message(sender)
+            other = await self.connect(self.bob)
+            await other.send_json_to({
+                "event": "message.recall", "request_id": "wsg-2",
+                "data": {"conversation_type": "group", "message_id": message_id},
+            })
+            error = await other.receive_json_from()
+            self.assertEqual(error["event"], "error")
+            self.assertEqual(error["data"]["code"], "message_not_found")
+            await sender.disconnect()
+            await other.disconnect()
+
+        async_to_sync(run)()
+
+    def test_gops_ws_03_group_recall_reaches_other_members(self):
+        async def run():
+            sender = await self.connect(self.alice)
+            receiver = await self.connect(self.bob)
+            message_id = await self.send_group_message(sender)
+            # bob already consumed its `message.group.new` inside the helper.
+
+            await sender.send_json_to({
+                "event": "message.recall", "request_id": "wsg-3",
+                "data": {"conversation_type": "group", "message_id": message_id},
+            })
+            ack = await sender.receive_json_from()
+            self.assertEqual(ack["event"], "message.recalled")
+
+            # bob was connected before the send, so its own new-message push
+            # queues ahead of the recall frame; drain it first.
+            new_msg = await receiver.receive_json_from()
+            self.assertEqual(new_msg["event"], "message.group.new")
+            self.assertEqual(new_msg["data"]["message_id"], message_id)
+
+            pushed = await receiver.receive_json_from()
+            self.assertEqual(pushed["event"], "message.recalled")
+            self.assertEqual(pushed["data"]["conversation_type"], "group")
+            self.assertEqual(pushed["data"]["message_id"], message_id)
+            await sender.disconnect()
+            await receiver.disconnect()
+
+        async_to_sync(run)()
+
+
+# ── File API (HTTP) ──────────────────────────────────────────────────────

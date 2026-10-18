@@ -18,7 +18,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P4 T01 | WP00 | 确认新旧需求边界和需求编号 | 需求规格说明书 V2.0 | 全员评审，新需求与继承功能明确区分 | P0 | 无 | 已完成（[Issue #128](https://github.com/HeanX/iChat_Pro/issues/128)）） |
 | P4 T02 | WP00 | 建立 Git 工作流和任务模板 | 分支、提交、PR、Issue 规范 | 提交和缺陷可关联任务编号 | P0 | P4 T01 | 已完成（[Issue #129](https://github.com/HeanX/iChat_Pro/issues/129)）） |
-| P4 T03 | WP00 | 制定迭代计划和风险清单 | 里程碑、风险登记表 | 范围、负责人、时间和降级方案明确 | P1 | P4 T01 | 未完成（[Issue #130](https://github.com/HeanX/iChat_Pro/issues/130) 开放）；部分产出：风险清单与里程碑已有；负责人、时间及降级方案待完整验收 |
+| P4 T03 | WP00 | 制定迭代计划和风险清单 | 里程碑、风险登记表 | 范围、负责人、时间和降级方案明确 | P1 | P4 T01 | 产出已就绪（[Issue #130](https://github.com/HeanX/iChat_Pro/issues/130) 开放）；新增 [iteration-plan.md](iteration-plan.md)：4 个迭代划分范围、模块负责人表与升级路径、6 周排期（W1-W6）、6 项降级方案与 5 项过程风险（PR-01～05）；技术风险见 risk-register.md。待非作者评审后可关 |
 | P4 T04 | WP01 | 设计云端部署架构 | 架构图、端口和数据流说明 | Web、ASGI、PostgreSQL、Redis、存储边界明确 | P0 | P4 T01 | 已完成（[Issue #131](https://github.com/HeanX/iChat_Pro/issues/131)）；2026-10-01 |
 | P4 T05 | WP01 | 准备云服务器和域名 | 服务器、DNS 和防火墙配置 | 公网域名可解析，只有必要端口开放 | P0 | P4 T04 | 已完成（[Issue #132](https://github.com/HeanX/iChat_Pro/issues/132)）；2026-10-01 公网取证 |
 | P4 T06 | WP01 | 配置 Nginx、HTTPS 和 WSS | TLS 与反向代理配置 | HTTP 跳转 HTTPS，WebSocket 正常升级 | P0 | P4 T05 | 已完成（[Issue #133](https://github.com/HeanX/iChat_Pro/issues/133)）；续期 reload hook 已实测 |

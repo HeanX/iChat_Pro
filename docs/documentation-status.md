@@ -78,6 +78,7 @@
 | [docs/phase4/protocol.md](phase4/protocol.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/requirements.md](phase4/requirements.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/risk-register.md](phase4/risk-register.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/iteration-plan.md](phase4/iteration-plan.md) | 计划/专题；更新迭代范围、负责人、排期或降级方案 |
 | [docs/phase4/t20-late-ack-validation.md](phase4/t20-late-ack-validation.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/tasks.md](phase4/tasks.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |
 | [docs/phase4/technical-design.md](phase4/technical-design.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |

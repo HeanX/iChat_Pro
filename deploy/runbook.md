@@ -7,6 +7,8 @@
 
 2026-10-18（#204 / P4 Test T23）：发布流程在 readiness 之后加了一道**冒烟门禁** `deploy/smoke.sh`，覆盖登录、CSRF、会话与核心 API；失败不写 `DEPLOYMENTS.log` 且 deploy 退出非零。新增第 7 节说明冒烟账号策略与前置条件。该门禁目前只在本地 SQLite + Django live server 下验证过（19 条用例，其中 6 条锚定 deploy.sh 的日志语义），**未在生产验证**。
 
+2026-10-18（#139 / P4 T12）：新增 `deploy/monitor.sh`（readiness 连续失败/PG 磁盘与连接数/Redis 内存/证书余期/journal 错误，webhook 告警带限频），见第 3b 节；14 条用例在本地通过。**未在生产验证**。
+
 2026-10-18（#177 / P4 T50）：发布加入**审批门禁**与**审计记录**。`DEPLOYMENTS.log` 由旧的 4 字段格式升级为结构化单行（`ts/sha/target/kind/actor/via/from/smoke/approval`），新增 `--status` 查询与 `/opt/ichat/.deploy-state` 状态目录。旧日志行仍是原样前缀，但字段不再对齐——解析旧行请按空格切分取前 4 段。43 条用例覆盖审计字段、审批语义、注入防护与状态跟踪，**未在生产验证**。
 
 现行生产入口 chat.20060810.xyz:8443；代码与部署基线 f2f60ec，最后核对 DEPLOYMENTS.log 为 2026-10-07T13:42:16Z。live/ready/login HTTPS 200，readiness 自动检查 DB+cache JSON，登录/核心接口冒烟失败阻断已实现代码（#204 待真实环境证据）；监控告警（#139）和完整发布审批（#177）仍待验收。服务器 SHA、GitHub main 和安装包 SHA 分别记录，回滚不自动降级数据库。
@@ -69,6 +71,30 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 - **查看发布记录**：`sudo /opt/ichat/bin/deploy.sh --status`（最近 5 条 + 最后一条成功发布的 SHA，后者才是权威的"在跑什么"）；`--status --verbose` 显示完整字段（默认视图隐藏 `via=`/`from=` 以保持可读）。行数可用 `ICHAT_STATUS_LINES` 调整。
 - **回滚应用**：`sudo /opt/ichat/bin/deploy.sh --commit <上一个SHA>`（**必须是完整 40 位 SHA**；传分支名/短 ref 会被拒绝，因为那是伪装成回滚的前向发布）——checkout 到指定 commit 并**停在该版本**（不会重置回 origin/main），探针通过后记为 `kind=rollback`。恢复新版本：重跑 `deploy.sh`（不带 --commit，仍需审批）。`/opt/ichat/.deploy-state/{current,previous}` 另外记住当前与上一个 SHA。**数据库不自动降级**；不可逆迁移的恢复走备份（第 4 节）。
 - 失败排查：`journalctl -u ichat -n 100`、`tail -50 /var/log/nginx/ichat.error.log`、冒烟失败项见 deploy 输出。
+
+## 3b. 监控告警（T12 / #139）
+
+`deploy/monitor.sh` 以只读方式巡检验收标准点名的四类状态，**不重启任何服务、不碰 443/2096/25383、不读聊天数据**：
+
+| 检查 | 触发条件（默认阈值） | 告警 key |
+| --- | --- | --- |
+| 服务 | `/health/ready/` 连续 3 次失败（单次失败只计数，发布重启不会误报） | `ready` |
+| 资源 | PG 数据盘使用率 ≥ 85%；PG 连接数 ≥ 40 | `disk` / `pg-conn` |
+| 资源 | Redis `used_memory` ≥ 512MB | `redis-mem` |
+| 证书 | TLS 证书剩余有效期 < 14 天（说明 `certbot renew` 已静默失败） | `cert` |
+| 错误 | `journalctl -u ichat -p err` 最近 10 分钟 ≥ 10 条 | `journal` |
+
+安装（root crontab，5 分钟一轮）：
+
+```cron
+*/5 * * * * /opt/ichat/repo/deploy/monitor.sh >> /var/log/ichat-monitor.log 2>&1
+```
+
+配置（写入 `/opt/ichat/.env`）：`ICHAT_ALERT_WEBHOOK`（Slack/Discord/通用 webhook，缺省时只进 syslog 与 stderr，不算告警通道）；`ICHAT_ALERT_MIN_SECS=1800`（同一 key 限频，防告警风暴）；上表阈值均可覆盖（`ICHAT_DISK_PCT`/`ICHAT_PG_MAX_CONN`/`ICHAT_REDIS_MAX_MB`/`ICHAT_READY_MAX_FAILS`/`ICHAT_CERT_MIN_DAYS`）。
+
+自检：`ICHAT_ALERT_TEST=1 /opt/ichat/repo/deploy/monitor.sh` 发一条测试告警，用于验证 webhook 连通。
+
+说明：证书检查**不跑** `certbot renew --dry-run`（它请求 LE staging 且有速率限制），而是读已装证书的 `notAfter`——若余额跌破 14 天，说明续期链路已静默失败，告警里会指向 letsencrypt 日志。状态计数在 `/var/lib/ichat/monitor`，"连续失败"跨 cron 轮次累计。
 
 ## 4. 备份与恢复（T13）
 

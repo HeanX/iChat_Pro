@@ -131,7 +131,9 @@ test('chunks are appended in order and the declared total is enforced', () => {
     /too_large/, 'declared_total');
   assert.deepEqual(fs.readFileSync(target), Buffer.from([0, 0, 0, 0, 0]));
 
-  assert.deepEqual(api.sealGrant({ token: grant.token, senderId: 1 }), { fileName: 'ordered.bin', bytes: 5 });
+  // Round 5 (F5): the reported name is the file the user actually chose.
+  assert.deepEqual(api.sealGrant({ token: grant.token, senderId: 1 }),
+    { fileName: path.basename(target), bytes: 5 });
   assert.throws(() => api.writeChunk({ token: grant.token, senderId: 1, offset: 5, dataBase64: 'AA==' }),
     /already_sealed/);
 });
@@ -259,7 +261,8 @@ test('sealing refuses a short file and opening requires a finished download', ()
   const empty = api.createSaveGrant({ fileName: 'empty.txt', totalBytes: 0, senderId: 1, filePath: emptyPath });
   assert.throws(() => api.writeChunk({ token: empty.token, senderId: 1, offset: 0, dataBase64: 'AAA=' }),
     /too_large/, 'declared_total');
-  assert.deepEqual(api.sealGrant({ token: empty.token, senderId: 1 }), { fileName: 'empty.txt', bytes: 0 });
+  assert.deepEqual(api.sealGrant({ token: empty.token, senderId: 1 }),
+    { fileName: path.basename(emptyPath), bytes: 0 });
   assert.equal(fs.statSync(emptyPath).size, 0);
 });
 
@@ -480,7 +483,9 @@ test('a trusted save request reaches the dialog with the sanitised default name'
     fileName: '..\\..\\invoice.pdf', totalBytes: 5,
   })).value;
   assert.equal(result.canceled, false);
-  assert.equal(result.fileName, 'invoice.pdf');
+  // Round 5 (F5): the dialog default was invoice.pdf, the user confirmed a
+  // different path - the reported name follows what is actually on disk.
+  assert.equal(result.fileName, path.basename(target));
   assert.equal(typeof result.token, 'string');
   assert.equal(h.dialogs.length, 1);
   assert.equal(path.dirname(h.dialogs[0].defaultPath).toLowerCase(), DOWNLOADS.toLowerCase(),
@@ -562,11 +567,11 @@ test('end to end: dialog, two chunks, seal, then open the exact saved file', asy
   sameShape(await write(0, 'QUJD'), ok({ written: 3, total: 6 }));
   sameShape(await write(3, 'REVG'), ok({ written: 6, total: 6 }));
   sameShape(await invoke(h.handlers.get('ichat:files:seal'), frameAt(h.origin()),
-    { token: pick.token }), ok({ fileName: 'e2e-report.pdf', bytes: 6 }));
+    { token: pick.token }), ok({ fileName: path.basename(target), bytes: 6 }));
 
   assert.equal(fs.readFileSync(target, 'utf8'), 'ABCDEF');
   sameShape(await invoke(h.handlers.get('ichat:files:open-downloaded'), frameAt(h.origin()),
-    { token: pick.token }), ok({ opened: true, fileName: 'e2e-report.pdf' }));
+    { token: pick.token }), ok({ opened: true, fileName: path.basename(target) }));
   assert.deepEqual(h.opened, [target], 'openPath receives the dialog path, never a renderer path');
   h.app.quit();
 });
@@ -947,14 +952,15 @@ test('a sealed grant does not consume the create quota', () => {
 
 test('releasing a failed download frees its slot and invalidates the token', () => {
   const api = io.createFileIo({ maxGrants: 1 });
-  const first = api.createSaveGrant({ fileName: 'f.txt', totalBytes: 4, senderId: 1, filePath: tempPath('f.txt') });
+  const firstGrantPath = tempPath('f.txt');
+  const first = api.createSaveGrant({ fileName: 'f.txt', totalBytes: 4, senderId: 1, filePath: firstGrantPath });
   api.writeChunk({ token: first.token, senderId: 1, offset: 0, dataBase64: 'QUI=' });
   assert.throws(() => api.createSaveGrant({
     fileName: 'g.txt', totalBytes: 4, senderId: 1, filePath: tempPath('g.txt'),
   }), /too_many_grants/);
 
   assert.deepEqual(api.releaseGrant({ token: first.token, senderId: 1 }),
-    { released: true, fileName: 'f.txt', discardedBytes: 2 });
+    { released: true, fileName: path.basename(firstGrantPath), discardedBytes: 2 });
   assert.throws(() => api.writeChunk({ token: first.token, senderId: 1, offset: 2, dataBase64: 'QUI=' }),
     /not_found/, 'a released token must stop working');
   // The slot is available again.
@@ -1034,13 +1040,15 @@ test('the browser fallback keeps its Done state instead of reverting to Download
 });
 
 test('the main process registers the release channel', async () => {
-  const h = launch({ dialogPath: tempPath('release-channel.txt') });
+  const releaseTarget = tempPath('release-channel.txt');
+  const h = launch({ dialogPath: releaseTarget });
   await h.started();
   assert.ok(h.handlers.get('ichat:files:release'), 'ichat:files:release must be registered');
   const pick = (await invoke(h.handlers.get('ichat:files:pick-save-target'), frameAt(h.origin()),
     { fileName: 'release-channel.txt', totalBytes: 4 })).value;
   sameShape(await invoke(h.handlers.get('ichat:files:release'), frameAt(h.origin()),
-    { token: pick.token }), ok({ released: true, fileName: 'release-channel.txt', discardedBytes: 0 }));
+    { token: pick.token }),
+  ok({ released: true, fileName: path.basename(releaseTarget), discardedBytes: 0 }));
   // After release the token is dead, so a retry cannot silently append.
   sameShape(await invoke(h.handlers.get('ichat:files:write-chunk'), frameAt(h.origin()),
     { token: pick.token, offset: 0, dataBase64: 'QUJD' }), failed('not_found'));
@@ -1076,4 +1084,243 @@ test('the file bubble routes its save result through the tested button helper', 
     !/\.then\(function \(save\) \{\s*offerOpenSavedFile\(btn, save\);/.test(chatSource),
     'the bubble must not bypass the helper and call offerOpenSavedFile directly',
   );
+});
+
+// ── Round 5 review (2026-10-24): the five findings, as regressions ────────
+
+test('two downloads cannot interleave into the same file', () => {
+  // F1/P1: reproduced before the fix as "A head + B head + A tail" on disk
+  // while both grants sealed successfully. An active grant must block a second
+  // grant for the same target, so the second download never starts writing.
+  const api = io.createFileIo();
+  const target = tempPath('shared-target.bin');
+  const head = Buffer.alloc(2 * 1024 * 1024, 'A');
+  const tail = Buffer.alloc(1024 * 1024, 'C');
+  const other = Buffer.alloc(2 * 1024 * 1024, 'B');
+
+  const a = api.createSaveGrant({
+    fileName: 'A.txt', totalBytes: head.length + tail.length, senderId: 1, filePath: target,
+  });
+  api.writeChunk({ token: a.token, senderId: 1, offset: 0, dataBase64: head.toString('base64') });
+
+  // The second download picks the same path while A is still streaming.
+  assert.throws(() => api.createSaveGrant({
+    fileName: 'B.txt', totalBytes: other.length, senderId: 1, filePath: target,
+  }), /target_in_use/, 'a second active download on the same path must be refused');
+
+  // A finishes normally and the file holds exactly A's bytes.
+  api.writeChunk({
+    token: a.token, senderId: 1, offset: head.length, dataBase64: tail.toString('base64'),
+  });
+  assert.deepEqual(api.sealGrant({ token: a.token, senderId: 1 }).bytes, head.length + tail.length);
+  const onDisk = fs.readFileSync(target);
+  assert.equal(onDisk.length, head.length + tail.length);
+  assert.ok(onDisk.subarray(0, 16).equals(Buffer.alloc(16, 'A')), 'head is A, not B');
+  assert.ok(onDisk.subarray(head.length).equals(tail), 'tail is A, not another download');
+});
+
+test('target ownership is compared case-insensitively and ignores trailing separators', () => {
+  // F1: "C:\Dir\a.txt" and "c:\dir\A.TXT" are one file on Windows; the guard
+  // must not be fooled by casing or a trailing backslash.
+  const api = io.createFileIo();
+  const dir = tempPath('case-dir');
+  fs.mkdirSync(dir, { recursive: true });
+  const lower = path.join(dir, 'report.txt');
+  const upper = path.join(dir, 'REPORT.TXT');
+
+  const first = api.createSaveGrant({
+    fileName: 'report.txt', totalBytes: 4, senderId: 1, filePath: lower,
+  });
+  const variant = process.platform === 'win32' ? upper : lower + path.sep;
+  assert.throws(() => api.createSaveGrant({
+    fileName: 'report.txt', totalBytes: 4, senderId: 1, filePath: variant,
+  }), /target_in_use/, 'a differently-cased path is the same target');
+
+  // A different file in the same directory is still allowed.
+  const sibling = api.createSaveGrant({
+    fileName: 'other.txt', totalBytes: 4, senderId: 1, filePath: path.join(dir, 'other.txt'),
+  });
+  assert.equal(typeof sibling.token, 'string');
+  api.releaseGrant({ token: first.token, senderId: 1 });
+});
+
+test('a new save to the same path retires the previous open token', () => {
+  // F1: replacing a finished download must invalidate the old grant, otherwise
+  // its "open" affordance points at bytes the new download wrote.
+  const api = io.createFileIo();
+  const target = tempPath('replaced-token.txt');
+  const first = api.createSaveGrant({ fileName: 'a.txt', totalBytes: 2, senderId: 1, filePath: target });
+  api.writeChunk({ token: first.token, senderId: 1, offset: 0, dataBase64: 'QUI=' });
+  api.sealGrant({ token: first.token, senderId: 1 });
+  assert.equal(api.openTarget({ token: first.token, senderId: 1 }).filePath, target);
+
+  const second = api.createSaveGrant({ fileName: 'a.txt', totalBytes: 2, senderId: 1, filePath: target });
+  assert.throws(() => api.openTarget({ token: first.token, senderId: 1 }), /not_found/,
+    'the stale token must not open the replaced file');
+  api.writeChunk({ token: second.token, senderId: 1, offset: 0, dataBase64: 'Q0Q=' });
+  api.sealGrant({ token: second.token, senderId: 1 });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'CD');
+  assert.equal(api.openTarget({ token: second.token, senderId: 1 }).filePath, target);
+});
+
+test('a refused same-path save leaves the active download untouched', () => {
+  // F1: the guard must not disturb the download it protects.
+  const api = io.createFileIo();
+  const target = tempPath('untouched.bin');
+  const grant = api.createSaveGrant({ fileName: 'x.bin', totalBytes: 6, senderId: 1, filePath: target });
+  api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'QUJD' });
+  assert.throws(() => api.createSaveGrant({
+    fileName: 'x.bin', totalBytes: 6, senderId: 1, filePath: target,
+  }), /target_in_use/);
+  // The original grant still works on its own offset sequence.
+  assert.deepEqual(api.writeChunk({ token: grant.token, senderId: 1, offset: 3, dataBase64: 'REVG' }),
+    { written: 6, total: 6 });
+  api.sealGrant({ token: grant.token, senderId: 1 });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'ABCDEF');
+});
+
+test('XML is not auto-opened because it can carry active HTML', () => {
+  // F4/P2: an XHTML-namespace <script> inside .xml runs when the system
+  // association is a browser. Same rule that removed .svg in round 3.
+  const api = io.createFileIo({ maxGrants: 8 });
+  for (const name of ['active-document.xml', 'active.XML', 'xhtml.xml']) {
+    const filePath = tempPath('xml-' + name.replace(/[^a-z0-9.]/gi, '_'));
+    const grant = api.createSaveGrant({ fileName: name, totalBytes: 4, senderId: 1, filePath });
+    api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'PGgvPg==' });
+    api.sealGrant({ token: grant.token, senderId: 1 });
+    assert.throws(() => api.openTarget({ token: grant.token, senderId: 1 }), /blocked_type/, name);
+  }
+  // Plain text stays openable.
+  const textPath = tempPath('notes.txt');
+  const text = api.createSaveGrant({ fileName: 'notes.txt', totalBytes: 2, senderId: 1, filePath: textPath });
+  api.writeChunk({ token: text.token, senderId: 1, offset: 0, dataBase64: 'aGk=' });
+  api.sealGrant({ token: text.token, senderId: 1 });
+  assert.equal(api.openTarget({ token: text.token, senderId: 1 }).filePath, textPath);
+});
+
+test('the reported file name is the one the user chose in the dialog', () => {
+  // F5/P3: the peer suggested "peer-name.txt", the user typed "chosen-name.txt".
+  // Reporting the suggestion while the disk holds the other name is a lie.
+  const api = io.createFileIo();
+  const chosen = tempPath('chosen-name.txt');
+  const grant = api.createSaveGrant({
+    fileName: 'peer-name.txt', totalBytes: 2, senderId: 1, filePath: chosen,
+  });
+  assert.equal(grant.fileName, path.basename(chosen));
+  api.writeChunk({ token: grant.token, senderId: 1, offset: 0, dataBase64: 'aGk=' });
+  assert.equal(api.sealGrant({ token: grant.token, senderId: 1 }).fileName, path.basename(chosen));
+  assert.equal(api.openTarget({ token: grant.token, senderId: 1 }).fileName, path.basename(chosen));
+});
+
+test('a download above the image preview limit still saves the file', async () => {
+  // F2/P2: images over AUTO_IMAGE_PREVIEW_LIMIT_BYTES render the plain bubble.
+  // Before the fix their Download button showed Done with nativeCalls 0 - the
+  // bytes were fetched and previewed but never written to disk. This drives the
+  // real runFileDownload with an 11 MiB image blob.
+  const created = [];
+  const toasts = [];
+  let nativeCalls = 0;
+  let downloadCalls = 0;
+  const makeNode = () => {
+    const node = {
+      className: '', innerHTML: '', children: [], listeners: {}, attributes: {},
+      classList: {
+        _set: new Set(),
+        add(c) { this._set.add(c); },
+        remove(c) { this._set.delete(c); },
+        contains(c) { return this._set.has(c); },
+      },
+      appendChild(child) { this.children.push(child); return child; },
+      removeChild(child) { const i = this.children.indexOf(child); if (i >= 0) this.children.splice(i, 1); return child; },
+      querySelector(selector) {
+        const className = selector.startsWith('.') ? selector.slice(1) : null;
+        if (!className) return null;
+        const stack = [...this.children];
+        while (stack.length) {
+          const current = stack.shift();
+          if ((current.className || '').split(/\s+/).includes(className)) return current;
+          stack.push(...(current.children || []));
+        }
+        return null;
+      },
+      setAttribute(name, value) { this.attributes[name] = String(value); },
+      getAttribute(name) { return this.attributes[name] === undefined ? null : this.attributes[name]; },
+      addEventListener(name, fn) { this.listeners[name] = fn; },
+    };
+    return node;
+  };
+  const context = vm.createContext({
+    console, Promise, Object, String, Number, Math, JSON, Error, Array, Boolean,
+    setTimeout, clearTimeout, URL: { createObjectURL: () => 'blob:probe' },
+    Blob, Uint8Array,
+    document: {
+      createElement: (tag) => {
+        const node = makeNode();
+        node.tagName = String(tag).toUpperCase();
+        created.push(node);
+        return node;
+      },
+    },
+    lucide: { createIcons() {} },
+    window: {
+      showToast: (message) => toasts.push(message),
+      iChatFileTransfer: {
+        nativeSaveAvailable: () => true,
+        saveBlobToDisk: async () => { nativeCalls += 1; return { status: 'saved', token: 'tok', fileName: 'large.png' }; },
+        fetchAndDecryptFile: async () => {
+          downloadCalls += 1;
+          return {
+            blob: new Blob([new Uint8Array(11 * 1024 * 1024)], { type: 'image/png' }),
+            metadata: { original_name: 'large.png' },
+          };
+        },
+      },
+    },
+  });
+  context.window.window = context.window;
+  const names = ['saveOrDownloadBlob', 'offerOpenSavedFile', 'applySaveResultToDownloadButton', 'runFileDownload'];
+  vm.runInContext(names.map((name) => extractFunction(chatSource, name)).join('\n'), context,
+    { filename: 'chat.js:runFileDownload' });
+  vm.runInContext('this.__run = runFileDownload;', context);
+
+  const container = makeNode();
+  const preview = makeNode();
+  preview.className = 'file-bubble-preview hidden';
+  container.appendChild(preview);
+  const button = makeNode();
+  button.className = 'file-download-btn';
+  button.setAttribute('data-file-id', '42');
+
+  const save = await context.__run(button, container, { type: 'single' }, 42);
+  assert.equal(downloadCalls, 1, 'the click fetches the file once');
+  assert.equal(nativeCalls, 1, 'an 11 MiB image must reach the native save path');
+  sameShape(save, { status: 'saved', token: 'tok', fileName: 'large.png' });
+  assert.match(button.innerHTML, /Done/, 'and only then reports Done');
+  assert.equal(button.classList.contains('downloaded'), true);
+  // The preview is still shown for images - presentation did not regress.
+  assert.equal(preview.classList.contains('hidden'), false);
+  assert.equal(created.filter((node) => node.tagName === 'IMG').length, 1,
+    'exactly one <img> is appended for the preview');
+});
+
+test('every changed asset carries a fresh cache-busting version', () => {
+  // F3/P2: nginx serves /static/ with expires 7d and there are no hashed
+  // asset names, so an unchanged ?v= keeps old clients on old JS for a week.
+  const template = fs.readFileSync(
+    path.resolve(desktopRoot, '../templates/pages/chat.html'), 'utf8');
+  const expected = [
+    ['js/file-transfer.js', /js\/file-transfer\.js' %\}\?v=([^"<]+)/],
+    ['js/chat.js', /js\/chat\.js' %\}\?v=([^"<]+)/],
+    ['css/chat.css', /css\/chat\.css' %\}\?v=([^"<]+)/],
+  ];
+  for (const [asset, pattern] of expected) {
+    const match = template.match(pattern);
+    assert.ok(match, asset + ' must be referenced with a version parameter');
+    assert.match(match[1], /^2026\d{4}-t19/, asset + ' version must be bumped for T19: ' + match[1]);
+  }
+  // chat.css is the same asset in two templates; the avatar editor does not
+  // load chat.js and is left alone on purpose.
+  const cssVersions = template.match(/css\/chat\.css' %\}\?v=([^"<]+)/);
+  assert.equal(cssVersions[1], template.match(/js\/chat\.js' %\}\?v=([^"<]+)/)[1],
+    'the modified JS and CSS share one T19 version tag');
 });

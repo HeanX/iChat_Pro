@@ -49,8 +49,11 @@ const MAX_FILE_NAME_LENGTH = 180;
 // something this app launches on the user's behalf. The in-app image preview
 // still renders SVG safely inside the chat page.
 const OPENABLE_EXTENSIONS = [
-  // plain text / data
-  '.txt', '.log', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.md', '.ini', '.cfg', '.conf',
+  // plain text / data. Round 5 review (F4/P2): .xml is NOT here. An .xml file
+  // can carry an XHTML-namespace <script>, and the system association for XML
+  // may be a browser - the extension alone does not make the content passive.
+  // Same reasoning that removed .svg in round 3. It is still saved normally.
+  '.txt', '.log', '.csv', '.tsv', '.json', '.yaml', '.yml', '.md', '.ini', '.cfg', '.conf',
   // documents
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', '.rtf', '.epub',
   // images (passive raster formats only - no SVG, see above)
@@ -167,6 +170,42 @@ function createFileIo(options = {}) {
     return live;
   }
 
+  /**
+   * Identity of a save target for ownership comparisons.
+   *
+   * Round 5 review (F1/P1): Windows paths are case-insensitive, so ownership
+   * has to be compared on a resolved, lower-cased path - otherwise
+   * "C:\Dir\a.txt" and "c:\dir\A.TXT" would look like different targets and
+   * two downloads could still interleave into one file. Trailing separators are
+   * dropped for the same reason. Aliasing through symlinks, hard links or 8.3
+   * short names is NOT detected (documented boundary): the dialog hands back
+   * the path the user picked, and this check exists to stop two of our own
+   * downloads from colliding, not to police the filesystem.
+   */
+  function targetKeyOf(raw) {
+    let resolved;
+    try {
+      resolved = path.resolve(String(raw));
+    } catch (_) {
+      resolved = String(raw);
+    }
+    const trimmed = resolved.replace(/[\\/]+$/, '');
+    return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+  }
+
+  /**
+   * Drop finished grants that own the same target.
+   *
+   * Called only after the new grant has passed its checks: an older token's
+   * "open" affordance would otherwise point at bytes somebody else just wrote.
+   * Active grants are never dropped here - they block the new grant instead.
+   */
+  function releaseGrantsFor(targetKey) {
+    for (const [token, grant] of grants) {
+      if (grant.sealed && targetKeyOf(grant.filePath) === targetKey) grants.delete(token);
+    }
+  }
+
   /** Validate what the renderer asks for BEFORE a native dialog is shown. */
   function validateSaveRequest(payload) {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -200,17 +239,39 @@ function createFileIo(options = {}) {
     }
 
     prune();
+    // Round 5 review (F1/P1): exactly one download may own a target path.
+    // Without this, a second download could pick the same file while the first
+    // is still streaming: both truncate it with 'w+', both write at their own
+    // offsets, and both seal successfully - leaving a file that is a mix of two
+    // downloads (AES-GCM cannot notice, because the mixing happens on disk
+    // after decryption).
+    //
+    // An *active* grant on the path blocks the new one. Everything is checked
+    // before anything is mutated, so a rejected request leaves no trace.
+    const targetKey = targetKeyOf(target);
+    for (const grant of grants.values()) {
+      if (targetKeyOf(grant.filePath) === targetKey && !grant.sealed) fail('target_in_use');
+    }
+
     // Review round 1 (BLOCKER): a finished download must not occupy a slot
     // for the rest of its TTL, otherwise the 9th save in 30 minutes fails for
     // a user who did nothing wrong. Only grants still able to accept bytes
     // count against the cap; sealed ones stay resolvable for "open".
     if (liveGrantCount() >= maxGrants) fail('too_many_grants');
 
+    // Taking the path over invalidates any *finished* grant that owned it: its
+    // "open" token would otherwise point at bytes this download is replacing.
+    releaseGrantsFor(targetKey);
+
     const token = createToken();
     const grant = {
       token,
       filePath: target,
-      fileName: request.fileName,
+      targetKey,
+      // Round 5 review (F5/P3): the name the user actually confirmed in the
+      // dialog is the truth. Reporting the peer's suggested name while the
+      // disk holds "chosen-name.txt" makes the success toast a lie.
+      fileName: path.basename(String(target).replace(/[\\/]+$/, '')) || request.fileName,
       senderId: input.senderId,
       totalBytes: request.totalBytes,
       writtenBytes: 0,

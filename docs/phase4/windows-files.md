@@ -27,11 +27,11 @@
 代码分布：
 
 ```
-desktop/file-io.js       +395 行  访问策略（纯 Node 可测，不 import electron）
+desktop/file-io.js       +456 行  访问策略（纯 Node 可测，不 import electron）
 desktop/main.js          +116 行  五条 IPC + 对话框 + shell.openPath
 desktop/preload.js        +17 行  iChatDesktop.files.{pickSaveTarget,writeChunk,seal,release,openDownloaded}
-static/js/file-transfer.js +168 行 saveBlobToDisk / openSavedFile / nativeSaveAvailable
-static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile 与两处调用点
+static/js/file-transfer.js +169 行 saveBlobToDisk / openSavedFile / nativeSaveAvailable
+static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile 与两处调用点
 ```
 
 ---
@@ -39,12 +39,14 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 ## 2. 安全模型（不可放宽的部分）
 
 1. **路径只来自系统对话框。** `createSaveGrant` 的 `filePath` 是 `dialog.showSaveDialog` 的返回值，渲染端无法提供。覆盖同名文件由系统自带的"是否替换"确认。
-2. **令牌是 128-bit 随机 UUID，并绑定 `webContents.id`。** 同一应用内另一个 webContents 拿到令牌写不进去（`wrong_sender`）。注意 `event.sender.id` 是**窗口级**标识：同一窗口里的子 frame 共享它。子 frame 默认不加载 preload、拿不到桥，所以当前不构成可利用缺口；若要 frame 级隔离需改用 `senderFrame.routingId`，本卡未做。
+2. **一个目标路径同时只有一个写入者。** 活动授权独占其规范化路径（Windows 下大小写不敏感），第二个下载选同一文件会被 `target_in_use` 拒绝；成功收尾的旧授权在路径被新下载接管时立即失效，避免"打开"指向别人刚写的内容。识别不到的是符号链接、硬链接与 8.3 短名别名——这属于文档边界，不属本卡要拦的"我们自己的两个下载互相覆盖"。
+
+3. **令牌是 128-bit 随机 UUID，并绑定 `webContents.id`。** 同一应用内另一个 webContents 拿到令牌写不进去（`wrong_sender`）。注意 `event.sender.id` 是**窗口级**标识：同一窗口里的子 frame 共享它。子 frame 默认不加载 preload、拿不到桥，所以当前不构成可利用缺口；若要 frame 级隔离需改用 `senderFrame.routingId`，本卡未做。
 3. **只追加且必须连续。** `offset !== writtenBytes` 直接 `offset_mismatch`，所以既不能跳写、不能回放、也不能预分配制造空洞文件。
 4. **声明大小强制。** `seal` 要求 `written === total`，否则 `incomplete`；单块上限 2 MiB，总大小上限 100 MiB（与 `file-transfer.js` 的 `MAX_FILE_SIZE` 一致）。
 5. **令牌会过期、有数量上限。** 30 分钟 TTL；同时最多 8 个**尚未收尾**的授权（已 `seal` 的下载不再占配额，否则 30 分钟内保存第 9 个文件就会无故失败）。已收尾的授权继续保留，供“打开”使用直到 TTL 到期。
 6. **打开只认令牌。** `openTarget` 从令牌反查路径，并要求该授权已 `seal`、大小吻合、文件仍存在。
-7. **打开走白名单，不是黑名单。** 只有已知的文档/**被动**图片/音视频/压缩包类型允许 `shell.openPath` 一键打开；其余一律保存成功但拒绝自动打开（`blocked_type`）。**`.svg` 不在白名单**：本地 SVG 被 Shell 打开时会在 `file://` 起源里执行自带脚本（Electron 39.8.10 实测可改 `document.title`），它仍是活动内容；应用内预览会正常渲染 SVG，只是不替用户去启动它。
+7. **打开走白名单，不是黑名单。** 只有已知的文档/**被动**图片/音视频/压缩包类型允许 `shell.openPath` 一键打开；其余一律保存成功但拒绝自动打开（`blocked_type`）。**`.svg` 与 `.xml` 都不在白名单**：本地 SVG 被 Shell 打开时会在 `file://` 起源里执行自带脚本（Electron 39.8.10 实测可改 `document.title`）；`.xml` 能携带 XHTML 命名空间的 `<script>`，而系统对 XML 的默认关联程序可能是浏览器。两者都仍是活动内容，应用内预览照常渲染 SVG，只是不替用户去启动它们。
    黑名单在这里是错的形状：文件名来自对端加密元数据，而 Windows Shell 会执行的东西远比 `.exe/.bat` 多——`.scf`、`.url`、`.pyw`、`.py`、`.sh`、`.pl`、`.rb` 都属于"双击即执行"。枚举不完，所以反过来只放行确定的文档类型。这仍然不阻止用户自己在资源管理器里打开这些文件，只是**应用不会替他执行对端代码**。
 8. **文件名净化。** 去掉目录部分、Win32 非法字符替换为 `_`、去掉尾随点与空格、`CON/PRN/AUX/NUL/COM1-9/LPT1-9` 加前缀、长度截到 180 且保留扩展名。
 
@@ -74,6 +76,7 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | 同时收尾的授权过多 | `too_many_grants` | 同时进行的下载过多，请等待其他下载完成或稍后重试。 |
 | 文件超过上限 | `too_large` | 文件超过允许的大小上限，无法保存。 |
 | 对话框已打开 | `dialog_in_progress` | 已有一个保存对话框打开，请先处理它。 |
+| 同一路径已有下载在写 | `target_in_use` | 该文件正在被另一个下载写入，请等它完成或换一个文件名。 |
 
 `write_failed` 时**不推进偏移**，且写入是定位写，所以修复磁盘空间后重试同一偏移会**覆盖**而不是**追加**那部分字节（有断言：写一半失败后重试，文件长度与内容都正确）。
 
@@ -87,18 +90,21 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- |
 | `.\.venv\Scripts\python.exe manage.py check` | `System check identified no issues (0 silenced).` |
 | `.\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run` | `No changes detected` |
-| `npm run test:e2ee` | **101 tests / 101 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 39 条） |
+| `npm run test:e2ee` | **109 tests / 109 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 47 条） |
 | `cd desktop && npm run test:layout` | `Sidebar layout: 36/36 browser checks passed` |
-| `cd desktop && npm run test:branding` | 打包 asar 内 **61 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
+| `cd desktop && npm run test:branding` | 打包 asar 内 **69 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
 | `cd desktop && npm run test:installer` | `NSIS runtime: 24/24 assertions passed` |
-| `cd desktop && npm run test:files` | **39 tests / 39 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
+| `cd desktop && npm run test:files` | **47 tests / 47 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
+| 真实 Electron 39.8.10 复核（`verify-fixes.cjs`） | F1 第二个下载被 `target_in_use` 拒绝、落盘 3 MiB 全属 A；F1 旧令牌 `not_found`；F2 11 MiB 图片 `nativeCalls=1` 且预览仍显示；F3 旧 URL 给旧模块、新 URL 给新模块；F4 `.xml` 保存成功但 `blocked_type`；F5 回报名 = 磁盘名 |
 
-新增套件 `chat/tests/js/desktop_file_io.test.js` 共 39 条，分四层：
+新增套件 `chat/tests/js/desktop_file_io.test.js` 共 47 条，分四层：
 
 1. **策略层**（`desktop/file-io.js`）：真实临时目录里写字节，覆盖文件名净化、严格字节数解析、顺序追加、越界、重放、过期、绑定发送者、授权上限、失败不推进偏移、**写一半失败后重试不重复追加**、**覆盖更长旧文件后按声明大小截断**、空文件、**白名单外一律拒绝打开**（`.scf/.url/.pyw/.py/.sh/.pl/.rb/.exe/'无扩展名'/双扩展名`）、**已 seal 不占配额**、**失败后可释放配额**、**对话框路径尾随点/空格不绕过白名单（且合法文档仍可打开）**。
 2. **主进程层**（真实 `main.js` 在 vm 沙箱里跑，只替换 OS 网络/对话框）：五条通道注册（含 `release`）、非受信 frame 拒绝、**校验先于弹框**、取消不建授权、同 frame 并发对话框拒绝、端到端（对话框→两块→seal→打开）、跨 sender 拒绝、可执行不调用 `openPath`、`openPath` 返回错误串时上报。
 3. **桥与渲染层**（真实 `preload.js` + `static/js/file-transfer.js`）：无桥时退回原行为、5 MiB 分 3 块且偏移为 `0/2/4 MiB`、字节可按序重组且完全相等、截断写入被拒绝、**`{ok:false,code}` 信封拆包**、错误码到中文文案的映射、0 字节文件仍走原生保存、**失败时释放授权**、释放本身失败不掩盖原始错误。
-4. **按钮状态机**（真实 `static/js/chat.js` 的 `offerOpenSavedFile`，最小 DOM 桩）：`saved` 才显示 `Done` 并附“打开”、`failed` 显示 `Retry` 且不保留 `downloaded` 样式、取消回到 `Download`、重复下载不叠加“打开”按钮。
+4. **按钮与下载路径**（真实 `static/js/chat.js` 的 `offerOpenSavedFile` / `runFileDownload`，最小 DOM 桩）：`saved` 才显示 `Done` 并附“打开”、`failed` 显示 `Retry` 且不保留 `downloaded` 样式、取消回到 `Download`、重复下载不叠加“打开”按钮；**11 MiB 图片必须走到原生保存**（`nativeCalls === 1`）。
+5. **资源版本**（读 `templates/pages/chat.html`）：三个改动过的静态资源都必须带 `2026…-t19` 版本参数，且 JS 与 CSS 共用同一版本标签；否则 nginx 的 `expires 7d` 会让旧客户端继续用旧逻辑。
+6. **同路径独占**（策略层）：第二个活动下载在创建时被 `target_in_use` 拒绝，落盘内容只属于第一个下载；新下载接管路径后旧“打开”令牌失效（`not_found`）。
 
 ---
 
@@ -118,7 +124,25 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 
 ---
 
-## 6. 兼容与回滚
+## 6. 静态资源与客户端缓存（升级路径）
+
+`deploy/nginx/ichat.conf` 对 `/static/` 设 `expires 7d`，且仓库没有按内容哈希命名的静态资源。这意味着**改了 JS 却不改 URL，旧客户端可能七天都用旧逻辑**——T19 第一版就踩了这个坑（用户审查 F3）：`file-transfer.js` 与 `chat.js` 都改了，模板还带 `?v=20261003-t20b` / `?v=20261005-t18-review1`，安装版沿用原用户缓存时新能力不会出现。
+
+本轮把三个改动过的资源统一升到 `?v=20261024-t19-files`：
+
+| 资源 | 位置 |
+| --- | --- |
+| `static/js/file-transfer.js` | `templates/pages/chat.html:332` |
+| `static/js/chat.js` | `templates/pages/chat.html:338` |
+| `static/css/chat.css` | `templates/pages/chat.html:7` |
+
+约束：`desktop_file_io.test.js` 里有一条测试读取模板，要求这三个资源都带 `2026…-t19` 版本参数且 JS/CSS 共用同一版本标签。**下次改动这些文件时必须同时改版本号**，否则测试会失败——这是故意留的闸门。
+
+长期方案（不在本卡范围）：改用内容哈希文件名（Django `ManifestStaticFilesStorage`），从根上消除“忘记改版本号”的可能。
+
+---
+
+## 7. 兼容与回滚
 
 - 浏览器端行为完全不变：没有 `window.iChatDesktop.files` 时 `nativeSaveAvailable()` 返回 `false`，`saveOrDownloadBlob` 走原来的 `<a download>`。
 - 老版本客户端连新服务端、新客户端连旧服务端都没有关系：本卡不涉及任何服务端协议、接口、模型或迁移改动（`makemigrations --check` 为 `No changes detected`）。
@@ -127,7 +151,7 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 
 ---
 
-## 7. 独立审查记录
+## 8. 独立审查记录
 
 按 [agent-handoff.md](agent-handoff.md) 所列的强制流程，实现完成后由**独立上下文的子 Agent**复核（只给 Issue 原文、diff 路径与命令清单，不给作者说明）。
 
@@ -137,6 +161,7 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | 2 | 另一个独立子 Agent（全新上下文，不复用第 1 轮） | FAIL | 1 / 3 / 5 | `78f1d13` |
 | 3 | 第三个独立子 Agent（全新上下文，不复用前两轮） | PASS WITH FINDINGS | 0 / 3 / 4（另 1 条 MINOR 遗留到第 4 轮） | 4549f80 |
 | 4 | 第四个独立子 Agent（收尾轮，逐条核实第 3 轮遗留项） | PASS WITH FINDINGS | 0 / 0 / 3（均为文档级） | 本提交 |
+| 5 | 用户复审（2026-10-24，附复现脚本） | FAIL | 1 / 3 / 1 | 本轮 |
 
 ### 第 1 轮发现与处置
 
@@ -205,7 +230,33 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 
 第 4 轮后真跑 7 条命令：`test:e2ee` 101/101、`test:files` 39/39、`test:branding` 61/61、`test:layout` 36/36、`test:installer` 24/24，`check` 与 `makemigrations --check` 无问题。
 
-### 变异测试结果（三轮问题修复后复验）
+### 第 5 轮（用户审查，2026-10-24）发现与处置
+
+用户按 `47772d2` 复审，提出 1 项 P1、3 项 P2、1 项 P3，并附可复现脚本。审查时 101 条自动化仍全绿——说明这五项都在既有测试的盲区里。
+
+| 编号 | 级别 | 问题 | 处置 |
+| --- | --- | --- | --- |
+| F1 | P1 | 同路径两个授权混写文件：A 首块 + B 首块 + A 尾块，两个 seal 都成功 | 活动授权独占规范化路径（Windows 大小写不敏感、忽略尾随分隔符）；新下载接管路径时废弃旧的已收尾授权；新增 `target_in_use` |
+| F2 | P2 | >10 MiB 图片点 Download 显示 `Done` 但从未落盘（保存调用 0 次） | 下载处理器抽成 `runFileDownload`，**所有 MIME 类型**都执行保存；预览降级为纯展示 |
+| F3 | P2 | 改动的 JS 未更新 `?v=`，nginx `expires 7d` 会让旧客户端继续用旧逻辑 | 三个改动资源（`chat.js`、`file-transfer.js`、`chat.css`）统一升到 `20261024-t19-files` |
+| F4 | P2 | `.xml` 在白名单里，可携带 XHTML 命名空间的脚本 | `.xml` 移出白名单（与 `.svg` 同一原则），保存不受影响 |
+| F5 | P3 | 另存为改名后，成功提示仍报发送方原名 | 回报文件名取对话框确认路径的 `basename` |
+
+修复后：复现脚本 `reproduce.cjs` 在第一步即被 `target_in_use` 拒绝（它断言的是旧缺陷，属预期）；新增 `verify-fixes.cjs` 用真实 Electron 39.8.10 验证 5 项的正确行为，全部通过。
+
+新增 8 条回归用例（合计 47 条），并对每条修复做变异验证，全部能被测试抓到：
+
+| 变异 | 结果 |
+| --- | --- |
+| 去掉 `target_in_use` 守卫 | 3 条失败 ✔ |
+| 路径比较改成大小写敏感 | 1 条失败 ✔ |
+| 接管路径时不废弃旧授权 | 1 条失败 ✔ |
+| 图片跳过保存 | 1 条失败 ✔ |
+| 撤回 `chat.js` 版本号 | 1 条失败 ✔ |
+| `.xml` 放回白名单 | 1 条失败 ✔ |
+| 回报发送方原名 | 7 条失败 ✔ |
+
+### 变异测试结果（各轮问题修复后复验）
 
 每个修复都做过"改回去看测试是否失败"的验证：
 
@@ -222,10 +273,17 @@ static/js/chat.js        +132/-26 行 saveOrDownloadBlob / offerOpenSavedFile �
 | 关掉浏览器 `unsupported` 分支（第 3 轮补测） | 1 条失败 ✔ |
 | 删除 `ichat:files:release` 注册（第 3 轮补测） | 2 条失败 ✔ |
 | `.svg` 放回白名单（第 3 轮补测） | 1 条失败 ✔ |
+| 去掉同路径独占守卫（第 5 轮） | 3 条失败 ✔ |
+| 路径比较改成大小写敏感（第 5 轮） | 1 条失败 ✔ |
+| 接管路径时不废弃旧授权（第 5 轮） | 1 条失败 ✔ |
+| 图片跳过保存（第 5 轮） | 1 条失败 ✔ |
+| 撤回 `chat.js` 版本号（第 5 轮） | 1 条失败 ✔ |
+| `.xml` 放回白名单（第 5 轮） | 1 条失败 ✔ |
+| 回报发送方原名（第 5 轮） | 7 条失败 ✔ |
 
 ---
 
-## 8. 相关文档
+## 9. 相关文档
 
 - 任务交接与模块边界：[agent-handoff.md](agent-handoff.md)（`docs/handoff/windows-desktop.md` 在交接分支上，未并入本分支）
 - 通知（T18）：[windows-notifications.md](windows-notifications.md)

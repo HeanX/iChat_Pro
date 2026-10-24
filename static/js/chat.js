@@ -5868,6 +5868,54 @@ function applySaveResultToDownloadButton(btn, save) {
   offerOpenSavedFile(btn, save);
 }
 
+// One download path for every MIME type.
+//
+// Round 5 review (F2/P2): this used to live inline inside
+// renderFileMessageBubble and only ran the save for non-images, so an image
+// above AUTO_IMAGE_PREVIEW_LIMIT_BYTES (which renders the plain bubble rather
+// than the viewer) fetched the bytes, rendered a thumbnail and reported "Done"
+// without ever asking the shell to write the file. Fetch -> preview -> save,
+// unconditionally; the preview is presentation, the save is the action.
+// Named so the behaviour can be driven directly from tests.
+function runFileDownload(btn, container, conv, fileId) {
+  var fid = (btn && btn.getAttribute ? btn.getAttribute('data-file-id') : null) || fileId;
+  var convType = conv ? conv.type : 'single';
+  if (!window.iChatFileTransfer || !window.iChatFileTransfer.fetchAndDecryptFile) {
+    window.showToast && window.showToast('File transfer module not loaded.');
+    return Promise.resolve(null);
+  }
+  btn.classList.add('downloading');
+  btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Downloading...';
+  lucide.createIcons();
+  return window.iChatFileTransfer.fetchAndDecryptFile(parseInt(fid, 10), convType).then(function (result) {
+    if (!result || !result.blob) throw new Error('empty download');
+    var url = URL.createObjectURL(result.blob);
+    var previewEl = container && container.querySelector('.file-bubble-preview');
+    if (previewEl && result.blob.type.indexOf('image/') === 0) {
+      var img = document.createElement('img');
+      img.src = url;
+      previewEl.appendChild(img);
+      previewEl.classList.remove('hidden');
+    }
+    return saveOrDownloadBlob(
+      result.blob,
+      (result.metadata && result.metadata.original_name) || 'file',
+      url,
+      { fileId: parseInt(fid, 10) }
+    ).then(function (save) {
+      applySaveResultToDownloadButton(btn, save);
+      return save;
+    });
+  }).catch(function (err) {
+    btn.classList.remove('downloading');
+    btn.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4"></i> Failed';
+    lucide.createIcons();
+    console.error('File download failed:', err);
+    window.showToast && window.showToast('Download failed: ' + ((err && err.message) || 'Unknown error'));
+    return null;
+  });
+}
+
 function downloadActiveImageViewer() {
   if (!activeImageViewer) return;
   // Round 2 review (MINOR): the earlier version appended the "open" button to
@@ -6066,53 +6114,7 @@ function renderFileMessageBubble(div, msg, conv, groupMeta) {
     downloadBtn.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      var btn = this;
-      var fid = btn.getAttribute('data-file-id');
-      var convType = conv ? conv.type : 'single';
-      if (!window.iChatFileTransfer || !window.iChatFileTransfer.fetchAndDecryptFile) {
-        window.showToast && window.showToast('File transfer module not loaded.');
-        return;
-      }
-      btn.classList.add('downloading');
-      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Downloading...';
-      lucide.createIcons();
-      window.iChatFileTransfer.fetchAndDecryptFile(parseInt(fid), convType).then(function (result) {
-        if (!result || !result.blob) throw new Error('empty download');
-        var url = URL.createObjectURL(result.blob);
-        var previewEl = div.querySelector('.file-bubble-preview');
-        if (previewEl) {
-          // Show image preview
-          if (result.blob.type.indexOf('image/') === 0) {
-            var img = document.createElement('img');
-            img.src = url;
-            previewEl.appendChild(img);
-            previewEl.classList.remove('hidden');
-          }
-        }
-        // Trigger download for non-image files
-        if (result.blob.type.indexOf('image/') !== 0) {
-          return saveOrDownloadBlob(
-            result.blob,
-            (result.metadata && result.metadata.original_name) || 'file',
-            url,
-            { fileId: parseInt(fid, 10) }
-          ).then(function (save) {
-            applySaveResultToDownloadButton(btn, save);
-            return save;
-          });
-        }
-        btn.classList.remove('downloading');
-        btn.classList.add('downloaded');
-        btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
-        lucide.createIcons();
-        return null;
-      }).catch(function (err) {
-        btn.classList.remove('downloading');
-        btn.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4"></i> Failed';
-        lucide.createIcons();
-        console.error('File download failed:', err);
-        window.showToast && window.showToast('Download failed: ' + (err.message || 'Unknown error'));
-      });
+      return runFileDownload(this, div, conv, fileId);
     });
   }
 

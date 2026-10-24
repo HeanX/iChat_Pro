@@ -1324,3 +1324,53 @@ test('every changed asset carries a fresh cache-busting version', () => {
   assert.equal(cssVersions[1], template.match(/js\/chat\.js' %\}\?v=([^"<]+)/)[1],
     'the modified JS and CSS share one T19 version tag');
 });
+
+test('an abandoned download stops holding its path after the idle timeout', () => {
+  // Round 6 review (P3): a renderer that dies without calling release used to
+  // keep the path locked for the whole 30-minute TTL. Silence is now treated
+  // as death after a much shorter idle window.
+  let clock = 10_000;
+  const api = io.createFileIo({
+    now: () => clock,
+    grantTtlMs: 30 * 60 * 1000,
+    staleActiveGrantMs: 60 * 1000,
+  });
+  const target = tempPath('abandoned.bin');
+  const abandoned = api.createSaveGrant({
+    fileName: 'abandoned.bin', totalBytes: 10, senderId: 1, filePath: target,
+  });
+  api.writeChunk({ token: abandoned.token, senderId: 1, offset: 0, dataBase64: 'QUJD' });
+
+  // Still within the idle window: the path stays locked.
+  clock += 30 * 1000;
+  assert.throws(() => api.createSaveGrant({
+    fileName: 'other.bin', totalBytes: 10, senderId: 1, filePath: target,
+  }), /target_in_use/);
+
+  // Silence beyond the idle window: the dead grant is reclaimed.
+  clock += 31 * 1000;
+  const retake = api.createSaveGrant({
+    fileName: 'abandoned.bin', totalBytes: 3, senderId: 1, filePath: target,
+  });
+  assert.equal(typeof retake.token, 'string', 'the path must be reusable again');
+  assert.throws(() => api.writeChunk({ token: abandoned.token, senderId: 1, offset: 3, dataBase64: 'REVG' }),
+    /not_found/, 'the abandoned token must be gone');
+});
+
+test('a download that keeps streaming is never reclaimed as stale', () => {
+  // The idle timeout must not punish a slow but live transfer.
+  let clock = 5_000;
+  const api = io.createFileIo({ now: () => clock, staleActiveGrantMs: 60 * 1000 });
+  const target = tempPath('slow.bin');
+  const grant = api.createSaveGrant({ fileName: 'slow.bin', totalBytes: 9, senderId: 1, filePath: target });
+  for (const offset of [0, 3, 6]) {
+    clock += 50 * 1000; // just under the idle window, every time
+    // prune() runs lazily; force it the way a real request would, otherwise
+    // "never refresh lastActivityAt" would go unnoticed (round 6 mutation).
+    api.prune();
+    api.writeChunk({ token: grant.token, senderId: 1, offset, dataBase64: 'QUJD' });
+  }
+  assert.deepEqual(api.sealGrant({ token: grant.token, senderId: 1 }),
+    { fileName: path.basename(target), bytes: 9 });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'ABCABCABC');
+});

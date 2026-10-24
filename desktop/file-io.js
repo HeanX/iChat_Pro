@@ -32,6 +32,14 @@ const MAX_CHUNK_BYTES = 2 * 1024 * 1024;
 const MAX_GRANTS = 8;
 /** A download that stalls for this long must be restarted by the user. */
 const GRANT_TTL_MS = 30 * 60 * 1000;
+/**
+ * Round 6 review (P3): an *active* grant that has received no chunk for this
+ * long belongs to a renderer that is gone (crash, reload, closed window), so it
+ * must not keep its path or its quota slot for the whole 30-minute TTL. Five
+ * minutes is far longer than the gap between 2 MiB chunks on any usable link,
+ * and far shorter than "the user restarts the app".
+ */
+const STALE_ACTIVE_GRANT_MS = 5 * 60 * 1000;
 const MAX_FILE_NAME_LENGTH = 180;
 
 // Round 2 review (BLOCKER): a *blocklist* is the wrong shape for this. The
@@ -137,6 +145,7 @@ function decodeBase64(raw) {
  * @param {number} [options.maxGrants]
  * @param {number} [options.maxFileBytes]
  * @param {number} [options.grantTtlMs]
+ * @param {number} [options.staleActiveGrantMs]
  * @param {() => number} [options.now]
  * @param {() => string} [options.createToken]
  * @param {string[]} [options.openableExtensions]
@@ -146,6 +155,7 @@ function createFileIo(options = {}) {
   const maxGrants = options.maxGrants || MAX_GRANTS;
   const maxFileBytes = options.maxFileBytes || MAX_FILE_BYTES;
   const grantTtlMs = options.grantTtlMs || GRANT_TTL_MS;
+  const staleActiveGrantMs = options.staleActiveGrantMs || STALE_ACTIVE_GRANT_MS;
   const now = options.now || (() => Date.now());
   const createToken = options.createToken || (() => crypto.randomUUID());
   const openableExtensions = options.openableExtensions || OPENABLE_EXTENSIONS;
@@ -156,7 +166,16 @@ function createFileIo(options = {}) {
   function prune() {
     const at = now();
     for (const [token, grant] of grants) {
-      if (at >= grant.expiresAt) grants.delete(token);
+      if (at >= grant.expiresAt) {
+        grants.delete(token);
+        continue;
+      }
+      // Round 6 review (P3): an unfinished download whose renderer stopped
+      // sending chunks is dead, not busy. Without this it would hold its path
+      // (and one quota slot) for the rest of the 30-minute TTL.
+      if (!grant.sealed && at - grant.lastActivityAt >= staleActiveGrantMs) {
+        grants.delete(token);
+      }
     }
   }
 
@@ -277,6 +296,9 @@ function createFileIo(options = {}) {
       writtenBytes: 0,
       sealed: false,
       createdAt: now(),
+      // Round 6 (P3): refreshed on every accepted chunk so a stalled download
+      // can be reclaimed long before its absolute TTL.
+      lastActivityAt: now(),
       expiresAt: now() + grantTtlMs,
     };
     grants.set(token, grant);
@@ -336,6 +358,7 @@ function createFileIo(options = {}) {
     // same offset is overwritten with the same bytes instead of appended.
     writeAt(grant, bytes, grant.writtenBytes);
     grant.writtenBytes = next;
+    grant.lastActivityAt = now();
     return { written: grant.writtenBytes, total: grant.totalBytes };
   }
 
@@ -453,4 +476,5 @@ module.exports = {
   MAX_CHUNK_BYTES,
   MAX_GRANTS,
   GRANT_TTL_MS,
+  STALE_ACTIVE_GRANT_MS,
 };

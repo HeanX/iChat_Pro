@@ -39,7 +39,7 @@ static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile �
 ## 2. 安全模型（不可放宽的部分）
 
 1. **路径只来自系统对话框。** `createSaveGrant` 的 `filePath` 是 `dialog.showSaveDialog` 的返回值，渲染端无法提供。覆盖同名文件由系统自带的"是否替换"确认。
-2. **一个目标路径同时只有一个写入者。** 活动授权独占其规范化路径（Windows 下大小写不敏感），第二个下载选同一文件会被 `target_in_use` 拒绝；成功收尾的旧授权在路径被新下载接管时立即失效，避免"打开"指向别人刚写的内容。识别不到的是符号链接、硬链接与 8.3 短名别名——这属于文档边界，不属本卡要拦的"我们自己的两个下载互相覆盖"。
+2. **一个目标路径同时只有一个写入者。** 活动授权独占其规范化路径（Windows 下大小写不敏感），第二个下载选同一文件会被 `target_in_use` 拒绝；成功收尾的旧授权在路径被新下载接管时立即失效，避免"打开"指向别人刚写的内容。**占用不会赖到 30 分钟 TTL**：活动授权若 5 分钟没收到任何分块，按"渲染端已消失"回收（`STALE_ACTIVE_GRANT_MS`），路径与配额立即释放。识别不到的是符号链接、硬链接与 8.3 短名别名——这属于文档边界，不属本卡要拦的"我们自己的两个下载互相覆盖"。
 
 3. **令牌是 128-bit 随机 UUID，并绑定 `webContents.id`。** 同一应用内另一个 webContents 拿到令牌写不进去（`wrong_sender`）。注意 `event.sender.id` 是**窗口级**标识：同一窗口里的子 frame 共享它。子 frame 默认不加载 preload、拿不到桥，所以当前不构成可利用缺口；若要 frame 级隔离需改用 `senderFrame.routingId`，本卡未做。
 3. **只追加且必须连续。** `offset !== writtenBytes` 直接 `offset_mismatch`，所以既不能跳写、不能回放、也不能预分配制造空洞文件。
@@ -76,7 +76,7 @@ static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile �
 | 同时收尾的授权过多 | `too_many_grants` | 同时进行的下载过多，请等待其他下载完成或稍后重试。 |
 | 文件超过上限 | `too_large` | 文件超过允许的大小上限，无法保存。 |
 | 对话框已打开 | `dialog_in_progress` | 已有一个保存对话框打开，请先处理它。 |
-| 同一路径已有下载在写 | `target_in_use` | 该文件正在被另一个下载写入，请等它完成或换一个文件名。 |
+| 同一路径已有下载在写 | `target_in_use` | 该文件正在被另一个下载写入，请等它完成、换一个文件名，或稍后再试。 |
 
 `write_failed` 时**不推进偏移**，且写入是定位写，所以修复磁盘空间后重试同一偏移会**覆盖**而不是**追加**那部分字节（有断言：写一半失败后重试，文件长度与内容都正确）。
 
@@ -90,14 +90,14 @@ static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- |
 | `.\.venv\Scripts\python.exe manage.py check` | `System check identified no issues (0 silenced).` |
 | `.\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run` | `No changes detected` |
-| `npm run test:e2ee` | **109 tests / 109 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 47 条） |
+| `npm run test:e2ee` | **111 tests / 111 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 49 条） |
 | `cd desktop && npm run test:layout` | `Sidebar layout: 36/36 browser checks passed` |
-| `cd desktop && npm run test:branding` | 打包 asar 内 **69 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
+| `cd desktop && npm run test:branding` | 打包 asar 内 **71 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
 | `cd desktop && npm run test:installer` | `NSIS runtime: 24/24 assertions passed` |
-| `cd desktop && npm run test:files` | **47 tests / 47 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
+| `cd desktop && npm run test:files` | **49 tests / 49 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
 | 真实 Electron 39.8.10 复核（`verify-fixes.cjs`） | F1 第二个下载被 `target_in_use` 拒绝、落盘 3 MiB 全属 A；F1 旧令牌 `not_found`；F2 11 MiB 图片 `nativeCalls=1` 且预览仍显示；F3 旧 URL 给旧模块、新 URL 给新模块；F4 `.xml` 保存成功但 `blocked_type`；F5 回报名 = 磁盘名 |
 
-新增套件 `chat/tests/js/desktop_file_io.test.js` 共 47 条，分四层：
+新增套件 `chat/tests/js/desktop_file_io.test.js` 共 49 条，分四层：
 
 1. **策略层**（`desktop/file-io.js`）：真实临时目录里写字节，覆盖文件名净化、严格字节数解析、顺序追加、越界、重放、过期、绑定发送者、授权上限、失败不推进偏移、**写一半失败后重试不重复追加**、**覆盖更长旧文件后按声明大小截断**、空文件、**白名单外一律拒绝打开**（`.scf/.url/.pyw/.py/.sh/.pl/.rb/.exe/'无扩展名'/双扩展名`）、**已 seal 不占配额**、**失败后可释放配额**、**对话框路径尾随点/空格不绕过白名单（且合法文档仍可打开）**。
 2. **主进程层**（真实 `main.js` 在 vm 沙箱里跑，只替换 OS 网络/对话框）：五条通道注册（含 `release`）、非受信 frame 拒绝、**校验先于弹框**、取消不建授权、同 frame 并发对话框拒绝、端到端（对话框→两块→seal→打开）、跨 sender 拒绝、可执行不调用 `openPath`、`openPath` 返回错误串时上报。
@@ -161,7 +161,8 @@ static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile �
 | 2 | 另一个独立子 Agent（全新上下文，不复用第 1 轮） | FAIL | 1 / 3 / 5 | `78f1d13` |
 | 3 | 第三个独立子 Agent（全新上下文，不复用前两轮） | PASS WITH FINDINGS | 0 / 3 / 4（另 1 条 MINOR 遗留到第 4 轮） | 4549f80 |
 | 4 | 第四个独立子 Agent（收尾轮，逐条核实第 3 轮遗留项） | PASS WITH FINDINGS | 0 / 0 / 3（均为文档级） | 本提交 |
-| 5 | 用户复审（2026-10-24，附复现脚本） | FAIL | 1 / 3 / 1 | 本轮 |
+| 5 | 用户复审（2026-10-24，附复现脚本） | FAIL | 1 / 3 / 1 | `585613b` |
+| 6 | 第五个独立子 Agent（聚焦复核 5 项修复） | PASS WITH FINDINGS | 0 / 0 / 1 | 本提交 |
 
 ### 第 1 轮发现与处置
 
@@ -256,6 +257,16 @@ static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile �
 | `.xml` 放回白名单 | 1 条失败 ✔ |
 | 回报发送方原名 | 7 条失败 ✔ |
 
+### 第 6 轮（独立复核，2026-10-24）发现与处置
+
+独立子 Agent 核实 5 项全部修复（47/47 通过、`verify-fixes.cjs` 7 项全绿、`reproduce.cjs` 因 F1 生效而在第二步报 `target_in_use`），并提出 1 条 P3：
+
+| 级别 | 问题 | 处置 |
+| --- | --- | --- |
+| P3 | F1 的路径独占把"同路径锁"绑在 30 分钟 TTL 上：渲染端崩溃/刷新未调用 `release` 时，该路径最长被占 30 分钟，且提示没说时长 | 活动授权 5 分钟无分块即视为死亡并回收（`STALE_ACTIVE_GRANT_MS`）；每收到一块刷新 `lastActivityAt`；提示文案补"或稍后再试" |
+
+新增 2 条用例（慢速但活跃的下载不会被误回收；放弃的下载在静默超时后可被重新占用），合计 49 条。
+
 ### 变异测试结果（各轮问题修复后复验）
 
 每个修复都做过"改回去看测试是否失败"的验证：
@@ -280,6 +291,7 @@ static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile �
 | 撤回 `chat.js` 版本号（第 5 轮） | 1 条失败 ✔ |
 | `.xml` 放回白名单（第 5 轮） | 1 条失败 ✔ |
 | 回报发送方原名（第 5 轮） | 7 条失败 ✔ |
+| 取消静默超时回收（第 6 轮） | 2 条失败 ✔ |
 
 ---
 

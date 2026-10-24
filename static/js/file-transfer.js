@@ -1087,7 +1087,7 @@
         too_large: '文件超过允许的大小上限，无法保存。',
         invalid_target: '所选位置不可用，请换一个目录再试。',
         dialog_in_progress: '已有一个保存对话框打开，请先处理它。',
-        target_in_use: '该文件正在被另一个下载写入，请等它完成或换一个文件名。',
+        target_in_use: '该文件正在被另一个下载写入，请等它完成、换一个文件名，或稍后再试。',
     };
 
     function describeNativeFileError(err) {

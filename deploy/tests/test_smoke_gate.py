@@ -31,13 +31,10 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.test import LiveServerTestCase
 
+from deploy.tests.support import bash, bash_unavailable_reason, shell_env
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SMOKE_SCRIPT = REPO_ROOT / "deploy" / "smoke.sh"
-
-# The gate is a bash script; without bash (e.g. a bare Windows CI image) the
-# honest outcome is "not executed", not "passed".
-BASH = shutil.which("bash")
-HAS_BASH = BASH is not None and SMOKE_SCRIPT.is_file()
 
 
 def _run_smoke(env):
@@ -48,7 +45,7 @@ def _run_smoke(env):
     console code page on Windows.
     """
     return subprocess.run(
-        [BASH, str(SMOKE_SCRIPT)],
+        [bash(), str(SMOKE_SCRIPT)],
         env=env,
         capture_output=True,
         text=True,
@@ -72,12 +69,15 @@ def _smoke_env(**overrides):
     return {k: v for k, v in env.items() if v is not None}
 
 
-@unittest.skipUnless(HAS_BASH, "bash is not available; smoke gate not executed")
 class SmokeGateTests(LiveServerTestCase):
     """Run the real deploy/smoke.sh against Django's live server."""
 
     @classmethod
     def setUpClass(cls):
+        # Fail, never skip: an unexecuted smoke gate must not look green.
+        reason = bash_unavailable_reason()
+        if reason:
+            raise AssertionError(reason)
         super().setUpClass()
         # Belt and braces: the gate must be executable-by-invocation, and a
         # modified bit lost by a Windows checkout should not silently pass.
@@ -242,9 +242,14 @@ class _BrokenApiHandler(BaseHTTPRequestHandler):
         pass
 
 
-@unittest.skipUnless(HAS_BASH, "bash is not available; smoke gate not executed")
 class SmokeGateCatchesRedirectedApiTests(unittest.TestCase):
     """The API regression a status-code-only gate would miss."""
+
+    @classmethod
+    def setUpClass(cls):
+        reason = bash_unavailable_reason()
+        if reason:
+            raise AssertionError(reason)
 
     def setUp(self):
         self.server = HTTPServer(("127.0.0.1", 0), _BrokenApiHandler)
@@ -264,7 +269,7 @@ class SmokeGateCatchesRedirectedApiTests(unittest.TestCase):
             SMOKE_PASSWORD="whatever",
         )
         result = subprocess.run(
-            [BASH, str(SMOKE_SCRIPT)],
+            [bash(), str(SMOKE_SCRIPT)],
             env=env,
             capture_output=True,
             text=True,
@@ -320,3 +325,109 @@ class SiteOriginTests(unittest.TestCase):
         self.assertIn('PORT_PART=":${BASE_AUTH##*:}"', source)
         # The old broken form put the whole URL into PORT_PART.
         self.assertNotIn('PORT_PART=${BASE_URL#"${BASE_URL%%:*}"}', source)
+
+
+class _RecordingHandler(BaseHTTPRequestHandler):
+    """Records the request line, then answers like a healthy /health/live/."""
+
+    requests: list[str] = []
+
+    def do_GET(self):  # noqa: N802
+        type(self).requests.append(f"{self.command} {self.path}")
+        body = b'{"status": "ok"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+class AutoBaseUrlOriginTests(unittest.TestCase):
+    """AUTO_BASE_URL must dial the configured origin, never a hard-coded port.
+
+    Review finding OPS-02: with only a staging .env in play, the readiness probe
+    and the smoke gate still requested production's 8443/8000. Here the real
+    smoke.sh is pointed at two loopback servers that record the request line,
+    so "which URL was actually fetched" is observable rather than inferred.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        reason = bash_unavailable_reason()
+        if reason:
+            raise AssertionError(reason)
+
+    def setUp(self):
+        _RecordingHandler.requests = []
+        self.tls_server = HTTPServer(("127.0.0.1", 0), _RecordingHandler)
+        self.tls_thread = threading.Thread(
+            target=self.tls_server.serve_forever, daemon=True
+        )
+        self.tls_thread.start()
+        self.addCleanup(self.tls_server.server_close)
+        self.addCleanup(self.tls_server.shutdown)
+        self.tls_origin = f"http://127.0.0.1:{self.tls_server.server_port}"
+
+    def run_auto(self, **overrides):
+        env = _smoke_env(
+            AUTO_BASE_URL="1",
+            DJANGO_ALLOWED_HOSTS="localhost",
+            SMOKE_USERNAME="somebody",
+            SMOKE_PASSWORD="whatever",
+            SMOKE_TIMEOUT="5",
+        )
+        env.pop("BASE_URL", None)
+        env.update(overrides)
+        return subprocess.run(
+            [bash(), str(SMOKE_SCRIPT)],
+            env=env,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=120,
+        )
+
+    def test_configured_tls_origin_is_the_one_that_gets_probed(self):
+        result = self.run_auto(
+            SMOKE_TLS_ORIGIN=self.tls_origin,
+            SMOKE_LOOPBACK_ORIGIN="http://127.0.0.1:1",
+        )
+        output = result.stdout + result.stderr
+        self.assertIn(f"against {self.tls_origin}", output, msg=output)
+        self.assertTrue(_RecordingHandler.requests, msg=output)
+        # The configured origin is the one dialed...
+        self.assertIn("GET /health/live/", _RecordingHandler.requests)
+        # ...and the production ports never appear in the transcript.
+        self.assertNotIn("8443", output)
+        self.assertNotIn("8000", output)
+
+    def test_fallback_uses_the_configured_loopback_origin(self):
+        """Nothing on the TLS origin -> fall back to the CONFIGURED loopback."""
+        fallback = HTTPServer(("127.0.0.1", 0), _RecordingHandler)
+        thread = threading.Thread(target=fallback.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(fallback.server_close)
+        self.addCleanup(fallback.shutdown)
+        loopback_origin = f"http://127.0.0.1:{fallback.server_port}"
+
+        result = self.run_auto(
+            SMOKE_TLS_ORIGIN="http://127.0.0.1:1",  # nothing listens
+            SMOKE_LOOPBACK_ORIGIN=loopback_origin,
+        )
+        output = result.stdout + result.stderr
+        self.assertIn(f"nothing answered on http://127.0.0.1:1", output, msg=output)
+        self.assertIn(f"against {loopback_origin}", output, msg=output)
+        self.assertTrue(_RecordingHandler.requests, msg=output)
+        self.assertNotIn("8443", output)
+        self.assertNotIn(":8000", output)
+
+    def test_production_defaults_are_unchanged(self):
+        """With no SMOKE_*_ORIGIN the gate still targets 8443, then 8000."""
+        result = self.run_auto()
+        output = result.stdout + result.stderr
+        self.assertIn("nothing answered on https://127.0.0.1:8443", output, msg=output)
+        self.assertIn("against http://127.0.0.1:8000", output, msg=output)
+

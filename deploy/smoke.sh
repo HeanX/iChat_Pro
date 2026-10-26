@@ -29,8 +29,15 @@
 #   BASE_URL            Required unless AUTO_BASE_URL=1. No trailing slash.
 #   SMOKE_USERNAME      Dedicated smoke account — never a real user.
 #   SMOKE_PASSWORD      Its password.
-#   AUTO_BASE_URL       "1": derive BASE_URL like deploy.sh does (TLS front door
-#                       https://127.0.0.1:8443, else loopback http://127.0.0.1:8000).
+#   AUTO_BASE_URL       "1": derive BASE_URL from the two origins below.
+#   SMOKE_TLS_ORIGIN    Origin tried first with AUTO_BASE_URL=1.
+#                       Default https://127.0.0.1:8443 — production's Nginx TLS
+#                       front door. A staging install passes its own, e.g.
+#                       https://127.0.0.1:8444.
+#   SMOKE_LOOPBACK_ORIGIN
+#                       Origin used when SMOKE_TLS_ORIGIN answers nothing.
+#                       Default http://127.0.0.1:8000 (production Daphne); a
+#                       staging install passes http://127.0.0.1:8001.
 #   DJANGO_ALLOWED_HOSTS  Used with AUTO_BASE_URL as the Host header.
 #   SMOKE_INSECURE_TLS  "1" -> add -k (self-signed cert on a fresh host).
 #   SMOKE_TIMEOUT       Per-request timeout in seconds (default 10).
@@ -97,12 +104,18 @@ has_session_cookie() {
 }
 
 # --- configuration -------------------------------------------------------
+# Both origins are configuration, never constants: deploy.sh resolves them
+# from the same .env the service runs with, so a staging install (Daphne 8001,
+# Nginx 8444) probes ITS OWN front door and never production's (review finding
+# OPS-02). Defaults keep the production behaviour unchanged.
+TLS_ORIGIN=${SMOKE_TLS_ORIGIN:-https://127.0.0.1:8443}
+LOOPBACK_ORIGIN=${SMOKE_LOOPBACK_ORIGIN:-http://127.0.0.1:8000}
 HOST_HEADER=()
 if [[ "${AUTO_BASE_URL:-0}" == "1" ]]; then
     HOST_NAME=${DJANGO_ALLOWED_HOSTS:-127.0.0.1}
     HOST_NAME=${HOST_NAME%%,*}
     HOST_HEADER=(-H "Host: $HOST_NAME")
-    BASE_URL=${BASE_URL:-https://127.0.0.1:8443}
+    BASE_URL=${BASE_URL:-$TLS_ORIGIN}
     if ! curl "${CURL_TLS[@]}" -fsS -o /dev/null --max-time 3 \
             -H "Host: $HOST_NAME" "$BASE_URL/health/live/" 2>/dev/null; then
         # Loopback Daphne. Only the health paths are exempt from the SSL
@@ -110,8 +123,8 @@ if [[ "${AUTO_BASE_URL:-0}" == "1" ]]; then
         # production, so the login and session checks cannot pass over plain
         # http against a DEBUG=False release. Say so plainly instead of
         # letting the operator read four confusing failures.
-        BASE_URL=http://127.0.0.1:8000
-        echo "WARNING: nothing answered on https://127.0.0.1:8443 — falling back" >&2
+        BASE_URL=$LOOPBACK_ORIGIN
+        echo "WARNING: nothing answered on $TLS_ORIGIN — falling back" >&2
         echo "         to $BASE_URL. Health checks work there, but login cannot:" >&2
         echo "         production sets SECURE_SSL_REDIRECT and secure cookies." >&2
         echo "         Start Nginx before the first deploy, or run with BASE_URL" >&2

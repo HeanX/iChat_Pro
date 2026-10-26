@@ -86,14 +86,65 @@ test_concurrent_conflicting_id_across_conversations (chat.tests.test_t32_review.
 
 ```text
 $ npm run test:e2ee
-tests 75 / pass 75 / fail 0
+tests 105 / pass 105 / fail 0
 
 $ node --check static/js/chat.js
 exit=0
 ```
 
-`test:e2ee` 由基线 62 条增至 75 条（本卡新增 `chat/tests/js/key_change_reminder.test.js` 13 条，
+本卡最初由基线 62 条增至 75 条（新增 `chat/tests/js/key_change_reminder.test.js` 13 条，
 已在基线 worktree 上用同一命令核对：`cfe53be` → tests 62 / pass 62）。
+
+Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又追加：
+
+| 文件 | 条数 | 覆盖 |
+| --- | --- | --- |
+| `chat/tests/js/key_trust_decline.test.js` | 21 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链 |
+| `chat/tests/js/settings_key_export.test.js` | 9 | 从真实模板抽取并执行独立设置页的 `keyMgrExport()` |
+| 合计 | 105 | 其中 4 个独立脚本（private/group/connection/desktop-config）+ `node --test` 97 条 |
+
+> 数字随代码演进会变，以当次 `npm run test:e2ee` 输出为准；上表为 2026-10-26 实测。
+
+## 3.1 客户端信任规则（WEB-03 / #189）
+
+"新密钥不自动继承旧信任状态"在浏览器端由以下规则保证，实现位于 `static/js/chat.js`：
+
+1. **只有一种授予路径**：`refreshKeyVerificationAfterChange(userId, { grantTrustFor })`
+   是唯一会调用 `window.iChatPrivateE2EE.trustPeerKey()` 的地方；不传 `grantTrustFor`
+   时它只刷新展示，不写信任。
+2. **授权对象取自本地快照**：`respondToKeyVerification()` 以
+   `pendingKeyVerificationRequests` 中用户实际点击的那条请求为准，
+   `verificationConfirmation()` 只用回包核对 `id` / `requester_id` / `responder_id`。
+   回包指向其它联系人或其它版本时**不授予任何人信任**并提示用户。
+3. **双重比对**：`acceptedVerificationPeer()` 要求 `status === "accepted"` 且自己是当事人；
+   `keyStatusMatchesAcceptedVerification()` 要求服务端当前 active key 的指纹**和版本**
+   都等于快照所 pin 的值。
+4. **作用域不扩散**：`peer.userId === userId` 保证授权只作用于被点名的那位联系人；
+   当前打开的**另一位**联系人只刷新展示，绝不会被顺带信任。
+5. **不授予的情形**：拒绝、取消、过期（含服务端 `409`）、普通刷新、`fetchContactKeyStatus`
+   失败、`respond` 抛错，一律不新增本地信任；失败时还会清空状态缓存，避免残留"已验证"外观。
+6. **拒绝与失败不报成功**：`accept` 未能真正授予时提示"密钥已变化，本次验证未授予信任"，
+   而不是显示成功。
+7. **双击幂等**：`keyVerificationResponsesInFlight` 保证同一条请求只发一次 `respond`，
+   不会出现两个相反 toast。
+
+对应回归用例见 `chat/tests/js/key_trust_decline.test.js`，其中包含
+"回包点名另一位联系人不得授予任何人"、"decline 遇回包声称 accepted 仍不授予"、
+"双击只发一次请求"等定向场景。
+
+## 3.2 独立设置页的密钥导出（WEB-04 / #170 依赖）
+
+`templates/components/settings_panel.html` 的 `keyMgrExport()` 在独立设置页
+（`templates/pages/settings.html`，不加载 `chat.js`）生效：
+
+- `await kmgr.exportBackup()` 真正完成后才显示 `Backup downloaded. Keep it safe!`；
+- 失败（私钥 `non-extractable`、无待导出备份、用户取消保存等）显示原因并给出恢复路径，
+  绝不再报成功；
+- 处理期间禁用按钮并显示 `Exporting…`，`finally` 恢复原文案；
+- 有 in-flight 守卫，重复点击不会并行导出；
+- **入口不重复实现前置条件**：是否可导出由 `key-manager.js:exportBackup()`
+  （`pendingBackup || record.private_key`）决定，因此"本地记录已清理但本标签页仍持有
+  一次性待备份"的设备也能正常导出。
 
 ## 4. 测试隔离（不得写脏仓库）
 
@@ -106,10 +157,10 @@ $ git status --short -- media/
 
 | 验收项 | 状态 | 证据 |
 | --- | --- | --- |
-| 新密钥不自动继承旧信任状态 | 通过（本机实测 + 6 轮独立审查） | §2 三条 `test_rotated_key_is_untrusted_and_old_record_is_kept` / `test_trust_list_after_rotation_reports_current_key` / `test_previous_and_last_endorsed_diverge_after_consecutive_rotations`；第 5 轮审查另以 10 场景矩阵（S1–S10）独立验证两端点逐字段一致 |
-| 相关代码或配置经过非作者成员评审 | **部分**：6 轮独立子 Agent 审查，第 6 轮（重开）给出无保留 **PASS**（无 BLOCKER/MAJOR/MINOR）；但审查者是 **AI 子 Agent，不是人类成员**，分支未推送、无 PR 评审记录，人类评审仍缺 | 见 §6 |
+| 新密钥不自动继承旧信任状态 | 通过（本机实测 + 多轮独立审查） | §2 三条 `test_rotated_key_is_untrusted_and_old_record_is_kept` / `test_trust_list_after_rotation_reports_current_key` / `test_previous_and_last_endorsed_diverge_after_consecutive_rotations`；第 5 轮审查另以 10 场景矩阵（S1–S10）独立验证两端点逐字段一致；**客户端侧**见 §3.1 与 `key_trust_decline.test.js`（拒绝/取消/过期/刷新不授予，接受且指纹一致才授予，回包不得改变授权对象） |
+| 相关代码或配置经过非作者成员评审 | **部分**：多轮独立子 Agent 审查；但审查者是 **AI 子 Agent，不是人类成员**，分支未推送、无 PR 评审记录，人类评审仍缺 | 见 §6 |
 | 适用的自动化或人工测试已执行并保存证据 | 自动化：已执行（§1–§3）；**人工 UI 验收：未执行** | 本文件 |
-| 需求、部署或测试文档已同步更新 | **部分**：已更新本分支内的 `docs/phase4/tasks.md`、`docs/phase4/traceability-matrix.md`、`docs/iChat Pro API 接口文档.md`、`docs/phase4/t08-acceptance-evidence.md`。`docs/handoff/accounts-auth.md` **不在本分支**（该目录在所有分支上都未被跟踪），相关结论写在主仓库工作区，合并时需单独落地 | `git diff cfe53be..HEAD --stat` |
+| 需求、部署或测试文档已同步更新 | **部分**：Phase4 修复轮已同步 `docs/phase4/t08-acceptance-evidence.md`（§3 数字与 §3.1/§3.2 新规则）、`docs/iChat Pro API 接口文档.md`（§3.3 验证请求语义与客户端契约）。`docs/phase4/tasks.md` 与 `docs/phase4/traceability-matrix.md` 归集成分支统一更新，本分支**未改**。`docs/handoff/accounts-auth.md` 不在本分支（该目录在所有分支上都未被跟踪） | `git diff d84df3c..HEAD --stat -- docs` |
 
 ## 6. 独立审查记录
 
@@ -121,6 +172,8 @@ $ git status --short -- media/
 | 4 | 独立子 Agent（新上下文） | PASS WITH FINDINGS | M1 证据文件 3 处残留错误、M2 措辞已修；**MAJOR：API 文档 `last_endorsed_*` 的 null 规则与代码不符** | 改代码使语义与字段名一致（`_endorsed_elsewhere()`），另修证据文件 |
 | 5 | 独立子 Agent（新上下文，10 场景矩阵） | PASS WITH FINDINGS | 语义变更正确、无回归；MAJOR：DELETE 注释引用了 `agent-handoff.md` 里不存在的规则 | 删除虚构引用，改注释放置位置，补"显式 untrusted"用例 |
 | 6 | 独立子 Agent（重开，新上下文） | **PASS**（无 BLOCKER / MAJOR / MINOR） | 仅 2 条过程记录：审查区间口径（ff3ea42..d80c836）、worktree 内 `.review/` 为审查痕迹 | 无需处理 |
+| 7 | 独立子 Agent（Phase4 修复轮，新上下文） | PASS WITH FINDINGS | WEB-03 主路径已修，但 3 MAJOR：授权对象取自服务端回包、文档未同步、导出入口门禁与实现不一致；另有 m-1 双击、m-4 死代码等 MINOR | 全部处理：授权改取本地快照并拒绝回包替换、同步本文件与 API 文档、删除重复门禁、加 in-flight 守卫、删除死代码入口；并补上能覆盖 M2/M7 变异的用例 |
+
 
 **未验证范围**（不得当作通过）：
 

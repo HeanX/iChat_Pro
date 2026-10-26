@@ -225,6 +225,74 @@
 > 补记：`POST /api/keys/upload/` 重复上传**内容完全相同**的公钥时不会产生新版本，
 > 直接返回 `200` 与当前有效密钥（`key_version` 不变）；只有内容不同才会轮换并返回 `201`。
 
+### 3.3 双向密钥验证请求（P4 Test T08 / #189）
+
+两名用户相互确认"当前指纹"的一次性握手。验证请求**在创建时把双方的指纹和版本固定下来**，
+接受时服务端重新比对两侧当前 active key。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/keys/verification-requests/` | 当前用户所有 `pending` 的验证请求 |
+| POST | `/api/keys/verification-requests/` | 创建（或复用）一条针对某联系人的验证请求 |
+| POST | `/api/keys/verification-requests/<id>/respond/` | 接受 / 拒绝 / 取消该请求 |
+
+创建请求体：
+
+```json
+{
+  "user_id": 7
+}
+```
+
+响应中的单条请求对象（列表项与 `respond` 回包同构）：
+
+```json
+{
+  "id": 42,
+  "requester_id": 1,
+  "requester_username": "alice",
+  "responder_id": 7,
+  "responder_username": "bob",
+  "requester_key_version": 1,
+  "requester_key_fingerprint": "AAAA...",
+  "responder_key_version": 2,
+  "responder_key_fingerprint": "BBBB...",
+  "status": "pending",
+  "direction": "outgoing",
+  "created_at": "2026-10-26T08:00:00+00:00",
+  "responded_at": null
+}
+```
+
+`direction` 相对**请求者本人**计算：`incoming` 表示对方发起、需要自己回应；`outgoing` 表示自己发起。
+`requester_key_fingerprint` / `responder_key_fingerprint` 是**请求创建时**的快照，之后对端轮换不会改写它。
+
+回应请求体：
+
+```json
+{
+  "action": "accept"
+}
+```
+
+`action` 取 `accept`、`decline`、`cancel`。只有 `responder` 可以 `accept`/`decline`，
+只有 `requester` 可以 `cancel`，越权返回 `403`。
+
+| 结果 | HTTP | 语义 |
+| --- | --- | --- |
+| `accept` 且两侧指纹仍与请求一致 | `200` | 原子地为**双方**写入 `verified` 判定，请求置为 `accepted`，并向两人推送 `key.verification.new` |
+| `accept` 但任一侧指纹或版本已变（含本机主动轮换） | `409` | 请求置为 `expired`，**不写任何信任**，返回 `{"error": "Keys changed. Start a new verification request."}` |
+| `decline` / `cancel` | `200` | 仅改状态，**不写任何信任** |
+
+> **客户端契约（重要）**：`respond` 的 2xx **只**表示"服务端处理了这一条请求"，
+> 它**不是**客户端应当信任其内容的凭据。浏览器端必须以**用户实际点击的那条本地请求快照**
+> 作为授权对象，只在 `action=accept`、服务端确认的 `id`/`requester_id`/`responder_id`
+> 与该快照一致，且重新拉取的 active key 仍等于快照里的指纹与版本时，才把该指纹写入
+> 本地信任库（`ichat_peer_identity:<uid>`）与发送缓存。回包若指向其他联系人或其它版本，
+> 一律不授予任何信任并提示用户。`decline` / `cancel` / `expired` / 普通刷新永不授予信任。
+>
+> 详见 `docs/phase4/t08-acceptance-evidence.md` 的「客户端信任规则」一节。
+
 ## 4. 会话 API
 
 ### 4.1 会话列表

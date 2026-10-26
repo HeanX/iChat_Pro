@@ -86,7 +86,7 @@ test_concurrent_conflicting_id_across_conversations (chat.tests.test_t32_review.
 
 ```text
 $ npm run test:e2ee
-tests 111 / pass 111 / fail 0
+tests 118 / pass 118 / fail 0
 
 $ node --check static/js/chat.js
 exit=0
@@ -99,19 +99,19 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
 
 | 文件 | 条数 | 覆盖 |
 | --- | --- | --- |
-| `chat/tests/js/key_trust_decline.test.js` | 27 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链 |
+| `chat/tests/js/key_trust_decline.test.js` | 34 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链（含自回声抑制） |
 | `chat/tests/js/settings_key_export.test.js` | 9 | 从真实模板抽取并执行独立设置页的 `keyMgrExport()` |
 
-口径说明（避免重复计数）：`npm run test:e2ee` = **111** 条，全部来自 `node --test` 阶段；
+口径说明（避免重复计数）：`npm run test:e2ee` = **118** 条，全部来自 `node --test` 阶段；
 另有 4 个独立脚本（`private_chat_e2ee`、`group_chat_e2ee`、`chat_connection`、`desktop_config`）
 在 `node --test` 之前用 `node <file>` 直接执行，只打印 `all tests passed`、**不产生计数**，
-因此不计入 111。逐文件实测：`message_accepted` 12、`public_key_cache` 2、
-`key_change_reminder` 13、`key_trust_decline` 27、`settings_key_export` 9、`desktop_branding` 1、
+因此不计入 118。逐文件实测：`message_accepted` 12、`public_key_cache` 2、
+`key_change_reminder` 13、`key_trust_decline` 34、`settings_key_export` 9、`desktop_branding` 1、
 `desktop_tray` 15、`chat_notifications` 13、`desktop_notifications` 7、`notification_integration` 12
-= 111。
+= 118。
 
 > 另注：若用 `node --test 'chat/tests/js/*.test.js'` 一次性跑**全部** 14 个文件（含上述 4 个
-> 独立脚本，每个算 1 条），总数是 115，与 `test:e2ee` 的 111 不是同一口径，不要混用。
+> 独立脚本，每个算 1 条），总数是 122，与 `test:e2ee` 的 118 不是同一口径，不要混用。
 
 > 数字随代码演进会变，以当次 `npm run test:e2ee` 输出为准；上表为 2026-10-26 实测。
 
@@ -119,9 +119,15 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
 
 "新密钥不自动继承旧信任状态"在浏览器端由以下规则保证，实现位于 `static/js/chat.js`：
 
-1. **只有一种授予路径**：`refreshKeyVerificationAfterChange(userId, { grantTrustFor })`
-   是唯一会调用 `window.iChatPrivateE2EE.trustPeerKey()` 的地方；不传 `grantTrustFor`
-   时它只刷新展示，不写信任。
+1. **私聊验证流程只有一条显式授予路径**：`refreshKeyVerificationAfterChange(userId, { grantTrustFor })`
+   是私聊验证流程中唯一会调用 `window.iChatPrivateE2EE.trustPeerKey()` 的地方；不传
+   `grantTrustFor` 时它只刷新展示，不写信任。
+   > 本地信任库并非只有一个写入点，准确说法是"只有一条**显式授权**的验证路径"：
+   > - 群聊轮换重试（`chat.js` 的 `iChatGroupE2EE.trustPeerKey`）写入同一命名空间，门禁是
+   >   用户点过的 `window.confirm()`；
+   > - `private-chat-e2ee.js` 的 `rememberPeerIdentity()` 在**首次**给某人发消息且本地无记录时
+   >   会做 TOFU 记录（无交互、无提示）。它只记录**当前**密钥，不会让新密钥继承旧信任
+   >   （旧版本被覆盖时会抛 `peer_key_changed`），因此不违背 #189 的验收原文。
 2. **授权对象取自本地快照，且是唯一来源**：
    - `respondToKeyVerification()` 以 `pendingKeyVerificationRequests` 中用户实际点击的那条
      请求为准，`verificationConfirmation()` 只用回包核对 `id` / `requester_id` / `responder_id`；
@@ -129,6 +135,10 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
    - WebSocket `accepted` 事件同样以托盘快照为授权对象，并须通过
      `verificationIdentifiesSameRequest()`；**没有本地快照时失败关闭**——用户从未在本标签页
      看到该请求，服务端说 accepted 不等于用户同意，因此不授予任何人并提示重新发起验证。
+   - **自己刚完成的 accept 的回声**由 `locallyAnsweredVerificationIds` 识别（写入 POST 前记录，
+     60 秒过期，POST 失败即移除）：命中时**静默**——不重复授予（HTTP 路径已授予）、不再提示
+     成功或失败、也不访问指纹端点。服务端会把 accepted 同时推给双方，没有这条会把正常成功
+     路径显示成失败。
 3. **双重比对**：`acceptedVerificationPeer()` 要求 `status === "accepted"` 且自己是当事人；
    `keyStatusMatchesAcceptedVerification()` 要求服务端当前 active key 的指纹**和版本**
    都等于快照所 pin 的值。
@@ -176,7 +186,7 @@ $ git status --short -- media/
 | 新密钥不自动继承旧信任状态 | 通过（本机实测 + 多轮独立审查） | §2 三条 `test_rotated_key_is_untrusted_and_old_record_is_kept` / `test_trust_list_after_rotation_reports_current_key` / `test_previous_and_last_endorsed_diverge_after_consecutive_rotations`；第 5 轮审查另以 10 场景矩阵（S1–S10）独立验证两端点逐字段一致；**客户端侧**见 §3.1 与 `key_trust_decline.test.js`（拒绝/取消/过期/刷新不授予，接受且指纹一致才授予，回包不得改变授权对象） |
 | 相关代码或配置经过非作者成员评审 | **部分**：多轮独立子 Agent 审查；但审查者是 **AI 子 Agent，不是人类成员**，分支未推送、无 PR 评审记录，人类评审仍缺 | 见 §6 |
 | 适用的自动化或人工测试已执行并保存证据 | 自动化：已执行（§1–§3）；**人工 UI 验收：未执行** | 本文件 |
-| 需求、部署或测试文档已同步更新 | **部分**：Phase4 修复轮已同步 `docs/phase4/t08-acceptance-evidence.md`（§3 数字与 §3.1/§3.2 新规则）、`docs/iChat Pro API 接口文档.md`（§3.3 验证请求语义与客户端契约）。`docs/phase4/tasks.md` 与 `docs/phase4/traceability-matrix.md` 归集成分支统一更新，本分支**未改**。`docs/handoff/accounts-auth.md` 不在本分支（该目录在所有分支上都未被跟踪） | `git diff d84df3c..HEAD --stat -- docs` |
+| 需求、部署或测试文档已同步更新 | **部分**：Phase4 修复轮已同步 `docs/phase4/t08-acceptance-evidence.md`（§3 数字与 §3.1/§3.2 新规则）、`docs/iChat Pro API 接口文档.md`（§3.3 验证请求语义与客户端契约）、**以及 `docs/phase4/traceability-matrix.md` 的 NEW-DEV-007 行**。`docs/phase4/tasks.md` 归集成分支统一更新，本分支**未改**。`docs/handoff/accounts-auth.md` 不在本分支（该目录在所有分支上都未被跟踪） | `git diff 716992b..HEAD --stat -- docs` |
 
 ## 6. 独立审查记录
 
@@ -190,6 +200,7 @@ $ git status --short -- media/
 | 6 | 独立子 Agent（重开，新上下文） | **PASS**（无 BLOCKER / MAJOR / MINOR） | 仅 2 条过程记录：审查区间口径（ff3ea42..d80c836）、worktree 内 `.review/` 为审查痕迹 | 无需处理 |
 | 7 | 独立子 Agent（Phase4 修复轮，新上下文） | PASS WITH FINDINGS | WEB-03 主路径已修，但 3 MAJOR：授权对象取自服务端回包、文档未同步、导出入口门禁与实现不一致；另有 m-1 双击、m-4 死代码等 MINOR | 全部处理：授权改取本地快照并拒绝回包替换、同步本文件与 API 文档、删除重复门禁、加 in-flight 守卫、删除死代码入口；并补上能覆盖 M2/M7 变异的用例 |
 | 8 | 独立子 Agent（第 2 轮，新上下文） | PASS WITH FINDINGS | HTTP 路径 35/35 确认修好、M-3 与 m-1/m-4 确认修好；**MAJOR：socket `accepted` 分支仍把事件负载当授权对象**（G2）；MINOR：回包 `id` 维无覆盖（F-1）、本文件数字自相矛盾（F-2）、204 提示不可读（F-3） | socket 改为无快照即失败关闭并给可读提示、成功 toast 移到 `granted` 之后；补 `id` 不匹配与 204 用例；按实测 111/27/9 统一数字 |
+| 9 | 独立子 Agent（第 3 轮，新上下文） | PASS WITH FINDINGS | G2 确认修复（基线 45 红 → HEAD 2 红）；**MAJOR：服务端把 accepted 推给双方，本页收到自己那次 accept 的回声 → 成功后又报「未授予信任」（E5）/ 两条成功（E3）**；MINOR：TOFU 第二写入点表述不严谨、HTTP 无快照文案不实、§5 自述矛盾、版本维零覆盖（MU9） | 新增 `locallyAnsweredVerificationIds` 自回声抑制（静默、幂等、60s 过期、POST 失败即移除）；HTTP 无快照改用「不在本页待处理列表」文案；§3.1 明确 TOFU/群聊写入点；§5 改正；补版本维与 `granted===false` 用例 |
 
 
 **未验证范围**（不得当作通过）：

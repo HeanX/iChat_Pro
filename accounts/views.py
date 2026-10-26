@@ -1127,6 +1127,85 @@ def public_key_fingerprint_view(request, user_id):
 
 # ── P2 T38: Key trust and fingerprint management ──────────────────
 
+#: Verdicts that mean "the user explicitly endorsed this exact fingerprint".
+ENDORSED_TRUST_STATUSES = frozenset({
+    KeyTrust.TrustStatus.TRUSTED,
+    KeyTrust.TrustStatus.VERIFIED,
+})
+
+
+def _summarize_key_trust(trust_records, active_key, previous_key=None):
+    """Describe the verdict that currently applies to ``active_key`` (T08).
+
+    Trust is bound to a fingerprint, never to the account: a rotated key does
+    not inherit the verdict given to its predecessor. ``key_changed`` stays
+    True only while the current key carries no endorsement *and* an earlier
+    fingerprint the user had endorsed exists -- so re-verifying the new key
+    silences the reminder instead of leaving a permanent warning.
+
+    ``trust_records`` must be an iterable ordered newest-first.
+    ``previous_key`` is the contact's preceding ``UserPublicKey`` (a key, not a
+    trust record -- an unendorsed version never gets a trust row).
+
+    Returns a dict with:
+
+    * ``trust_status`` / ``verified_at`` -- the verdict for the active key;
+    * ``key_changed`` -- whether the user should be warned;
+    * ``previous`` -- the preceding key version, if the contact has rotated and
+      we still know about it (audit context);
+    * ``endorsed`` -- the last trust record the user endorsed
+      (``trusted``/``verified``) for a fingerprint *other than* the active one,
+      i.e. what a rotation moved away from. Reported regardless of whether the
+      active key already has a verdict, so a client can still show history
+      after re-verification. ``None`` when no other fingerprint was endorsed.
+    """
+    records = list(trust_records)
+
+    def _endorsed_elsewhere():
+        return next(
+            (
+                record for record in records
+                if record.trust_status in ENDORSED_TRUST_STATUSES
+                and (active_key is None
+                     or record.key_fingerprint != active_key.key_fingerprint)
+            ),
+            None,
+        )
+
+    if active_key is None:
+        newest = records[0] if records else None
+        return {
+            'trust_status': newest.trust_status if newest else KeyTrust.TrustStatus.UNTRUSTED,
+            'verified_at': newest.verified_at if newest else None,
+            'key_changed': False,
+            'previous': previous_key,
+            'endorsed': None,
+        }
+
+    matching = next(
+        (record for record in records if record.key_fingerprint == active_key.key_fingerprint),
+        None,
+    )
+    if matching is not None:
+        # The active key has its own verdict, so the warning is resolved; the
+        # previous endorsement is still reported so the history stays visible.
+        return {
+            'trust_status': matching.trust_status,
+            'verified_at': matching.verified_at,
+            'key_changed': False,
+            'previous': previous_key,
+            'endorsed': _endorsed_elsewhere(),
+        }
+
+    endorsed = _endorsed_elsewhere()
+    return {
+        'trust_status': KeyTrust.TrustStatus.UNTRUSTED,
+        'verified_at': None,
+        'key_changed': endorsed is not None,
+        'previous': previous_key,
+        'endorsed': endorsed,
+    }
+
 
 @login_required
 @require_GET
@@ -1161,11 +1240,14 @@ def contact_fingerprints_view(request, user_id):
     active_key = keys.filter(is_active=True).first()
 
     # Check if current user has verified any of the contact's keys
-    trust_records = KeyTrust.objects.filter(
-        user=request.user,
-        contact=target,
+    trust_records = (
+        KeyTrust.objects
+        .filter(user=request.user, contact=target)
+        .order_by('-updated_at')
     )
     trust_map = {t.key_fingerprint: t.trust_status for t in trust_records}
+    previous_key = keys.filter(key_version__lt=active_key.key_version).first() if active_key else None
+    summary = _summarize_key_trust(trust_records, active_key, previous_key)
 
     key_data = []
     for k in keys:
@@ -1178,12 +1260,30 @@ def contact_fingerprints_view(request, user_id):
         | (models.Q(user=target) & models.Q(contact=request.user)),
     ).exists()
 
+    superseded = summary['endorsed']
+    previous = summary['previous']
     return JsonResponse({
         'user_id': target.pk,
         'username': target.username,
         'is_contact': is_contact,
         'active_key': _serialize_key(active_key) if active_key else None,
         'keys': key_data,
+        # T08: the active key never inherits the superseded verdict; these
+        # fields let the client explain a rotation instead of guessing.
+        'key_changed': summary['key_changed'],
+        # The preceding key version (whatever its verdict was).
+        'previous_key_fingerprint': previous.key_fingerprint if previous else None,
+        'previous_key_version': previous.key_version if previous else None,
+        'previous_trust_status': (
+            trust_map.get(previous.key_fingerprint, 'untrusted') if previous else None
+        ),
+        # The last fingerprint the user endorsed other than the active one. It
+        # stays reported even when key_changed is false (after re-verifying the
+        # new key, or after explicitly marking it untrusted), because it is
+        # history, not a warning flag.
+        'last_endorsed_key_fingerprint': superseded.key_fingerprint if superseded else None,
+        'last_endorsed_key_version': superseded.key_version if superseded else None,
+        'last_endorsed_trust_status': superseded.trust_status if superseded else None,
     })
 
 
@@ -1207,7 +1307,12 @@ def key_trust_view(request, user_id):
         return JsonResponse({'error': 'Contact has no public key.'}, status=404)
 
     if request.method == 'POST':
-        trust_status = _json_body(request).get('trust_status', 'trusted')
+        payload = _json_body(request)
+        if not isinstance(payload, dict):
+            # A malformed or non-object body used to raise AttributeError and
+            # surface as a 500 HTML page instead of a JSON error.
+            return JsonResponse({'error': 'invalid_json'}, status=400)
+        trust_status = payload.get('trust_status', 'trusted')
         if trust_status not in KeyTrust.TrustStatus.values:
             return JsonResponse({'error': 'Invalid trust status.'}, status=400)
 
@@ -1229,6 +1334,11 @@ def key_trust_view(request, user_id):
         })
 
     elif request.method == 'DELETE':
+        # Removes the verdict for the *active* fingerprint only (unchanged from
+        # T38); older KeyTrust rows are kept for audit. Deleting a whole
+        # contact's history was considered for T08 and rejected for that
+        # reason: a post-rotation reminder is cleared by verifying the new key,
+        # not by destroying the audit trail.
         deleted, _ = KeyTrust.objects.filter(
             user=request.user,
             contact=target,
@@ -1245,28 +1355,65 @@ def key_trust_view(request, user_id):
 @login_required
 @require_GET
 def key_trust_list_view(request):
-    """List key trust status for all contacts (T38)."""
-    trust_records = KeyTrust.objects.filter(
-        user=request.user,
-    ).select_related('contact').order_by('-updated_at')
+    """List the current key trust status for all contacts (T38/T08).
+
+    One row per contact, describing the **active** key. ``previous_*`` is the
+    actual preceding version; ``last_endorsed_*`` is the last fingerprint the
+    user endorsed, which is what a rotation warning is really about (the two
+    differ after several consecutive rotations).
+    """
+    trust_records = (
+        KeyTrust.objects
+        .filter(user=request.user)
+        .select_related('contact')
+        .order_by('-updated_at')
+    )
+
+    grouped = {}
+    for record in trust_records:
+        grouped.setdefault(record.contact_id, []).append(record)
 
     results = []
-    for t in trust_records:
-        # Check if the contact has rotated their key
-        active_key = _active_key(t.contact_id)
-        key_changed = (
-            active_key is not None
-            and active_key.key_fingerprint != t.key_fingerprint
+    for contact_id, records in grouped.items():
+        contact = records[0].contact
+        active_key = _active_key(contact_id)
+        previous_key = (
+            UserPublicKey.objects
+            .filter(user_id=contact_id, key_version__lt=active_key.key_version)
+            .order_by('-key_version')
+            .first()
+            if active_key else None
         )
+        summary = _summarize_key_trust(records, active_key, previous_key)
+        previous = summary['previous']
+        endorsed = summary['endorsed']
+        records_by_fingerprint = {r.key_fingerprint: r for r in records}
         results.append({
-            'contact_id': t.contact_id,
-            'contact_username': t.contact.username,
-            'key_fingerprint': t.key_fingerprint,
-            'key_version': t.key_version,
-            'trust_status': t.trust_status,
-            'verified_at': t.verified_at.isoformat() if t.verified_at else None,
-            'key_changed': key_changed,
+            'contact_id': contact_id,
+            'contact_username': contact.username,
+            'key_fingerprint': (
+                active_key.key_fingerprint if active_key else records[0].key_fingerprint
+            ),
+            'key_version': active_key.key_version if active_key else records[0].key_version,
+            'trust_status': summary['trust_status'],
+            'verified_at': (
+                summary['verified_at'].isoformat() if summary['verified_at'] else None
+            ),
+            'key_changed': summary['key_changed'],
             'active_key_fingerprint': active_key.key_fingerprint if active_key else None,
+            # The immediately preceding version, whatever its verdict was.
+            'previous_key_fingerprint': previous.key_fingerprint if previous else None,
+            'previous_key_version': previous.key_version if previous else None,
+            'previous_trust_status': (
+                records_by_fingerprint[previous.key_fingerprint].trust_status
+                if previous and previous.key_fingerprint in records_by_fingerprint
+                else (KeyTrust.TrustStatus.UNTRUSTED if previous else None)
+            ),
+            # The last fingerprint the user endorsed other than the active one;
+            # reported as history even when key_changed is false.
+            'last_endorsed_key_fingerprint': endorsed.key_fingerprint if endorsed else None,
+            'last_endorsed_key_version': endorsed.key_version if endorsed else None,
+            'last_endorsed_trust_status': endorsed.trust_status if endorsed else None,
         })
 
     return JsonResponse({'trusts': results})

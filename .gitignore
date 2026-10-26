@@ -50,7 +50,6 @@ desktop/out/
 desktop/dist/
 
 # Review scratch (handoff workflow)
-.review/
 
 # Android / Capacitor (P4 T22)
 mobile/node_modules/

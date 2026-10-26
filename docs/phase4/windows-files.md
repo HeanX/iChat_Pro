@@ -93,14 +93,14 @@ static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- |
 | `.\.venv\Scripts\python.exe manage.py check` | `System check identified no issues (0 silenced).` |
 | `.\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run` | `No changes detected` |
-| `npm run test:e2ee` | **111 tests / 111 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 49 条） |
+| `npm run test:e2ee` | **111 tests / 111 pass / 0 fail**（改造前同一基线为 62 pass，本卡新增 50 条；2026-10-26 QA-03 又补 1 条真实气泡按钮入口回归，现共 50 条） |
 | `cd desktop && npm run test:layout` | `Sidebar layout: 36/36 browser checks passed` |
 | `cd desktop && npm run test:branding` | 打包 asar 内 **71 tests 全通过**、`Native PE icon: 7 source frames matched exactly`。注意：新增的 `desktop_file_io` 套件读的是**源码**（不认 `ICHAT_DESKTOP_TEST_ARCHIVE`），asar 内只验证到 `file-io.js` 确实被打包 |
 | `cd desktop && npm run test:installer` | `NSIS runtime: 24/24 assertions passed` |
 | `cd desktop && npm run test:files` | **49 tests / 49 pass**（第 1 轮审查发现该入口曾指向不存在的文件） |
 | 真实 Electron 39.8.10 复核（`verify-fixes.cjs`） | F1 第二个下载被 `target_in_use` 拒绝、落盘 3 MiB 全属 A；F1 旧令牌 `not_found`；F2 11 MiB 图片 `nativeCalls=1` 且预览仍显示；F3 旧 URL 给旧模块、新 URL 给新模块；F4 `.xml` 保存成功但 `blocked_type`；F5 回报名 = 磁盘名 |
 
-新增套件 `chat/tests/js/desktop_file_io.test.js` 共 49 条，分四层：
+新增套件 `chat/tests/js/desktop_file_io.test.js` 共 50 条（QA-03 补齐真实气泡按钮入口后），分四层：
 
 1. **策略层**（`desktop/file-io.js`）：真实临时目录里写字节，覆盖文件名净化、严格字节数解析、顺序追加、越界、重放、过期、绑定发送者、授权上限、失败不推进偏移、**写一半失败后重试不重复追加**、**覆盖更长旧文件后按声明大小截断**、空文件、**白名单外一律拒绝打开**（`.scf/.url/.pyw/.py/.sh/.pl/.rb/.exe/'无扩展名'/双扩展名`）、**已 seal 不占配额**、**失败后可释放配额**、**对话框路径尾随点/空格不绕过白名单（且合法文档仍可打开）**。
 2. **主进程层**（真实 `main.js` 在 vm 沙箱里跑，只替换 OS 网络/对话框）：五条通道注册（含 `release`）、非受信 frame 拒绝、**校验先于弹框**、取消不建授权、同 frame 并发对话框拒绝、端到端（对话框→两块→seal→打开）、跨 sender 拒绝、可执行不调用 `openPath`、`openPath` 返回错误串时上报。
@@ -269,7 +269,7 @@ static/js/chat.js        +156/-48 行 saveOrDownloadBlob / offerOpenSavedFile �
 | --- | --- | --- |
 | P3 | F1 的路径独占把"同路径锁"绑在 30 分钟 TTL 上：渲染端崩溃/刷新未调用 `release` 时，该路径最长被占 30 分钟，且提示没说时长 | 活动授权 5 分钟无分块即视为死亡并回收（`STALE_ACTIVE_GRANT_MS`）；每收到一块刷新 `lastActivityAt`；提示文案补"或稍后再试" |
 
-新增 2 条用例（慢速但活跃的下载不会被误回收；放弃的下载在静默超时后可被重新占用），合计 49 条。
+新增 2 条用例（慢速但活跃的下载不会被误回收；放弃的下载在静默超时后可被重新占用），合计 50 条。
 
 ### 变异测试结果（各轮问题修复后复验）
 

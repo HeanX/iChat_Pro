@@ -1317,6 +1317,9 @@ test('every changed asset carries a fresh cache-busting version', () => {
     const match = template.match(pattern);
     assert.ok(match, asset + ' must be referenced with a version parameter');
     assert.match(match[1], /^2026\d{4}-t19/, asset + ' version must be bumped for T19: ' + match[1]);
+    // Any later change to these assets must bump the tag again; the date prefix
+    // alone is not enough (review F-4: chat.js changed 312 lines after the
+    // previous tag and this test still passed).
   }
   // chat.css is the same asset in two templates; the avatar editor does not
   // load chat.js and is left alone on purpose.

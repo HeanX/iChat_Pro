@@ -100,7 +100,6 @@
 | [docs/phase4/windows-notifications.md](phase4/windows-notifications.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-tray.md](phase4/windows-tray.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-files.md](phase4/windows-files.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
-
 | [docs/handoff/README.md](handoff/README.md) | 现行说明/专题；8 模块交接入口与 12 文件清单，模块增删/改名时同步（2026-10-26 纳入版本控制） |
 | [docs/handoff/cloud-deploy-ops.md](handoff/cloud-deploy-ops.md) | 现行说明/专题；云部署运维交接（发布/审批/回滚/监控/staging/备份恢复），以 `deploy/**` 实际实现为准，注明核对提交 |
 | [docs/handoff/accounts-auth.md](handoff/accounts-auth.md) | 现行说明/专题；模块 1 账号/认证/公钥信任交接（按 `cfe53be` 勘察，符号名优先于行号） |

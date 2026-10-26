@@ -141,8 +141,14 @@ sudo -u postgres psql -c "CREATE DATABASE ichat_staging OWNER ichat_staging;"
 # 填 deploy/staging/env.staging.example -> /opt/ichat-staging/.env (600, ichat-staging)
 sudo cp deploy/staging/ichat-staging.service /etc/systemd/system/
 sudo systemctl daemon-reload
-# 身份/端口全部写在那个 .env 里；命令行只需选安装树与审批开关
-sudo ICHAT_APP_DIR=/opt/ichat-staging ICHAT_REQUIRE_APPROVAL=0 \
+# 身份/端口**只能**在命令行给：deploy.sh 见到 .env 里出现这些键会 exit 2，
+sudo ICHAT_APP_DIR=/opt/ichat-staging \
+     ICHAT_MEDIA_DIR=/var/lib/ichat-staging/media \
+     ICHAT_SERVICE_NAME=ichat-staging \
+     ICHAT_SERVICE_USER=ichat-staging \
+     ICHAT_TLS_PORT=8444 \
+     ICHAT_HTTP_PORT=8001 \
+     ICHAT_REQUIRE_APPROVAL=0 \
      /opt/ichat-staging/bin/deploy.sh --branch main
 ```
 

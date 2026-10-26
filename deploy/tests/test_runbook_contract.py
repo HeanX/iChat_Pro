@@ -121,9 +121,21 @@ class RunbookDescribesTheRealBehaviourTests(unittest.TestCase):
         self.assertIn("smoke=skipped-no-script", self.runbook)
         self.assertIn("IS_ROLLBACK", self.runbook)
 
-    def test_runbook_does_not_tell_operators_to_re_export_staging_identity(self):
-        """The staging recipe must rely on .env, which is what the fix enables."""
-        self.assertNotIn("ICHAT_SERVICE_NAME=ichat-staging \\", self.runbook)
+    def test_runbook_tells_operators_to_pass_the_staging_identity_on_the_command_line(self):
+        """F-01: the identity keys are caller-only, so the recipe must export them.
+
+        ``deploy.sh`` refuses to run when any sovereign key appears in the
+        deployed tree's ``.env`` — that is the point of the guard: a tree must
+        not authorise its own deployment. The staging recipe therefore has to
+        pass the identity on the command line. The previous assertion pinned the
+        opposite (``assertNotIn``), i.e. the wrong side of this contract.
+        """
+        self.assertIn("ICHAT_SERVICE_NAME=ichat-staging", self.runbook)
+        self.assertIn("ICHAT_APP_DIR=/opt/ichat-staging", self.runbook)
+
+    def test_runbook_states_that_identity_keys_in_dot_env_are_refused(self):
+        """The prohibition next to the recipe: exit 2, not a silent ignore."""
+        self.assertIn("exit 2", self.runbook)
 
     def test_runbook_names_both_storage_roots(self):
         self.assertIn("media 与 static 两类根目录", self.runbook)

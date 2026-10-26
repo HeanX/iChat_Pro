@@ -94,6 +94,53 @@ prod_db=$(env_value "$PROD_ENV" DATABASE_URL || true)
 staging_db=$(env_value "$STAGING_ENV" DATABASE_URL || true)
 same_or_diff "DATABASE_URL" "$prod_db" "$staging_db"
 
+# A URL is not one secret. Comparing the whole string and calling it "secret
+# isolation" let staging keep production's ROLE and PASSWORD as long as the
+# database name was different (review finding OPS-09) — the write risk is the
+# credential, not the path. Each component is therefore compared on its own
+# and reported by digest, never by value.
+url_user() {  # url_user <url> -> percent-decoded userinfo username
+    local url=$1 userinfo
+    userinfo=$(printf '%s' "$url" | sed -E 's|^[a-z0-9+.-]+://||')
+    userinfo=${userinfo%%/*}
+    [[ "$userinfo" == *"@"* ]] || { printf ''; return 0; }
+    printf '%s' "${userinfo%@*}" | cut -d: -f1
+}
+url_password() {  # url_password <url> -> percent-decoded userinfo password
+    local url=$1 userinfo credentials
+    userinfo=$(printf '%s' "$url" | sed -E 's|^[a-z0-9+.-]+://||')
+    userinfo=${userinfo%%/*}
+    [[ "$userinfo" == *"@"* ]] || { printf ''; return 0; }
+    credentials=${userinfo%@*}
+    [[ "$credentials" == *":"* ]] || { printf ''; return 0; }
+    printf '%s' "${credentials#*:}"
+}
+
+if [[ -n "$prod_db" && -n "$staging_db" ]]; then
+    prod_role=$(url_user "$prod_db")
+    staging_role=$(url_user "$staging_db")
+    prod_pw=$(url_password "$prod_db")
+    staging_pw=$(url_password "$staging_db")
+
+    if [[ -z "$staging_role" ]]; then
+        violation "DATABASE_URL: staging URL carries no role (userinfo missing)"
+    elif [[ "$staging_role" == "$prod_role" ]]; then
+        violation "DATABASE_URL: staging shares the production database ROLE '${staging_role}' (staging must have its own login, runbook §3c)"
+    else
+        ok "database role differs (hash $(sha "$staging_role")…)"
+    fi
+
+    # An absent password on either side cannot be compared, and "no password"
+    # is not isolation: say so instead of silently passing the dimension.
+    if [[ -z "$prod_pw" || -z "$staging_pw" ]]; then
+        violation "DATABASE_URL: cannot compare database passwords (prod set: $([[ -n "$prod_pw" ]] && echo yes || echo NO), staging set: $([[ -n "$staging_pw" ]] && echo yes || echo NO))"
+    elif [[ "$staging_pw" == "$prod_pw" ]]; then
+        violation "DATABASE_URL: staging shares the production database PASSWORD (value hash $(sha "$staging_pw")…); rotate the staging role's password"
+    else
+        ok "database password differs (hash $(sha "$staging_pw")…)"
+    fi
+fi
+
 # --- 2. config: database name, redis logical db, origins ------------------
 echo "-- config"
 if [[ -z "$staging_db" ]]; then
@@ -133,21 +180,39 @@ echo "-- storage"
 for key in DJANGO_MEDIA_ROOT DJANGO_STATIC_ROOT; do
     same_or_diff "$key" "$(env_value "$PROD_ENV" "$key")" "$(env_value "$STAGING_ENV" "$key")"
 done
-staging_media=$(env_value "$STAGING_ENV" DJANGO_MEDIA_ROOT || true)
-if [[ -n "$staging_media" ]]; then
-    prod_media=$(env_value "$PROD_ENV" DJANGO_MEDIA_ROOT || true)
-    prod_media=${prod_media:-/var/lib/ichat/media}
-    # No shared subtree: staging must not read or write production media.
-    # Paths are normalised first, so trailing slashes and `..` components
-    # cannot dodge the comparison.
-    staging_norm=$(normalise_path "$staging_media")
-    prod_norm=$(normalise_path "$prod_media")
-    if [[ "${staging_norm}/" == "${prod_norm}/"* || "${prod_norm}/" == "${staging_norm}/"* ]]; then
-        violation "MEDIA_ROOT nesting: $staging_media overlaps $prod_media"
-    else
-        ok "media roots are disjoint directories"
+
+# Both roots need the nesting test, not just media. `collectstatic --clear`
+# empties the whole static root, so a staging root nested inside production's
+# (or the reverse) makes each release delete the other environment's files —
+# review finding OPS-10, where only MEDIA_ROOT was checked. Comparison is on
+# normalised paths, so trailing slashes, duplicate separators and `..` cannot
+# dodge it.
+check_no_nesting() {  # check_no_nesting <label> <key> <prod-default> [display]
+    local label=$1 key=$2 prod_default=${3:-} display=${4:-$1}
+    local staging_path prod_path staging_norm prod_norm
+    staging_path=$(env_value "$STAGING_ENV" "$key" || true)
+    prod_path=$(env_value "$PROD_ENV" "$key" || true)
+    prod_path=${prod_path:-$prod_default}
+    if [[ -z "$staging_path" ]]; then
+        violation "$label: staging $key is unset, so the roots cannot be compared"
+        return 0
     fi
-fi
+    if [[ -z "$prod_path" ]]; then
+        violation "$label: production $key is unset, so the roots cannot be compared"
+        return 0
+    fi
+    staging_norm=$(normalise_path "$staging_path")
+    prod_norm=$(normalise_path "$prod_path")
+    # Trailing "/" makes the prefix test component-aware: /a/bc is not inside
+    # /a/b. Equality is the degenerate case of the same test.
+    if [[ "${staging_norm}/" == "${prod_norm}/"* || "${prod_norm}/" == "${staging_norm}/"* ]]; then
+        violation "$label nesting: $staging_path overlaps $prod_path (one must not be an ancestor of the other)"
+    else
+        ok "${display} roots are disjoint directories"
+    fi
+}
+check_no_nesting "STATIC_ROOT" DJANGO_STATIC_ROOT /opt/ichat/staticfiles "static"
+check_no_nesting "MEDIA_ROOT" DJANGO_MEDIA_ROOT /var/lib/ichat/media "media"
 
 # --- 4. runtime separation (ports, service, user) -------------------------
 echo "-- runtime"
@@ -186,23 +251,94 @@ if (( port_checked == 0 )); then
     violation "staging systemd unit not found in $staging_tree/repo/deploy/staging/; daphne port UNVERIFIED"
 fi
 
-# --- 5. live data separation (optional, needs psql/redis-cli) -------------
+# --- 5. live data separation (--check-data) -------------------------------
+# Before this, the branch only compared the tail of two URLs it had already
+# compared as text and never opened a connection, yet printed "live database
+# names differ" and contributed to an ISOLATED verdict (review finding
+# OPS-08). "Live data" now means a live query:
+#   * the role each environment actually authenticates as is read from the
+#     server (SELECT current_user), not from the URL;
+#   * the Redis logical database index comes from CONFIG GET / SELECT, not
+#     from the URL tail;
+#   * a missing client, an unreachable server or a rejected login is
+#     UNVERIFIED — a violation with a non-zero exit, never a quiet pass.
+# The password still travels only through PGPASSWORD, and no URL or secret is
+# printed.
+live_psql_role() {  # live_psql_role <db-url>; echoes the role, or nothing
+    local url=$1 user pass host port dbname out
+    user=$(url_user "$url")
+    pass=$(url_password "$url")
+    # host[:port]/dbname, without the userinfo section.
+    local rest=${url#*://}
+    rest=${rest#*@}
+    host=${rest%%/*}
+    dbname=${rest#*/}
+    dbname=${dbname%%\?*}
+    port=5432
+    if [[ "$host" == *:* ]]; then
+        port=${host##*:}
+        host=${host%:*}
+    fi
+    out=$(PGPASSWORD="$pass" PGUSER="$user" PGHOST="$host" PGPORT="$port" \
+        PGDATABASE="$dbname" psql -X -qAt -c 'SELECT current_user;' 2>/dev/null) \
+        || return 1
+    printf '%s' "$out"
+}
+
+live_redis_db() {  # live_redis_db <redis-url>; echoes SELECTed db index
+    local url=$1 host port out
+    local rest=${url#*://}
+    rest=${rest#*@}
+    host=${rest%%/*}
+    port=6379
+    if [[ "$host" == *:* ]]; then
+        port=${host##*:}
+        host=${host%:*}
+    fi
+    # `SELECT <n>` returns OK; ask the server which db we are on.
+    out=$(redis-cli -h "${host:-127.0.0.1}" -p "$port" --no-auth-warning \
+        client info 2>/dev/null | sed -n 's/^db=\([0-9]*\).*/\1/p')
+    [[ -n "$out" ]] || return 1
+    printf '%s' "$out"
+}
+
 if [[ "$CHECK_DATA" == "true" ]]; then
     echo "-- live data"
-    if command -v psql >/dev/null 2>&1 && [[ -n "$staging_db" ]]; then
-        staging_dbname=${staging_db##*/}
-        prod_dbname=${prod_db##*/}
-        if [[ "$staging_dbname" != "$prod_dbname" ]]; then
-            ok "live database names differ: prod=$prod_dbname staging=$staging_dbname"
+    if ! command -v psql >/dev/null 2>&1; then
+        violation "live database: psql not installed, so the live role is UNVERIFIED"
+    elif [[ -z "$staging_db" || -z "$prod_db" ]]; then
+        violation "live database: DATABASE_URL missing on one side, so the live role is UNVERIFIED"
+    else
+        staging_live_role=$(live_psql_role "$staging_db") \
+            || staging_live_role=""
+        prod_live_role=$(live_psql_role "$prod_db") || prod_live_role=""
+        if [[ -z "$staging_live_role" ]]; then
+            violation "live database: could not authenticate to the staging database, so its role is UNVERIFIED"
+        elif [[ -z "$prod_live_role" ]]; then
+            violation "live database: could not authenticate to the production database, so the comparison is UNVERIFIED"
+        elif [[ "$staging_live_role" == "$prod_live_role" ]]; then
+            violation "live database role: staging authenticates as '${staging_live_role}', IDENTICAL to production"
         else
-            violation "live databases share the name $prod_dbname"
+            ok "live database role differs (staging hash $(sha "$staging_live_role")…)"
         fi
     fi
-    if command -v redis-cli >/dev/null 2>&1; then
-        sdb=${staging_redis##*/}
-        pdb=${prod_redis##*/}
-        [[ "$sdb" != "$pdb" ]] && ok "redis logical dbs differ" \
-            || violation "redis logical db identical"
+
+    if ! command -v redis-cli >/dev/null 2>&1; then
+        violation "live redis: redis-cli not installed, so the live logical db is UNVERIFIED"
+    elif [[ -z "$staging_redis" || -z "$prod_redis" ]]; then
+        violation "live redis: REDIS_URL missing on one side, so the logical db is UNVERIFIED"
+    else
+        staging_live_db=$(live_redis_db "$staging_redis") || staging_live_db=""
+        prod_live_db=$(live_redis_db "$prod_redis") || prod_live_db=""
+        if [[ -z "$staging_live_db" ]]; then
+            violation "live redis: could not query the staging server, so its logical db is UNVERIFIED"
+        elif [[ -z "$prod_live_db" ]]; then
+            violation "live redis: could not query the production server, so the comparison is UNVERIFIED"
+        elif [[ "$staging_live_db" == "$prod_live_db" ]]; then
+            violation "live redis: both servers are on logical db ${staging_live_db}, IDENTICAL to production"
+        else
+            ok "live redis logical db differs (prod=$prod_live_db staging=$staging_live_db)"
+        fi
     fi
 fi
 

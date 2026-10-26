@@ -98,6 +98,12 @@ class DeployGateLoggingTests(unittest.TestCase):
             # the block hands these origins to smoke.sh (OPS-02).
             "TLS_ORIGIN=https://127.0.0.1:8443\n"
             "LOOPBACK_ORIGIN=http://127.0.0.1:8000\n"
+            # Audit identity is frozen before .env is read, and the log line
+            # uses only these (F-02), so the harness must supply them.
+            "FROZEN_ACTOR=tester\n"
+            "FROZEN_VIA=direct\n"
+            "FROZEN_ORIGIN=local-console\n"
+            "APPROVAL=#177\n"
             f"COMMIT={commit!r}\n"
             f"IS_ROLLBACK={1 if is_rollback else 0}\n"
             f'ICHAT_SKIP_SMOKE={"1" if skip else "0"}\n'

@@ -249,24 +249,113 @@ fi
 #   2. $APP_DIR/.env — the same file systemd loads through EnvironmentFile
 #   3. the production default
 #
-# APP_DIR itself is deliberately NOT re-read from the file: the caller picks
-# the install tree, and that choice decides which .env is read at all.
+# Two groups of names do NOT follow that precedence, because .env is written by
+# whoever owns the tree being deployed and must never be able to authorise its
+# own deployment (review findings F-01 / F-02):
 #
-# The caller's values are snapshotted first, because `source` would otherwise
-# let the file silently overwrite an explicit operator override.
-_CALLER_SERVICE_NAME=${ICHAT_SERVICE_NAME:-}
-_CALLER_SERVICE_USER=${ICHAT_SERVICE_USER:-}
-_CALLER_MEDIA_DIR=${ICHAT_MEDIA_DIR:-}
-_CALLER_TLS_PORT=${ICHAT_TLS_PORT:-}
-_CALLER_HTTP_PORT=${ICHAT_HTTP_PORT:-}
+#   SOVEREIGN (caller-only): who/where the install is, what it may restart and
+#   probe, and who is releasing. A .env that sets one of these is REFUSED —
+#   silently ignoring it would hide a hostile or misconfigured tree.
+#
+#   The frozen audit values (actor / approval / via / origin) are computed from
+#   the caller's environment BEFORE the file is read and never recomputed, so
+#   the value the approval gate validated is the value the log records.
+#
+# APP_DIR itself is likewise caller-only: it selects which .env is read.
+SOVEREIGN_KEYS=(
+    ICHAT_APP_DIR
+    ICHAT_PROD_APP_DIR
+    ICHAT_SERVICE_NAME
+    ICHAT_SERVICE_USER
+    ICHAT_MEDIA_DIR
+    ICHAT_TLS_PORT
+    ICHAT_HTTP_PORT
+    ICHAT_READY_ORIGIN
+    ICHAT_LOOPBACK_ORIGIN
+    ICHAT_DEPLOYER
+    ICHAT_APPROVAL
+    ICHAT_REQUIRE_APPROVAL
+    ICHAT_SKIP_SMOKE
+)
+
+# Names that may come from .env (they describe the application, not the
+# deployment). Kept permissive: unknown keys are harmless because nothing below
+# reads them for a decision that .env may influence.
+reject_sovereign_in_env() {  # reject_sovereign_in_env <file>
+    local file=$1 line key found=()
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" == *=* ]] || continue
+        key=${line%%=*}
+        key=${key#"${key%%[![:space:]]*}"}
+        key=${key%"${key##*[![:space:]]}"}
+        local allowed
+        for allowed in "${SOVEREIGN_KEYS[@]}"; do
+            [[ "$key" == "$allowed" ]] && found+=("$key")
+        done
+    done < "$file"
+    if (( ${#found[@]} > 0 )); then
+        echo "ERROR: $file sets deployment-identity keys, which this script" >&2
+        echo "       accepts ONLY from the caller's environment:" >&2
+        for key in "${found[@]}"; do
+            echo "         $key" >&2
+        done
+        echo "       A deployable tree must not be able to choose the unit it" >&2
+        echo "       restarts, the ports it probes, or the actor/approval it is" >&2
+        echo "       recorded under. Move these to the command line:" >&2
+        echo "         sudo $BIN_COPY $(for key in "${found[@]}"; do printf '%s=<value> ' "$key"; done)" >&2
+        echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
+        exit 2
+    fi
+}
+reject_sovereign_in_env "$APP_DIR/.env"
+
+# Snapshot the caller's identity values under private names before the file is
+# read, so `source` cannot shadow them even transiently. The guard above means
+# a clean .env never touched them; this is the second line of defence for a
+# tree whose .env is malformed in a way the guard did not spell out.
+_SOV_SERVICE_NAME=${ICHAT_SERVICE_NAME:-}
+_SOV_SERVICE_USER=${ICHAT_SERVICE_USER:-}
+_SOV_MEDIA_DIR=${ICHAT_MEDIA_DIR:-}
+_SOV_TLS_PORT=${ICHAT_TLS_PORT:-}
+_SOV_HTTP_PORT=${ICHAT_HTTP_PORT:-}
+_SOV_READY_ORIGIN=${ICHAT_READY_ORIGIN:-}
+_SOV_LOOPBACK_ORIGIN=${ICHAT_LOOPBACK_ORIGIN:-}
+_SOV_SKIP_SMOKE=${ICHAT_SKIP_SMOKE:-}
+_SOV_APPROVAL=${ICHAT_APPROVAL:-}
+_SOV_REQUIRE_APPROVAL=${ICHAT_REQUIRE_APPROVAL:-}
+_SOV_DEPLOYER=${ICHAT_DEPLOYER:-}
+_SOV_PROD_APP_DIR=${ICHAT_PROD_APP_DIR:-}
+_SOV_APP_DIR=${APP_DIR:-}
+
+# Frozen audit identity. Computed here — before .env is read — so the approval
+# gate and the DEPLOYMENTS.log line can never disagree with each other or with
+# the operator who actually ran the command (F-02).
+FROZEN_ACTOR=$(deploy_actor)
+FROZEN_VIA=$(deploy_via)
+FROZEN_ORIGIN=$(deploy_origin)
 
 set -a; source "$APP_DIR/.env"; set +a
 
-[[ -n "$_CALLER_SERVICE_NAME" ]] && ICHAT_SERVICE_NAME=$_CALLER_SERVICE_NAME
-[[ -n "$_CALLER_SERVICE_USER" ]] && ICHAT_SERVICE_USER=$_CALLER_SERVICE_USER
-[[ -n "$_CALLER_MEDIA_DIR" ]] && ICHAT_MEDIA_DIR=$_CALLER_MEDIA_DIR
-[[ -n "$_CALLER_TLS_PORT" ]] && ICHAT_TLS_PORT=$_CALLER_TLS_PORT
-[[ -n "$_CALLER_HTTP_PORT" ]] && ICHAT_HTTP_PORT=$_CALLER_HTTP_PORT
+# Restore the caller's values: for these names the caller always wins.
+APP_DIR=$_SOV_APP_DIR
+ICHAT_SERVICE_NAME=$_SOV_SERVICE_NAME
+ICHAT_SERVICE_USER=$_SOV_SERVICE_USER
+ICHAT_MEDIA_DIR=$_SOV_MEDIA_DIR
+ICHAT_TLS_PORT=$_SOV_TLS_PORT
+ICHAT_HTTP_PORT=$_SOV_HTTP_PORT
+ICHAT_READY_ORIGIN=$_SOV_READY_ORIGIN
+ICHAT_LOOPBACK_ORIGIN=$_SOV_LOOPBACK_ORIGIN
+ICHAT_SKIP_SMOKE=${_SOV_SKIP_SMOKE:-0}
+ICHAT_APPROVAL=$_SOV_APPROVAL
+ICHAT_REQUIRE_APPROVAL=$_SOV_REQUIRE_APPROVAL
+ICHAT_DEPLOYER=$_SOV_DEPLOYER
+PROD_APP_DIR=${_SOV_PROD_APP_DIR:-/opt/ichat}
+# APPROVAL / REQUIRE_APPROVAL were computed by the approval gate above, from
+# the caller's environment only — .env had not been read yet. They are NOT
+# recomputed here: the value the gate validated is the value the log records
+# (review finding F-02).
 
 PROD_SERVICE_NAME=ichat
 PROD_SERVICE_USER=ichat
@@ -298,54 +387,111 @@ HTTP_PORT=$(resolve_port ICHAT_HTTP_PORT "${ICHAT_HTTP_PORT:-}" 8000)
 TLS_ORIGIN=${ICHAT_READY_ORIGIN:-https://127.0.0.1:$TLS_PORT}
 LOOPBACK_ORIGIN=${ICHAT_LOOPBACK_ORIGIN:-http://127.0.0.1:$HTTP_PORT}
 
+# Lexical path normalisation: collapse duplicate separators, drop "." and
+# resolve "..". Purely textual (the directories need not exist on this host),
+# and deliberately the same algorithm check_isolation.sh uses — a guard that
+# compares raw strings is bypassed by /var/lib//ichat/media, .../media/. and
+# .../../ichat/media alike (review finding F-04).
+normalise_dir() {  # normalise_dir <path>
+    local p=${1:-} part
+    local -a parts=() out=()
+    # Collapse duplicate separators, then split on the remaining ones.
+    while [[ "$p" == *"//"* ]]; do p=${p//\/\//\/}; done
+    IFS='/' read -r -a parts <<< "$p"
+    for part in "${parts[@]}"; do
+        case "$part" in
+            ''|'.') continue ;;
+            '..')
+                # Pop the last real component; a leading ".." is dropped
+                # because there is nothing above the root to escape to.
+                (( ${#out[@]} > 0 )) && unset 'out[${#out[@]}-1]'
+                ;;
+            *) out+=("$part") ;;
+        esac
+    done
+    printf '/%s' "$(IFS='/'; printf '%s' "${out[*]}")"
+}
+
+# The same-or-nested test, shared by every path guard so none of them drifts.
+paths_overlap() {  # paths_overlap <a> <b>; 0 when equal or one contains the other
+    local a b
+    a=$(normalise_dir "$1")
+    b=$(normalise_dir "$2")
+    [[ "$a" == "$b" || "${a}/" == "${b}/"* || "${b}/" == "${a}/"* ]]
+}
+
 # A non-production tree that resolves to a PRODUCTION resource has an
 # incomplete staging identity; it is not a working install. Refuse BEFORE the
 # restart: "restarted the wrong unit" cannot be undone by the script, and
 # "wrote staging media into production" cannot be undone either.
 #
 # ICHAT_PROD_APP_DIR names the tree that IS production (default /opt/ichat).
-# It exists because the production defaults are the ones that must never be
-# inherited by accident: an install elsewhere that leaves them unset is
-# refused rather than quietly pointed at them. Point it at a different tree
-# only when production itself really lives there.
-normalise_dir() {  # strip trailing/duplicate separators; keep the root
-    local p=${1:-}
-    while [[ "$p" == */ ]]; do p=${p%/}; done
-    printf '%s' "${p:-/}"
-}
-PROD_APP_DIR=${ICHAT_PROD_APP_DIR:-/opt/ichat}
+# It is caller-only (see SOVEREIGN_KEYS): a tree must not be able to declare
+# itself production to skip these guards.
 PROD_APP_NORM=$(normalise_dir "$PROD_APP_DIR")
 if [[ "$(normalise_dir "$APP_DIR")" != "$PROD_APP_NORM" ]]; then
     if [[ "$SERVICE_NAME" == "$PROD_SERVICE_NAME" ]]; then
         echo "ERROR: install tree $APP_DIR would restart the PRODUCTION unit" >&2
         echo "       '$SERVICE_UNIT' because ICHAT_SERVICE_NAME is unset." >&2
-        echo "       Set ICHAT_SERVICE_NAME (and ICHAT_SERVICE_USER) in" >&2
-        echo "       $APP_DIR/.env or in the caller's environment." >&2
+        echo "       Set ICHAT_SERVICE_NAME (and ICHAT_SERVICE_USER) on the" >&2
+        echo "       command line, or in $APP_DIR/.env? No: identity keys are" >&2
+        echo "       caller-only. Example:" >&2
+        echo "         sudo ICHAT_SERVICE_NAME=ichat-staging \\" >&2
+        echo "              ICHAT_SERVICE_USER=ichat-staging \\" >&2
+        echo "              $BIN_COPY" >&2
         echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
         exit 2
     fi
     if [[ "$SERVICE_USER" == "$PROD_SERVICE_USER" ]]; then
         echo "ERROR: install tree $APP_DIR would create media as the production" >&2
         echo "       user '$PROD_SERVICE_USER' because ICHAT_SERVICE_USER is unset." >&2
-        echo "       Set ICHAT_SERVICE_USER in $APP_DIR/.env." >&2
+        echo "       Identity keys are caller-only; pass it on the command line." >&2
         echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
         exit 2
     fi
     if [[ "$(normalise_dir "$MEDIA_DIR")" == "$PROD_MEDIA_DIR" ]]; then
         echo "ERROR: install tree $APP_DIR would use the PRODUCTION media root" >&2
-        echo "       $PROD_MEDIA_DIR because ICHAT_MEDIA_DIR is unset." >&2
-        echo "       Set ICHAT_MEDIA_DIR in $APP_DIR/.env." >&2
+        echo "       $PROD_MEDIA_DIR because ICHAT_MEDIA_DIR is unset (or is a" >&2
+        echo "       spelling of it: //, /., ../ are all normalised first)." >&2
         echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
         exit 2
     fi
     if [[ "$TLS_PORT" == "8443" || "$HTTP_PORT" == "8000" ]]; then
         echo "ERROR: install tree $APP_DIR would probe PRODUCTION's ports" >&2
         echo "       ($TLS_ORIGIN / $LOOPBACK_ORIGIN) because ICHAT_TLS_PORT /" >&2
-        echo "       ICHAT_HTTP_PORT are unset. Set them in $APP_DIR/.env to the" >&2
-        echo "       staging front door and Daphne port (8444 / 8001)." >&2
+        echo "       ICHAT_HTTP_PORT are unset. Pass the staging front door and" >&2
+        echo "       Daphne port on the command line (8444 / 8001)." >&2
         echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
         exit 2
     fi
+    # An explicit origin override is documented and allowed, so the guard has
+    # to look at the ORIGINS too: ICHAT_READY_ORIGIN=https://127.0.0.1:8443
+    # otherwise probed production while the port variables looked fine
+    # (review finding F-03).
+    origin_port() {  # origin_port <url> -> trailing :port, or the scheme default
+        local url=$1 host
+        host=${url#*://}
+        host=${host%%/*}
+        if [[ "$host" == *:* ]]; then
+            printf '%s' "${host##*:}"
+        elif [[ "$url" == https://* ]]; then
+            printf '443'
+        else
+            printf '80'
+        fi
+    }
+    for origin in "$TLS_ORIGIN" "$LOOPBACK_ORIGIN"; do
+        case "$(origin_port "$origin")" in
+            8443|8000)
+                echo "ERROR: install tree $APP_DIR would probe PRODUCTION's port" >&2
+                echo "       via an explicit origin: $origin" >&2
+                echo "       Set ICHAT_READY_ORIGIN / ICHAT_LOOPBACK_ORIGIN to the" >&2
+                echo "       staging front door (e.g. https://127.0.0.1:8444)." >&2
+                echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
+                exit 2
+                ;;
+        esac
+    done
 fi
 echo "==> Install: tree=$APP_DIR unit=$SERVICE_UNIT user=$SERVICE_USER media=$MEDIA_DIR"
 echo "==> Probes: ready=$TLS_ORIGIN fallback=$LOOPBACK_ORIGIN"
@@ -484,17 +630,21 @@ fi
 
 echo "==> Deploy OK: commit=$DEPLOYED_SHA (readiness: db+cache ok; smoke: $SMOKE_RESULT)"
 # One structured line per release: who, what, when, and how it was gated.
-# Field values are sanitised by the helpers so the log stays greppable.
+# actor/via/from/approval are the FROZEN values computed before .env was read
+# (FROZEN_ACTOR/FROZEN_VIA/FROZEN_ORIGIN/APPROVAL): recomputing them here would
+# let a deployed tree rewrite who released it and under which approval, and
+# would let the recorded approval differ from the one the gate validated
+# (review finding F-02).
 printf 'ts=%s sha=%s target=%s kind=%s actor=%s via=%s from=%s smoke=%s approval=%s\n' \
     "$(date -u +%FT%TZ)" \
     "$DEPLOYED_SHA" \
     "$TARGET" \
     "$RELEASE_KIND" \
-    "$(deploy_actor)" \
-    "$(deploy_via)" \
-    "$(deploy_origin)" \
+    "$FROZEN_ACTOR" \
+    "$FROZEN_VIA" \
+    "$FROZEN_ORIGIN" \
     "$SMOKE_RESULT" \
-    "$(deploy_approval)" \
+    "$APPROVAL" \
     >> "$LOG_FILE"
 
 # Remember the SHA of the last SUCCESSFUL release and the one it replaced, so
@@ -521,6 +671,6 @@ if [[ "$state_ok" != "1" ]]; then
     echo "WARNING: could not update $STATE_DIR; the release IS recorded in" >&2
     echo "         $LOG_FILE and is running. Rollback target: see the log." >&2
 fi
-echo "==> Recorded: actor=$(deploy_actor) kind=$RELEASE_KIND approval=$(deploy_approval)"
+echo "==> Recorded: actor=$FROZEN_ACTOR kind=$RELEASE_KIND approval=$APPROVAL"
 [[ -n "$PREVIOUS" ]] && echo "    rollback target if needed: $PREVIOUS"
 exit 0

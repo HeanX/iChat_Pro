@@ -289,7 +289,7 @@ sequenceDiagram
 | 草稿、AI 历史 | 桌面：DPAPI 密文（`enc:` 前缀）；Web：明文（已知限制） | 桌面端出现不带 `enc:` 前缀的记录即缺陷 |
 | 解密后的明文 | 仅内存与已渲染 DOM | 落 localStorage/IndexedDB 即缺陷 |
 | 公钥、指纹、key_version | 明文可存 | 不得被当作"身份已核实"的证据 |
-| 同步游标 | 明文可存（带 HMAC 签名，服务端不可伪造） | — |
+| 同步游标 | 明文可存。**签发方是服务端**：`chat/services/sync.py:25-27` 用 `settings.SECRET_KEY` 做 HMAC，`:30-45` 由服务端选择 cursor 内容（conversation/user/sequence/high_water）并签发；`:48-57` 只验证签名。因此正确表述是「**客户端在不知道服务端签名密钥时不能修改游标；服务端负责签发与验证**」——**不是**"服务端不可伪造"：服务端持有签名密钥，当然可以签发自己选定的任何内容 | — |
 
 ### 6.3 必须向用户显式说明的
 
@@ -311,6 +311,7 @@ sequenceDiagram
 | 历史密钥迁移 | #170 未交付 |
 | 渗透测试 / DAST / SAST | #198 未执行；本文不是其替代 |
 | 威胁建模的可利用性验证 | 本文只做静态代码取证，**未做任何利用实验** |
+| 普通客户端伪造/篡改同步游标 | 未发现可行路径（无签名密钥即无法重算 HMAC，`sync.py:56` 用 `hmac.compare_digest`），但**未做利用实验**；且这不改变"服务端自己可以签发任意游标内容"这一事实（§6.2 已按签发主体改写） |
 
 ### 7.2 本轮无法验证
 
@@ -337,6 +338,7 @@ sequenceDiagram
 | 消息应用与迟到 ACK | `node --test chat/tests/js/message_accepted.test.js` |
 | 连接状态机与退避 | `node chat/tests/js/chat_connection.test.js` |
 | 服务端密文边界校验 | `\.venv\Scripts\python.exe manage.py test chat`（在仓库根、能访问主仓库 `.venv` 的 shell 里执行；git worktree 默认不含 `.venv`） |
+| 同步游标签发/校验（§6.2） | `chat/services/sync.py:25-57`（`_sign` 用 `SECRET_KEY`、`make_sync_cursor` 取服务端值、`verify_sync_cursor:56` 用 `hmac.compare_digest` 只校验签名）；审查期 probe 见 `.review/phase4-full-review-20261024/accounts-t38-cursor-probe.log`（服务端选 `sequence=999`/`high_water=1000`，`verify_sync_cursor` 原样返回 999/1000） |
 | 密钥信任与指纹 | `\.venv\Scripts\python.exe manage.py test accounts`（同上） |
 
 聚合命令：`npm run test:e2ee` = 11 个测试文件（4 个以裸 `node` 执行、7 个以 `node --test` 执行），其中 `node --test` 部分 **62 项通过 / 0 失败**。上表只点出与本威胁模型直接相关的入口；其余 5 个（`desktop_branding`、`desktop_config`、`desktop_tray`、`desktop_notifications`、`chat_notifications`）属桌面/通知类，**不**计入 E2EE 覆盖。

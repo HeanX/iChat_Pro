@@ -233,20 +233,89 @@ test('a synchronous throw reports failure and never reports success', async () =
   assert.equal(panel.exportButton.textContent, DEFAULT_LABEL);
 });
 
-test('a missing key manager or record never exports and never reports success', async () => {
+test('a missing key manager never exports and never reports success', async () => {
   const noManager = createPanel({});
   await noManager.context.keyMgrExport();
   assert.equal(noManager.calls.exportBackup, 0);
   assert.equal(noManager.messages.includes(SUCCESS_TEXT), false);
   assert.equal(noManager.isErrorShown(), true);
+  assert.match(noManager.messages[0], /Key manager is not available/);
+});
 
+test('an implementation refusal is reported by the implementation, not a duplicate gate', async () => {
+  // Round-2 review M-3: the panel used to refuse whenever loadCurrentRecord()
+  // was empty, which is narrower than exportBackup()'s real precondition
+  // (`pendingBackup || record.private_key`). The panel must defer to the
+  // implementation and surface its reason.
+  const reason = new Error(
+    'This device stores its private key as non-extractable. A JSON backup can only be exported immediately after key creation, import, or legacy migration.'
+  );
   const noRecord = createPanel({
-    kmgr: { loadCurrentRecord: () => null, exportBackup: () => Promise.resolve() },
+    kmgr: {
+      loadCurrentRecord: () => null,
+      exportBackup: () => Promise.reject(reason),
+    },
   });
   await noRecord.context.keyMgrExport();
-  assert.equal(noRecord.calls.exportBackup, 0, 'nothing to export means no export attempt');
+
+  assert.equal(noRecord.calls.exportBackup, 1, 'the implementation decides, not a local gate');
   assert.equal(noRecord.messages.includes(SUCCESS_TEXT), false);
   assert.equal(noRecord.isErrorShown(), true);
+  assert.match(noRecord.messages[0], /non-extractable/, 'the implementation reason reaches the user');
+  assert.match(noRecord.messages[0], /use the backup you saved/i);
+});
+
+test('a pending-backup-only device can export through the panel', async () => {
+  // Round-2 review M-3: the local record was pruned but the tab still holds the
+  // one-shot pending backup. exportBackup() succeeds in that state, so the
+  // panel entry point must reach it instead of refusing.
+  let downloads = 0;
+  const panel = createPanel({
+    kmgr: {
+      loadCurrentRecord: () => null,
+      exportBackup: async () => {
+        downloads += 1;
+        return undefined;
+      },
+    },
+  });
+
+  await panel.context.keyMgrExport();
+
+  assert.equal(panel.calls.exportBackup, 1, 'the panel reached the implementation');
+  assert.equal(downloads, 1, 'and the export actually produced its download');
+  assert.equal(panel.messages[0], SUCCESS_TEXT, 'so success is now truthful');
+  assert.equal(panel.isSuccessShown(), true);
+});
+
+test('the panel gate does not contradict the real key-manager precondition', () => {
+  // Keep the two sources of truth from drifting again: assert that the panel
+  // no longer pre-empts exportBackup() with its own record check, and that
+  // key-manager.js still allows a pending backup with no local record.
+  const managerSource = fs.readFileSync(
+    path.join(root, 'static/js/key-manager.js'),
+    'utf8'
+  ).replace(/\r\n/g, '\n');
+  assert.match(
+    managerSource,
+    /if \(!pendingBackup && \(!record \|\| !record\.private_key\)\)/,
+    'exportBackup() precondition is pendingBackup || record.private_key'
+  );
+  assert.match(
+    managerSource,
+    /const backupRecord = pendingBackup \|\| record;/,
+    'and a pending backup alone is exported'
+  );
+  assert.equal(
+    /if \(!kmgr \|\| \(kmgr\.loadCurrentRecord && !kmgr\.loadCurrentRecord\(\)\)\)/.test(panelScript),
+    false,
+    'the panel must not re-implement the precondition (round-2 M-3)'
+  );
+  assert.match(
+    panelScript,
+    /await kmgr\.exportBackup\(\)/,
+    'it awaits the implementation instead'
+  );
 });
 
 test('a second click during an in-flight export cannot start a parallel export', async () => {

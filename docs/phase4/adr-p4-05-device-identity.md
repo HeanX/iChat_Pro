@@ -2,8 +2,8 @@
 
 | | |
 | --- | --- |
-| 状态 | 提案（Proposed）——已通过独立技术评审（见下方评审记录），**待单一迁移负责人会签后进入实现**；2026-10-26 修复 ACC-01 关系冲突（见 §4.6） |
-| 日期 | 2026-10-18（2026-10-26 修订 D1/D2 的关系命名与轮换语义） |
+| 状态 | 提案（Proposed）——已通过独立技术评审（见下方评审记录），**待单一迁移负责人会签后进入实现**；2026-10-26 修复 ACC-01 关系冲突（见 §4.6）与 ACC-01-A `is_active` 真源不变式 |
+| 日期 | 2026-10-18（2026-10-26 修订 D1/D2 的关系命名、轮换语义与 is_active 不变式） |
 | 决策者 | 账号与公钥信任模块负责人（本 ADR 作者）；会签人 = 单一迁移负责人（约束 `accounts/models.py`、`chat/models.py` 与迁移编号，见 conventions §5），会签结论以 Issue #167 评论区留档 |
 | 关联 | Issue #167（本 ADR）；下游 #168（设备列表与撤销）、#169（多设备密钥分发）、#170（历史密钥迁移） |
 | 前置 | [ADR-P4-04 E2EE 威胁模型](e2ee-threat-model.md)（T38，另一分支交付）——其"不覆盖"一节明确把设备级身份/撤销留白 |
@@ -215,8 +215,34 @@ Django 的系统检查对此报 `fields.E302`（反向访问器冲突）与 `fie
    新行的 `UserPublicKey.device` 在创建时写入，**旧行保持原值**——历史归属不可变。
 2. **谁持有 current 指针**：**设备**持有（`Device.current_public_key`），不是 `UserPublicKey`。
    理由：`UserPublicKey` 是**不可变的版本流水**（只插入、只翻 `is_active`），把"当前"写进流水行会让
-   "哪一行是当前"出现两个真源（`is_active` 与指针）。`UserPublicKey.is_active` 继续表示
-   "**账号级**当前密钥"，与设备级指针是不同粒度，不互相推导。
+   "哪一行是当前"出现两个真源（`is_active` 与指针）。
+
+   **`is_active` 的真实语义（必须按代码写，不能按直觉写）**：它不是"账号级当前密钥"这种可以
+   与设备指针并存的独立标志，而是**全账号唯一的一张"当前"票**——
+   `accounts/views.py:65-69` 的 `_active_key()` 用 `filter(user_id=..., is_active=True).first()`
+   取唯一一条（8 处调用：`:1061`、`:1082`、`:1118`、`:1205`、`:1256`、`:1374-1375`、`:1440-1441`，
+   覆盖公钥下发、联系人对端查询、密钥变更提醒），而 `upload_public_key_view` 在 `:1067` 用
+   `filter(user=request.user, is_active=True).update(is_active=False)` **清掉全账号**的标记，
+   `:1068-1074` 新建行的 `is_active` 由模型默认值 `True` 给出（`accounts/models.py:312`）。
+   因此**两个真源必须在下列不变式下共存**（ACC-01-A 补齐，实现 PR 必须照此写测试）：
+
+   | # | 不变式 | 违反后果 |
+   | --- | --- | --- |
+   | I1 | **设备行一律 `is_active=False`**；只有 `device=NULL` 的账号级行可以 `is_active=True` | 设备行若为 True，`_active_key()` 可能取到某个设备的密钥并把它当成"账号身份"下发给联系人对端，`KeyTrust` 语义随即失真 |
+   | I2 | 一个账号**至多一行** `is_active=True`（即 `unique_active_key_per_user` 的部分唯一约束，建议与 `accounts.0017` 同批加） | 有两个 True 时 `_active_key()` 用 `.first()` 静默挑一条，取哪条取决于排序（`-key_version`），成为隐式行为 |
+   | I3 | `Device.current_public_key` **必须**指向 `device` 反查结果里的一行（即 `current_public_key.device_id == device.pk`，或该行 `device=NULL` 的迁移过渡态） | 指针指向别人的密钥 = 设备"当前身份"是伪造的；建议实现时在 `clean()`/`save()` 与测试里双向断言 |
+   | I4 | **设备级轮换不得走 `upload_public_key_view` 的整账号清零分支**：`:1067` 的 `update(is_active=False)` 一旦执行，账号级"当前票"就没了，I1/I2 同时被破坏 | 设备轮换会顺手把账号级身份打成"无当前密钥"，联系人对端看到 `key_changed` 假告警 |
+   | I5 | 账号级轮换（`device=NULL` 的新版本）**不改** `Device.current_public_key`；设备级轮换**不改**任何行的 `is_active` | 双向越界都会让 I1 失效 |
+
+   **冲突时的裁决规则**（同一事务内同时触及两侧时）：以 **I1/I2 优先**——先把行落成
+   `is_active=False`（设备行）或完成"清旧 + 置新"的账号级事务（账号行），再更新
+   `Device.current_public_key`；两步必须在同一 `transaction.atomic()` 内，且**后置断言**
+   "账号内 `is_active=True` 的行数 ≤ 1" 失败即回滚。这样即使将来有人把设备轮换接到旧视图，
+   I2 的约束也会在提交前拦住，而不是留下一个静默的双真源。
+
+   一句话总结粒度：`is_active` 回答"**这个账号**的身份密钥是哪一版"（供 `_active_key()` 与
+   联系人对端使用），`current_public_key` 回答"**这台设备**此刻用哪一版"。二者**不互相推导**，
+   但由 I1–I5 强制保持方向一致。
 3. **历史版本如何归属**：`device.public_keys.all()`（经 `UserPublicKey.device` 反查）给出该设备**历来**
    产生的所有版本，按 `key_version` 排序即可重建该设备的密钥时间线。
    `device.current_public_key` 只给出当前的那一版。**两者不可互相替代**：
@@ -289,6 +315,9 @@ stdout/stderr 与退出码）。
    按账号内递增）还是新接口？走旧视图会把设备密钥和账号密钥搅进同一条版本序列，且旧视图
    **不写** `UserPublicKey.device`（`accounts/views.py:1060-1074` 的 `create()` 只传 user/公钥/指纹/
    算法/版本），设备归属会全部落成 NULL。
+   **§4.6 的 I1–I5 已说明这条路的代价**：走旧视图等于让设备轮换触发 `:1067` 的整账号清零，
+   破坏 I1/I2/I4；所以"复用旧视图"在不变式下**不是**一个可选项，除非同时改那个视图（属实现 PR
+   的越界范围）。Q1 实际要定的只是"账号级行是否继续产生"，不再是"要不要复用旧视图"。
 2. **Q2**：`recipients` 扩展（#169）采用"每设备一个信封"还是"设备组密钥"？前者流量 N 倍，后者需要新的群密钥协商，倾向前者起步。
 3. **Q3**：设备撤销后，其历史 `KeyTrust` 记录是否需要向对端广播"该设备密钥已作废"？涉及协议新增事件类型，需消息模块同意。
 4. **Q4**：`device_id` 在客户端卸载重装后会变（浏览器 localStorage 清空即变），是否允许"同设备不同 ID"产生两条记录？倾向允许 + 以 `last_seen_at` 自动归档僵尸记录（需 #168 定义阈值）。**需同时决定归档形态**：
@@ -306,6 +335,13 @@ stdout/stderr 与退出码）。
 [ ] schema probe 复跑：实现时把 §4.6 的 probe 指向真实模型，确认 check 0 errors 且迁移可生成
 [ ] 针对 §4.6 四条语义的测试：轮换只改 current 指针、旧行 device 不变、
     device.public_keys 给出历史全集、device=NULL 行不参与设备级判断
+[ ] 针对 §4.6「is_active 不变式」I1–I5 的测试与约束（ACC-01-A）：
+    ① 设备行落库后 is_active 必须为 False；② 账号内 is_active=True 的行数 ≤ 1
+       （建议 `UniqueConstraint(fields=['user'], condition=Q(is_active=True))`，
+       name="unique_active_key_per_user"，与 accounts.0017 同批）；
+    ③ current_public_key 与 device 反查结果的一致性检查；
+    ④ 设备级轮换不触发 upload_public_key_view 的整账号清零（accounts/views.py:1067）；
+    ⑤ 账号级轮换不改 Device.current_public_key（双向越界各一条）
 [ ] POST /api/devices/register/（幂等：同 (user, device_id) 更新而非重复插入）
 [ ] GET  /api/devices/（仅返回自己的设备，含 revoked 状态）
 [ ] 每账号活跃（未撤销）设备数上限，超限拒绝（上限值待会签，建议 ≤10）
@@ -330,6 +366,7 @@ stdout/stderr 与退出码）。
 | 2 | 独立子 Agent（全新上下文，复审第一轮处理 + 新增内容事实核对） | PASS WITH FINDINGS | 第一轮 7 项处理中 5 项确认已修复、MINOR-2 延后处理判定合理。**MAJOR-2（本轮新引入）**：§4.5 曾照抄 risk-register.md R-03 的代码行号（`consumers.py:120-135`、`views.py:2457-2477`），经逐行核实分别指向连接计数器与清缓存 stub、与 `sender_copy` 无关——那组行号基于 T36 重构前的快照已漂移；且 R-03 所述"两条规则不同的路径"已被 T36 消解（`views.py:2246` 注释自证同规则）。**已按当前代码改写 §4.5**：真正的残留风险是 `serialize_private_message`（consumers.py:700 起）与 `_private_message_payload_for_viewer`（views.py:4101 起）两份**同规则副本**需同步修改，并建议借 #169 合并为单一实现。**流程项**：documentation-status/tasks/traceability 的登记改动当时未提交（已随本提交补上）。MINOR-A（评审记录回链延后理由，见本轮第 1 行括注）与 MINOR-B（提交登记文件）一并处理。 |
 | 3 | 独立子 Agent（全新上下文，仅复核第二轮处理） | PASS WITH FINDINGS | §4.5 新表述逐行核实全部相符（含 `views.py:2246` 注释、勘误时间线自洽）；MINOR-A 回链、登记文件落地均确认。**MINOR-C**：§4.5"两份副本"漏了群聊第三处同规则判定（`serialize_group_recipient`，consumers.py:798-803）——已补，现为"三处副本、合并范围必须含群聊"；顺带修正 L4103-4108 的 1 行偏移。 |
 | 4 | Phase4 全量审查（独立 Agent，最小 schema probe 复现） | **FAIL（ACC-01，MAJOR）** | `Device.public_key` 的 `related_name="device"` 与 `UserPublicKey.device` 正向字段重名 → `fields.E302`/`E303`。**已修**：D1 改名为 `current_public_key` / `related_name="current_device"`，新增 §4.6 写死"current 指针 vs 历史归属"的四条语义，并用同一 probe 给出修正前（E302+E303, exit 1）与修正后（0 errors, exit 0）的对照输出。修复仅限设计，不含模型/迁移/接口实现。 |
+| 5 | 修复轮独立复审（全新上下文，自建两个最小工程重跑 schema probe） | **PASS WITH FINDINGS** | schema 侧复现一致（before E302+E303/exit 1，after 0 errors/exit 0），越界检查通过（无模型/迁移/接口改动），tasks.md 未被误勾。**ACC-01-A（MINOR）**：§4.6 第 2 条只写"不互相推导"，没有回答两个"当前"真源如何共存；实际上 `is_active` 是**全账号唯一**的一张当前票（`accounts/views.py:65-69` 的 `_active_key()` 取唯一一条，`:1067` 整账号清零，`accounts/models.py:312` 默认 True），与"设备轮换只改指针"在设备轮换时必然冲突。**已修**：§4.6 第 2 条改写为"两条真源 + I1–I5 五条不变式 + 冲突裁决规则"，Q1 同步说明"复用旧视图"在不变式下不是可选项，§7 清单补 I1–I5 的测试与 `unique_active_key_per_user` 约束项。 |
 | 待定 | 单一迁移负责人（会签） | — | 回答 Q1–Q5 后进入实现 |
 
 > 本次评审由 AI 子 Agent 完成，构成 conventions §1 意义上的独立技术评审记录；

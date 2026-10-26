@@ -91,6 +91,18 @@
 | [docs/phase4/windows-branding.md](phase4/windows-branding.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-notifications.md](phase4/windows-notifications.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-tray.md](phase4/windows-tray.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/handoff/README.md](handoff/README.md) | 现行说明/专题；8 模块交接入口与 12 文件清单，模块增删/改名时同步（2026-10-26 纳入版本控制） |
+| [docs/handoff/cloud-deploy-ops.md](handoff/cloud-deploy-ops.md) | 现行说明/专题；云部署运维交接（发布/审批/回滚/监控/staging/备份恢复），以 `deploy/**` 实际实现为准，注明核对提交 |
+| [docs/handoff/accounts-auth.md](handoff/accounts-auth.md) | 现行说明/专题；模块 1 账号/认证/公钥信任交接（按 `cfe53be` 勘察，符号名优先于行号） |
+| [docs/handoff/messaging-protocol.md](handoff/messaging-protocol.md) | 现行说明/专题；模块 2 消息/协议/同步补取交接 |
+| [docs/handoff/web-frontend-e2ee.md](handoff/web-frontend-e2ee.md) | 现行说明/专题；模块 3 Web 前端与 E2EE 交接 |
+| [docs/handoff/windows-desktop.md](handoff/windows-desktop.md) | 现行说明/专题；模块 4 Windows 桌面端交接 |
+| [docs/handoff/data-storage-file.md](handoff/data-storage-file.md) | 现行说明/专题；模块 6 数据模型/存储/加密文件交接 |
+| [docs/handoff/testing-quality-ci.md](handoff/testing-quality-ci.md) | 现行说明/专题；模块 7 测试体系/CI/质量门禁交接（历史数字 404/36/24 只追加不改写） |
+| [docs/handoff/android-mobile.md](handoff/android-mobile.md) | 现行说明/专题；模块 8 Android 端交接；其 `../phase4/adr-p4-03-*.md` 链接仅在 `feature/p4-t22-mobile-adr-and-skeleton` 上存在 |
+| [docs/handoff/conventions.md](handoff/conventions.md) | 现行说明/专题；交接通用约定（分支/提交/评审/证据格式/安全红线），模块文档的前置 |
+| [docs/handoff/issue-backlog.md](handoff/issue-backlog.md) | 现行说明/专题；开放 Issue 派工索引，Issue 状态变化时同步 |
+| [docs/handoff/prompt-template.md](handoff/prompt-template.md) | 现行说明/专题；派工 Prompt 模板（最短版/完整版/审查者） |
 
 ## 维护约束
 

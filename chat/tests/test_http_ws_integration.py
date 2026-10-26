@@ -1288,6 +1288,10 @@ class WsReceiptTests(MessagingWsBase):
         receipt, a single ``message.receipt.updated`` event for the sender, one
         ack carrying ``request_id``, and ``unread_count == 0`` afterwards.
 
+        "once" is checked, not assumed (MSG-02-A): after the sender reads its
+        one event, ``receive_nothing()`` asserts the queue is empty. An extra
+        ``message.receipt.updated`` would therefore turn this case red.
+
         It deliberately does NOT claim monotonicity. "A later ``delivered`` (or
         a new message) must not re-bump the count" is *not* exercised here:
         there is no second receipt and no follow-up message in this case.
@@ -1302,7 +1306,7 @@ class WsReceiptTests(MessagingWsBase):
                 "event": "message.receipt.update", "request_id": "rcp-3",
                 "data": {"conversation_type": "single", "message_id": message_id, "status": "read"},
             })
-            # sender sees the status update — exactly one event
+            # the sender's first (and only) status event
             update = await sender.receive_json_from()
             self.assertEqual(update["event"], "message.receipt.updated")
             self.assertEqual(update["data"]["status"], "read")
@@ -1315,6 +1319,13 @@ class WsReceiptTests(MessagingWsBase):
                 ).unread_count
             )()
             self.assertEqual(unread, 0)
+
+            # ...and nothing after it: one receipt must not fan out into a
+            # second status event for the sender.
+            self.assertTrue(
+                await sender.receive_nothing(timeout=0.2),
+                "sender received a second message.receipt.updated for one read receipt",
+            )
             await sender.disconnect()
             await receiver.disconnect()
 

@@ -324,8 +324,16 @@ covered via IntegrityError」），**不是覆盖漏洞**，因此不为此写�
 | 分类 | 含义 | 本卡的例子 |
 | --- | --- | --- |
 | **未覆盖** | 没有任何用例走到这条路径/这个码 | `storage_unavailable`、`database_busy`、`sync_cursor_expired`（见上） |
-| **已知偏差** | 用例**覆盖并断言**了当前行为，但该行为与契约不符，本卡只钉住不改 | §4 表的 5 项：`file_unavailable` 409 vs 410、HTTP 撤回超时返回裸文案、`message_type_mismatch`/`invalid_json`/`rate_limited`/`file_too_large`/`upload_forbidden` 未进注册表 |
+| **已知偏差** | 用例**覆盖并断言**了当前行为，但该行为与契约不符，本卡只钉住不改 | §4 表的 5 项：`file_unavailable` 409 vs 410、HTTP 撤回超时返回裸文案，以及下面那 3 个未注册码 |
 | **等价变异体** | 变异后用例仍绿，但语义等价（非漏测） | §5 的 M0 乐观重放分支 |
+
+**本文件真正断言过的未注册码只有 3 个**（与 §4 末 `:228-229` 一致，可用该处复算命令重算）：
+`message_type_mismatch`（`HTTP-FILE-09`，`:1005`）、`file_too_large`（`HTTP-FILE-02`，`:935`）、
+`upload_forbidden`（`HTTP-FILE-05`/`06`，`:959`、`:971`）。
+`invalid_json`、`rate_limited` **在本文件中出现 0 次**（`Select-String -Pattern 'invalid_json|rate_limited'`
+实测），因此它们既不属于"已知偏差"，也不属于本卡的覆盖范围——§4 表的第 3 行把它们与
+`message_type_mismatch` 并列，是**对未注册码清单的描述**，不是"本卡断言了这三个"的意思；
+本段是那个歧义的更正（MSG-01-A）。
 
 `file_type_mismatch` 既不是未覆盖也不是已知偏差：它是**已注册且已覆盖**的码。
 

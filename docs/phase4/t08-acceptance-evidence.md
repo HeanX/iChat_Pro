@@ -86,7 +86,7 @@ test_concurrent_conflicting_id_across_conversations (chat.tests.test_t32_review.
 
 ```text
 $ npm run test:e2ee
-tests 118 / pass 118 / fail 0
+tests 120 / pass 120 / fail 0
 
 $ node --check static/js/chat.js
 exit=0
@@ -99,19 +99,19 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
 
 | 文件 | 条数 | 覆盖 |
 | --- | --- | --- |
-| `chat/tests/js/key_trust_decline.test.js` | 34 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链（含自回声抑制） |
+| `chat/tests/js/key_trust_decline.test.js` | 36 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链（含自回声抑制与拒绝原因区分） |
 | `chat/tests/js/settings_key_export.test.js` | 9 | 从真实模板抽取并执行独立设置页的 `keyMgrExport()` |
 
-口径说明（避免重复计数）：`npm run test:e2ee` = **118** 条，全部来自 `node --test` 阶段；
+口径说明（避免重复计数）：`npm run test:e2ee` = **120** 条，全部来自 `node --test` 阶段；
 另有 4 个独立脚本（`private_chat_e2ee`、`group_chat_e2ee`、`chat_connection`、`desktop_config`）
 在 `node --test` 之前用 `node <file>` 直接执行，只打印 `all tests passed`、**不产生计数**，
-因此不计入 118。逐文件实测：`message_accepted` 12、`public_key_cache` 2、
-`key_change_reminder` 13、`key_trust_decline` 34、`settings_key_export` 9、`desktop_branding` 1、
+因此不计入 120。逐文件实测：`message_accepted` 12、`public_key_cache` 2、
+`key_change_reminder` 13、`key_trust_decline` 36、`settings_key_export` 9、`desktop_branding` 1、
 `desktop_tray` 15、`chat_notifications` 13、`desktop_notifications` 7、`notification_integration` 12
-= 118。
+= 120。
 
 > 另注：若用 `node --test 'chat/tests/js/*.test.js'` 一次性跑**全部** 14 个文件（含上述 4 个
-> 独立脚本，每个算 1 条），总数是 122，与 `test:e2ee` 的 118 不是同一口径，不要混用。
+> 独立脚本，每个算 1 条），总数是 124，与 `test:e2ee` 的 120 不是同一口径，不要混用。
 
 > 数字随代码演进会变，以当次 `npm run test:e2ee` 输出为准；上表为 2026-10-26 实测。
 
@@ -130,8 +130,12 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
    >   （旧版本被覆盖时会抛 `peer_key_changed`），因此不违背 #189 的验收原文。
 2. **授权对象取自本地快照，且是唯一来源**：
    - `respondToKeyVerification()` 以 `pendingKeyVerificationRequests` 中用户实际点击的那条
-     请求为准，`verificationConfirmation()` 只用回包核对 `id` / `requester_id` / `responder_id`；
-     回包指向其它联系人、其它版本或其它 `id` 时**不授予任何人信任**并提示用户。
+     请求为准，`verificationConfirmation()` 只用回包核对 `id` / `requester_id` / `responder_id`
+     三项身份，回包指向其它联系人或其它 `id` 时**不授予任何人信任**并提示用户。
+   - 回包中的 `requester_key_version` / `*_key_fingerprint` **一律忽略**：授予只用快照所 pin 的
+     指纹与版本。版本这一维不是由回包核对的，而是由第 3 条的
+     `keyStatusMatchesAcceptedVerification()` 对**实时指纹端点**比对来保证——回包写 v9 也不会
+     改变授予的版本。
    - WebSocket `accepted` 事件同样以托盘快照为授权对象，并须通过
      `verificationIdentifiesSameRequest()`；**没有本地快照时失败关闭**——用户从未在本标签页
      看到该请求，服务端说 accepted 不等于用户同意，因此不授予任何人并提示重新发起验证。
@@ -147,9 +151,17 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
 5. **不授予的情形**：拒绝、取消、过期（含服务端 `409`）、普通刷新、无本地快照的 socket
    事件、`fetchContactKeyStatus` 失败、`respond` 抛错（含 204/空回包），一律不新增本地信任；
    失败时还会清空状态缓存，避免残留"已验证"外观。
-6. **拒绝与失败不报成功**：成功文案只在 `refreshKeyVerificationAfterChange()` 返回
-   `{granted: true}` 之后显示；未能真正授予时提示"密钥已变化，本次验证未授予信任"或
-   "服务端未返回确认信息"，而不是显示成功。
+6. **拒绝与失败不报成功，且各说各话**：成功文案只在
+   `refreshKeyVerificationAfterChange()` 返回 `{granted: true}` 之后显示。未授予时按
+   `outcome.reason` 分别提示（`keyVerificationRefusalMessage()`），HTTP 与 socket 两条路径共用：
+   | `reason` | 含义 | 提示要点 |
+   | --- | --- | --- |
+   | `key-changed` | 实时端点返回的指纹/版本与快照不符 | 密钥已变化，请重新发起验证 |
+   | `lookup-failed` | 指纹端点读不到（离线/5xx/404），`fetchContactKeyStatus` 返回 `null` | **无法确认对方当前密钥**，未授予信任，请检查网络后重试 |
+   | `mismatch` / 无快照 | 授权对象不属于本页（回包或事件指向别处） | 请求已不在本页待处理列表，请重新发起验证 |
+   | `not-authorised` | 普通刷新，本来就不授予 | 无提示 |
+   > `fetchContactKeyStatus()` 内部 `catch` 后返回 `null`、从不 reject，因此"读取失败"必须靠
+   > `refreshed === null` 判定；否则会与"密钥已变化"混为一谈（第 4 轮 MINOR-1 的根因）。
 7. **双击幂等**：`keyVerificationResponsesInFlight` 保证同一条请求只发一次 `respond`，
    不会出现两个相反 toast。
 
@@ -201,6 +213,7 @@ $ git status --short -- media/
 | 7 | 独立子 Agent（Phase4 修复轮，新上下文） | PASS WITH FINDINGS | WEB-03 主路径已修，但 3 MAJOR：授权对象取自服务端回包、文档未同步、导出入口门禁与实现不一致；另有 m-1 双击、m-4 死代码等 MINOR | 全部处理：授权改取本地快照并拒绝回包替换、同步本文件与 API 文档、删除重复门禁、加 in-flight 守卫、删除死代码入口；并补上能覆盖 M2/M7 变异的用例 |
 | 8 | 独立子 Agent（第 2 轮，新上下文） | PASS WITH FINDINGS | HTTP 路径 35/35 确认修好、M-3 与 m-1/m-4 确认修好；**MAJOR：socket `accepted` 分支仍把事件负载当授权对象**（G2）；MINOR：回包 `id` 维无覆盖（F-1）、本文件数字自相矛盾（F-2）、204 提示不可读（F-3） | socket 改为无快照即失败关闭并给可读提示、成功 toast 移到 `granted` 之后；补 `id` 不匹配与 204 用例；按实测 111/27/9 统一数字 |
 | 9 | 独立子 Agent（第 3 轮，新上下文） | PASS WITH FINDINGS | G2 确认修复（基线 45 红 → HEAD 2 红）；**MAJOR：服务端把 accepted 推给双方，本页收到自己那次 accept 的回声 → 成功后又报「未授予信任」（E5）/ 两条成功（E3）**；MINOR：TOFU 第二写入点表述不严谨、HTTP 无快照文案不实、§5 自述矛盾、版本维零覆盖（MU9） | 新增 `locallyAnsweredVerificationIds` 自回声抑制（静默、幂等、60s 过期、POST 失败即移除）；HTTP 无快照改用「不在本页待处理列表」文案；§3.1 明确 TOFU/群聊写入点；§5 改正；补版本维与 `granted===false` 用例 |
+| 10 | 独立子 Agent（第 4 轮，新上下文） | PASS WITH FINDINGS（0 MAJOR） | 自回声已确认修复（服务端前提重跑：双推 + 推送先于响应；两种到达顺序实测；删守卫变异 17 项红）；MU2/MU9 缺口关闭；A24 裁定为已过期观察项。剩 2 MINOR：socket `granted===false` 在**指纹端点读取失败**时仍谎称「密钥已变化」、§3.1 称「其它版本不授予」与代码不符 | `refreshKeyVerificationAfterChange()` 返回 `{granted, reason}`（`granted`/`key-changed`/`lookup-failed`/`mismatch`/`not-authorised`），两条路径共用 `keyVerificationRefusalMessage()`，「读取失败」单独文案；§3.1 改为「回包版本一律忽略，版本维由实时端点比对保证」 |
 
 
 **未验证范围**（不得当作通过）：

@@ -118,6 +118,48 @@ class SovereignEnvKeyTests(StubbedHostTestCase, unittest.TestCase):
         self.assertIn("ICHAT_SKIP_SMOKE", output, msg=output)
         self.assertNotIn("SKIPPED for this deploy", output)
 
+    def test_env_cannot_overwrite_the_caller_snapshot_with_sov_names(self):
+        """The _SOV_* prefix is reserved (review R2-01/R2-02).
+
+        The script snapshots the caller's identity into _SOV_* before sourcing
+        .env and reads them afterwards. `set -a` exports any assignment in the
+        file, so `_SOV_PROD_APP_DIR=<itself>` used to make the staging identity
+        guard compare the tree against itself, skip the whole block, and restart
+        the PRODUCTION unit — while still recording a successful release.
+        """
+        self.host.write_env(
+            _SOV_PROD_APP_DIR="/opt/ichat",
+            _SOV_SERVICE_NAME="ichat",
+            _SOV_SERVICE_USER="ichat",
+            _SOV_MEDIA_DIR="/var/lib/ichat/media",
+            _SOV_TLS_PORT="8443",
+            _SOV_HTTP_PORT="8000",
+        )
+
+        result = self.run_deploy()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, msg=output)
+        self.assertIn("_SOV_PROD_APP_DIR", output, msg=output)
+        # Nothing may reach the production unit, and no release may be recorded.
+        # (Check the log file, not the output: the refusal text mentions
+        # "kind=deploy" while explaining the rule.)
+        self.assertEqual(self.host.read("SYSTEMCTL_LOG"), "", msg=output)
+        self.assertNotIn(
+            "kind=deploy", self.host.read_file(self.host.deployments_log),
+            msg="the refused release was recorded",
+        )
+
+    def test_env_cannot_disable_the_smoke_gate_via_sov_name(self):
+        """_SOV_SKIP_SMOKE=1 in .env would bypass the gate the same way."""
+        self.host.write_env(_SOV_SKIP_SMOKE="1")
+        self.host.write_smoke_stub(exit_code=1)
+
+        result = self.run_deploy()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, msg=output)
+        self.assertIn("_SOV_SKIP_SMOKE", output, msg=output)
+        self.assertNotIn("SKIPPED for this deploy", output)
+
     def test_a_clean_env_still_works(self):
         """The guard must not reject an ordinary staging .env (all caller-side)."""
         env = self.staging_env_file()

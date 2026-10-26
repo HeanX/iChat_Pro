@@ -4971,7 +4971,7 @@ function handleGroupInvitationNew(data) {
 async function respondToKeyVerification(requestId, action) {
   if (!requestId) return;
   try {
-    await apiFetch(`/api/keys/verification-requests/${requestId}/respond/`, {
+    const data = await apiFetch(`/api/keys/verification-requests/${requestId}/respond/`, {
       method: "POST",
       body: JSON.stringify({ action })
     });
@@ -4983,11 +4983,32 @@ async function respondToKeyVerification(requestId, action) {
     });
     renderPendingGroupInvitations();
     renderPendingKeyVerifications();
-    await refreshKeyVerificationAfterChange(keyVerificationOtherUserId(request));
+    // Only an accept the server confirmed may authorise trust, and only for the
+    // fingerprint that accept named. Decline, cancel and expiry are decisions
+    // not to trust anything.
+    const confirmed = data && data.request ? data.request : null;
+    let authorisation = null;
+    if (action === "accept") {
+      if (confirmed && confirmed.status === "accepted") {
+        authorisation = confirmed;
+      } else if (!confirmed && request) {
+        // A 2xx accept without a body still means the server accepted the
+        // request we held; keep the fingerprint snapshot that request pinned.
+        authorisation = Object.assign({}, request, { status: "accepted" });
+      }
+    }
+    await refreshKeyVerificationAfterChange(
+      keyVerificationOtherUserId(confirmed || request),
+      authorisation ? { grantTrustFor: authorisation } : undefined
+    );
     window.showToast(action === "accept"
       ? (currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed")
       : (currentLanguage === "zh" ? "安全验证请求已处理" : "Security request updated"));
   } catch (err) {
+    // Nothing is trusted until the server answered, so a failed authorisation
+    // must not keep rendering a stale "verified" verdict either.
+    contactKeyStatusCacheByUserId = {};
+    keyTrustListCache = null;
     window.showToast(err.message || (currentLanguage === "zh" ? "处理安全验证失败" : "Could not update security verification"));
     await fetchPendingGroupInvitations();
   }
@@ -5000,23 +5021,63 @@ function keyVerificationOtherUserId(verification) {
   return null;
 }
 
-async function refreshKeyVerificationAfterChange(userId = null) {
+// The peer fingerprint a verification request pinned when it was created. Only
+// an accepted request carries an authorisation; for every other status this
+// returns null and no caller may use it to grant trust.
+function acceptedVerificationPeer(verification) {
+  if (!verification || verification.status !== "accepted") return null;
+  const iAmRequester = Number(verification.requester_id) === Number(myUserId);
+  const iAmResponder = Number(verification.responder_id) === Number(myUserId);
+  if (!iAmRequester && !iAmResponder) return null;
+  const peerId = iAmRequester ? verification.responder_id : verification.requester_id;
+  const fingerprint = iAmRequester
+    ? verification.responder_key_fingerprint
+    : verification.requester_key_fingerprint;
+  const keyVersion = iAmRequester
+    ? verification.responder_key_version
+    : verification.requester_key_version;
+  if (!peerId || !fingerprint) return null;
+  return {
+    userId: Number(peerId),
+    keyVersion: keyVersion === undefined || keyVersion === null ? null : Number(keyVersion),
+    keyFingerprint: String(fingerprint)
+  };
+}
+
+// The active key the server reports must still be the fingerprint the accepted
+// request pinned; a rotation in between invalidates the authorisation.
+function keyStatusMatchesAcceptedVerification(contactStatus, verification) {
+  const peer = acceptedVerificationPeer(verification);
+  if (!peer) return null;
+  const active = getActiveKeyStatus(contactStatus);
+  if (!active || !active.key_fingerprint) return null;
+  if (String(active.key_fingerprint) !== peer.keyFingerprint) return null;
+  if (peer.keyVersion !== null && Number(active.key_version) !== peer.keyVersion) return null;
+  return active;
+}
+
+// Re-reads server state after a verification event. Passing `grantTrustFor` is
+// the only way this function can extend local trust, so plain refreshes,
+// declines, cancels and expiries never do.
+async function refreshKeyVerificationAfterChange(userId = null, options = {}) {
   contactKeyStatusCacheByUserId = {};
   keyTrustListCache = null;
+  const grantTrustFor = options && options.grantTrustFor ? options.grantTrustFor : null;
   if (userId) {
     const refreshed = await fetchContactKeyStatus(userId, { force: true });
-    const active = getActiveKeyStatus(refreshed);
-    if (active && window.iChatPrivateE2EE && window.iChatPrivateE2EE.trustPeerKey) {
-      window.iChatPrivateE2EE.trustPeerKey(active);
+    const peer = acceptedVerificationPeer(grantTrustFor);
+    if (peer && peer.userId === Number(userId)) {
+      const verified = keyStatusMatchesAcceptedVerification(refreshed, grantTrustFor);
+      if (verified && window.iChatPrivateE2EE && window.iChatPrivateE2EE.trustPeerKey) {
+        window.iChatPrivateE2EE.trustPeerKey(verified);
+      }
     }
   }
   const conv = activeChatId ? conversationsById[activeChatId] : null;
   if (conv && conv.type === "single" && conv.peer_id) {
+    // Display only: having a conversation open is not a verification of it.
     const refreshed = await fetchContactKeyStatus(conv.peer_id, { force: true });
     const active = getActiveKeyStatus(refreshed);
-    if (active && window.iChatPrivateE2EE && window.iChatPrivateE2EE.trustPeerKey) {
-      window.iChatPrivateE2EE.trustPeerKey(active);
-    }
     updateDetailsPanel(conv);
     const modal = document.getElementById("fingerprint-modal");
     if (modal && !modal.classList.contains("hidden")) {
@@ -5046,9 +5107,17 @@ function handleKeyVerificationNew(data) {
   if (payload.event === "requested" && verification.direction === "incoming") {
     window.showToast(currentLanguage === "zh" ? "收到安全验证请求" : "Security verification request received");
   } else if (payload.event === "accepted") {
-    refreshKeyVerificationAfterChange(keyVerificationOtherUserId(verification));
+    // The socket event is itself the server-confirmed accept for this
+    // verification, so it authorises trust -- but only for the fingerprint the
+    // accepted request pinned, never for whatever the contact now reports.
+    refreshKeyVerificationAfterChange(
+      keyVerificationOtherUserId(verification),
+      { grantTrustFor: verification }
+    );
     window.showToast(currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed");
   } else if (payload.event === "expired") {
+    // Refresh only: an expiry is exactly the case where the fingerprints no
+    // longer match, so it must never endorse the current key.
     refreshKeyVerificationAfterChange(keyVerificationOtherUserId(verification));
     window.showToast(currentLanguage === "zh" ? "密钥已变化，请重新发起安全验证" : "Keys changed. Start verification again.");
   }

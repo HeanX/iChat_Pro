@@ -91,15 +91,31 @@ class RunbookDescribesTheRealBehaviourTests(unittest.TestCase):
         self.runbook = RUNBOOK.read_text(encoding="utf-8")
         self.monitor = monitor_source()
 
-    def test_runbook_says_the_env_file_is_the_source(self):
-        self.assertIn("按白名单逐行解析", self.runbook)
+    def test_runbook_says_the_env_file_is_whitelisted(self):
         self.assertIn("ENV_FILE_KEYS", self.runbook)
+        # The value syntax systemd accepts must be documented with the loader.
+        self.assertIn("EnvironmentFile", self.runbook)
+
+    def test_runbook_says_identity_keys_are_caller_only(self):
+        """F-01: the runbook must not tell operators to put identity in .env."""
+        self.assertIn("只能由调用方提供", self.runbook)
+        self.assertIn("ICHAT_PROD_APP_DIR", self.runbook)
 
     def test_runbook_documents_the_journal_failure_behaviour(self):
         self.assertIn("查询失败", self.runbook)
 
     def test_runbook_documents_stdin_for_the_db_url(self):
         self.assertIn("stdin", self.runbook)
+
+    def test_runbook_documents_the_accepted_env_value_syntax(self):
+        """F-05: quotes and trailing comments must be documented as valid."""
+        self.assertIn('KEY="1"', self.runbook)
+        self.assertIn("#", self.runbook)
+
+    def test_runbook_documents_the_live_redis_db_selection(self):
+        """F-07: the doc must say the URL's db index is passed to redis-cli."""
+        self.assertIn("client info", self.runbook)
+        self.assertIn("-n <URL", self.runbook)
 
     def test_runbook_states_the_forward_release_rule(self):
         self.assertIn("smoke=skipped-no-script", self.runbook)

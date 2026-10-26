@@ -92,7 +92,7 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 */5 * * * * /opt/ichat/repo/deploy/monitor.sh >> /var/log/ichat-monitor.log 2>&1
 ```
 
-配置（写入 `/opt/ichat/.env`，脚本按白名单逐行解析，**不 source**）：`ICHAT_ALERT_WEBHOOK`（Slack/Discord/通用 webhook，缺省时只进 syslog 与 stderr，不算告警通道）；`ICHAT_ALERT_MIN_SECS=1800`（同一 key 限频，防告警风暴）；`ICHAT_BASE_URL`（readiness 探针 origin，缺省 `https://127.0.0.1:8443`）；`ICHAT_SERVICE_NAME`（journal 检查的单元名，缺省 `ichat`）；`DJANGO_ALLOWED_HOSTS`（探针的 `Host` 头取第一个域名，与 .env 其余配置共用）；上表阈值均可覆盖（`ICHAT_DISK_PCT`/`ICHAT_PG_MAX_CONN`/`ICHAT_REDIS_MAX_MB`/`ICHAT_READY_MAX_FAILS`/`ICHAT_CERT_MIN_DAYS`）。白名单是 `monitor.sh` 的 `ENV_FILE_KEYS`：**只有列出的名字生效**，进程环境同名变量优先于 `.env`，其余行一律忽略。
+白名单是 `monitor.sh` 的 `ENV_FILE_KEYS`（含 `DJANGO_ALLOWED_HOSTS`，它提供探针的 `Host` 头）：**只有列出的名字生效**，进程环境同名变量优先于 `.env`，其余行一律忽略。取值语法与 systemd 的 `EnvironmentFile` 一致：`KEY=1`、`KEY="1"`、`KEY='1'`、`KEY=1  # 说明` 都有效（引号会被剥掉，行尾 `#` 只在前面是空白且不在引号内时才算注释），所以写在 `.env` 里的阈值不会因为多了一对引号就静默退回默认值（F-05）。值只做文本处理，绝不 `eval`。
 
 '自检：`ICHAT_ALERT_TEST=1 /opt/ichat/repo/deploy/monitor.sh` 发一条测试告警，用于验证 webhook 连通。
 
@@ -115,7 +115,7 @@ staging 与生产共用一台 t3.small，但**不共享任何配置、数据、�
 | `ICHAT_TLS_PORT` | readiness 经 Nginx 的端口 | `8443` | `8444` |
 | `ICHAT_HTTP_PORT` | readiness 回落 Daphne 的端口 | `8000` | `8001` |
 
-**只写在 staging `.env` 里就够了**，不必每次在命令行重复 export。若安装树不是生产树、而身份仍是生产缺省值（单元/用户/media/端口任一），`deploy.sh` 会在**改动任何东西之前**以 exit 2 拒绝执行——不完整的 staging 身份不会被当成可用的 staging。`ICHAT_PROD_APP_DIR` 用于声明真正的生产树（缺省 `/opt/ichat`）。readiness 与冒烟门禁的 origin 由同一份解析结果推导，staging 因此不会回落到生产的 8443/8000。
+**这些身份键只能由调用方提供**（review finding F-01）：`deploy.sh` 会先在 `$APP_DIR/.env` 里扫描 `ICHAT_APP_DIR`/`ICHAT_PROD_APP_DIR`/`ICHAT_SERVICE_NAME`/`ICHAT_SERVICE_USER`/`ICHAT_MEDIA_DIR`/`ICHAT_TLS_PORT`/`ICHAT_HTTP_PORT`/`ICHAT_READY_ORIGIN`/`ICHAT_LOOPBACK_ORIGIN`/`ICHAT_DEPLOYER`/`ICHAT_APPROVAL`/`ICHAT_REQUIRE_APPROVAL`/`ICHAT_SKIP_SMOKE`，**只要出现任一键就以 exit 2 拒绝执行**（绝不静默忽略：能被部署的树若能自己选择重启哪个单元、探测哪个端口、审计行记谁发布，OPS-01 的守卫就形同虚设）。其余键（`DATABASE_URL` 等应用配置）仍从 `.env` 读取。
 
 布局（全部独立于生产）：
 
@@ -154,7 +154,7 @@ sudo deploy/staging/check_isolation.sh --check-data
 
 它逐项断言（任一违反即 exit 1）：SECRET_KEY 与生产不同；`DATABASE_URL` **逐维度**比较——登录角色名与角色密码各自必须不同（只改库名不算秘密隔离），staging 库名（从 URL path 解析）必须是 `ichat_staging`；CSRF origin 不同；Redis 逻辑库不同；**media 与 static 两类根目录**互不相等、互不为祖先（先做 `/` 与 `..` 规范化，尾斜杠、重复分隔符与相对跳转都绕不过；static 用 `collectstatic --clear`，嵌套会互删文件）；代码树/服务单元/服务用户不同；daphne 端口非 8000（unit 找不到时报 "port UNVERIFIED" 而非静默通过）。任何 key 缺失都会报告而不是静默中断；秘密值只以 SHA-256 前缀形式出现，绝不明文打印。
 
-`--check-data` 会**真的连接**：用 `psql` 读两库各自的 `current_user`（登录角色），用 `redis-cli` 读各自实际所在的逻辑库，再比较。psql/redis-cli 缺失、连不上或登录被拒绝时该维度报 `UNVERIFIED` 并 exit 1——不会把"没查"写成 `ISOLATED`。凭据只走 `PGPASSWORD` 环境变量，不出现在 argv。
+`--check-data` 会**真的连接**：用 `psql` 读两库各自的 `current_user`（登录角色）；用 `redis-cli -n <URL 里的库号> client info` 读连接实际所在的逻辑库（`db=` 出现在单行输出的中间，按字段解析而不是按行首匹配），再比较。URL 里没有库号、输出里没有 `db=`、或服务器实际库号与 URL 不符时，该维度报 `UNVERIFIED` 并 exit 1——不会把“没查”或“查不准”写成 `ISOLATED`。凭据只走 `PGPASSWORD` 环境变量，不出现在 argv。
 
 staging 的发布走同一条 deploy.sh（审批门禁可用 `ICHAT_REQUIRE_APPROVAL=0`，因为 staging 本身就是审批前验证环节），冒烟门禁照常运行（staging 有自己的 `SMOKE_USERNAME/SMOKE_PASSWORD`）。
 ## 4. 备份与恢复（T13）

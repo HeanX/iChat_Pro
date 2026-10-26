@@ -86,6 +86,7 @@
 | [docs/phase4/windows-branding.md](phase4/windows-branding.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-notifications.md](phase4/windows-notifications.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-tray.md](phase4/windows-tray.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/windows-files.md](phase4/windows-files.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 
 ## 维护约束
 

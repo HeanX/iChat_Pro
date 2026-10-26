@@ -5769,14 +5769,165 @@ function closeImagePreviewViewer() {
   activeImageViewer = null;
 }
 
-function downloadActiveImageViewer() {
-  if (!activeImageViewer) return;
+// P4 T19: inside the desktop shell an <a download> is bound to the app origin,
+// so where the file lands (or whether it lands at all) is up to the browser
+// download manager. Both call sites already hold the decrypted Blob, so no
+// re-fetch happens: the bytes are handed to the native save path when it is
+// available, and the previous anchor is kept for browser builds.
+// Returns {status: 'saved'|'canceled'|'unsupported'} and never rejects for the
+// expected failures - the caller decides what to tell the user.
+function saveOrDownloadBlob(blob, filename, url, metadata) {
+  var ft = window.iChatFileTransfer;
+  var native = ft && typeof ft.nativeSaveAvailable === 'function' && ft.nativeSaveAvailable();
+  // A 0-byte file is legitimate and must take the native path too; only a
+  // missing blob falls back to the anchor.
+  if (native && blob && typeof blob.size === 'number') {
+    return ft.saveBlobToDisk(blob, Object.assign({ original_name: filename }, metadata || {}))
+      .then(function (save) {
+        if (save && save.status === 'saved' && window.showToast) {
+          window.showToast('已保存到：' + (save.fileName || filename));
+        }
+        return save || { status: 'canceled' };
+      })
+      .catch(function (err) {
+        window.showToast && window.showToast(err.message || '保存失败');
+        return { status: 'failed' };
+      });
+  }
   var a = document.createElement('a');
-  a.href = activeImageViewer.url;
-  a.download = imageViewerFilename();
+  a.href = url;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  return Promise.resolve({ status: 'unsupported' });
+}
+
+// After a successful native save, swap the "Done" label for an opener bound to
+// the saved file. Opening is addressed by the grant token from that save, so
+// the renderer cannot ask the shell to open an arbitrary path. For file types
+// the shell refuses to execute (installers, scripts) the hint is shown and the
+// plain "Done" label stays.
+function offerOpenSavedFile(btn, save) {
+  btn.classList.remove('downloading');
+  var previousOpen = btn.parentNode && btn.parentNode.querySelector('[data-file-open]');
+  if (previousOpen) previousOpen.remove();
+  // Review round 1 (BLOCKER): "Done" may only mean the bytes are on disk. A
+  // canceled dialog leaves nothing behind, and a failed save must be retryable
+  // rather than looking successful next to an error toast.
+  if (!save || save.status !== 'saved') {
+    btn.classList.remove('downloaded');
+    btn.innerHTML = save && save.status === 'failed'
+      ? '<i data-lucide="alert-circle" class="w-4 h-4"></i> Retry'
+      : '<i data-lucide="download" class="w-4 h-4"></i> Download';
+    lucide.createIcons();
+    return;
+  }
+  btn.classList.add('downloaded');
+  btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
+  if (!save.token) {
+    lucide.createIcons();
+    return;
+  }
+  var open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'file-open-btn';
+  open.setAttribute('data-file-open', '');
+  open.innerHTML = '<i data-lucide="external-link" class="w-4 h-4"></i> 打开';
+  open.addEventListener('click', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    open.disabled = true;
+    window.iChatFileTransfer.openSavedFile(save.token).then(function (result) {
+      open.disabled = false;
+      if (result.status === 'opened' || result.status === 'unsupported') return;
+      window.showToast && window.showToast(result.reason || '打开失败');
+    }).catch(function () {
+      open.disabled = false;
+      window.showToast && window.showToast('打开失败');
+    });
+  });
+  btn.parentNode && btn.parentNode.appendChild(open);
+  lucide.createIcons();
+}
+
+// Round 3 review (MAJOR): the "browser build keeps its Done state" rule lived
+// inline inside renderFileMessageBubble, where no test could reach it. It is a
+// separate function now so the branch is directly covered.
+// 'unsupported' means the browser anchor already fired and the download
+// manager owns the file: the button must keep the pre-T19 Done state instead of
+// being reset by offerOpenSavedFile.
+function applySaveResultToDownloadButton(btn, save) {
+  if (save && save.status === 'unsupported') {
+    btn.classList.remove('downloading');
+    btn.classList.add('downloaded');
+    btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
+    lucide.createIcons();
+    return;
+  }
+  offerOpenSavedFile(btn, save);
+}
+
+// One download path for every MIME type.
+//
+// Round 5 review (F2/P2): this used to live inline inside
+// renderFileMessageBubble and only ran the save for non-images, so an image
+// above AUTO_IMAGE_PREVIEW_LIMIT_BYTES (which renders the plain bubble rather
+// than the viewer) fetched the bytes, rendered a thumbnail and reported "Done"
+// without ever asking the shell to write the file. Fetch -> preview -> save,
+// unconditionally; the preview is presentation, the save is the action.
+// Named so the behaviour can be driven directly from tests.
+function runFileDownload(btn, container, conv, fileId) {
+  var fid = (btn && btn.getAttribute ? btn.getAttribute('data-file-id') : null) || fileId;
+  var convType = conv ? conv.type : 'single';
+  if (!window.iChatFileTransfer || !window.iChatFileTransfer.fetchAndDecryptFile) {
+    window.showToast && window.showToast('File transfer module not loaded.');
+    return Promise.resolve(null);
+  }
+  btn.classList.add('downloading');
+  btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Downloading...';
+  lucide.createIcons();
+  return window.iChatFileTransfer.fetchAndDecryptFile(parseInt(fid, 10), convType).then(function (result) {
+    if (!result || !result.blob) throw new Error('empty download');
+    var url = URL.createObjectURL(result.blob);
+    var previewEl = container && container.querySelector('.file-bubble-preview');
+    if (previewEl && result.blob.type.indexOf('image/') === 0) {
+      var img = document.createElement('img');
+      img.src = url;
+      previewEl.appendChild(img);
+      previewEl.classList.remove('hidden');
+    }
+    return saveOrDownloadBlob(
+      result.blob,
+      (result.metadata && result.metadata.original_name) || 'file',
+      url,
+      { fileId: parseInt(fid, 10) }
+    ).then(function (save) {
+      applySaveResultToDownloadButton(btn, save);
+      return save;
+    });
+  }).catch(function (err) {
+    btn.classList.remove('downloading');
+    btn.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4"></i> Failed';
+    lucide.createIcons();
+    console.error('File download failed:', err);
+    window.showToast && window.showToast('Download failed: ' + ((err && err.message) || 'Unknown error'));
+    return null;
+  });
+}
+
+function downloadActiveImageViewer() {
+  if (!activeImageViewer) return;
+  // Round 2 review (MINOR): the earlier version appended the "open" button to
+  // a detached div, so it never appeared. Round 3 (MINOR): saveOrDownloadBlob
+  // already shows the "saved to" toast, so doing it again here doubled it.
+  // The viewer only reports failures; the success toast is shared.
+  return saveOrDownloadBlob(
+    activeImageViewer.blob,
+    imageViewerFilename(),
+    activeImageViewer.url,
+    { fileId: activeImageViewer.fileId }
+  );
 }
 
 function rotateActiveImageViewer() {
@@ -5963,50 +6114,7 @@ function renderFileMessageBubble(div, msg, conv, groupMeta) {
     downloadBtn.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      var btn = this;
-      var fid = btn.getAttribute('data-file-id');
-      var convType = conv ? conv.type : 'single';
-      if (!window.iChatFileTransfer || !window.iChatFileTransfer.fetchAndDecryptFile) {
-        window.showToast && window.showToast('File transfer module not loaded.');
-        return;
-      }
-      btn.classList.add('downloading');
-      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Downloading...';
-      lucide.createIcons();
-      window.iChatFileTransfer.fetchAndDecryptFile(parseInt(fid), convType).then(function (result) {
-        btn.classList.remove('downloading');
-        btn.classList.add('downloaded');
-        btn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Done';
-        lucide.createIcons();
-        if (result && result.blob) {
-          var url = URL.createObjectURL(result.blob);
-          var previewEl = div.querySelector('.file-bubble-preview');
-          if (previewEl) {
-            // Show image preview
-            if (result.blob.type.indexOf('image/') === 0) {
-              var img = document.createElement('img');
-              img.src = url;
-              previewEl.appendChild(img);
-              previewEl.classList.remove('hidden');
-            }
-          }
-          // Trigger download for non-image files
-          if (result.blob.type.indexOf('image/') !== 0) {
-            var a = document.createElement('a');
-            a.href = url;
-            a.download = (result.metadata && result.metadata.original_name) || 'file';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          }
-        }
-      }).catch(function (err) {
-        btn.classList.remove('downloading');
-        btn.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4"></i> Failed';
-        lucide.createIcons();
-        console.error('File download failed:', err);
-        window.showToast && window.showToast('Download failed: ' + (err.message || 'Unknown error'));
-      });
+      return runFileDownload(this, div, conv, fileId);
     });
   }
 

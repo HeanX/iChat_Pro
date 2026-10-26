@@ -7,6 +7,13 @@ const INVOKE_CHANNELS = [
   'ichat:secure-storage:encrypt',
   'ichat:secure-storage:decrypt',
   'ichat:notifications:show',
+  // T19: native file save/open. Note what is absent on purpose: the renderer
+  // cannot name a path, cannot read a file back, and cannot delete one.
+  'ichat:files:pick-save-target',
+  'ichat:files:write-chunk',
+  'ichat:files:seal',
+  'ichat:files:release',
+  'ichat:files:open-downloaded',
 ];
 
 contextBridge.exposeInMainWorld('iChatDesktop', {
@@ -31,6 +38,16 @@ contextBridge.exposeInMainWorld('iChatDesktop', {
         }
       });
     },
+  },
+  // T19: decrypted bytes go to disk only through a save dialog the user
+  // confirmed. Base64 is the wire form because a Blob cannot cross
+  // contextBridge; main decodes, enforces the cap and appends sequentially.
+  files: {
+    pickSaveTarget: (payload) => ipcRenderer.invoke('ichat:files:pick-save-target', payload),
+    writeChunk: (payload) => ipcRenderer.invoke('ichat:files:write-chunk', payload),
+    seal: (payload) => ipcRenderer.invoke('ichat:files:seal', payload),
+    release: (payload) => ipcRenderer.invoke('ichat:files:release', payload),
+    openDownloaded: (payload) => ipcRenderer.invoke('ichat:files:open-downloaded', payload),
   },
   __channels: INVOKE_CHANNELS,
 });

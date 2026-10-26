@@ -93,30 +93,27 @@ class IsolationCase(unittest.TestCase):
         self.staging_tree = staging_tree
 
     def run_check(self, prod=None, staging=None, extra_args=(), path_prefix=None,
-                  isolated_path=False):
+                  extra_env=None):
         """Run the checker against fixture env files.
 
         ``path_prefix`` prepends a stub directory. That alone is NOT enough to
-        simulate a missing tool: on Linux ``/usr/bin/psql`` is still behind the
-        stub, so deleting the stub found the real client and the
-        "psql is not installed" case silently exercised the happy path (CI run
-        40343782825). ``isolated_path`` replaces PATH with the stub directory
-        plus a minimal system path instead of extending it.
+        simulate a missing client: on Linux a real ``/usr/bin/psql`` stays
+        reachable behind the stub, so deleting the stub found the real binary
+        and the "not installed" case silently exercised the happy path (CI run
+        40343782825). Cases that need an absent client point ``ICHAT_PSQL`` /
+        ``ICHAT_REDIS_CLI`` at a path that does not exist instead.
         """
         write_env(self.staging, staging if staging is not None else staging_env())
         if prod is not None:
             write_env(self.prod, prod)
-        base_path = os.environ.get("PATH", "")
-        if isolated_path and path_prefix:
-            # Keep only what bash itself needs (it is invoked by absolute path,
-            # but coreutils live in /usr/bin and /bin).
-            base_path = "/usr/bin:/bin"
         env = {
-            "PATH": base_path,
+            "PATH": os.environ.get("PATH", ""),
             "TMPDIR": os.environ.get("TMPDIR") or os.environ.get("TEMP") or "",
         }
         if path_prefix:
             env["PATH"] = f"{path_prefix}:{env['PATH']}"
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             [bash(), str(CHECK),
              "--prod-env", str(self.prod),
@@ -460,10 +457,11 @@ class LiveDataCheckTests(IsolationCase):
             staging=staging_env(ICHAT_APP_DIR=str(self.staging_tree)),
             extra_args=("--check-data",),
             path_prefix=str(bindir),
-            # Must actually remove psql from PATH: on Linux a real /usr/bin/psql
-            # sits behind the stub directory, which made this case pass for the
-            # wrong reason (CI run 40343782825).
-            isolated_path=True,
+            # Point the checker at a client that does not exist. Deleting the
+            # stub was not enough: on Linux a real /usr/bin/psql stayed
+            # reachable behind the stub directory, so this case exercised the
+            # happy path and only passed on Windows (CI run 40343782825).
+            extra_env={"ICHAT_PSQL": str(bindir / "psql-absent")},
         )
         output = self.output(result)
         self.assertNotEqual(result.returncode, 0, msg=output)

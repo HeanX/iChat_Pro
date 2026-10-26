@@ -264,6 +264,15 @@ fi
 #     UNVERIFIED — a violation with a non-zero exit, never a quiet pass.
 # The password still travels only through PGPASSWORD, and no URL or secret is
 # printed.
+#
+# ICHAT_PSQL names the client. Production leaves it unset (PATH lookup); the
+# regression suite points it at a stub so it can simulate "client not
+# installed" without depending on what the host happens to ship. Prepending a
+# stub directory to PATH was not enough: on Linux a real /usr/bin/psql stayed
+# reachable behind it (CI run 40343782825).
+PSQL_BIN=${ICHAT_PSQL:-psql}
+REDIS_CLI_BIN=${ICHAT_REDIS_CLI:-redis-cli}
+
 live_psql_role() {  # live_psql_role <db-url>; echoes the role, or nothing
     local url=$1 user pass host port dbname out
     user=$(url_user "$url")
@@ -280,7 +289,7 @@ live_psql_role() {  # live_psql_role <db-url>; echoes the role, or nothing
         host=${host%:*}
     fi
     out=$(PGPASSWORD="$pass" PGUSER="$user" PGHOST="$host" PGPORT="$port" \
-        PGDATABASE="$dbname" psql -X -qAt -c 'SELECT current_user;' 2>/dev/null) \
+        PGDATABASE="$dbname" "$PSQL_BIN" -X -qAt -c 'SELECT current_user;' 2>/dev/null) \
         || return 1
     printf '%s' "$out"
 }
@@ -313,7 +322,7 @@ live_redis_db() {  # live_redis_db <redis-url>; echoes the db index in use
     #   id=3 addr=127.0.0.1:... fd=8 name= age=0 ... db=0 sub=0 psub=0 ...
     # The previous `sed -n 's/^db=...'` only matched the test stub's shape and
     # failed against a real server (review finding F-07).
-    reply=$(redis-cli -h "${host:-127.0.0.1}" -p "$port" -n "$from_url" \
+    reply=$("$REDIS_CLI_BIN" -h "${host:-127.0.0.1}" -p "$port" -n "$from_url" \
         --no-auth-warning client info 2>/dev/null) || return 1
     out=$(printf '%s\n' "$reply" | grep -o 'db=[0-9][0-9]*' | head -1)
     out=${out#db=}
@@ -334,8 +343,8 @@ live_redis_db() {  # live_redis_db <redis-url>; echoes the db index in use
 
 if [[ "$CHECK_DATA" == "true" ]]; then
     echo "-- live data"
-    if ! command -v psql >/dev/null 2>&1; then
-        violation "live database: psql not installed, so the live role is UNVERIFIED"
+    if ! command -v "$PSQL_BIN" >/dev/null 2>&1; then
+        violation "live database: $PSQL_BIN not installed, so the live role is UNVERIFIED"
     elif [[ -z "$staging_db" || -z "$prod_db" ]]; then
         violation "live database: DATABASE_URL missing on one side, so the live role is UNVERIFIED"
     else
@@ -353,8 +362,8 @@ if [[ "$CHECK_DATA" == "true" ]]; then
         fi
     fi
 
-    if ! command -v redis-cli >/dev/null 2>&1; then
-        violation "live redis: redis-cli not installed, so the live logical db is UNVERIFIED"
+    if ! command -v "$REDIS_CLI_BIN" >/dev/null 2>&1; then
+        violation "live redis: $REDIS_CLI_BIN not installed, so the live logical db is UNVERIFIED"
     elif [[ -z "$staging_redis" || -z "$prod_redis" ]]; then
         violation "live redis: REDIS_URL missing on one side, so the logical db is UNVERIFIED"
     else

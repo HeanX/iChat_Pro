@@ -245,6 +245,29 @@ test('the generated script is valid JavaScript and survives an odd-but-legal ori
 });
 
 /**
+ * Collapse CRLF to LF.
+ *
+ * A Windows checkout with `core.autocrlf=true` (Git's common Windows default)
+ * has CRLF in the working tree while the committed blob is LF. Every string this
+ * suite builds or compares must therefore be normalised: the first version of
+ * the guard self-check hardcoded `'\n'` in `html.replace(...)`, so on a CRLF
+ * checkout the replace matched nothing, the "removed" mutation silently stayed
+ * intact, and the test went red with `a removed tag is detected: 3 !== 2` — for
+ * a reason that had nothing to do with the code under test.
+ *
+ * Only CRLF is rewritten: a lone CR is not produced by git and rewriting it
+ * would be guessing.
+ */
+function normaliseEol(text) {
+  return String(text).replace(/\r\n/g, '\n');
+}
+
+/** Read a text file and normalise its line endings to LF. */
+function readText(file) {
+  return normaliseEol(fs.readFileSync(file, 'utf8'));
+}
+
+/**
  * Parse the classic `<script src>` loads of an HTML document in source order.
  *
  * The previous version of the ordering test used `html.indexOf('js/mobile-env.js')`,
@@ -258,33 +281,42 @@ test('the generated script is valid JavaScript and survives an odd-but-legal ori
  * Both `src="..."` and `src='...'` and a bare `src=path` are accepted so a
  * formatting change cannot make the test silently match nothing.
  *
- * @param {string} html
- * @returns {Array<{src:string, attrs:string, index:number}>}
+ * Input is normalised to LF internally, so callers may pass CRLF text; the
+ * result (src, attrs, order) is identical either way. `index` is deliberately
+ * NOT returned: it is an offset into whatever string was passed, so it would
+ * differ between LF and CRLF input and any assertion on it would reintroduce
+ * the line-ending dependency this normalisation exists to remove.
+ *
+ * @param {string} html  document source, LF or CRLF
+ * @returns {Array<{src:string, attrs:string}>}
  */
 function parseScriptSrcs(html) {
+  const normalised = normaliseEol(html);
   const loads = [];
   const tagRe = /<script\b([^>]*)>/gi;
   let tag;
-  while ((tag = tagRe.exec(html)) !== null) {
+  while ((tag = tagRe.exec(normalised)) !== null) {
     const attrs = tag[1];
     const srcMatch = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
     if (!srcMatch) continue;
     const src = srcMatch[1] !== undefined ? srcMatch[1]
       : srcMatch[2] !== undefined ? srcMatch[2] : srcMatch[3];
-    loads.push({ src: src, attrs: attrs, index: tag.index });
+    loads.push({ src: src, attrs: attrs });
   }
   return loads;
 }
 
+/** Expected load order of the shell's classic scripts. */
+const EXPECTED_ORDER = ['js/mobile-env.js', 'js/mobile-config.js', 'js/shell.js'];
+
 test('index.html loads mobile-env.js before mobile-config.js and shell.js', () => {
   // Ordering is load-time correctness, not style: mobile-env.js must define the
   // global before shell.js reads it, and mobile-config.js must be parsed first.
-  const html = fs.readFileSync(path.join(mobileRoot, 'www', 'index.html'), 'utf8');
+  const html = readText(path.join(mobileRoot, 'www', 'index.html'));
   const loads = parseScriptSrcs(html);
   const order = loads.map((l) => l.src);
 
-  assert.deepStrictEqual(order,
-    ['js/mobile-env.js', 'js/mobile-config.js', 'js/shell.js'],
+  assert.deepStrictEqual(order, EXPECTED_ORDER,
     'unexpected <script src> order: ' + JSON.stringify(order));
 
   // Order is the whole point: re-state it as explicit pairwise comparisons so a
@@ -310,22 +342,127 @@ test('parseScriptSrcs detects a moved or removed env script (guard self-check)',
   // Mutation proof, in-tree: the ordering assertion must FAIL for the exact
   // regression it claims to guard. If somebody re-breaks the assertion into an
   // indexOf, this test keeps failing until it is a real parser again.
-  const html = fs.readFileSync(path.join(mobileRoot, 'www', 'index.html'), 'utf8');
+  //
+  // Every mutation below is built with line-ending-tolerant patterns and applied
+  // to the normalised source, so this test behaves identically in an LF and a
+  // CRLF working tree (see normaliseEol above).
+  const html = readText(path.join(mobileRoot, 'www', 'index.html'));
 
+  const envTag = /[ \t]*<script\s+src="js\/mobile-env\.js"><\/script>[ \t]*\r?\n?/;
+  const shellTag = /([ \t]*<script\s+src="js\/shell\.js"><\/script>[ \t]*\r?\n?)/;
+  assert.ok(envTag.test(html), 'the env tag the mutations rely on is present');
+  assert.ok(shellTag.test(html), 'the shell tag the mutations rely on is present');
+
+  // 1) env moves after shell.js
   const movedAfterShell = html
-    .replace('  <script src="js/mobile-env.js"></script>\n', '')
-    .replace('  <script src="js/shell.js"></script>',
-      '  <script src="js/shell.js"></script>\n  <script src="js/mobile-env.js"></script>');
-  assert.notDeepStrictEqual(parseScriptSrcs(movedAfterShell).map((l) => l.src),
-    ['js/mobile-env.js', 'js/mobile-config.js', 'js/shell.js'],
+    .replace(envTag, '')
+    .replace(shellTag, '$1  <script src="js/mobile-env.js"></script>\n');
+  assert.deepStrictEqual(parseScriptSrcs(movedAfterShell).map((l) => l.src),
+    ['js/mobile-config.js', 'js/shell.js', 'js/mobile-env.js'],
     'moving mobile-env.js after shell.js must be detected');
 
-  const removed = html.replace('  <script src="js/mobile-env.js"></script>\n', '');
-  assert.strictEqual(parseScriptSrcs(removed).length, 2, 'a removed tag is detected');
+  // 2) env deleted
+  const removed = html.replace(envTag, '');
+  assert.deepStrictEqual(parseScriptSrcs(removed).map((l) => l.src),
+    ['js/mobile-config.js', 'js/shell.js'], 'a removed tag is detected');
 
+  // 3) env deferred: order looks right, but defer breaks the guarantee
   const deferred = html.replace('<script src="js/mobile-env.js">',
     '<script defer src="js/mobile-env.js">');
   assert.ok(/\bdefer\b/i.test(parseScriptSrcs(deferred)[0].attrs), 'defer is detected');
+
+  // 4) env duplicated (the copy lands just before shell.js)
+  const duplicated = html.replace(shellTag,
+    '  <script src="js/mobile-env.js"></script>\n$1');
+  assert.deepStrictEqual(parseScriptSrcs(duplicated).map((l) => l.src),
+    ['js/mobile-env.js', 'js/mobile-config.js', 'js/mobile-env.js', 'js/shell.js'],
+    'a duplicated tag is detected');
+  assert.notDeepStrictEqual(parseScriptSrcs(duplicated).map((l) => l.src), EXPECTED_ORDER,
+    'a duplicated tag must not look like the expected order');
+});
+
+test('parseScriptSrcs gives identical results for LF and CRLF input', () => {
+  // Regression guard for the line-ending fragility itself: converting the page
+  // to CRLF (what a core.autocrlf=true checkout produces) must not change the
+  // parsed loads at all — same order, same src, same attrs.
+  const lf = readText(path.join(mobileRoot, 'www', 'index.html'));
+  const crlf = lf.replace(/\n/g, '\r\n');
+  assert.notStrictEqual(crlf, lf, 'the CRLF variant is really different text');
+  assert.ok(crlf.indexOf('\r\n') !== -1, 'CRLF variant contains CRLF');
+
+  const fromLf = parseScriptSrcs(lf);
+  const fromCrlf = parseScriptSrcs(crlf);
+
+  assert.deepStrictEqual(fromCrlf, fromLf,
+    'CRLF input must parse to the same loads as LF input');
+  assert.deepStrictEqual(fromCrlf.map((l) => l.src), EXPECTED_ORDER);
+  // Attrs are compared too: a trailing \r leaking into an attribute would let a
+  // `defer` check silently miss.
+  assert.ok(fromCrlf.every((l) => l.attrs.indexOf('\r') === -1),
+    'no carriage return leaks into parsed attributes');
+
+  // A single-line tag cannot carry a CRLF inside it, so the assertions above do
+  // not actually prove the parser normalises. A tag split across lines can: in a
+  // CRLF document the attribute chunk then contains "\r\n", which would leak into
+  // `attrs` (and could hide a `defer` behind a stray \r) unless the parser
+  // normalises first. This is what makes that normalisation load-bearing.
+  const multilineLf = [
+    '<script',
+    '  src="js/mobile-env.js">',
+    '</script>',
+    '<script defer',
+    '  src="js/shell.js"></script>',
+  ].join('\n');
+  const multilineCrlf = multilineLf.replace(/\n/g, '\r\n');
+  const mlLf = parseScriptSrcs(multilineLf);
+  const mlCrlf = parseScriptSrcs(multilineCrlf);
+  assert.deepStrictEqual(mlCrlf, mlLf,
+    'a tag split across lines must parse identically under CRLF');
+  assert.deepStrictEqual(mlCrlf.map((l) => l.src), ['js/mobile-env.js', 'js/shell.js']);
+  assert.ok(mlCrlf.every((l) => l.attrs.indexOf('\r') === -1),
+    'CRLF inside a multi-line tag must not reach attrs: ' + JSON.stringify(mlCrlf));
+  assert.ok(mlCrlf[1].attrs.indexOf('defer') !== -1, 'multi-line attrs are still parsed');
+});
+
+test('the README-style command checks survive CRLF', () => {
+  // Same class of bug, different assertion: the page checks in
+  // 'the start screen documents the commands that actually exist' and the
+  // .gitignore checks in the regression script are plain substring searches.
+  // Substring search is line-ending agnostic as long as the needle does not span
+  // a newline, so this pins that property directly: a CRLF copy of the page and
+  // of .gitignore must satisfy exactly the same checks as the LF copy.
+  //
+  // NOTE: this deliberately reads the raw bytes instead of using readText().
+  // normalising first would make the CRLF variant below still contain LF only,
+  // so the test would compare two identical LF strings and prove nothing.
+  const lf = fs.readFileSync(path.join(mobileRoot, 'www', 'index.html'), 'utf8')
+    .replace(/\r\n/g, '\n');
+  const crlf = lf.replace(/\n/g, '\r\n');
+  assert.notStrictEqual(crlf, lf, 'the CRLF variant is really different text');
+  for (const needle of [
+    'npm run config:generate',
+    'npx cap sync android',
+    'assembleDebug',
+    'ICHAT_MOBILE_SERVER_URL',
+    '不读 <code>mobile/.env</code>',
+    '尚未实现',
+  ]) {
+    assert.strictEqual(crlf.indexOf(needle) !== -1, lf.indexOf(needle) !== -1,
+      'check "' + needle + '" must not depend on line endings');
+    assert.ok(lf.indexOf(needle) !== -1, 'page still contains "' + needle + '"');
+  }
+  assert.strictEqual(crlf.indexOf('或构建环境中设置'), -1,
+    'the negative check must hold for CRLF too');
+
+  // .gitignore: every pattern is a whole line; matching is done against a CRLF
+  // split, which is what a CRLF checkout produces.
+  const ignoreLf = fs.readFileSync(path.join(mobileRoot, '.gitignore'), 'utf8')
+    .replace(/\r\n/g, '\n');
+  const ignoreCrlf = ignoreLf.replace(/\n/g, '\r\n');
+  for (const pattern of ['www/js/mobile-env.js', 'www/js/mobile-env.js.tmp', 'capacitor.config.json.tmp']) {
+    const line = ignoreCrlf.split('\r\n').find((l) => l === pattern);
+    assert.strictEqual(line, pattern, '.gitignore pattern "' + pattern + '" is a whole line');
+  }
 });
 
 test('the start screen documents the commands that actually exist', () => {
@@ -333,7 +470,7 @@ test('the start screen documents the commands that actually exist', () => {
   // together so the wording cannot drift again.
   const pkg = JSON.parse(fs.readFileSync(path.join(mobileRoot, 'package.json'), 'utf8'));
   assert.ok(pkg.scripts['config:generate'], 'package.json has config:generate');
-  const html = fs.readFileSync(path.join(mobileRoot, 'www', 'index.html'), 'utf8');
+  const html = readText(path.join(mobileRoot, 'www', 'index.html'));
 
   assert.ok(html.indexOf('npm run config:generate') !== -1, 'page names the real npm script');
   assert.ok(html.indexOf('npx cap sync android') !== -1, 'page names the real cap sync command');

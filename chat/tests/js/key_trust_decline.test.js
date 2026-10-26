@@ -74,6 +74,9 @@ const CHAT_TRUST_RULE = [
   'keyStatusMatchesAcceptedVerification',
   'verificationConfirmation',
   'verificationIdentifiesSameRequest',
+  'rememberLocallyAnswered',
+  'forgetLocallyAnswered',
+  'isLocallyAnswered',
 ];
 const CHAT_ENTRY_POINTS = [
   'refreshKeyVerificationAfterChange',
@@ -139,6 +142,10 @@ function createWorld(options = {}) {
     pendingKeyVerificationRequests: options.pending || [],
     // Production's in-flight guard state, reset per world.
     keyVerificationResponsesInFlight: {},
+    // Production's self-echo bookkeeping, reset per world.
+    locallyAnsweredVerificationIds: {},
+    KEY_VERIFICATION_ECHO_TTL_MS: 60000,
+    Date,
     TRUST_STORAGE_PREFIX: TRUST_KEY,
     IDENTITY_ALGORITHM: 'ECDH-P256',
     PrivateChatCryptoError: class PrivateChatCryptoError extends Error {},
@@ -487,6 +494,100 @@ test('an accept whose server fingerprint no longer matches the request grants no
   assert.deepEqual(world.cacheCalls, [], 'an unverified fingerprint must not become the send key');
 });
 
+test('an accept whose live key reports the same fingerprint at a newer version grants nothing', async () => {
+  // Round-3 review MINOR-4 / mutation MU9: the version dimension had no test at
+  // all, so deleting the version comparison stayed green. Same fingerprint,
+  // different version must be treated as "the key moved".
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    // Same fingerprint as the pinned v2/BBBB, but the server now publishes v3.
+    status: [keyStatusPayload({ userId: 7, version: 3, fingerprint: 'BBBB', trust: 'verified' })],
+    api: async () => ({ status: 'ok', request: acceptedVerification(incomingRequest) }),
+  });
+
+  await world.context.respondToKeyVerification(42, 'accept');
+
+  assert.deepEqual(
+    world.versions(7),
+    { 1: 'AAAA' },
+    'a version bump invalidates the authorisation even when the fingerprint matches'
+  );
+  assert.deepEqual(world.cacheCalls, [], 'and the newer version must not become the send key');
+  assert.equal(
+    world.toasts[world.toasts.length - 1],
+    'Keys changed. Nothing was trusted. Start verification again.',
+    'the refusal is reported as a changed key'
+  );
+});
+
+test('the same fingerprint at the pinned version still grants', async () => {
+  // Control for the case above: only the version differs, so if this passes and
+  // the previous one fails, the version comparison is what is doing the work.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [keyStatusPayload({ userId: 7, version: 2, fingerprint: 'BBBB', trust: 'verified' })],
+    api: async () => ({ status: 'ok', request: acceptedVerification(incomingRequest) }),
+  });
+
+  await world.context.respondToKeyVerification(42, 'accept');
+
+  assert.equal(world.versions(7)['2'], 'BBBB');
+  assert.equal(world.toasts[world.toasts.length - 1], 'Security verification completed');
+});
+
+test('a snapshot-consistent accept whose key rotated mid-flight reports the refusal', async () => {
+  // Round-3 review MU2: moving the success toast out of the `outcome.granted`
+  // check stayed green because every "no success" case made the grant
+  // impossible. This one reaches the granted===false branch through the normal
+  // path: the snapshot matches and the server confirms, but the live endpoint
+  // has already rotated.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('DDDD')],
+    api: async () => ({ status: 'ok', request: acceptedVerification(incomingRequest) }),
+  });
+
+  const outcome = await world.context.refreshKeyVerificationAfterChange(7, {
+    grantTrustFor: acceptedVerification(incomingRequest),
+  });
+  assert.equal(outcome.granted, false, 'the refresh reports no grant');
+
+  await world.context.respondToKeyVerification(42, 'accept');
+  assert.equal(
+    world.toasts.some(text => text === 'Security verification completed'),
+    false,
+    'no success may be claimed when granted is false'
+  );
+  assert.match(world.toasts[world.toasts.length - 1], /Nothing was trusted/);
+});
+
+test('a socket accept whose key rotated after the snapshot grants nothing and claims no success', async () => {
+  // Round-3 review MU2, socket form: the snapshot matches and the event is
+  // genuine, but the live endpoint has moved on, so granted is false. Moving the
+  // success toast out of the `outcome.granted` gate must fail here.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('DDDD')],
+  });
+
+  world.context.handleKeyVerificationNew({
+    data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
+  });
+  await flush();
+
+  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'the rotation invalidates the authorisation');
+  assert.equal(
+    world.toasts.some(text => text === 'Security verification completed'),
+    false,
+    'no success may be claimed when the socket path granted nothing'
+  );
+  assert.match(world.toasts[world.toasts.length - 1], /Nothing was trusted/);
+});
+
 test('a failed respond call leaves no verified-looking local state', async () => {
   const world = createWorld({
     stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
@@ -694,6 +795,89 @@ test('an honest accept of the held snapshot still grants and reports success', a
   assert.equal(world.versions(7)['2'], 'BBBB', 'the approved fingerprint is still trusted');
   assert.equal(world.cacheCalls.length, 1, 'and still replaces the cached send key');
   assert.equal(world.toasts[world.toasts.length - 1], 'Security verification completed');
+});
+
+test('the echo of our own accept after the HTTP success is silent', async () => {
+  // Round-3 review MAJOR-1 / E5: the server pushes `accepted` to both parties, so
+  // this page receives an echo of the accept it just performed. The tray entry is
+  // already gone, so without the self-echo record the user is told "nothing was
+  // trusted" immediately after a real success.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    api: async () => ({ status: 'ok', request: acceptedVerification(incomingRequest) }),
+  });
+
+  await world.context.respondToKeyVerification(42, 'accept');
+  const afterHttp = world.toasts.slice();
+  assert.deepEqual(afterHttp, ['Security verification completed'], 'the HTTP path reports one success');
+
+  world.context.handleKeyVerificationNew({
+    data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
+  });
+  await flush();
+
+  assert.deepEqual(
+    world.toasts,
+    ['Security verification completed'],
+    'the echo adds no duplicate success and no contradictory refusal'
+  );
+  assert.deepEqual(world.versions(7), { 1: 'AAAA', 2: 'BBBB' }, 'trust was granted exactly once');
+  assert.equal(world.cacheCalls.length, 1, 'and the send cache was written once');
+});
+
+test('the echo of our own accept that overtakes the HTTP response is silent', async () => {
+  // Round-3 review MAJOR-1 / E1-E3: the same race in the other order. The echo
+  // arrives while the POST is still in flight, so the tray entry is already
+  // recorded as locally answered before the response lands.
+  let releaseResponse;
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    api: () =>
+      new Promise(resolve => {
+        releaseResponse = () =>
+          resolve({ status: 'ok', request: acceptedVerification(incomingRequest) });
+      }),
+  });
+
+  const pendingPost = world.context.respondToKeyVerification(42, 'accept');
+  // the socket frame wins the race
+  world.context.handleKeyVerificationNew({
+    data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
+  });
+  await flush();
+  releaseResponse();
+  await pendingPost;
+  await flush();
+
+  assert.deepEqual(
+    world.toasts,
+    ['Security verification completed'],
+    'exactly one success, never two, and no refusal'
+  );
+  assert.deepEqual(world.versions(7), { 1: 'AAAA', 2: 'BBBB' }, 'granted exactly once');
+});
+
+test('an accept that is not ours still fails closed with a readable message', async () => {
+  // The counterpart of the two echo cases: an id this page never answered keeps
+  // the round-3 fail-closed behaviour, so the self-echo guard cannot be used to
+  // silence a genuine event.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+  });
+
+  world.context.handleKeyVerificationNew({
+    data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
+  });
+  await flush();
+
+  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'nothing is granted');
+  assert.equal(world.toasts.length, 1, 'one message');
+  assert.match(world.toasts[0], /no longer in this page's pending list/);
 });
 
 test('a socket accept naming another contact grants nothing', async () => {

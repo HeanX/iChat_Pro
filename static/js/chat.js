@@ -349,6 +349,15 @@ let pendingKeyVerificationRequests = [];
 // In-flight guard: a double click must not send a second respond POST and race
 // two contradictory toasts. Keyed by "<requestId>:<action>".
 let keyVerificationResponsesInFlight = {};
+// The request ids this page just answered itself. The server pushes the
+// `accepted` event to BOTH parties, so the client that clicked Accept receives
+// an echo of its own action *after* respondToKeyVerification() already cleared
+// the tray entry. Without this set that echo falls into the "no local snapshot"
+// branch and the user is told nothing was trusted right after a real success.
+// id -> epoch ms when it was recorded; entries expire after
+// KEY_VERIFICATION_ECHO_TTL_MS so a replayed event cannot stay silent forever.
+let locallyAnsweredVerificationIds = {};
+const KEY_VERIFICATION_ECHO_TTL_MS = 60000;
 let pendingGroupInvitationTimer = null;
 let currentSearchTab = 'chats';     // Active search type tab
 let searchDebounceTimer = null;    // Debounce timer for search input
@@ -4969,6 +4978,9 @@ async function respondToKeyVerification(requestId, action) {
   // A double click must not POST twice and race two contradictory toasts.
   if (keyVerificationResponsesInFlight[actionKey]) return;
   keyVerificationResponsesInFlight[actionKey] = true;
+  // Recorded BEFORE the POST so an echo that overtakes the response is already
+  // recognisable as this page's own action (see rememberLocallyAnswered).
+  const answeredHere = rememberLocallyAnswered(requestId);
   // The snapshot the user actually saw and acted on. It is the ONLY source of
   // the authorisation object: a response body may confirm this request but must
   // never choose who is trusted, at which version, or with which fingerprint.
@@ -5007,18 +5019,25 @@ async function respondToKeyVerification(requestId, action) {
       authorisation ? { grantTrustFor: authorisation } : undefined
     );
     if (action === "accept" && !(outcome && outcome.granted)) {
-      // The server accepted, but the contact's key has moved since the request
-      // was pinned. Say so: the old toast claimed a verification that did not
-      // happen.
-      window.showToast(currentLanguage === "zh"
-        ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
-        : "Keys changed. Nothing was trusted. Start verification again.");
+      // Two different reasons, two different messages: with no snapshot there
+      // was never an authorisation object in this page (someone else answered
+      // it), which is not the same thing as the key having rotated.
+      window.showToast(!snapshot
+        ? (currentLanguage === "zh"
+          ? "此验证请求已不在本页的待处理列表中，未授予信任。请重新发起安全验证。"
+          : "This verification request is no longer in this page's pending list, so nothing was trusted. Start verification again.")
+        : (currentLanguage === "zh"
+          ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
+          : "Keys changed. Nothing was trusted. Start verification again."));
       return;
     }
     window.showToast(action === "accept"
       ? (currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed")
       : (currentLanguage === "zh" ? "安全验证请求已处理" : "Security request updated"));
   } catch (err) {
+    // The POST did not land, so this page did not answer the request; a later
+    // echo must not be silently swallowed by the self-echo guard.
+    forgetLocallyAnswered(requestId);
     // Nothing is trusted until the server answered, so a failed authorisation
     // must not keep rendering a stale "verified" verdict either.
     contactKeyStatusCacheByUserId = {};
@@ -5039,6 +5058,43 @@ async function respondToKeyVerification(requestId, action) {
   } finally {
     delete keyVerificationResponsesInFlight[actionKey];
   }
+}
+
+// ── self-echo bookkeeping ────────────────────────────────────────────────
+// The server pushes `key.verification.new` to both parties, so this page also
+// receives an `accepted` event for an accept it just performed over HTTP. By
+// then the tray entry is gone, so without this record the echo would look like
+// an unverifiable request and the user would be told "nothing was trusted"
+// immediately after a real success.
+function rememberLocallyAnswered(requestId) {
+  const id = Number(requestId);
+  if (!Number.isSafeInteger(id) || id <= 0) return false;
+  const now = Date.now();
+  for (const key of Object.keys(locallyAnsweredVerificationIds)) {
+    if (now - locallyAnsweredVerificationIds[key] > KEY_VERIFICATION_ECHO_TTL_MS) {
+      delete locallyAnsweredVerificationIds[key];
+    }
+  }
+  locallyAnsweredVerificationIds[id] = now;
+  return true;
+}
+
+function forgetLocallyAnswered(requestId) {
+  delete locallyAnsweredVerificationIds[Number(requestId)];
+}
+
+// True while an `accepted` event for this id is (or recently was) this page's
+// own answer. Expired entries are treated as unknown so a stale id cannot
+// suppress a genuine event forever.
+function isLocallyAnswered(requestId) {
+  const id = Number(requestId);
+  const stamp = locallyAnsweredVerificationIds[id];
+  if (!stamp) return false;
+  if (Date.now() - stamp > KEY_VERIFICATION_ECHO_TTL_MS) {
+    delete locallyAnsweredVerificationIds[id];
+    return false;
+  }
+  return true;
 }
 
 // Interprets the respond response against the local snapshot.
@@ -5178,6 +5234,15 @@ function handleKeyVerificationNew(data) {
     //     this tab, so "the server accepted it" is not "the user approved it".
     // The pinned fingerprint and version are then re-checked against the live
     // endpoint by keyStatusMatchesAcceptedVerification(), which also fails shut.
+    //
+    // An echo of this page's own accept is neither a grant nor a refusal: the
+    // HTTP path already granted (or already explained why it could not), and
+    // saying anything here produces a duplicate success toast or, worse, a
+    // "nothing was trusted" line right after a real success. Stay silent and
+    // still clear the tray entry (done above).
+    if (isLocallyAnswered(verification.id)) {
+      return;
+    }
     let authorisation = null;
     let refusal = null;
     if (snapshot) {
@@ -5205,11 +5270,15 @@ function handleKeyVerificationNew(data) {
     ).then(function(outcome) {
       // The caller does not await this branch, so the toast is emitted here and
       // only a real grant may claim success.
-      window.showToast(outcome && outcome.granted
-        ? (currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed")
-        : (currentLanguage === "zh"
-          ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
-          : "Keys changed. Nothing was trusted. Start verification again."));
+      if (outcome && outcome.granted) {
+        window.showToast(currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed");
+        return;
+      }
+      // The snapshot is gone by now (the caller cleared it), so distinguish the
+      // rotated-key case explicitly instead of borrowing the "this page" text.
+      window.showToast(currentLanguage === "zh"
+        ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
+        : "Keys changed. Nothing was trusted. Start verification again.");
     }).catch(function(err) {
       // An unawaited rejection here used to surface as a console error next to
       // a success toast (review m-2).

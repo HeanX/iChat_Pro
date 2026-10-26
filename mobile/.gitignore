@@ -3,3 +3,7 @@
 # be committed. Shape reference: www/js/mobile-env.example.js
 www/js/mobile-env.js
 www/js/mobile-env.js.tmp
+
+# Temp file from the atomic write of the generated (tracked) capacitor config.
+# An interrupted build leaves it behind; it must never be committed.
+capacitor.config.json.tmp

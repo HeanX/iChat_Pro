@@ -20,6 +20,19 @@
  * No DOM, no window.crypto, no network: Node testable.
  */
 
+/*
+ * Everything lives inside this IIFE on purpose. The file used to declare six
+ * functions at top level, so loading it in the WebView also published
+ * normalizeOrigin / isLoopback / buildWsUrl / resolveMobileConfig /
+ * buildCapacitorConfig / buildMobileEnvScript as globals. They are read-only
+ * there and cannot escalate, but a third-party script that happened to define
+ * `resolveMobileConfig` later would silently replace the HTTPS/loopback policy.
+ * One named global (`window.iChatMobileConfig`) is the whole public surface.
+ *
+ * The body is deliberately NOT re-indented, so a reviewer can see that this
+ * commit only adds the wrapper: `git diff -w` should show no logic changes.
+ */
+(function () {
 'use strict';
 
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '::1', '[::1]'];
@@ -209,7 +222,11 @@ const api = {
 };
 
 if (typeof module !== 'undefined' && module.exports) {
+  // Node: the test suite and scripts/write-capacitor-config.js require() this.
   module.exports = api;
 } else {
+  // WebView: exactly one global, never the internal functions.
   window.iChatMobileConfig = api;
 }
+
+})();

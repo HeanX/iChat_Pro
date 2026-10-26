@@ -17,9 +17,10 @@
 2. **认证方式**：**不新增 token 端点**。**目标形态**是 Android 复用现有 **Django Session + CSRF Cookie**，
    WebView 与 Web 同源；**该形态需 T24 接通同源加载后才成立**，目前未实现也未实测。
    需要 token 的情形与前置条件见 §3.3。
-3. **工程骨架已落地并可构建**：`mobile/` 可 `npm install` + `npx cap sync` + Gradle 构建，
+3. **工程骨架已落地并可构建**：`mobile/` 可 `npm install` + `npm run config:generate` + `npx cap sync` + Gradle 构建，
    `mobile/android/` 是 Capacitor CLI **真实生成**（非手写）的原生工程；
-   **`app-debug.apk` 已真实产出**（最终产物 4.22 MB / `67104134…26C878`，SHA256 与构建命令见 §5）。
+   **`app-debug.apk` 已真实产出**（AND-01 整改后产物 4,138,535 B / `14B41ADA…EB48E9`；
+   修复前的旧产物 4.22 MB / `67104134…26C878` 已标注为过期。SHA256 与构建命令见 §5）。
 4. **本机工具链**：JDK 21+ 与 **Android SDK Platform 36 缺失**（系统只有 JDK 1.8 与 SDK 33/34）。
    已通过 **workspace 内可写 SDK 根目录**（`mobile/.android-sdk`）+ 本机已有的 **OpenJDK 23** 补齐，
    构建成功。**真机 / 模拟器安装与启动未执行**（无设备、无 emulator 包、无 Hyper-V），属"未验证"。
@@ -104,9 +105,15 @@ Cookie 由 WebView 的 CookieManager 自动管理，`wss://` 握手复用同一 
 
 > **当前骨架不是这个形态。** T22 的发布构建 `server.url` 为 `null`，WebView 加载的是打包进 APK 的
 > 本地 assets（`mobile/www/index.html` 启动页），`shell.js` 里没有任何 `location`/`navigate`/WebSocket
-> 代码，APK 内也没有注入 `window.ICHAT_MOBILE_ENV` 的代码。也就是说 **"同源加载 Django 页面"是
-> T24 要接通的目标，不是本卡已实现的事实**。本卡只落地了"服务地址如何解析、如何校验"这一层。
-> 上一版 ADR 在这里用了现在时，属表述错误，已更正。
+> 代码。**服务地址是构建期注入的，不是运行时注入**：`npm run config:generate`
+> （`mobile/scripts/write-capacitor-config.js`）把解析后的 origin 写成
+> `mobile/www/js/mobile-env.js`（`window.ICHAT_MOBILE_ENV = {...}`），该文件是 gitignore 的构建产物，
+> 由 `npx cap sync android` 一起复制进 `android/app/src/main/assets/public/`，最终出现在 APK 内。
+> 也就是说 **"同源加载 Django 页面"是 T24 要接通的目标，不是本卡已实现的事实**；本卡只落地了
+> "服务地址如何解析、如何校验、如何注入打包资源"这一层。运行时注入（安装后在 App 内改地址、
+> 或由服务端下发）**尚未实现**。
+> 上一版 ADR 在这里用了现在时，属表述错误；AND-01 整改前这里还写着"APK 内也没有注入
+> `window.ICHAT_MOBILE_ENV` 的代码"，该句已被 T22 AND-01 整改证伪（APK 内确有该文件），现更正。
 
 关键约束（写进 `mobile/www/js/mobile-config.js` 并由 `mobile/tests/mobile-config.test.js` 守护）：
 
@@ -147,18 +154,25 @@ Cookie 由 WebView 的 CookieManager 自动管理，`wss://` 握手复用同一 
 mobile/
 ├── package.json                    # 依赖固定为精确版本，不用 ^
 ├── capacitor.config.json           # 由 scripts/write-capacitor-config.js 生成，发布模式无 server 块
+├── .gitignore                      # 忽略构建产物 www/js/mobile-env.js(+.tmp) 与 capacitor.config.json.tmp
 ├── scripts/
-│   └── write-capacitor-config.js   # 从 www/js/mobile-config.js 契约生成配置；未配置时 exit 1
+│   └── write-capacitor-config.js   # 从 www/js/mobile-config.js 契约生成配置；未配置时 exit 1 且不写任何文件
 ├── www/                            # WebView 打包进 APK 的本地资源
-│   ├── index.html                  # 骨架启动页（不是聊天 UI）
+│   ├── index.html                  # 骨架启动页（不是聊天 UI），按 env → config → shell 顺序加载脚本
 │   ├── css/mobile-shell.css        # 安全区适配；不依赖 Django 静态资源
 │   └── js/
-│       ├── mobile-config.js        # 纯函数配置契约（Node 可测）
+│       ├── mobile-config.js        # 纯函数配置契约（IIFE，Node 可测；浏览器只暴露 window.iChatMobileConfig）
+│       ├── mobile-env.js           # 【构建产物，gitignore】config:generate 写入的 window.ICHAT_MOBILE_ENV
+│       ├── mobile-env.example.js   # 上面那份产物的形态说明（入库）
 │       └── shell.js                # 启动页渲染，仅读 window.ICHAT_MOBILE_ENV
 ├── tests/
-│   └── mobile-config.test.js       # node:test，13 条
+│   ├── mobile-config.test.js       # node:test，13 条：origin/HTTPS/WSS/live-reload 契约
+│   └── mobile-env.test.js          # node:test，12 条：注入链路、未配置路径、陈旧产物、脚本顺序
 └── android/                        # Capacitor CLI 真实生成的原生工程
 ```
+
+> 测试共 **25 条**（13 + 12）。`npm run test:mobile` 同时加载两个文件；手写 `node --test` 时
+> 两个文件都要给，只跑 `mobile-config.test.js` 会漏掉注入链路那 12 条。
 
 ### 4.2 固定工具链版本
 
@@ -212,7 +226,15 @@ npx cap add android
 #           @capacitor/app@8.1.2, @capacitor/network@8.0.1, @capacitor/preferences@8.0.1
 #    [success] android platform added!
 
-# 同步 web 资源
+# 【AND-01 起新增的必经步骤】解析服务地址并生成运行时注入文件
+# 读的是**进程环境变量**，不读 mobile/.env；不设变量时 exit 1，两个文件都不写。
+$env:ICHAT_MOBILE_SERVER_URL = 'https://chat.example.com:8443'
+npm run config:generate
+# -> [iChat mobile] 已写入 ...\mobile-env.js（运行时注入 window.ICHAT_MOBILE_ENV）
+#    [iChat mobile] origin=https://chat.example.com:8443 ws=wss://chat.example.com:8443/ws/chat/
+#    [iChat mobile] server.url=(未设置，发布模式)
+
+# 同步 web 资源（含 www/js/mobile-env.js）
 npx cap sync android
 # -> √ Copying web assets from www to android\app\src\main\assets\public
 #    √ Sync finished in 0.082s
@@ -242,14 +264,37 @@ gradle assembleDebug --no-daemon --console=plain
 
 > **改 `mobile/www/**` 后必须 `npx cap sync android` 再构建。** `gradle assembleDebug` 只编译
 > 已经 synced 进 `android/app/src/main/assets/public/` 的副本，不会自己回头看 `www/`。
+>
+> **`npm run config:generate` 同样是必经步骤**（AND-01 起）。跳过它，或只写了 `mobile/.env`
+> 而没有导出进程环境变量，结果是：生成器 `exit 1`、不写 `www/js/mobile-env.js`，此时若直接
+> `cap sync` + 构建，得到的是**不带服务地址的包**，启动页永远停在"未配置"。这是 AND-01 的原始缺陷，
+> 整改后由 `config:generate` 补齐，并由 `mobile/tests/mobile-env.test.js` 守护。
 
-产物与校验（第 2 轮整改后重新 `cap sync` + 重新构建的最终产物）：
+产物与校验：
+
+**⚠️ 下面这个 `67104134…` 是修复前（2026-10-18）的产物，已过期，不要拿它当当前状态。**
+它的包里 `index.html` 仍是旧文案、没有 `www/js/mobile-env.js`，也就是启动页永远停在"未配置"的那个包。
+仓库里 `mobile/android/app/build/outputs/apk/debug/app-debug.apk` 目前仍是这一份（`build/` 已 gitignore，不入库）。
 
 ```
+# 已过期（T22 初版 / AND-01 修复前产物）
 mobile/android/app/build/outputs/apk/debug/app-debug.apk
   大小    4.22 MB (4,424,830 bytes)
   SHA256  671041340377964EC10EBC495D4CC087F390B2E4A0C6F8BB5080BAEAFA26C878
 ```
+
+AND-01 整改后重新构建的产物（当前形态，2026-10-26，`config:generate` → `cap sync` → `assembleDebug`）：
+
+```
+  大小    4,138,535 bytes
+  SHA256  14B41ADAF2C5A7E8A2C78D817D7E73C8BC63EA97553C3E9B66040A84C5EB48E9
+  构建环境  Gradle 9.5.1 + OpenJDK 23.0.1（wrapper 8.14.3 未解包，见 §5.3）
+```
+
+> **这个 SHA 只在同一环境下可复现**：它含 Gradle/AGP 的时间戳与签名差异，换机器、换 Gradle 版本
+> 都会变（前几轮的 ①–④ 也是同一原因各不相同）。要复核"包内资源对不对"，**比对 SHA 无用，比对
+> 包内 `assets/public/**` 的字节才有意义**，见下面 §5.1 的资源清单。
+> 复现命令：`npm run config:generate` → `npx cap sync android` → `cd android; gradlew assembleDebug`。
 
 > 构建历史（每次的差异都是实质改动，不是重建噪声）：
 > ① 初版 3.94 MB / `F10D3570…CDFCD2`；
@@ -257,9 +302,12 @@ mobile/android/app/build/outputs/apk/debug/app-debug.apk
 > ③ 审查整改（收窄 FileProvider、修仪器化断言）后 `FCE3182E…66C7AE6`
 > —— **但这一步漏跑了 `npx cap sync`**，APK 内嵌的 `mobile-config.js` 仍是 5152 B 的旧版
 > （`cleartext:false`），所以该 SHA 无法按文档复现。**这是第 2 轮审查发现的证据缺陷，已修**；
-> ④ 重跑 `cap sync` + 重构 `buildCapacitorConfig`（不再信任 `insecure` 标志）后为上面的
-> `67104134…26C878`：APK 内 `mobile-config.js` 为 **6064 B**，与 `mobile/www/js/mobile-config.js`
-> 逐字节一致（第 3 轮审查从 zip 解出后做过全字节比对，四个资源文件全部 identical）。
+> ④ 重跑 `cap sync` + 重构 `buildCapacitorConfig`（不再信任 `insecure` 标志）后为
+> `67104134…26C878`：APK 内 `mobile-config.js` 为 **6064 B**，与当时的 `mobile/www/js/mobile-config.js`
+> 逐字节一致（第 3 轮审查从 zip 解出后做过全字节比对，四个资源文件全部 identical）；
+> ⑤ **AND-01 整改**（构建期注入 `window.ICHAT_MOBILE_ENV`、修正启动页步骤、`mobile-config.js` 改 IIFE）
+> 后为 `14B41ADA…EB48E9`：包内多出 `assets/public/js/mobile-env.js`（389 B），`index.html` 由
+> 2015 B 增至 4017 B，`mobile-config.js` 由 6064 B 增至 8766 B。
 > 第③步那个包里的才是旧实现（`cleartext: resolved.insecure === true`），现已不存在于产物中。
 > **产物不入库**（`build/` 已 gitignore）。
 
@@ -280,22 +328,26 @@ AndroidManifest 中被加固的三项（从 APK 内反查，不是看源码）�
   android:fullBackupContent=false
   android:dataExtractionRules=@0x7f100001
 
-assets/public/index.html           2015
-assets/public/js/mobile-config.js  6064
-assets/public/js/shell.js          1702
-assets/public/css/mobile-shell.css 2478
+assets/public/index.html            4017
+assets/public/js/mobile-config.js   8766
+assets/public/js/mobile-env.js       389   <- 构建期注入，含本次 origin；未配置构建无此文件
+assets/public/js/shell.js           1702
+assets/public/css/mobile-shell.css  2478
 ```
 
-> 上面四个数字是**从最终产物** `67104134…26C878` 的 zip 目录直接读出的**未压缩字节数**，
-> 且第 3 轮审查已逐字节比对确认与 `mobile/www/` 下同名文件完全一致。
+> 上面五个数字是**从 AND-01 产物 `14B41ADA…EB48E9` 的 zip 目录直接读出的未压缩字节数**，
+> 并已逐字节比对确认与 `mobile/www/` 下同名文件完全一致（`mobile-env.js` 除外——它是构建产物，
+> 与 `mobile/www/js/mobile-env.js` 一致，而后者不入库）。
+> 注意 `assets/public/js/mobile-env.example.js`（1037 B）也会随 `www/` 一起进包：它只是形态说明、
+> 不会被 `index.html` 加载，无功能影响；若后续要精简体积，可在 `cap sync` 前排除。
 >
 > 口径提醒：早期草稿写过 1962/5152/1646/2346，那是**误把 git blob 大小（LF 规范化后）当成
-> APK 内文件大小**。其中 `index.html`/`shell.js`/`mobile-shell.css` 三个文件的 blob 从 `3cc4fc7`
-> 起就没有变过，所以那两个数字从一开始就不是"旧包大小"；`5152` 是 `mobile-config.js` 早期 blob 的
-> LF 字节数，而包内 CRLF 版本实际是 5317 B。**跨平台复现时字节数会因 CRLF/LF 不同而变化**，
-> 引用这四个数时请注明是"本机产物、未压缩字节数"。
+> APK 内文件大小**。其中 `index.html`/`shell.js`/`mobile-shell.css` 三个文件的 blob 在 `3cc4fc7`
+> 到 `ac14a37` 之间没变过，所以那两个数字从一开始就不是"旧包大小"；`5152` 是 `mobile-config.js`
+> 早期 blob 的 LF 字节数，而包内 CRLF 版本实际是 5317 B。**跨平台复现时字节数会因 CRLF/LF 不同而变化**，
+> 引用这些数时请注明是"本机产物、未压缩字节数"。
 
-→ 说明 `webDir: www` 生效，`www/` 里的骨架页确实被打进 APK。
+→ 说明 `webDir: www` 生效，`www/` 里的骨架页确实被打进 APK，且**服务地址随包走**（构建期注入）。
 
 ### 5.1.1 骨架阶段就做掉的加固：禁用备份
 
@@ -311,6 +363,30 @@ Capacitor CLI 生成的 `AndroidManifest.xml` 默认 `android:allowBackup="true"
 这是**降低风险**，不是解决 T29：它挡的是"备份带走密钥"，挡不了"设备已 root"或"WebView 存储被读取"。
 T29 仍需在 §2.3 的 (a)/(b)/(c) 中做出选择。
 
+### 5.1.2 "未配置构建"的行为（AND-01 整改后）
+
+不设置 `ICHAT_MOBILE_SERVER_URL`（或写成非法值）时，`npm run config:generate` 的行为是**失败关闭**：
+
+```
+exit code = 1
+www/js/mobile-env.js          -> 不写；若上一次构建留下过，会被删除
+capacitor.config.json         -> 逐字节不变（sha256 与运行前相同）
+stderr                        -> 配置无效 + 原因 + "现有 capacitor.config.json 保持不变"
+```
+
+于是随后 `npx cap sync` + `assembleDebug` 得到的是一个**不带 origin 的包**：APK 里没有
+`assets/public/js/mobile-env.js`，`www/index.html` 的 `<script src="js/mobile-env.js">` 404（经典脚本，
+不影响后续脚本），`window.ICHAT_MOBILE_ENV` 为 `undefined`，`shell.js` 渲染 **"未配置"** 面板。
+这是**预期行为**，不是缺陷——但它必须被看见，所以：
+
+- 生成器在 stderr 明确说明是否删除了陈旧产物；
+- 启动页在"未配置"面板里给出完整可执行步骤（见 `mobile/www/index.html`）；
+- `mobile/tests/mobile-env.test.js` 覆盖三条：未配置不写、未配置删陈旧、写入失败清理 `.tmp`。
+
+> **为什么未配置要删旧产物而不是留着**：`npx cap sync` 只复制文件，不会判断内容。若旧
+> `mobile-env.js` 还在，包会带着**上一次的 origin** 发布，启动页显示"就绪"却指向错误服务器——
+> 这比"未配置"更糟，因为它不会报错。删除是唯一安全的默认。
+
 
 ### 5.2 四条验收逐项对齐
 
@@ -318,7 +394,7 @@ T29 仍需在 §2.3 的 (a)/(b)/(c) 中做出选择。
 | --- | --- | --- |
 | 能复用现有页面并生成 Android 工程 | **部分满足**：工程已生成且可构建出 APK；"复用现有页面"的**运行时**验证需 T24 出包后在设备上加载 Django 页面 | §5.1 的 `npx cap add android` 输出 + APK 产物 + `launchable-activity` |
 | 相关代码或配置经过非作者成员评审 | **证据不足，不能由本卡判定通过**：三轮独立审查均有结论，但审查者是子 Agent、产物在 `.review/`（已 gitignore），**git 里 9 个提交作者全是同一人**。可审计性上这条**不成立**，需真人评审后在 Issue 留痕 | §8（三轮记录是文字，不是可审计产物） |
-| 适用的自动化或人工测试已执行并保存证据 | `node --test mobile/tests/mobile-config.test.js` **13/13 通过**；`manage.py check` / `makemigrations --check` / `npm run test:e2ee` 62/62 均实跑；**设备安装/启动/截图未执行** | §5.1 |
+| 适用的自动化或人工测试已执行并保存证据 | `cd mobile && npm run test:mobile`（同时加载 `tests/mobile-config.test.js` + `tests/mobile-env.test.js`）**25/25 通过**；仓库根 `node --test mobile/tests/*.test.js` 同为 25/25。`manage.py check` / `makemigrations --check` / `npm run test:e2ee` 62/62 均实跑；**设备安装/启动/截图未执行** | §5.1 |
 | 需求、部署或测试文档已同步更新 | 本 ADR + `docs/phase4/tasks.md` T22 行 + `docs/handoff/android-mobile.md` §1/§6.1 + `docs/documentation-status.md` 已更新；**但三轮审查中各出现一次"文档数字与事实不符"，说明这条在本卡内反复失守过** | §8.1–§8.3 |
 
 ### 5.3 明确未完成的项（不得当作通过）
@@ -355,10 +431,18 @@ $sdk = '<repo>\mobile\.android-sdk'
     --sdk_root="$sdk" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 $env:ANDROID_HOME = $sdk
 
-# 3) 同步 + 构建（有网络访问 services.gradle.org 时用 wrapper，这是正式路径）
+# 3) 生成配置 → 同步 → 构建（有网络访问 services.gradle.org 时用 wrapper，这是正式路径）
 cd mobile
 npm install
-npx cap sync android
+
+# 3a) 【必经】注入服务地址。读进程环境变量，不读 mobile/.env。
+#     不设这一步 = 打出没有 origin 的包 = 启动页永远"未配置"（AND-01 原缺陷）。
+$env:ICHAT_MOBILE_SERVER_URL = 'https://<你的服务器>:8443'
+npm run config:generate
+#     期望：exit 0，写出 www/js/mobile-env.js 与 capacitor.config.json（后者仍无 server 块）
+#     CI 里应显式断言 exit 0，否则 config:generate 失败后 cap sync 仍会继续并打包出"未配置"包。
+
+npx cap sync android               # 把 www/（含 mobile-env.js）复制进原生工程
 cd android
 .\gradlew.bat assembleDebug        # 期望 app/build/outputs/apk/debug/app-debug.apk
 
@@ -403,6 +487,7 @@ adb shell am start -n com.ichat.pro/.MainActivity
 | 1 | 独立审查子 Agent（非作者上下文，只给 Issue 原文 + diff + 命令） | **PASS WITH FINDINGS** | 2 BLOCKER / 5 MAJOR / 5 MINOR | 见 §8.1 |
 | 2 | 新的独立审查子 Agent（不复用第 1 轮会话） | **PASS WITH FINDINGS** | 0 BLOCKER / 3 MAJOR / 6 MINOR | 见 §8.2 |
 | 3 | 又一个新的独立审查子 Agent（复核第 2 轮整改） | **PASS WITH FINDINGS** | 0 BLOCKER / 3 MAJOR / 4 MINOR | 见 §8.3 |
+| 4 | 又一个新的独立审查子 Agent（复核 AND-01 整改 `ac14a37`） | **PASS WITH FINDINGS** | 0 BLOCKER / 1 MAJOR / 4 MINOR | 见 §8.4 |
 
 ### 8.1 第 1 轮发现项与整改
 
@@ -470,3 +555,27 @@ adb shell am start -n com.ichat.pro/.MainActivity
 > 按 `conventions.md` §1：三轮审查各自独立开新上下文，均未复用会话，且都没拿到作者的实现说明。
 > **三轮结论都是 PASS WITH FINDINGS，从未出现纯 PASS。** 按规则第 3 轮已到上限（连续 3 轮不通过
 > 应停下问人），因此本卡**就此停下，不自行放行**：只提交证据与未验证范围，由人来决定是否关闭 #149。
+
+### 8.4 第 4 轮（AND-01 整改复核）发现项与整改
+
+第 4 轮是**全新上下文**的独立审查，对象是 AND-01 整改提交 `ac14a37`。它用三种手段（sha256 复算、
+`vm` 执行、自写严格 DOM 桩）独立复现了整条链路，确认"按启动页步骤操作现在确实能生效"，
+**0 BLOCKER**。1 MAJOR + 4 MINOR 全部是**证据与边界**问题，不是功能问题：
+
+| 级别 | 问题 | 整改 |
+| --- | --- | --- |
+| **MAJOR (F-06)** | **ADR / 交接文档整体停在修复前**：① §3.1 仍写"APK 内也没有注入 `window.ICHAT_MOBILE_ENV` 的代码"，被本轮实现证伪；② 测试条数写 13（实际 25），且验收表里的命令根本不加载新测试文件；③ §5.1 资源清单是 4 个文件、`index.html 2015 B`；④ 旧 APK SHA 未标注过期；⑤ **§5.1 命令序列缺 `npm run config:generate`**——照抄会打出没有 origin 的包，正是 AND-01 的原缺陷形态 | 本 ADR 六处全部改正：§3.1 改述构建期注入（并说明运行时仍未实现）、§4.1 目录树与条数、§5.1 命令序列插入生成步骤+过期标注+新 SHA、§5.1 资源清单按当前产物重写、**新增 §5.1.2 "未配置构建"**、§5.2 测试条数、§6 复现步骤 3a。`docs/handoff/android-mobile.md` 是未跟踪的用户材料，**未改**，需交接文档负责人同步（见 §8.4 末尾） |
+| MINOR (F-01) | `mobile-env.test.js` 的顺序断言**恒真**：`indexOf('js/mobile-env.js')` 命中的是散文（offset 936）而不是标签（offset 3182），6/6 变异全部漏检，包括"把脚本挪到 `shell.js` 之后" | 改为真正解析 `<script src>` 序列并断言 `['js/mobile-env.js','js/mobile-config.js','js/shell.js']`，另拒绝 `defer`/`async`/`type=module`；**新增一条自检测试**用 3 个变异证明这个守卫有区分度。变异复核：修复前 7/7 漏检 → 修复后 6/6 检出 |
+| MINOR (F-02) | `writeAtomic` 不清理 `.tmp`；**未配置分支不删陈旧的 `mobile-env.js`**（陈旧 origin 会被 `cap sync` 打进包，页面还会显示"就绪"指向错误服务器）；`capacitor.config.json.tmp` 未进 `.gitignore` | 未配置分支**删除**陈旧产物（删不掉则显式告警），`writeAtomic` 失败必清 `.tmp`；写入顺序改为 env 先、config 后，config 写失败则回滚删除 env（失败关闭）；`.gitignore` 补 `capacitor.config.json.tmp`。新增 2 条测试覆盖 |
+| MINOR (F-04) | `mobile-config.js` 顶层函数泄漏成 7 个 window 全局（基线已有 6 个，本轮 +1） | 整体包进 IIFE，浏览器只暴露 `window.iChatMobileConfig`；Node 侧 `module.exports` 不变（测试与生成器仍 `require`）。正文**故意不重新缩进**，`git diff -w` 只有包装层，便于审查。实测全局从 7 个降为 1 个 |
+| MINOR (F-05) | 作者的 before/after 探针 DOM 桩过宽：`getElementById` 对不存在的 id **伪造**元素，且 `DOMContentLoaded` 在注册时立即触发 | 改为缺失 id 返回 `null` 并记录到 `accessedMissing`（断言必须为空），事件在全部脚本执行完后才派发。收紧后结论不变（before=未配置 / after=就绪），`accessedMissing=[]` |
+
+第 4 轮整改后复验：`npm run test:mobile` **25/25**、仓库根 `node --test mobile/tests/*.test.js` **25/25**、
+F-01 变异 6/6 检出、完整文档步骤在临时目录重走一遍并产出 `14B41ADA…EB48E9`（包内资源逐字节一致、
+无 `server` 块、`allowBackup=false`）。**仍无真机/模拟器，未调用 `.\gradlew.bat`（wrapper 8.14.3 未解包）**。
+
+> **待交接文档负责人同步（本卡未改，因为 `docs/handoff/android-mobile.md` 目前是未跟踪的用户材料）**：
+> 该文件 §1 与 §6 仍写"13 条"、构建步骤仍是 `npm install → cap sync → gradlew`，缺 `npm run config:generate`。
+> 建议同步为：① 测试 25 条（`test:mobile` 含两个文件）；② `cd mobile` → 设 `ICHAT_MOBILE_SERVER_URL`
+> → `npm run config:generate` → `npx cap sync android` → 构建；③ 说明 `www/js/mobile-env.js` 是 gitignore
+> 的构建产物、由 `config:generate` 生成，未配置时不生成且会删除陈旧副本；④ 强调生成器**不读 `.env`**。

@@ -169,6 +169,57 @@ test('a remote plain-HTTP origin is rejected before any file is written', () => 
   }
 });
 
+test('an unconfigured run deletes a stale mobile-env.js from an earlier build', () => {
+  // F-02 (review AND-01 round 2): the dangerous sequence is "configure once, then
+  // run again without the variable". Leaving the old file behind means the next
+  // `npx cap sync` packages the previous origin and the start screen says "就绪"
+  // pointing at the wrong server.
+  const scratch = makeScratch();
+  try {
+    const first = runGenerator(scratch, {
+      ICHAT_MOBILE_SERVER_URL: 'https://old.example.com:8443',
+    });
+    assert.strictEqual(first.status, 0, first.stderr);
+    const stale = path.join(scratch, ENV_REL);
+    assert.ok(fs.existsSync(stale), 'first run writes the artifact');
+    assert.ok(fs.readFileSync(stale, 'utf8').indexOf('old.example.com') !== -1);
+
+    const second = runGenerator(scratch, {});
+    assert.strictEqual(second.status, 1, 'unconfigured run still fails');
+    assert.strictEqual(fs.existsSync(stale), false,
+      'stale artifact must be deleted, not left to be packaged');
+    assert.ok(second.stderr.indexOf('已删除') !== -1,
+      'stderr says the stale artifact was removed: ' + second.stderr);
+    // And the downgrade is real: replaying the tree now renders unconfigured.
+    assert.strictEqual(fs.existsSync(stale), false);
+  } finally {
+    removeScratch(scratch);
+  }
+});
+
+test('a failed write leaves no .tmp litter behind', () => {
+  // F-02(b/c): an interrupted or failing write must not leave *.tmp files that a
+  // later `git add -A` would pick up (capacitor.config.json.tmp is a tracked-name
+  // neighbourhood, mobile-env.js.tmp is gitignored).
+  const scratch = makeScratch();
+  try {
+    // Make the final rename impossible by putting a directory where the target
+    // file must go: fs.renameSync then fails, and the temp file must be removed.
+    const envPath = path.join(scratch, ENV_REL);
+    fs.mkdirSync(envPath, { recursive: true });
+    const run = runGenerator(scratch, {
+      ICHAT_MOBILE_SERVER_URL: 'https://chat.example.com:8443',
+    });
+    assert.strictEqual(run.status, 1, 'a failed write exits non-zero: ' + run.stdout);
+    assert.strictEqual(fs.existsSync(envPath + '.tmp'), false, 'env .tmp must be cleaned up');
+    const leftovers = fs.readdirSync(path.join(scratch, 'www', 'js'))
+      .filter((f) => f.endsWith('.tmp'));
+    assert.deepStrictEqual(leftovers, [], 'no *.tmp under www/js: ' + leftovers);
+  } finally {
+    removeScratch(scratch);
+  }
+});
+
 test('an unconfigured resolution renders the null script, never an empty global', () => {
   // Defence in depth for the "write an empty object" alternative: an unconfigured
   // build must ship no file, because `window.ICHAT_MOBILE_ENV = {}` in a stale
@@ -193,19 +244,88 @@ test('the generated script is valid JavaScript and survives an odd-but-legal ori
     'https://chat.example.com', 'origin is normalised, default port dropped');
 });
 
+/**
+ * Parse the classic `<script src>` loads of an HTML document in source order.
+ *
+ * The previous version of the ordering test used `html.indexOf('js/mobile-env.js')`,
+ * which matched the PROSE in the unconfigured panel (`<code>www/js/mobile-env.js</code>`)
+ * at offset 936 instead of the tag at offset 3182. Every ordering assertion was
+ * therefore vacuously true: moving the tag after shell.js still passed. A real
+ * parser is the only way to assert load order.
+ *
+ * Regex, not a full HTML parser: this document is authored by us and has no
+ * commented-out or template-generated script tags, so tag extraction is exact.
+ * Both `src="..."` and `src='...'` and a bare `src=path` are accepted so a
+ * formatting change cannot make the test silently match nothing.
+ *
+ * @param {string} html
+ * @returns {Array<{src:string, attrs:string, index:number}>}
+ */
+function parseScriptSrcs(html) {
+  const loads = [];
+  const tagRe = /<script\b([^>]*)>/gi;
+  let tag;
+  while ((tag = tagRe.exec(html)) !== null) {
+    const attrs = tag[1];
+    const srcMatch = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
+    if (!srcMatch) continue;
+    const src = srcMatch[1] !== undefined ? srcMatch[1]
+      : srcMatch[2] !== undefined ? srcMatch[2] : srcMatch[3];
+    loads.push({ src: src, attrs: attrs, index: tag.index });
+  }
+  return loads;
+}
+
 test('index.html loads mobile-env.js before mobile-config.js and shell.js', () => {
   // Ordering is load-time correctness, not style: mobile-env.js must define the
   // global before shell.js reads it, and mobile-config.js must be parsed first.
   const html = fs.readFileSync(path.join(mobileRoot, 'www', 'index.html'), 'utf8');
-  const envAt = html.indexOf('js/mobile-env.js');
-  const cfgAt = html.indexOf('js/mobile-config.js');
-  const shellAt = html.indexOf('js/shell.js');
-  assert.ok(envAt !== -1, 'index.html references js/mobile-env.js: ' + envAt);
+  const loads = parseScriptSrcs(html);
+  const order = loads.map((l) => l.src);
+
+  assert.deepStrictEqual(order,
+    ['js/mobile-env.js', 'js/mobile-config.js', 'js/shell.js'],
+    'unexpected <script src> order: ' + JSON.stringify(order));
+
+  // Order is the whole point: re-state it as explicit pairwise comparisons so a
+  // failure says which relationship broke.
+  const envAt = order.indexOf('js/mobile-env.js');
+  const cfgAt = order.indexOf('js/mobile-config.js');
+  const shellAt = order.indexOf('js/shell.js');
+  assert.ok(envAt !== -1, 'index.html loads js/mobile-env.js');
   assert.ok(envAt < cfgAt, 'env before config (' + envAt + ' < ' + cfgAt + ')');
   assert.ok(cfgAt < shellAt, 'config before shell (' + cfgAt + ' < ' + shellAt + ')');
-  // Exactly one <script> load; the path may also appear in comments/prose.
-  const scriptTags = html.split('<script src="js/mobile-env.js">').length - 1;
-  assert.strictEqual(scriptTags, 1, 'mobile-env.js is loaded exactly once, got ' + scriptTags);
+
+  // The env script must be a plain classic script: with defer/async/module the
+  // 404-tolerance and the ordering guarantee both change.
+  for (const load of loads) {
+    assert.ok(!/\b(?:defer|async)\b/i.test(load.attrs),
+      load.src + ' must not be deferred/async: ' + load.attrs);
+    assert.ok(!/\btype\s*=\s*["']?module/i.test(load.attrs),
+      load.src + ' must not be a module: ' + load.attrs);
+  }
+});
+
+test('parseScriptSrcs detects a moved or removed env script (guard self-check)', () => {
+  // Mutation proof, in-tree: the ordering assertion must FAIL for the exact
+  // regression it claims to guard. If somebody re-breaks the assertion into an
+  // indexOf, this test keeps failing until it is a real parser again.
+  const html = fs.readFileSync(path.join(mobileRoot, 'www', 'index.html'), 'utf8');
+
+  const movedAfterShell = html
+    .replace('  <script src="js/mobile-env.js"></script>\n', '')
+    .replace('  <script src="js/shell.js"></script>',
+      '  <script src="js/shell.js"></script>\n  <script src="js/mobile-env.js"></script>');
+  assert.notDeepStrictEqual(parseScriptSrcs(movedAfterShell).map((l) => l.src),
+    ['js/mobile-env.js', 'js/mobile-config.js', 'js/shell.js'],
+    'moving mobile-env.js after shell.js must be detected');
+
+  const removed = html.replace('  <script src="js/mobile-env.js"></script>\n', '');
+  assert.strictEqual(parseScriptSrcs(removed).length, 2, 'a removed tag is detected');
+
+  const deferred = html.replace('<script src="js/mobile-env.js">',
+    '<script defer src="js/mobile-env.js">');
+  assert.ok(/\bdefer\b/i.test(parseScriptSrcs(deferred)[0].attrs), 'defer is detected');
 });
 
 test('the start screen documents the commands that actually exist', () => {

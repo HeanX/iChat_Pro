@@ -314,11 +314,22 @@ fi
 if [[ "${ICHAT_SKIP_SMOKE:-0}" == "1" ]]; then
     echo "WARNING: ICHAT_SKIP_SMOKE=1 — login/core-API smoke gate SKIPPED for this deploy." >&2
 elif [[ ! -f "$REPO_DIR/deploy/smoke.sh" ]]; then
-    # Rolling back to a commit from before the gate existed (e.g. f2f60ec,
-    # the 2026-10-07 production build) means the target tree has no smoke
-    # script. Failing here would make the documented rollback path itself
-    # unusable, so skip loudly and record the exception instead.
-    echo "WARNING: target commit $DEPLOYED_SHA predates deploy/smoke.sh — smoke gate SKIPPED." >&2
+    # The gate script lives in the deployed tree, so a target commit from
+    # before #204 (e.g. f2f60ec, the 2026-10-07 production build) has none.
+    # Only a ROLLBACK may skip in that case: failing there would make the
+    # documented escape hatch unusable. A forward release with no gate script
+    # is a broken gate, not a historical rollback (review finding OPS-03) —
+    # it must fail closed and record NOTHING.
+    if [[ "$IS_ROLLBACK" != "1" ]]; then
+        echo "ERROR: $REPO_DIR/deploy/smoke.sh is missing from the target tree." >&2
+        echo "       A forward release cannot skip its login/core-API gate:" >&2
+        echo "       nothing proves this build can authenticate, so commit" >&2
+        echo "       $DEPLOYED_SHA is NOT recorded." >&2
+        echo "       Fix the tree, or set ICHAT_SKIP_SMOKE=1 for a known-broken hotfix." >&2
+        exit 1
+    fi
+    # Rolling back past #204: skip loudly and record the exception.
+    echo "WARNING: target commit $DEPLOYED_SHA predates deploy/smoke.sh — smoke gate SKIPPED (rollback)." >&2
     SMOKE_ABSENT=1
 else
     if [[ -z "${SMOKE_USERNAME:-}" || -z "${SMOKE_PASSWORD:-}" ]]; then

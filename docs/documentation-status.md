@@ -10,6 +10,8 @@
 
 2026-10-13 增补：[第四次实验-单元测试与代码评审报告](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.md) 与 [项目中期完成情况报告](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.md)。测试与评审数据为本机实测，评审统计取自 Git 提交历史；同时修复了头像测试向仓库 `media/` 写入真实文件的测试污染缺陷。
 
+2026-10-18 增补：[ADR-P4-04 跨平台 E2EE 威胁模型与数据流](phase4/e2ee-threat-model.md)（P4 T38 / #165）。覆盖现有 Web 与 Windows 实现，含资产表、信任边界、DFD、攻击面、威胁清单与"不可保存数据"硬约束；Android 与设备级密钥明确标为未覆盖。代码基线 `cfe53be`，文中每条现行实现均标注 `文件:行`。**该文档不构成安全验收结论**，#165 仍保持开放。
+
 | 文档 | 用途与本次维护 |
 | --- | --- |
 | [.github/ISSUE_TEMPLATE/task.md](../.github/ISSUE_TEMPLATE/task.md) | 提交/任务模板；补文档与真实验收证据约束 |
@@ -75,18 +77,36 @@
 | [docs/phase4/baseline-report.md](phase4/baseline-report.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/completion-audit-20261007.md](phase4/completion-audit-20261007.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/deploy-architecture.md](phase4/deploy-architecture.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/e2ee-threat-model.md](phase4/e2ee-threat-model.md) | 现行说明/专题；ADR-P4-04 跨平台 E2EE 威胁模型与数据流（资产/攻击面/信任边界/不可保存数据），2026-10-18 新增 |
 | [docs/phase4/protocol.md](phase4/protocol.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/requirements.md](phase4/requirements.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/adr-p4-05-device-identity.md](phase4/adr-p4-05-device-identity.md) | 现行说明/专题；P4 T40 设备身份模型设计决策与阶段切分；随 #167 实现/会签进展更新 |
+| [docs/phase4/t43-historical-key-migration-study.md](phase4/t43-historical-key-migration-study.md) | 现行说明/研究；P4 T43 历史密钥迁移的方案评估与失败/撤销路径；随方案 A 产品化或方案 B 立项进展更新 |
 | [docs/phase4/risk-register.md](phase4/risk-register.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/iteration-plan.md](phase4/iteration-plan.md) | 计划/专题；更新迭代范围、负责人、排期或降级方案 |
 | [docs/phase4/t20-late-ack-validation.md](phase4/t20-late-ack-validation.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/tasks.md](phase4/tasks.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |
+| [docs/testing/p4-test-t13-http-ws-integration.md](testing/p4-test-t13-http-ws-integration.md) | 现行说明/专题；P4 Test T13（#194）的用例索引与验收记录，改动测试或错误码时同步 |
 | [docs/phase4/technical-design.md](phase4/technical-design.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/traceability-matrix.md](phase4/traceability-matrix.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |
 | [docs/phase4/windows-branding.md](phase4/windows-branding.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-notifications.md](phase4/windows-notifications.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-tray.md](phase4/windows-tray.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-files.md](phase4/windows-files.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+
+| [docs/handoff/README.md](handoff/README.md) | 现行说明/专题；8 模块交接入口与 12 文件清单，模块增删/改名时同步（2026-10-26 纳入版本控制） |
+| [docs/handoff/cloud-deploy-ops.md](handoff/cloud-deploy-ops.md) | 现行说明/专题；云部署运维交接（发布/审批/回滚/监控/staging/备份恢复），以 `deploy/**` 实际实现为准，注明核对提交 |
+| [docs/handoff/accounts-auth.md](handoff/accounts-auth.md) | 现行说明/专题；模块 1 账号/认证/公钥信任交接（按 `cfe53be` 勘察，符号名优先于行号） |
+| [docs/handoff/messaging-protocol.md](handoff/messaging-protocol.md) | 现行说明/专题；模块 2 消息/协议/同步补取交接 |
+| [docs/handoff/web-frontend-e2ee.md](handoff/web-frontend-e2ee.md) | 现行说明/专题；模块 3 Web 前端与 E2EE 交接 |
+| [docs/handoff/windows-desktop.md](handoff/windows-desktop.md) | 现行说明/专题；模块 4 Windows 桌面端交接 |
+| [docs/handoff/data-storage-file.md](handoff/data-storage-file.md) | 现行说明/专题；模块 6 数据模型/存储/加密文件交接 |
+| [docs/handoff/testing-quality-ci.md](handoff/testing-quality-ci.md) | 现行说明/专题；模块 7 测试体系/CI/质量门禁交接（历史数字 404/36/24 只追加不改写） |
+| [docs/handoff/android-mobile.md](handoff/android-mobile.md) | 现行说明/专题；模块 8 Android 端交接；其 `../phase4/adr-p4-03-*.md` 链接仅在 `feature/p4-t22-mobile-adr-and-skeleton` 上存在 |
+| [docs/handoff/conventions.md](handoff/conventions.md) | 现行说明/专题；交接通用约定（分支/提交/评审/证据格式/安全红线），模块文档的前置 |
+| [docs/handoff/issue-backlog.md](handoff/issue-backlog.md) | 现行说明/专题；开放 Issue 派工索引，Issue 状态变化时同步 |
+| [docs/handoff/prompt-template.md](handoff/prompt-template.md) | 现行说明/专题；派工 Prompt 模板（最短版/完整版/审查者） |
+
 
 ## 维护约束
 

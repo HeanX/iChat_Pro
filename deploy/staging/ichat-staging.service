@@ -1,0 +1,28 @@
+[Unit]
+Description=iChat Pro ASGI (Daphne) - STAGING (P4 T49)
+After=network-online.target postgresql.service redis6.service
+Wants=network-online.target
+
+# Staging twin of ichat.service: own user, own tree, own loopback port (8001;
+# nginx exposes staging on 8444), own media volume. Never run both units with
+# the same values — the isolation check (deploy/staging/check_isolation.sh)
+# asserts they differ.
+
+[Service]
+Type=exec
+User=ichat-staging
+Group=ichat-staging
+WorkingDirectory=/opt/ichat-staging/repo
+EnvironmentFile=/opt/ichat-staging/.env
+ExecStart=/opt/ichat-staging/.venv/bin/daphne -b 127.0.0.1 -p 8001 ichat_pro.asgi:application
+Restart=always
+RestartSec=3
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/ichat-staging
+
+[Install]
+WantedBy=multi-user.target

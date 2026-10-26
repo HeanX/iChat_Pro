@@ -1,10 +1,22 @@
 # 全部文档维护索引
 
-> 复核日期：2026-10-07；代码基线 f2f60ec。所有受版本控制的 Markdown 已复核并更新，原二进制课程归档保留。
+> 复核日期：2026-10-13（事实快照 2026-10-07）。代码基线 f2f60ec：本地 HEAD 与基线之间只有文档改动与测试隔离修复，无产品代码逻辑差异。所有受版本控制的 Markdown 已复核并更新，原二进制课程归档保留。
 
 现行事实入口是 [项目现状](current-status.md)。同名旧 PDF/Word 并非 Markdown 本次状态补注的镜像；原需求/实验成果按当时版本归档，新交付状态报告另提供三个同步格式。未核实的姓名、学号、责任与验收不虚填。
 
 ## 文档清单
+
+2026-10-12 增补：[项目交接文档](项目交接文档.md) 与 [GitHub 协作开发指南](GitHub协作开发指南.md)。用于成员接手与共同开发，已核对本地配置、脚本和 CI 定义；生产、Issue 与专项验收沿用原日期证据，本次未复验。
+
+2026-10-13 增补：[第四次实验-单元测试与代码评审报告](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.md) 与 [项目中期完成情况报告](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.md)。测试与评审数据为本机实测，评审统计取自 Git 提交历史；同时修复了头像测试向仓库 `media/` 写入真实文件的测试污染缺陷。
+
+
+2026-10-18 增补：[ADR-P4-04 跨平台 E2EE 威胁模型与数据流](phase4/e2ee-threat-model.md)（P4 T38 / #165）。覆盖现有 Web 与 Windows 实现，含资产表、信任边界、DFD、攻击面、威胁清单与"不可保存数据"硬约束；Android 与设备级密钥明确标为未覆盖。代码基线 `cfe53be`，文中每条现行实现均标注 `文件:行`。**该文档不构成安全验收结论**，#165 仍保持开放。
+
+
+2026-10-18 增补：[ADR-P4-03 移动端技术路线与工程骨架](phase4/adr-p4-03-mobile-tech-stack.md)（P4 T22 / #149）。记录 Capacitor 8 混合路线、转原生的三条触发条件、Session 认证复用、固定工具链版本与本机构建环境缺口；同步更新 [Android/移动端交接文档](handoff/android-mobile.md) §1 与 [docs/phase4/tasks.md](phase4/tasks.md) T22 行。**debug APK 已构建**（4.22 MB，SHA256 `67104134…26C878`，manifest 已禁用备份）；**真机/模拟器安装与启动、WebView 加载 Django 页面均未执行，不计为通过。**
+
+2026-10-26 增补（AND-01 整改）：启动页的配置指引已与实现对齐，服务地址改为**构建期注入**——`npm run config:generate`（读进程环境变量，**不读** `mobile/.env`）生成 `mobile/www/js/mobile-env.js`，随 `npx cap sync android` 进 APK；未配置时生成器 `exit 1` 并删除陈旧产物。同步更新 [ADR-P4-03](phase4/adr-p4-03-mobile-tech-stack.md) §3.1/§5.1/§5.1.2/§8.4–§8.5、[Android/移动端交接文档](handoff/android-mobile.md) §1/§6 与 [docs/phase4/tasks.md](phase4/tasks.md) T22 行。测试 **29/29**（LF 与 `core.autocrlf=true` 的 CRLF 工作树各跑一次）。**APK 数字口径**：上文 2026-10-18 的 `67104134…26C878` **已过期**（修复前产物）；AND-01 后为 4,138,535 B / `14B41ADA…EB48E9`，但 SHA 不可跨环境复现，核对产物应比对 `assets/public/**` 与 `mobile/www/` 的**字节**。**真机/模拟器仍未执行。**
 
 | 文档 | 用途与本次维护 |
 | --- | --- |
@@ -14,6 +26,8 @@
 | [deploy/runbook.md](../deploy/runbook.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [desktop/build/README.md](../desktop/build/README.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/README.md](README.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/GitHub协作开发指南.md](GitHub%E5%8D%8F%E4%BD%9C%E5%BC%80%E5%8F%91%E6%8C%87%E5%8D%97.md) | 现行说明/专题；成员加入、Issue、分支、PR、评审、冲突与 CI 约定 |
+| [docs/项目交接文档.md](%E9%A1%B9%E7%9B%AE%E4%BA%A4%E6%8E%A5%E6%96%87%E6%A1%A3.md) | 现行说明/专题；接手顺序、环境搭建、代码入口、待办与签收表 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告.docx](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A.docx) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告.pdf](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A.pdf) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告_v2.docx](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A_v2.docx) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
@@ -30,6 +44,12 @@
 | [docs/course-testing/第一次实验-需求分析与任务拆解报告.pdf](course-testing/%E7%AC%AC%E4%B8%80%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E9%9C%80%E6%B1%82%E5%88%86%E6%9E%90%E4%B8%8E%E4%BB%BB%E5%8A%A1%E6%8B%86%E8%A7%A3%E6%8A%A5%E5%91%8A.pdf) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
 | [docs/course-testing/第二次实验-软件工程全链路与AI实践报告.md](course-testing/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E8%BD%AF%E4%BB%B6%E5%B7%A5%E7%A8%8B%E5%85%A8%E9%93%BE%E8%B7%AF%E4%B8%8EAI%E5%AE%9E%E8%B7%B5%E6%8A%A5%E5%91%8A.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/course-testing/第二次实验-软件工程全链路与AI实践报告.pdf](course-testing/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E8%BD%AF%E4%BB%B6%E5%B7%A5%E7%A8%8B%E5%85%A8%E9%93%BE%E8%B7%AF%E4%B8%8EAI%E5%AE%9E%E8%B7%B5%E6%8A%A5%E5%91%8A.pdf) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
+| [docs/course-testing/第四次实验-单元测试与代码评审报告.md](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.md) | 本次实验记录；单元测试分层/规模/设计与实测结果、代码评审流程与真实评审轮次、发现的测试缺陷 |
+| [docs/course-testing/第四次实验-单元测试与代码评审报告.pdf](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.pdf) | 本次实验提交格式；从同名 Markdown 生成并渲染核对 |
+| [docs/course-testing/第四次实验-单元测试与代码评审报告.docx](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.docx) | 本次实验提交格式；从同名 Markdown 生成 |
+| [docs/course-testing/项目中期完成情况报告.md](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.md) | 本次实验记录；中期文档/界面/代码完成情况、Bug 与修复、需求中期调整 |
+| [docs/course-testing/项目中期完成情况报告.pdf](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.pdf) | 本次实验提交格式；从同名 Markdown 生成并渲染核对 |
+| [docs/course-testing/项目中期完成情况报告.docx](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.docx) | 本次实验提交格式；从同名 Markdown 生成 |
 | [docs/current-status.md](current-status.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/documentation-status.md](documentation-status.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/iChat Pro AI Assistant 增强整理文档.md](iChat%20Pro%20AI%20Assistant%20%E5%A2%9E%E5%BC%BA%E6%95%B4%E7%90%86%E6%96%87%E6%A1%A3.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
@@ -58,21 +78,41 @@
 | [docs/iChat Pro 需求文档_修订版.md](iChat%20Pro%20%E9%9C%80%E6%B1%82%E6%96%87%E6%A1%A3_%E4%BF%AE%E8%AE%A2%E7%89%88.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/p3_t01_regression_report.md](p3_t01_regression_report.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase2_test_coverage.md](phase2_test_coverage.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
+| [docs/quality/coverage-report.md](quality/coverage-report.md) | 覆盖率快照；由 `scripts/coverage_report.py` 生成，勿手工编辑 |
 | [docs/phase4/README.md](phase4/README.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/agent-handoff.md](phase4/agent-handoff.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/baseline-report.md](phase4/baseline-report.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/completion-audit-20261007.md](phase4/completion-audit-20261007.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/deploy-architecture.md](phase4/deploy-architecture.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/e2ee-threat-model.md](phase4/e2ee-threat-model.md) | 现行说明/专题；ADR-P4-04 跨平台 E2EE 威胁模型与数据流（资产/攻击面/信任边界/不可保存数据），2026-10-18 新增 |
 | [docs/phase4/protocol.md](phase4/protocol.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/requirements.md](phase4/requirements.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/adr-p4-05-device-identity.md](phase4/adr-p4-05-device-identity.md) | 现行说明/专题；P4 T40 设备身份模型设计决策与阶段切分；随 #167 实现/会签进展更新 |
+| [docs/phase4/t43-historical-key-migration-study.md](phase4/t43-historical-key-migration-study.md) | 现行说明/研究；P4 T43 历史密钥迁移的方案评估与失败/撤销路径；随方案 A 产品化或方案 B 立项进展更新 |
 | [docs/phase4/risk-register.md](phase4/risk-register.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/iteration-plan.md](phase4/iteration-plan.md) | 计划/专题；更新迭代范围、负责人、排期或降级方案 |
 | [docs/phase4/t20-late-ack-validation.md](phase4/t20-late-ack-validation.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/tasks.md](phase4/tasks.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |
+| [docs/testing/p4-test-t13-http-ws-integration.md](testing/p4-test-t13-http-ws-integration.md) | 现行说明/专题；P4 Test T13（#194）的用例索引与验收记录，改动测试或错误码时同步 |
 | [docs/phase4/technical-design.md](phase4/technical-design.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/traceability-matrix.md](phase4/traceability-matrix.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |
 | [docs/phase4/windows-branding.md](phase4/windows-branding.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-notifications.md](phase4/windows-notifications.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/windows-tray.md](phase4/windows-tray.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/windows-files.md](phase4/windows-files.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/handoff/README.md](handoff/README.md) | 现行说明/专题；8 模块交接入口与 12 文件清单，模块增删/改名时同步（2026-10-26 纳入版本控制） |
+| [docs/handoff/cloud-deploy-ops.md](handoff/cloud-deploy-ops.md) | 现行说明/专题；云部署运维交接（发布/审批/回滚/监控/staging/备份恢复），以 `deploy/**` 实际实现为准，注明核对提交 |
+| [docs/handoff/accounts-auth.md](handoff/accounts-auth.md) | 现行说明/专题；模块 1 账号/认证/公钥信任交接（按 `cfe53be` 勘察，符号名优先于行号） |
+| [docs/handoff/messaging-protocol.md](handoff/messaging-protocol.md) | 现行说明/专题；模块 2 消息/协议/同步补取交接 |
+| [docs/handoff/web-frontend-e2ee.md](handoff/web-frontend-e2ee.md) | 现行说明/专题；模块 3 Web 前端与 E2EE 交接 |
+| [docs/handoff/windows-desktop.md](handoff/windows-desktop.md) | 现行说明/专题；模块 4 Windows 桌面端交接 |
+| [docs/handoff/data-storage-file.md](handoff/data-storage-file.md) | 现行说明/专题；模块 6 数据模型/存储/加密文件交接 |
+| [docs/handoff/testing-quality-ci.md](handoff/testing-quality-ci.md) | 现行说明/专题；模块 7 测试体系/CI/质量门禁交接（历史数字 404/36/24 只追加不改写） |
+| [docs/handoff/android-mobile.md](handoff/android-mobile.md) | 现行说明/专题；模块 8 Android 端交接；其 `../phase4/adr-p4-03-*.md` 链接仅在 `feature/p4-t22-mobile-adr-and-skeleton` 上存在 |
+| [docs/handoff/conventions.md](handoff/conventions.md) | 现行说明/专题；交接通用约定（分支/提交/评审/证据格式/安全红线），模块文档的前置 |
+| [docs/handoff/issue-backlog.md](handoff/issue-backlog.md) | 现行说明/专题；开放 Issue 派工索引，Issue 状态变化时同步 |
+| [docs/handoff/prompt-template.md](handoff/prompt-template.md) | 现行说明/专题；派工 Prompt 模板（最短版/完整版/审查者） |
+
 
 ## 维护约束
 

@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-29/78 项闭环：工程 25/54、测试 4/24。云端 M1、可靠消息 M2、Windows P0（T14/T15/T20/T21）以及 P1 品牌 T16、托盘 T17 已有证据；通知 T18 待最终客户端布局复验，文件 T19 待实施。Android 和设备级安全增强未完成，不能宣布全部 P0 完成。
+29/78 项闭环：工程 25/54、测试 4/24。云端 M1、可靠消息 M2、Windows P0（T14/T15/T20/T21）以及 P1 品牌 T16、托盘 T17 已有证据；通知 T18 待最终客户端布局复验，文件 T19 已实现待安装版实测。Android 和设备级安全增强未完成，不能宣布全部 P0 完成。
 
 ## 阅读顺序
 
@@ -17,6 +17,7 @@
 | [114 条需求矩阵](traceability-matrix.md) | 逐条映射和证据边界 |
 | [需求基线](requirements.md) | 原始目标与范围冲突处理 |
 | [技术方案](technical-design.md) / [现行协议](protocol.md) | 代码入口、已实现契约及待做设计 |
+| [E2EE 威胁模型](e2ee-threat-model.md) | ADR-P4-04：资产、信任边界、数据流、不可保存数据（Web/Windows；Android 未覆盖） |
 | [Agent 工作包](agent-handoff.md) | 文件边界与交接规则 |
 | [风险登记](risk-register.md) / [基线报告](baseline-report.md) | 原缺陷取证、处置与历史测试数据 |
 | [完成审计](completion-audit-20261007.md) | 逐卡完成判定与不能关闭的原因 |

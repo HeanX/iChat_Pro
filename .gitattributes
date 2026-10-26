@@ -1,0 +1,15 @@
+# Line-ending and binary handling for mobile/.
+#
+# NOTE: .gitattributes CANNOT pin a file mode. The executable bit on
+# mobile/android/gradlew lives in the git index (100755) and has to be set with
+#   git update-index --chmod=+x mobile/android/gradlew
+# by whoever regenerates the project on Windows, where core.filemode=false makes
+# new files land as 100644. See docs/phase4/adr-p4-03-mobile-tech-stack.md §8.1.
+#
+# What this file does control: gradlew must stay LF (a CRLF shebang breaks the
+# script on Linux/macOS), and the wrapper jar must never be treated as text.
+
+mobile/android/gradlew text eol=lf
+*.sh text eol=lf
+
+mobile/android/gradle/wrapper/gradle-wrapper.jar binary

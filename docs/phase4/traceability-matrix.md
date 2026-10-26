@@ -103,15 +103,15 @@
 
 | 需求编号 | 名称 | 优先级 | 工程任务 | 测试任务 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| NEW-DEV-001 | 设备标识 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
+| NEW-DEV-001 | 设备标识 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 设计已交：ADR-P4-05（[#167](https://github.com/HeanX/iChat_Pro/issues/167)，2026-10-18，Device 模型 + 两阶段切分）待会签实现；分发/撤销/历史迁移仍待 #167–#170 |
 | NEW-DEV-002 | 独立设备密钥 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
 | NEW-DEV-003 | 设备列表 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
 | NEW-DEV-004 | 撤销设备 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
 | NEW-DEV-005 | 多设备分发 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
-| NEW-DEV-006 | 新设备限制 | P0 | P4 T21、T29、T38、T39 | P4 Test T07 | 部分：新身份不能自动读取旧历史；跨设备策略/测试 #188 待完成 |
-| NEW-DEV-007 | 密钥变化提示 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
-| NEW-DEV-008 | 安全存储适配 | P0 | P4 T21、T29、T38、T39 | P4 Test T07、T17 | 部分：Windows safeStorage 已验收 #148；Android/平台统一契约待 #156/#166 |
-| NEW-DEV-009 | 历史迁移 | P2 | P4 T43 | P4 Test T06 | 未完成：设备级身份/分发/撤销或历史迁移 #167–#170 |
+| NEW-DEV-006 | 新设备限制 | P0 | P4 T21、T29、T38、T39 | P4 Test T07 | 部分：新身份不能自动读取旧历史；跨设备策略/测试 #188 待完成；威胁模型与不可保存数据清单见 [ADR-P4-04](e2ee-threat-model.md) |
+| NEW-DEV-007 | 密钥变化提示 | P1 | P4 T40、T41、T42 | P4 Test T06、T08 | 部分：指纹变化提醒已完成代码与测试（[#189](https://github.com/HeanX/iChat_Pro/issues/189)，2026-10-18：新密钥不继承旧信任、重新验证后提醒清除）；2026-10-26 Phase4 修复轮补齐客户端信任规则（拒绝/取消/过期/刷新不授予，仅接受且指纹一致才授予，服务端回包不得改变授权对象，无本地快照的 socket 事件失败关闭，自身 accept 回声静默幂等，双击幂等，见 `t08-acceptance-evidence.md` §3.1）；`npm run test:e2ee` 由 75 条增至 120 条；待 UI 人工验收与非作者人类评审；设备级分发/撤销仍待 #167–#170 |
+| NEW-DEV-008 | 安全存储适配 | P0 | P4 T21、T29、T38、T39 | P4 Test T07、T17 | 部分：Windows safeStorage 已验收 #148；Android/平台统一契约待 #156/#166；存储边界与残差风险见 [ADR-P4-04](e2ee-threat-model.md) |
+| NEW-DEV-009 | 历史迁移 | P2 | P4 T43 | P4 Test T06 | 设计已交：`t43-historical-key-migration-study.md`（[#170](https://github.com/HeanX/iChat_Pro/issues/170)，2026-10-18：v1=人工备份迁移、v2=在线交接、拒绝服务端托管），待人类确认；实现待 #167–#169 |
 
 ## TST — 测试与质量（26 条）
 
@@ -122,12 +122,12 @@
 | NEW-TST-003 | 黑盒测试 | P0 | — | P4 Test T10 | 待专项验收：见对应开放任务及需求原文 |
 | NEW-TST-004 | 探索性测试 | P1 | — | 并入 P4 Test T03/T04/T19/T20 执行记录 | 待专项验收：见对应开放任务及需求原文 |
 | NEW-TST-005 | 白盒测试 | P0 | — | P4 Test T11 | 待专项验收：见对应开放任务及需求原文 |
-| NEW-TST-006 | 后端覆盖率 | P0 | — | P4 Test T12 | 待专项验收：见对应开放任务及需求原文 |
-| NEW-TST-007 | 分支覆盖率 | P0 | — | P4 Test T12 | 待专项验收：见对应开放任务及需求原文 |
-| NEW-TST-008 | 高风险覆盖率 | P0 | — | P4 Test T12 | 待专项验收：见对应开放任务及需求原文 |
+| NEW-TST-006 | 后端覆盖率 | P0 | — | P4 Test T12 | 部分：统计已建立、可重复（语句 70.49%，目标 ≥85%，**未达标**），见 [覆盖率报告](../quality/coverage-report.md)；门禁待 P4 T46 #173 |
+| NEW-TST-007 | 分支覆盖率 | P0 | — | P4 Test T12 | 部分：统计已建立、可重复（分支 54.49%，目标 ≥75%，**未达标**），见 [覆盖率报告](../quality/coverage-report.md) |
+| NEW-TST-008 | 高风险覆盖率 | P0 | — | P4 Test T12 | 未验证：高风险面清单未定义、未单独统计（目标 ≥90%），需 P4 Test T11 白盒路径说明支撑 |
 | NEW-TST-009 | 单元测试 | P0 | — | P4 Test T10～T13 | 部分：现有 404 Django + JS 回归；完整需求覆盖待各专项任务 |
-| NEW-TST-010 | 接口测试 | P0 | — | P4 Test T13 | 部分：HTTP 接口回归已执行；完整专项索引/验收 #194 待补 |
-| NEW-TST-011 | WebSocket 测试 | P0 | — | P4 Test T13 | 部分：WS/并发/协议回归已执行；完整专项验收 #194 待补 |
+| NEW-TST-010 | 接口测试 | P0 | — | P4 Test T13 | 部分：2026-10-18 新增 HTTP 侧用例 61 条（私聊 16 / 群聊 10 / sync 6 / 撤回状态删除私聊 7 / **群聊分支 8** / 文件 14），本机实测全通过；编号见 [T13 验收记录](../testing/p4-test-t13-http-ws-integration.md)；仍缺非作者人类评审与 CI run |
+| NEW-TST-011 | WebSocket 测试 | P0 | — | P4 Test T13 | 部分：2026-10-18 新增 WS 侧用例 18 条（信封 5 / 回执 3 / 撤回私聊 4 / **撤回群聊 3** / typing 3）；`message.recall` 事件由零覆盖变为 7 条；WS 群聊发送未新增（基线 `test_group_realtime.py` 已有 7 处断言）；仍缺 Redis 多进程与弱网证据 |
 | NEW-TST-012 | 数据库集成测试 | P0 | — | P4 Test T14 | 已验证：真实 PostgreSQL 16 CI [#195](https://github.com/HeanX/iChat_Pro/issues/195) |
 | NEW-TST-013 | Redis 集成测试 | P0 | — | P4 Test T14 | 已验证：真实 Redis 7 CI [#195](https://github.com/HeanX/iChat_Pro/issues/195) |
 | NEW-TST-014 | 浏览器 E2E | P1 | — | P4 Test T15 | 部分：Chromium 布局 36/36；完整浏览器业务 E2E #196 待验收 |

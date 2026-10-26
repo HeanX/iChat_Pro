@@ -68,14 +68,75 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Install development tooling
+        run: python -m pip install -r requirements-dev.txt
+
       - name: Check Django configuration
         run: python manage.py check
 
       - name: Check migrations
         run: python manage.py makemigrations --check --dry-run
 
+      # P4 Test T12 (#193): the coverage tooling's own guard tests. Django's
+      # default discovery only collects accounts/chat/ichat_pro, so these
+      # would otherwise never run anywhere.
+      - name: Test coverage integrity and deploy collection guards
+        run: python -m unittest scripts.test_coverage_report scripts.test_check_deploy_collection scripts.test_coverage_security -v
+
+      # QA-01: bash is a hard requirement for the ops suite. The five modules
+      # below skip themselves when `shutil.which("bash")` is empty, and a
+      # skipped suite reports green. ubuntu-latest ships bash, but a runner
+      # image change (or a container job) must fail here, not silently reduce
+      # the ops coverage to zero.
+      - name: Require bash for the ops shell regressions
+        run: |
+          set -euo pipefail
+          command -v bash
+          bash --version | head -n 1
+
+      # QA-01: the ops/cloud regression suite is named explicitly, never left
+      # to implicit discovery. `deploy/` used to be a PEP 420 namespace
+      # package, so `manage.py test` collected 404 tests and zero `deploy.*`
+      # ones even though naming the modules collected 82 (review evidence:
+      # cloud-ops-default-discovery.json).
+      #
+      # PRECONDITION (review P12): these steps require the ops suite, i.e.
+      # `deploy/__init__.py` and `deploy/tests/` from
+      # feat/p4-t49-test-environment. On a branch without them this step fails
+      # by design (a missing ops suite must never look green), so the QA branch
+      # is only expected to be green once it is integrated with that branch.
+      # See docs/quality/coverage-integrity.md (ops-suite prerequisite).
+      - name: Guard that the deploy modules are collected (requires the ops suite from feat/p4-t49-test-environment)
+        env:
+          ICHAT_TEST_BASH: /bin/bash
+        run: python scripts/check_deploy_collection.py
+
       - name: Run tests
         run: python manage.py test
+
+      - name: Run the deploy/ops regression suite explicitly (requires the ops suite from feat/p4-t49-test-environment)
+        env:
+          ICHAT_TEST_BASH: /bin/bash
+        run: |
+          set -euo pipefail
+          # The module list comes from the guard, so a module added to
+          # deploy/tests/ later cannot be silently left out of this command.
+          # It also fails when deploy/tests/ (or deploy/__init__.py) is missing.
+          MODULES=$(python scripts/check_deploy_collection.py --print-modules)
+          echo "deploy modules: ${MODULES}"
+          # 2>&1 is load-bearing: unittest writes "Ran N tests" to stderr
+          # (TextTestRunner defaults to sys.stderr), so a bare `| tee` leaves
+          # the file empty and the grep below can never match. Verified:
+          # stdout-only -> 0 bytes / 0 hits; with 2>&1 -> 1 hit.
+          python manage.py test ${MODULES} --parallel 1 -v 2 2>&1 | tee deploy-tests.log
+          # Belt and braces: the run must have executed the ops modules, not
+          # merely started. A "Ran 0 tests" that still exits 0 is the failure
+          # mode this whole job exists to prevent.
+          grep -q '^Ran [1-9][0-9]* tests\? in ' deploy-tests.log
+          if grep -Eq '^OK .*skipped=[1-9][0-9]*' deploy-tests.log; then
+            echo 'ERROR: skipped deploy regressions are not a passing result' >&2
+            exit 1
+          fi
 
   # P4 Test T14: real-dependency integration (NEW-TST-012/013) — the SQLite /
   # in-memory job above must not be the only validation of migrations and
@@ -130,5 +191,38 @@ jobs:
       - name: Apply migrations to PostgreSQL
         run: python manage.py migrate --noinput
 
+      # QA-01: the same two guards as the `test` job. The ops suite is the one
+      # that exercises release gates, so it must not depend on this job's
+      # implicit discovery either, and the shell it needs must really exist.
+      #
+      # PRECONDITION (review P12): requires the ops suite from
+      # feat/p4-t49-test-environment; see the same note in the `test` job.
+      - name: Require bash for the ops shell regressions
+        run: |
+          set -euo pipefail
+          command -v bash
+          bash --version | head -n 1
+
+      - name: Guard that the deploy modules are collected (requires the ops suite from feat/p4-t49-test-environment)
+        env:
+          ICHAT_TEST_BASH: /bin/bash
+        run: python scripts/check_deploy_collection.py
+
       - name: Run tests against PostgreSQL and Redis
         run: python manage.py test --parallel 1
+
+      - name: Run the deploy/ops regression suite explicitly (requires the ops suite from feat/p4-t49-test-environment)
+        env:
+          ICHAT_TEST_BASH: /bin/bash
+        run: |
+          set -euo pipefail
+          MODULES=$(python scripts/check_deploy_collection.py --print-modules)
+          echo "deploy modules: ${MODULES}"
+          # 2>&1 is load-bearing: "Ran N tests" goes to stderr, so a bare
+          # `| tee` produces an empty log and the grep below can never match.
+          python manage.py test ${MODULES} --parallel 1 -v 2 2>&1 | tee deploy-tests.log
+          grep -q '^Ran [1-9][0-9]* tests\? in ' deploy-tests.log
+          if grep -Eq '^OK .*skipped=[1-9][0-9]*' deploy-tests.log; then
+            echo 'ERROR: skipped deploy regressions are not a passing result' >&2
+            exit 1
+          fi

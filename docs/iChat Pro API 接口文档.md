@@ -188,7 +188,115 @@
 }
 ```
 
-`trust_status` 使用 `KeyTrust.TrustStatus` 枚举，当前常见值包括 `trusted`、`untrusted`。
+`trust_status` 使用 `KeyTrust.TrustStatus` 枚举，取值 `trusted`、`untrusted`、`verified`。
+请求体不是 JSON 对象（非法 JSON、数组、`null`）时返回 `400 {"error": "invalid_json"}`。
+
+`DELETE /api/keys/contacts/<user_id>/trust/` **只删除当前有效公钥指纹的那一条判定**，
+其它历史指纹的判定保留用于审计。对端轮换公钥后，新指纹通常还没有记录，此时该请求返回
+`{"status": "ok", "deleted": false}`，属于预期行为——轮换后的安全提醒应当通过
+「验证新指纹」清除，而不是靠删除记录。
+
+### 密钥指纹与信任状态字段（P4 Test T08）
+
+`GET /api/keys/contacts/<user_id>/fingerprints/` 与 `GET /api/keys/trust/` 在原有字段之外
+返回以下字段，用于向用户提示"联系人密钥已变更"：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `key_changed` | bool | 当前有效指纹是否处于"待重新验证"状态：用户曾对旧指纹做出过 `trusted`/`verified` 判定，而当前指纹还没有判定。重新验证当前指纹后立即变为 `false`。 |
+| `previous_key_fingerprint` / `previous_key_version` | string / int | 紧邻当前版本的上一个公钥版本（取自 `UserPublicKey` 历史，可能从未被信任过）。无更早版本时为 `null`。 |
+| `previous_trust_status` | string | 上一版公钥的判定；上一版从未被判定过时为 `untrusted`，没有更早版本时为 `null`。历史行即使被置为 `untrusted` 也原样返回。 |
+| `last_endorsed_key_fingerprint` / `last_endorsed_key_version` / `last_endorsed_trust_status` | string / int / string | 用户**最后一次背书**的、且**与当前指纹不同**的那个指纹（`trusted` 或 `verified`）。经过多次轮换时它可能比 `previous_*` 更旧，例如 v1 已验证 → v2 → v3 时 `previous_key_version=2`、`last_endorsed_key_version=1`。只有"从未对其它指纹背书过"时为 `null`。 |
+
+> **`key_changed` 与 `last_endorsed_*` 是两个问题**：前者是"要不要提醒"，后者是"历史上背书过谁"。
+> 因此 `key_changed=false` **不代表** `last_endorsed_*` 为 `null`——重新验证当前指纹后、或把当前指纹显式标为
+> `untrusted` 后，`last_endorsed_*` 依然会返回之前背书过的旧指纹。
+
+> 约定：信任**按指纹**生效，不按账号继承。对端轮换后新指纹一律从 `untrusted` 开始。
+
+> 层级说明：`GET /api/keys/trust/` 返回 `{"trusts": [ ... ]}`，上表字段位于**数组的每个元素内**；
+> 该元素另含 `contact_id`、`contact_username`、`key_fingerprint`、`key_version`、`trust_status`、
+> `verified_at`、`active_key_fingerprint`。`GET /api/keys/contacts/<user_id>/fingerprints/` 则把这些
+> 字段放在**响应顶层的同级位置**（与 `active_key`、`keys[]` 并列）。
+
+> 补记：`POST /api/keys/contacts/<user_id>/trust/` 的请求体为空或 `{}` 时，服务端按 T38 的既有行为
+> 默认写入 `trusted`。要显式表达"不信任"请传 `{"trust_status": "untrusted"}`。
+
+> 补记：`POST /api/keys/upload/` 重复上传**内容完全相同**的公钥时不会产生新版本，
+> 直接返回 `200` 与当前有效密钥（`key_version` 不变）；只有内容不同才会轮换并返回 `201`。
+
+### 3.3 双向密钥验证请求（P4 Test T08 / #189）
+
+两名用户相互确认"当前指纹"的一次性握手。验证请求**在创建时把双方的指纹和版本固定下来**，
+接受时服务端重新比对两侧当前 active key。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/keys/verification-requests/` | 当前用户所有 `pending` 的验证请求 |
+| POST | `/api/keys/verification-requests/` | 创建（或复用）一条针对某联系人的验证请求 |
+| POST | `/api/keys/verification-requests/<id>/respond/` | 接受 / 拒绝 / 取消该请求 |
+
+创建请求体：
+
+```json
+{
+  "user_id": 7
+}
+```
+
+响应中的单条请求对象（列表项与 `respond` 回包同构）：
+
+```json
+{
+  "id": 42,
+  "requester_id": 1,
+  "requester_username": "alice",
+  "responder_id": 7,
+  "responder_username": "bob",
+  "requester_key_version": 1,
+  "requester_key_fingerprint": "AAAA...",
+  "responder_key_version": 2,
+  "responder_key_fingerprint": "BBBB...",
+  "status": "pending",
+  "direction": "outgoing",
+  "created_at": "2026-10-26T08:00:00+00:00",
+  "responded_at": null
+}
+```
+
+`direction` 相对**请求者本人**计算：`incoming` 表示对方发起、需要自己回应；`outgoing` 表示自己发起。
+`requester_key_fingerprint` / `responder_key_fingerprint` 是**请求创建时**的快照，之后对端轮换不会改写它。
+
+回应请求体：
+
+```json
+{
+  "action": "accept"
+}
+```
+
+`action` 取 `accept`、`decline`、`cancel`。只有 `responder` 可以 `accept`/`decline`，
+只有 `requester` 可以 `cancel`，越权返回 `403`。
+
+| 结果 | HTTP | 语义 |
+| --- | --- | --- |
+| `accept` 且两侧指纹仍与请求一致 | `200` | 原子地为**双方**写入 `verified` 判定，请求置为 `accepted`，并向两人推送 `key.verification.new` |
+| `accept` 但任一侧指纹或版本已变（含本机主动轮换） | `409` | 请求置为 `expired`，**不写任何信任**，返回 `{"error": "Keys changed. Start a new verification request."}` |
+| `decline` / `cancel` | `200` | 仅改状态，**不写任何信任** |
+
+> **客户端契约（重要）**：`respond` 的 2xx **只**表示"服务端处理了这一条请求"，
+> 它**不是**客户端应当信任其内容的凭据。浏览器端必须以**用户实际点击的那条本地请求快照**
+> 作为授权对象，只在 `action=accept`、服务端确认的 `id`/`requester_id`/`responder_id`
+> 与该快照一致，且重新拉取的 active key 仍等于快照里的指纹与版本时，才把该指纹写入
+> 本地信任库（`ichat_peer_identity:<uid>`）与发送缓存。回包若指向其他联系人、其它版本或
+> 其它 `id`，一律不授予任何信任并提示用户。`decline` / `cancel` / `expired` / 普通刷新永不授予信任。
+>
+> 同一契约适用于 WebSocket 的 `key.verification.new` 事件：`event="accepted"` 只是服务端
+> 的陈述，**不是用户授权**。客户端必须把事件与本地托盘快照比对；**没有本地快照时不授予
+> 任何人信任**（用户从未看到该请求，就谈不上同意），并提示用户重新发起验证。
+> 成功提示只能在真正写入本地信任之后显示。
+>
+> 详见 `docs/phase4/t08-acceptance-evidence.md` 的「客户端信任规则」一节。
 
 ## 4. 会话 API
 

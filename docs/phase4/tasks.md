@@ -18,7 +18,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P4 T01 | WP00 | 确认新旧需求边界和需求编号 | 需求规格说明书 V2.0 | 全员评审，新需求与继承功能明确区分 | P0 | 无 | 已完成（[Issue #128](https://github.com/HeanX/iChat_Pro/issues/128)）） |
 | P4 T02 | WP00 | 建立 Git 工作流和任务模板 | 分支、提交、PR、Issue 规范 | 提交和缺陷可关联任务编号 | P0 | P4 T01 | 已完成（[Issue #129](https://github.com/HeanX/iChat_Pro/issues/129)）） |
-| P4 T03 | WP00 | 制定迭代计划和风险清单 | 里程碑、风险登记表 | 范围、负责人、时间和降级方案明确 | P1 | P4 T01 | 未完成（[Issue #130](https://github.com/HeanX/iChat_Pro/issues/130) 开放）；部分产出：风险清单与里程碑已有；负责人、时间及降级方案待完整验收 |
+| P4 T03 | WP00 | 制定迭代计划和风险清单 | 里程碑、风险登记表 | 范围、负责人、时间和降级方案明确 | P1 | P4 T01 | 产出已就绪（[Issue #130](https://github.com/HeanX/iChat_Pro/issues/130) 开放）；新增 [iteration-plan.md](iteration-plan.md)：4 个迭代划分范围、模块负责人表与升级路径、6 周排期（W1-W6）、6 项降级方案与 5 项过程风险（PR-01～05）；技术风险见 risk-register.md。待非作者评审后可关 |
 | P4 T04 | WP01 | 设计云端部署架构 | 架构图、端口和数据流说明 | Web、ASGI、PostgreSQL、Redis、存储边界明确 | P0 | P4 T01 | 已完成（[Issue #131](https://github.com/HeanX/iChat_Pro/issues/131)）；2026-10-01 |
 | P4 T05 | WP01 | 准备云服务器和域名 | 服务器、DNS 和防火墙配置 | 公网域名可解析，只有必要端口开放 | P0 | P4 T04 | 已完成（[Issue #132](https://github.com/HeanX/iChat_Pro/issues/132)）；2026-10-01 公网取证 |
 | P4 T06 | WP01 | 配置 Nginx、HTTPS 和 WSS | TLS 与反向代理配置 | HTTP 跳转 HTTPS，WebSocket 正常升级 | P0 | P4 T05 | 已完成（[Issue #133](https://github.com/HeanX/iChat_Pro/issues/133)）；续期 reload hook 已实测 |
@@ -27,17 +27,17 @@
 | P4 T09 | WP01 | 接入 Redis Channel Layer | Redis 与实时通信配置 | 多客户端消息可正确分发，Redis 不开放公网 | P0 | P4 T07 | 已完成（[Issue #136](https://github.com/HeanX/iChat_Pro/issues/136)）；2026-10-01 |
 | P4 T10 | WP01 | 配置持久化文件存储 | 媒体/密文文件存储方案 | 服务重启或升级后文件仍可访问 | P0 | P4 T07 | 已完成（[Issue #137](https://github.com/HeanX/iChat_Pro/issues/137)）；2026-10-01 |
 | P4 T11 | WP01 | 配置环境变量和秘密管理 | 生产配置清单 | 仓库、安装包和日志中无生产密钥 | P0 | P4 T07 | 已完成（[Issue #138](https://github.com/HeanX/iChat_Pro/issues/138)）；2026-10-01 |
-| P4 T12 | WP01 | 配置健康检查、日志和监控 | 监控面板或记录 | 能发现服务、资源、证书和关键错误状态 | P1 | P4 T07～P4 T11 | 未完成（[Issue #139](https://github.com/HeanX/iChat_Pro/issues/139) 开放）；部分实现：health/日志已完成，监控告警待做 |
+| P4 T12 | WP01 | 配置健康检查、日志和监控 | 监控面板或记录 | 能发现服务、资源、证书和关键错误状态 | P1 | P4 T07～P4 T11 | 代码已实现，待真实环境证据（[Issue #139](https://github.com/HeanX/iChat_Pro/issues/139) 开放）；`deploy/monitor.sh` 覆盖 readiness 连续失败/PG 磁盘+连接数/Redis 内存/证书余期/journal 错误，webhook 告警带限频、投递失败重试；检查跑不成（工具缺失/认证失败/状态目录不可写）会触发 `monitor` 告警并 exit 1，不与"一切正常"混淆；18 条本地用例覆盖判定/限频/不可观测场景。**未在生产验证** |
 | P4 T13 | WP01 | 实现备份、恢复和回滚 | 脚本/手册及演练记录 | 独立环境恢复成功，版本可回退 | P0 | P4 T08、P4 T10 | 已完成（[Issue #140](https://github.com/HeanX/iChat_Pro/issues/140)）；复审两项补齐：首次部署回归修复 + 可复跑恢复演练，二次复验通过 |
 | P4 T14 | WP03 | 将 Electron 默认目标切换为云服务 | 环境化服务地址配置 | 无需本地 Django 即可使用核心功能 | P0 | P4 T06～P4 T11 | 已完成（[Issue #141](https://github.com/HeanX/iChat_Pro/issues/141)）；两轮复审整改后闭环，默认云地址已内建，T15 生命周期实测确认无需本地 Django 即可启动云端登录页 |
 | P4 T15 | WP03 | 完成 Windows 打包配置 | `.exe` 安装包 | 干净 Windows 环境可安装、启动和卸载 | P0 | P4 T14 | 已完成（[Issue #142](https://github.com/HeanX/iChat_Pro/issues/142)）；四轮复审整改后复验闭环：安装/云端启动/双路径卸载/注册表清理，NSIS 断言 24/24 |
 | P4 T16 | WP03 | 统一名称、图标和版本 | 产品资源与关于信息 | 安装器、窗口、托盘和快捷方式标识一致 | P1 | P4 T15 | 已完成（[Issue #143](https://github.com/HeanX/iChat_Pro/issues/143)）；PR #317 后补齐关于入口、完整 exe 标识和 Windows 构建资源校验，详见 [品牌验收](windows-branding.md)；托盘标识随 T17 实测；数字签名另需证书，不在本项范围 |
 | P4 T17 | WP03 | 实现窗口与系统托盘 | 桌面窗口/托盘功能 | 最小化、恢复和退出行为正确 | P1 | P4 T15 | 已完成（[Issue #144](https://github.com/HeanX/iChat_Pro/issues/144)）；PR #319 实现托盘，用户 PR #321 修复 Tray 导入/图标参数、单实例锁时机、离线启动路径与退出清理；main 93c0190 四项 CI 全绿，安装包 SHA-256 前缀 01f801a5；15 项源码/打包回归通过，原生实测托盘单击/双击恢复同窗、隐藏态菜单退出进程归零、登录态待发箱保留均通过，详见 [托盘验收](windows-tray.md) |
 | P4 T18 | WP03 | 接入 Windows 系统通知 | 通知与会话跳转 | 新消息通知遵守静音设置，点击可定位会话 | P1 | P4 T14 | 未完成（[Issue #145](https://github.com/HeanX/iChat_Pro/issues/145) 开放）；实现及回归已完成；通知预览布局修复后的正式客户端最终复验待记录 |
-| P4 T19 | WP03 | 完善文件选择、下载和打开 | 文件系统集成 | 文件跨端收发成功，异常路径有提示 | P1 | P4 T14 | 未完成（[Issue #146](https://github.com/HeanX/iChat_Pro/issues/146) 开放）；待实施原生文件选择、保存及打开 |
+| P4 T19 | WP03 | 完善文件选择、下载和打开 | 文件系统集成 | 文件跨端收发成功，异常路径有提示 | P1 | P4 T14 | 未完成（[Issue #146](https://github.com/HeanX/iChat_Pro/issues/146) 开放）；原生保存/打开已实现（窄 IPC，39 项自动化通过，见 [文件验收](windows-files.md)）；安装版登录态实测与跨端未验证 |
 | P4 T20 | WP03 | 实现连接状态和自动重连 | 状态提示及重连逻辑 | 网络恢复后 30 秒内重新连接 | P0 | P4 T14 | 已完成（[Issue #147](https://github.com/HeanX/iChat_Pro/issues/147)）；部署 16e6345 后生产复验：9.2s 重连、自动重发、补取无重复、晚 ACK 排序正确；[关闭证据](https://github.com/HeanX/iChat_Pro/issues/147#issuecomment-5970277528) |
 | P4 T21 | WP03 | 强化敏感数据存储和日志 | 安全存储方案、日志规则 | 私钥、Token 和聊天明文不进入普通文件和日志 | P0 | P4 T14 | 已完成（[Issue #148](https://github.com/HeanX/iChat_Pro/issues/148)）；八轮复审整改后复验闭环：safeStorage 桥+加密 KV+存储边界文档 |
-| P4 T22 | WP04 | 确认 Capacitor 等移动端技术方案 | 技术决策记录、工程骨架 | 能复用现有页面并生成 Android 工程 | P0 | P4 T01 | 未完成（[Issue #149](https://github.com/HeanX/iChat_Pro/issues/149) 开放）；Android 工程与验收待开展 |
+| P4 T22 | WP04 | 确认 Capacitor 等移动端技术方案 | 技术决策记录、工程骨架 | 能复用现有页面并生成 Android 工程 | P0 | P4 T01 | 部分完成（[Issue #149](https://github.com/HeanX/iChat_Pro/issues/149) 开放）；ADR-P4-03 已定稿（Capacitor 方案 + 转原生触发条件）；`mobile/` 骨架与 `mobile/android/` 原生工程由 Capacitor CLI 8.5.3 真实生成；服务地址走**构建期注入**（`npm run config:generate` 写 `www/js/mobile-env.js`，读进程环境变量、不读 `.env`），**debug APK 已构建**（AND-01 后 4,138,535 B / `14B41ADA…EB48E9`；修复前旧产物 4.22 MB / `67104134…26C878` 已过期；已禁用备份且 FileProvider 已收窄），配置契约 **29/29** 测试通过（LF 与 CRLF 工作树各一次）；**未执行**：真机/模拟器安装与启动、WebView 加载 Django 页面（当前 `server.url=null` 只加载本地 assets，尚未接通）、两个 API Level 的运行记录，证据边界见 [ADR §5.3](../phase4/adr-p4-03-mobile-tech-stack.md) |
 | P4 T23 | WP04 | 完成移动端响应式适配 | 手机端页面 | 核心操作无溢出、遮挡或鼠标悬停依赖 | P0 | P4 T22 | 未完成（[Issue #150](https://github.com/HeanX/iChat_Pro/issues/150) 开放）；Android 工程与验收待开展 |
 | P4 T24 | WP04 | 生成 Android APK/AAB | 可安装包 | 真机或独立模拟器安装并启动 | P0 | P4 T22、P4 T23 | 未完成（[Issue #151](https://github.com/HeanX/iChat_Pro/issues/151) 开放）；Android 工程与验收待开展 |
 | P4 T25 | WP04 | 适配返回键和应用生命周期 | 生命周期处理逻辑 | 后台恢复不串号、不重复发送、不丢失草稿 | P0 | P4 T24 | 未完成（[Issue #152](https://github.com/HeanX/iChat_Pro/issues/152) 开放）；Android 工程与验收待开展 |
@@ -53,19 +53,19 @@
 | P4 T35 | WP02 | 统一服务端时间和消息排序 | 排序规则及测试 | 设备时间偏差不造成明显乱序 | P0 | P4 T31 | 已完成（[Issue #162](https://github.com/HeanX/iChat_Pro/issues/162)）；sync 序号排序 + 历史 (created_at,id) tiebreaker |
 | P4 T36 | WP02 | 统一 HTTP fallback 与 WebSocket 规则 | 一致性测试与修复 | 两条发送路径执行相同权限、幂等和状态逻辑 | P0 | P4 T32、P4 T33 | 已完成（[Issue #163](https://github.com/HeanX/iChat_Pro/issues/163)）；两轮复审整改复验：全部写入路径入服务层，无视图旁路 |
 | P4 T37 | WP02 | 完成 Windows—Android 跨端聊天 | 综合演示与结果记录 | 两台独立设备双向文本消息通过 | P0 | P4 T20、P4 T26、P4 T31～P4 T36 | 未完成（[Issue #164](https://github.com/HeanX/iChat_Pro/issues/164) 开放） |
-| P4 T38 | WP05 | 编写 E2EE 威胁模型和数据流 | 威胁模型、数据流图 | 明确资产、攻击面、信任边界和不可保存数据 | P0 | P4 T01、P4 T04 | 未完成（[Issue #165](https://github.com/HeanX/iChat_Pro/issues/165) 开放）；浏览器文档已更新；完整跨平台威胁模型与数据流验收仍待做 |
+| P4 T38 | WP05 | 编写 E2EE 威胁模型和数据流 | 威胁模型、数据流图 | 明确资产、攻击面、信任边界和不可保存数据 | P0 | P4 T01、P4 T04 | 未完成（[Issue #165](https://github.com/HeanX/iChat_Pro/issues/165) 开放）；2026-10-18 已落笔 [ADR-P4-04 跨平台威胁模型](e2ee-threat-model.md)（Web/Windows 覆盖，含资产/攻击面/信任边界/不可保存数据/DFD），Android 与设备级未覆盖，待独立评审；2026-10-26 修正 §6.2 同步游标的签发主体表述（WEB-05：客户端无签名密钥时不能修改游标，服务端负责签发与验证） |
 | P4 T39 | WP05 | 适配平台安全存储 | Windows/Android 密钥存储实现 | 普通存储或日志中无可直接读取私钥 | P0 | P4 T21、P4 T29 | 未完成（[Issue #166](https://github.com/HeanX/iChat_Pro/issues/166) 开放）；跨平台/设备增强待验收 |
-| P4 T40 | WP05 | 设计并实现设备身份模型 | 模型、迁移、接口 | 同一账号不同设备可独立识别 | P1 | P4 T38 | 未完成（[Issue #167](https://github.com/HeanX/iChat_Pro/issues/167) 开放）；跨平台/设备增强待验收 |
+| P4 T40 | WP05 | 设计并实现设备身份模型 | 模型、迁移、接口 | 同一账号不同设备可独立识别 | P1 | P4 T38 | 未完成（[Issue #167](https://github.com/HeanX/iChat_Pro/issues/167) 开放）；2026-10-18 设计阶段已交：ADR-P4-05（`docs/phase4/adr-p4-05-device-identity.md`）含 Device 模型设计、两阶段切分与待决问题 Q1–Q5，待迁移负责人会签后进入实现；2026-10-26 修复 ACC-01 关系冲突（改为 `Device.current_public_key` / `related_name="current_device"`，新增 §4.6 轮换与历史归属语义，附 schema probe：修正前 E302/E303、修正后 0 errors）；跨平台/设备增强待验收 |
 | P4 T41 | WP05 | 实现设备列表与撤销 | 设置页面、接口和测试 | 被撤销设备不接收后续消息密钥 | P1 | P4 T40 | 未完成（[Issue #168](https://github.com/HeanX/iChat_Pro/issues/168) 开放）；跨平台/设备增强待验收 |
 | P4 T42 | WP05 | 实现多设备新消息密钥分发 | 协议、代码和测试 | 每个有效设备可解密新消息 | P1 | P4 T40、P4 T41 | 未完成（[Issue #169](https://github.com/HeanX/iChat_Pro/issues/169) 开放）；跨平台/设备增强待验收 |
-| P4 T43 | WP05 | 研究历史密钥迁移 | 设计文档或安全原型 | 仅经用户授权，失败和撤销路径明确 | P2 | P4 T42 | 未完成（[Issue #170](https://github.com/HeanX/iChat_Pro/issues/170) 开放）；跨平台/设备增强待验收 |
+| P4 T43 | WP05 | 研究历史密钥迁移 | 设计文档或安全原型 | 仅经用户授权，失败和撤销路径明确 | P2 | P4 T42 | 未完成（[Issue #170](https://github.com/HeanX/iChat_Pro/issues/170) 开放）；2026-10-18 研究阶段已交：`docs/phase4/t43-historical-key-migration-study.md`（方案 A/B/C 评估 + 逐场景失败/撤销表，1 轮独立评审勘误后复验），推荐 v1=产品化既有 JSON 备份、v2=在线交接（依赖 #167）；**待人类确认归档**；跨平台/设备增强待验收 |
 | P4 T44 | WP07 | 接入静态检查和格式门禁 | CI 配置 | 检查失败时流水线失败 | P0 | P4 T02 | 未完成（[Issue #171](https://github.com/HeanX/iChat_Pro/issues/171) 开放） |
 | P4 T45 | WP07 | 接入 Django、迁移和自动化测试 | CI 配置 | 任一核心测试失败时禁止合并 | P0 | P4 Test T01、P4 T02 | 未完成（[Issue #172](https://github.com/HeanX/iChat_Pro/issues/172) 开放）；四项 CI 已运行；主分支 required_status_checks 未配置，完整门禁未验收 |
 | P4 T46 | WP07 | 接入覆盖率门禁 | CI 报告 | 低于阈值时阻断或产生审批例外记录 | P0 | P4 Test T12 | 未完成（[Issue #173](https://github.com/HeanX/iChat_Pro/issues/173) 开放） |
 | P4 T47 | WP07 | 接入依赖与秘密扫描 | 安全流水线 | 高危漏洞或密钥泄露阻断发布 | P1 | P4 T11、P4 Test T17 | 未完成（[Issue #174](https://github.com/HeanX/iChat_Pro/issues/174) 开放） |
 | P4 T48 | WP07 | 自动/标准化构建客户端 | 构建流水线和产物 | 安装包带版本号、校验值和构建记录 | P1 | P4 T15、P4 T24 | 未完成（[Issue #175](https://github.com/HeanX/iChat_Pro/issues/175) 开放）；Windows 构建已有；Android 构建及原任务完整验收待做 |
-| P4 T49 | WP07 | 部署独立测试环境 | 测试环境流水线 | 与生产配置、数据和密钥隔离 | P1 | P4 T07～P4 T11 | 未完成（[Issue #176](https://github.com/HeanX/iChat_Pro/issues/176) 开放） |
-| P4 T50 | WP07 | 建立生产发布审批与回滚 | 发布流程 | 可追踪发布人、版本、时间并可恢复稳定版本 | P1 | P4 T13、P4 Test T23 | 未完成（[Issue #177](https://github.com/HeanX/iChat_Pro/issues/177) 开放） |
+| P4 T49 | WP07 | 部署独立测试环境 | 测试环境流水线 | 与生产配置、数据和密钥隔离 | P1 | P4 T07～P4 T11 | 代码已实现，待实机搭建（[Issue #176](https://github.com/HeanX/iChat_Pro/issues/176) 开放）；`deploy.sh` 参数化（`ICHAT_APP_DIR`/`ICHAT_MEDIA_DIR`/`ICHAT_SERVICE_NAME`/`ICHAT_SERVICE_USER`），新增 `deploy/staging/`（env 模板、systemd 单元 8001 端口、`check_isolation.sh` 隔离断言）；11 条隔离用例本地通过。**staging 实机未搭建，未在生产验证** |
+| P4 T50 | WP07 | 建立生产发布审批与回滚 | 发布流程 | 可追踪发布人、版本、时间并可恢复稳定版本 | P1 | P4 T13、P4 Test T23 | 代码已实现，待真实环境证据（[Issue #177](https://github.com/HeanX/iChat_Pro/issues/177) 开放）；`DEPLOYMENTS.log` 升级为结构化审计行（含 `actor/via/from/kind/approval`），新增审批门禁（缺 `ICHAT_APPROVAL` 时在改动服务前拒绝、回滚免审批）、`--status` 查询与 `.deploy-state/{current,previous}`；46 条用例在本地通过。**未在生产验证**；已过 2 轮独立审查（第 1 轮 FAIL 的 BLOCKER 与 4 项 MAJOR 已修，第 2 轮 PASS WITH FINDINGS） |
 | P4 T51 | WP08 | 建立 AI 使用记录 | AI 实践日志 | 记录任务、用途、人工修改和验证结果 | P1 | P4 T01 | 已完成（[Issue #178](https://github.com/HeanX/iChat_Pro/issues/178)）；AI 实践日志、PR #304 实测与复核记录；2026-10-07 证据核对补关，见 [完成索引](completion-audit-20261007.md) |
 | P4 T52 | WP08 | AI 辅助日志与缺陷分析 | 分析记录 | 建议可追溯到真实日志和复现结果 | P2 | P4 Test T21 | 已完成（[Issue #179](https://github.com/HeanX/iChat_Pro/issues/179)）；晚 ACK 真实复现、PR #304 修复与 #147 生产复验；见 [完成索引](completion-audit-20261007.md) |
 | P4 T53 | WP08 | 整理安装、云端和跨端证据 | 截图、视频、日志 | 每项 P0 成果有可复核证据 | P0 | 各 Epic P0 完成 | 未完成（[Issue #180](https://github.com/HeanX/iChat_Pro/issues/180) 开放） |
@@ -82,12 +82,12 @@
 | P4 Test T05 | WP06 | 完成群聊和文件跨端验证 | 综合测试记录 | 群消息和加密文件在各端结果一致 | P1 | P4 T19、P4 T28、P4 T37 | 未完成（[Issue #186](https://github.com/HeanX/iChat_Pro/issues/186) 开放） |
 | P4 Test T06 | WP06 | 复核三端加密协议兼容性 | 加密测试向量 | Windows、Android、浏览器对相同向量结果一致 | P0 | P4 T14、P4 T24 | 未完成（[Issue #187](https://github.com/HeanX/iChat_Pro/issues/187) 开放） |
 | P4 Test T07 | WP06 | 审计服务端密文边界 | 数据库/API/日志检查报告 | 无消息明文、私钥和文件密钥明文 | P0 | P4 T07～P4 T11 | 未完成（[Issue #188](https://github.com/HeanX/iChat_Pro/issues/188) 开放） |
-| P4 Test T08 | WP06 | 验证密钥指纹和变化提醒 | UI、接口和测试 | 新密钥不自动继承旧信任状态 | P0 | P4 Test T06 | 未完成（[Issue #189](https://github.com/HeanX/iChat_Pro/issues/189) 开放） |
+| P4 Test T08 | WP06 | 验证密钥指纹和变化提醒 | UI、接口和测试 | 新密钥不自动继承旧信任状态 | P0 | P4 Test T06 | 未完成（[Issue #189](https://github.com/HeanX/iChat_Pro/issues/189) 开放）；2026-10-18 代码与测试完成：6 轮独立审查、第 6 轮无保留 PASS（无 BLOCKER/MAJOR/MINOR），accounts 142 条与 `npm run test:e2ee` 170 条条全绿（本机实测，见 `docs/phase4/t08-acceptance-evidence.md`）；**仍缺**：UI 人工验收、非作者人类评审、CI run（分支未推送），故不标完成、Issue 不关闭 |
 | P4 Test T09 | WP06 | 编写总体测试计划 | 测试计划 | 范围、环境、方法、人员、准入/准出标准完整 | P0 | P4 T01～P4 Test T02 | 未完成（[Issue #190](https://github.com/HeanX/iChat_Pro/issues/190) 开放） |
 | P4 Test T10 | WP06 | 设计黑盒测试 | 黑盒用例集 | 包含等价类、边界值、判定表、状态和场景法 | P0 | P4 Test T09 | 未完成（[Issue #191](https://github.com/HeanX/iChat_Pro/issues/191) 开放） |
 | P4 Test T11 | WP06 | 设计白盒测试 | 白盒用例与路径说明 | 覆盖关键条件、分支、循环和异常路径 | P0 | P4 Test T09 | 未完成（[Issue #192](https://github.com/HeanX/iChat_Pro/issues/192) 开放） |
-| P4 Test T12 | WP06 | 建立覆盖率统计 | coverage 配置和报告 | 语句/分支覆盖率可重复生成并达到评审目标 | P0 | P4 Test T01、P4 Test T11 | 未完成（[Issue #193](https://github.com/HeanX/iChat_Pro/issues/193) 开放） |
-| P4 Test T13 | WP06 | 完善 HTTP/WebSocket 集成测试 | 自动化测试集 | P0 接口成功、异常、边界和越权场景有覆盖 | P0 | P4 T31～P4 T36 | 未完成（[Issue #194](https://github.com/HeanX/iChat_Pro/issues/194) 开放）；已有接口/WS 自动回归；专项 P0 用例索引与验收待完成 |
+| P4 Test T12 | WP06 | 建立覆盖率统计 | coverage 配置和报告 | 语句/分支覆盖率可重复生成并达到评审目标 | P0 | P4 Test T01、P4 Test T11 | 部分完成（[Issue #193](https://github.com/HeanX/iChat_Pro/issues/193) 开放）；统计已落地且可重复：`.coveragerc` + `scripts/coverage_report.py`，实测语句 70.49% / 分支 54.49%（合计 66.82%），见 [覆盖率报告](../quality/coverage-report.md)。**未达 requirements.md 的 85%/75% 目标**，缺口见报告对照表；阈值门禁属 P4 T46。2026-10-26 Phase4 修复轮修掉快照真实性缺陷（`--settings`/`--pythonpath`/`COVERAGE_RCFILE`/`--pattern` 等测量基准替换一律拒写，`--allow-subset` 不能放行），**覆盖率数字仍低于目标，本卡未完成** |
+| P4 Test T13 | WP06 | 完善 HTTP/WebSocket 集成测试 | 自动化测试集 | P0 接口成功、异常、边界和越权场景有覆盖 | P0 | P4 T31～P4 T36 | 部分完成（[Issue #194](https://github.com/HeanX/iChat_Pro/issues/194) 开放）；2026-10-18 新增 `chat/tests/test_http_ws_integration.py`（79 条：成功 18 / 异常 27 / 边界 12 / 越权 21 / 回归锚点 1；本机 SQLite 实测 `Ran 79 tests ... OK`，全量 483 条 OK），用例索引与三轮独立审查记录见 [T13 验收记录](../testing/p4-test-t13-http-ws-integration.md)；2026-10-26 修复轮更正 `file_type_mismatch` 过期的"未覆盖"表述，并把回执用例改名为与其断言范围一致的名字；**仍缺**：非作者人类评审、CI run、PostgreSQL/Redis 真实并发与弱网证据 |
 | P4 Test T14 | WP06 | 建立 PostgreSQL/Redis 集成测试 | 测试环境与结果 | 不以 SQLite/内存通道完全替代正式依赖验证 | P0 | P4 T08、P4 T09 | 已完成（[Issue #195](https://github.com/HeanX/iChat_Pro/issues/195)）；CI PG/Redis 350 条 + 服务器实测 |
 | P4 Test T15 | WP06 | 建立浏览器/Electron E2E | Playwright 等脚本 | 失败保留截图、日志或跟踪文件 | P1 | P4 Test T03 | 未完成（[Issue #196](https://github.com/HeanX/iChat_Pro/issues/196) 开放） |
 | P4 Test T16 | WP06 | 建立 Android UI 自动化 | Appium 等脚本 | 安装、权限、登录、聊天和生命周期可执行 | P1 | P4 Test T04 | 未完成（[Issue #197](https://github.com/HeanX/iChat_Pro/issues/197) 开放） |
@@ -97,7 +97,7 @@
 | P4 Test T20 | WP06 | 执行兼容性测试 | Windows/Android/浏览器矩阵 | 指定环境核心流程均有结论 | P1 | P4 Test T03、P4 Test T04 | 未完成（[Issue #201](https://github.com/HeanX/iChat_Pro/issues/201) 开放） |
 | P4 Test T21 | WP06 | 建立缺陷管理与回归流程 | 缺陷清单、修复和回归记录 | 缺陷关联需求、用例、提交和复测结果 | P0 | P4 Test T09 | 已完成（[Issue #202](https://github.com/HeanX/iChat_Pro/issues/202)）；缺陷→需求/PR/用例→独立复核→生产复验的流程与实际闭环；见 [完成索引](completion-audit-20261007.md) |
 | P4 Test T22 | WP06 | 编写最终测试总结 | 完整测试报告 | 数据可由原始执行结果复核，无虚构结果 | P0 | P4 Test T10～P4 Test T21 | 未完成（[Issue #203](https://github.com/HeanX/iChat_Pro/issues/203) 开放） |
-| P4 Test T23 | WP07 | 部署后冒烟测试 | 冒烟脚本 | 健康、登录和核心接口失败时阻断发布 | P0 | P4 Test T14、P4 T49 | 未完成（[Issue #204](https://github.com/HeanX/iChat_Pro/issues/204) 开放）；readiness 自动门禁已有；登录/核心 API 冒烟失败阻断未实现 |
+| P4 Test T23 | WP07 | 部署后冒烟测试 | 冒烟脚本 | 健康、登录和核心接口失败时阻断发布 | P0 | P4 Test T14、P4 T49 | 代码已实现，待评审与真机证据（[Issue #204](https://github.com/HeanX/iChat_Pro/issues/204) 开放）；`deploy/smoke.sh` 断言 health/readiness/登录表单+会话/`api/conversations/`+`api/profile/me/`/未认证 401，`deploy.sh` 在其失败时不写入 `DEPLOYMENTS.log` 并 exit 1；`deploy/tests/test_smoke_gate.py` 7 条用例在本地 SQLite 通过。**未在生产或独立环境验证**，独立审查未完成前不算验收 |
 | P4 Test T24 | WP08 | AI 辅助需求与用例评审 | 评审记录 | AI 建议经人工确认，不直接作为结论 | P1 | P4 Test T02、P4 Test T09 | 未完成（[Issue #205](https://github.com/HeanX/iChat_Pro/issues/205) 开放） |
 
 ## 验收与维护

@@ -364,17 +364,50 @@
     }
   }
 
-  function keyMgrExport() {
+  // exportBackup() is async and rejects on this device's normal failure path
+  // (a non-extractable key with no pending backup), so the success message may
+  // only appear after it truly resolves -- otherwise the user is told a usable
+  // backup exists and may clear the only device that still holds the key.
+  //
+  // This handler deliberately does NOT re-implement exportBackup()'s
+  // precondition. key-manager.js exports when `pendingBackup || record.private_key`,
+  // and a tab that still holds the one-shot pending backup can export even
+  // after the local record was pruned. An extra `loadCurrentRecord()` gate here
+  // would hide that working path behind a false "No keys to export", so the
+  // implementation stays the single source of truth: call it and report what it
+  // says, including its own reason when there is nothing to export.
+  let keyMgrExportInFlight = false;
+
+  async function keyMgrExport() {
+    const btn = document.getElementById('btn-key-export');
+    const label = btn ? btn.textContent.trim() : '';
+    if (keyMgrExportInFlight) return;
+    keyMgrExportInFlight = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Exporting…';
+    }
     try {
       const kmgr = _kmgr();
-      if (!kmgr || !kmgr.loadCurrentRecord()) {
-        _showKeyMsg('No keys to export. Initialize them first.', true);
+      if (!kmgr || typeof kmgr.exportBackup !== 'function') {
+        _showKeyMsg('Key manager is not available on this page. Reload and try again.', true);
         return;
       }
-      kmgr.exportBackup();
+      await kmgr.exportBackup();
       _showKeyMsg('Backup downloaded. Keep it safe!');
     } catch (err) {
-      _showKeyMsg('Export failed: ' + err.message, true);
+      const reason = err && err.message ? err.message : String(err);
+      _showKeyMsg(
+        'Export failed: ' + reason +
+        ' No backup file was created. Keep this device signed in, or use the backup you saved when the key was created.',
+        true,
+      );
+    } finally {
+      keyMgrExportInFlight = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = label || 'Export Backup';
+      }
     }
   }
 

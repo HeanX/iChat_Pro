@@ -1056,6 +1056,170 @@
         return cookieValue;
     }
 
+    // ── Native save / open (P4 T19, Electron only) ──────────────────────
+    //
+    // In the Chromium build a Blob reaches disk through an <a download>. Inside
+    // the desktop shell that anchor is bound to the app origin, so the browser
+    // download manager may place the file anywhere or drop it silently - the
+    // user cannot tell whether the bytes landed. When the narrow native bridge
+    // is present the decrypted bytes go through an OS save dialog instead.
+
+    const NATIVE_WRITE_CHUNK_BYTES = 2 * 1024 * 1024; // mirrors desktop/file-io.js
+
+    function nativeFileBridge() {
+        const bridge = window.iChatDesktop;
+        return bridge && bridge.files && typeof bridge.files.pickSaveTarget === 'function'
+            ? bridge.files
+            : null;
+    }
+
+    // Error text keyed by the codes desktop/file-io.js raises. "交付" wording
+    // for the codes a user can actually act on; everything else falls back.
+    const NATIVE_FILE_MESSAGES = {
+        not_found: '上次的保存凭证已失效，请重新下载。',
+        expired: '下载超时，请重新下载。',
+        offset_mismatch: '写入位置不一致，已中止，请重新下载。',
+        write_failed: '写入失败：磁盘已满或文件被占用。',
+        blocked_type: '出于安全考虑，安装包和脚本不能直接打开，请在下载目录中查看。',
+        open_failed: '打开失败：系统没有关联的应用。文件已保存，可在下载目录中打开。',
+        incomplete: '文件没有接收完整，已中止，请重新下载。',
+        too_many_grants: '同时进行的下载过多，请等待其他下载完成或稍后重试。',
+        too_large: '文件超过允许的大小上限，无法保存。',
+        invalid_target: '所选位置不可用，请换一个目录再试。',
+        dialog_in_progress: '已有一个保存对话框打开，请先处理它。',
+        target_in_use: '该文件正在被另一个下载写入，请等它完成、换一个文件名，或稍后再试。',
+    };
+
+    function describeNativeFileError(err) {
+        const code = err && err.code;
+        if (code && NATIVE_FILE_MESSAGES[code]) return NATIVE_FILE_MESSAGES[code];
+        return '保存失败：' + ((err && (err.message || err.toString())) || '未知错误');
+    }
+
+    function rewrapNativeFileError(err) {
+        const wrapped = new Error(describeNativeFileError(err));
+        wrapped.cause = err;
+        wrapped.nativeCode = err && err.code;
+        return wrapped;
+    }
+
+    /**
+     * Unwrap the `{ok, value|code}` envelope main.js resolves with.
+     *
+     * `ipcMain.handle` only carries `message` across the process boundary, so a
+     * thrown error would lose its code and every message above would collapse
+     * into "Error invoking remote method ...". Expected failures therefore come
+     * back as data and are re-thrown here, inside the renderer, where the code
+     * is still intact (review round 1, verified on Electron 39.8.10).
+     */
+    async function callNativeFileBridge(operation) {
+        const envelope = await operation();
+        if (envelope && envelope.ok === false) {
+            const error = new Error(envelope.code);
+            error.code = envelope.code;
+            if (envelope.detail !== undefined) error.detail = envelope.detail;
+            throw error;
+        }
+        if (!envelope || envelope.ok !== true) {
+            throw new Error('保存通道返回了无法识别的响应。');
+        }
+        return envelope.value;
+    }
+
+    /**
+     * Ask for a save target, then stream the blob through the native writer.
+     *
+     * @param {Blob} blob - decrypted bytes
+     * @param {{original_name?: string, name?: string}} [metadata]
+     * @returns {Promise<{status: 'canceled'|'saved', fileName?: string, token?: string, canceled?: boolean}>}
+     */
+    async function saveBlobToDisk(blob, metadata) {
+        const bridge = nativeFileBridge();
+        if (!bridge) return { status: 'canceled', canceled: true };
+        // Review round 1 (MAJOR): a 0-byte file is legitimate (file-io.js seals
+        // it), so it must take the native path too instead of being pushed back
+        // into the invisible browser download.
+        if (!blob || typeof blob.size !== 'number') {
+            throw new Error('文件内容不可用，无法保存。');
+        }
+        const fileName = String((metadata && (metadata.original_name || metadata.name)) || '')
+            .replace(/[\\/]+$/, '') || 'download';
+
+        let target;
+        try {
+            target = await callNativeFileBridge(function () {
+                return bridge.pickSaveTarget({ fileName: fileName, totalBytes: blob.size });
+            });
+        } catch (err) {
+            throw rewrapNativeFileError(err);
+        }
+        if (!target || target.canceled) return { status: 'canceled', canceled: true };
+
+        let offset = 0;
+        try {
+            while (offset < blob.size) {
+                const slice = blob.slice(offset, Math.min(offset + NATIVE_WRITE_CHUNK_BYTES, blob.size));
+                const chunk = new Uint8Array(await slice.arrayBuffer());
+                // btoa() only accepts a binary string; 2 MiB keeps the argv-free
+                // JSON payload and the base64 copy comfortably bounded.
+                let binary = '';
+                for (let i = 0; i < chunk.length; i += 0x8000) {
+                    binary += String.fromCharCode.apply(null, chunk.subarray(i, i + 0x8000));
+                }
+                const result = await callNativeFileBridge(function () {
+                    return bridge.writeChunk({
+                        token: target.token,
+                        offset: offset,
+                        dataBase64: btoa(binary),
+                    });
+                });
+                if (!result || result.written !== offset + chunk.length) {
+                    const mismatch = new Error('offset_mismatch');
+                    mismatch.code = 'offset_mismatch';
+                    throw mismatch;
+                }
+                offset = result.written;
+            }
+            await callNativeFileBridge(function () {
+                return bridge.seal({ token: target.token });
+            });
+        } catch (err) {
+            // Round 2 review (MAJOR): hand the quota slot back. A retry starts a
+            // fresh grant, so repeatedly failing saves (disk full, locked file)
+            // cannot lock the user out of saving anything else for 30 minutes.
+            if (typeof bridge.release === 'function') {
+                try {
+                    await callNativeFileBridge(function () {
+                        return bridge.release({ token: target.token });
+                    });
+                } catch (_) { /* best effort: the TTL reclaims it eventually */ }
+            }
+            throw rewrapNativeFileError(err);
+        }
+        return {
+            status: 'saved',
+            token: target.token,
+            fileName: (target && target.fileName) || fileName,
+        };
+    }
+
+    /**
+     * Open a file this session saved. Resolves to a status instead of throwing
+     * for the expected "the OS refused" cases so callers can show a hint.
+     */
+    async function openSavedFile(token) {
+        const bridge = nativeFileBridge();
+        if (!bridge) return { status: 'unsupported' };
+        try {
+            const result = await callNativeFileBridge(function () {
+                return bridge.openDownloaded({ token: token });
+            });
+            return { status: 'opened', fileName: result && result.fileName };
+        } catch (err) {
+            return { status: 'failed', reason: describeNativeFileError(err), code: err && err.code };
+        }
+    }
+
     // ── Public API ──────────────────────────────────────────────────────
 
     window.iChatFileTransfer = {
@@ -1085,6 +1249,11 @@
         downloadAndDecryptFile: downloadAndDecryptFile,
         fetchAndDecryptFile: fetchAndDecryptFile,
         fetchFileKeyBytes: fetchFileKeyBytes,
+
+        // Native save / open (Electron only)
+        nativeSaveAvailable: function () { return nativeFileBridge() !== null; },
+        saveBlobToDisk: saveBlobToDisk,
+        openSavedFile: openSavedFile,
 
         // UI
         showFilePicker: showFilePicker,

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P4 T22 review fix (m2): the Capacitor template shipped
+  <external-path name="my_images" path="." />, which exposes the ENTIRE external
+  storage to anything holding a content:// URI from this FileProvider.
+
+  Narrowed to an app-private subdirectory. T28 (#155) owns the real file picking
+  and saving flows; it may add further entries, but each one must stay scoped to
+  a specific directory rather than path=".".
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="ichat_cache" path="ichat/" />
+    <files-path name="ichat_files" path="ichat/" />
+    <external-files-path name="ichat_external_files" path="ichat/" />
+</paths>

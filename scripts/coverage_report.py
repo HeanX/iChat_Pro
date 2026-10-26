@@ -43,9 +43,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN_PATH = REPO_ROOT / 'docs' / 'quality' / 'coverage-report.md'
 
+#: The measurement basis. Coverage reads this implicitly when it is called by
+#: hand, but the tooling names it explicitly on every invocation so the run
+#: cannot be re-pointed at a different rc behind the script's back (P11).
+REPO_COVERAGERC = REPO_ROOT / '.coveragerc'
+
 # ``--pattern``'s argparse default: it matches every test file, so only an
 # explicitly different value narrows the run.
 _DEFAULT_PATTERN = 'test*.py'
+
+#: Module names CPython imports automatically from ``sys.path`` at startup. A
+#: file with one of these names runs before any project code, so it can replace
+#: unittest's discovery without leaving a trace in argv (review P11).
+_STARTUP_HOOKS = ('sitecustomize.py', 'usercustomize.py')
 
 # The settings module the published snapshot is produced from. Anything else
 # (via ``--settings`` or ``DJANGO_SETTINGS_MODULE``) is not comparable: a
@@ -105,7 +115,7 @@ def _parse_test_args(extra_args: list[str]) -> tuple[argparse.Namespace, list[st
 
 
 def _is_subset_run(options: argparse.Namespace, unknown: list[str]) -> bool:
-    """True when the parsed arguments narrow the suite to a partial run.
+    """True when the run cannot speak for the whole suite.
 
     Thin boolean wrapper over ``_subset_reason`` (the reason itself is what the
     refusal message needs); the precedence between the individual checks lives
@@ -118,64 +128,133 @@ def _subset_is_unpublishable(options: argparse.Namespace, unknown: list[str]) ->
     """True when ``--allow-subset`` must NOT be able to publish this run.
 
     ``--allow-subset`` means "I know I narrowed the run; publish it anyway".
-    That is a legitimate statement about filters the *operator* chose -- a
-    label, ``--tag``, ``-k``, ``--pattern``.
+    That is a legitimate statement only for filters that choose *which of the
+    discovered tests* to run -- a label, ``--tag``, ``--exclude-tag``, ``-k``.
 
-    It is not a statement about a swapped settings module, a swapped
-    ``TEST_RUNNER`` or a ``--pythonpath`` that changes which ``ichat_pro`` gets
-    imported: there the *runner* decided how much of the suite to run, and the
-    command line cannot even tell how much that was. So this check asks only
-    about those substitutions and deliberately ignores the benign filters --
-    otherwise ``--allow-subset --settings=<alt> <label>`` would launder a
-    1-test run into the published snapshot (review P7).
+    It is not a statement about anything that changes the **basis** the numbers
+    are computed on:
 
-    A full run is never unpublishable, whatever options were spelled.
+    * a swapped settings module, ``TEST_RUNNER`` or ``--pythonpath`` (the
+      *runner* decides how much to run, and argv cannot even tell how much);
+    * ``--pattern`` / ``-t``: they change what discovery reaches at all, so the
+      denominator shrinks with the numerator (review P13);
+    * a replacement coverage configuration (review P11).
+
+    For those, "I know it is a subset" is not something the operator can know,
+    so ``--allow-subset`` must not launder them into the published snapshot
+    (review P7). A full run is never unpublishable, whatever options were
+    spelled.
     """
-    if unknown:
-        # Django rejects unknown options itself; nothing to launder here.
-        return False
-    return _substitution_reason(options) is not None
+    return (
+        _coverage_basis_reason() is not None
+        or _basis_replacement_reason(options, unknown) is not None
+    )
 
 
-def _substitution_scope(options: argparse.Namespace) -> str:
-    """A stable, human-readable signature of the code that will run the tests.
+def _pythonpath_is_repo_root(path: str) -> bool:
+    """Whether a path points at the repository root itself.
 
-    Every input that can change *which* settings/runner/package the child
-    process resolves is folded in here. Two runs with the same signature must
-    load the same code; if the signature cannot be computed, the caller treats
-    the run as unverifiable.
-
-    ``--pythonpath`` belongs here for a concrete reason: ``manage.py test``
-    calls ``handle_default_options``, which does ``sys.path.insert(0,
-    options.pythonpath)``. A directory holding a shadow ``ichat_pro`` package
-    then wins over the repository copy -- with an identical ``TEST_RUNNER``
-    string, so comparing names alone sees nothing wrong (review P6).
-    """
-    parts = [f'settings={_effective_settings_module(options)[0]}']
-    pythonpath = getattr(options, 'pythonpath', None)
-    if pythonpath:
-        try:
-            resolved = Path(str(pythonpath)).resolve()
-        except OSError:
-            resolved = Path(str(pythonpath))
-        parts.append(f'pythonpath={resolved}')
-    top_level = getattr(options, 'top_level', None)
-    if top_level and str(top_level) not in ('.', ''):
-        parts.append(f'top_level={top_level}')
-    return '; '.join(parts)
-
-
-def _pythonpath_is_repo_root(pythonpath: str) -> bool:
-    """Whether ``--pythonpath`` points at the repository root itself.
-
-    ``--pythonpath .`` (or an absolute path that resolves to the repo) inserts
-    the directory this script already imports from, so it cannot swap
-    ``ichat_pro`` for a shadow copy and is not a substitution. Anything else is.
+    ``--pythonpath .`` or ``-t <repo>`` insert the directory this script
+    already imports from, so they cannot swap ``ichat_pro`` for a shadow copy
+    and are not substitutions. Anything else is.
     """
     try:
-        return Path(str(pythonpath)).resolve() == REPO_ROOT
+        return Path(str(path)).resolve() == REPO_ROOT
     except (OSError, RuntimeError):
         return False
+
+
+def _path_inside(path: str | Path, root: Path) -> bool:
+    """Whether ``path`` resolves to ``root`` or somewhere below it."""
+    try:
+        resolved = Path(str(path)).resolve()
+    except (OSError, RuntimeError):
+        return False
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _coverage_basis_reason(environ=None) -> str | None:
+    """Why the coverage measurement itself would use a non-repo configuration.
+
+    P11: coverage reads ``COVERAGE_RCFILE`` from the environment and otherwise
+    falls back to ``.coveragerc``. A forged rc that reports only
+    ``ichat_pro/test_runner.py`` turned a 70.49% / 54.49% baseline into
+    "6/6 statements, 0/0 branches, 100.00%, 已达标" with **no argv at all**, and
+    overwrote the published snapshot. The rc decides what is measured, so it is
+    exactly as load-bearing as ``TEST_RUNNER``: same class, same refusal.
+
+    ``COVERAGE_FILE`` is deliberately *not* refused: it only says where the raw
+    data lives, and pointing it somewhere else is a legitimate CI convenience.
+    It would become a bypass only if a stale file there were read back as this
+    run's data, so instead of refusing it, every coverage child is handed
+    ``COVERAGE_FILE=<repo>/.coverage`` (see ``_coverage_child_env``). The knob
+    stays usable and stops being able to lie.
+
+    ``PYTHONPATH`` entries outside the repository are refused for the same
+    reason ``--pythonpath`` is. A directory there containing ``sitecustomize.py``
+    is imported by the interpreter *before* any project code, and a stubbed
+    ``unittest.TestLoader.discover`` made a documented full-suite command report
+    ``Ran 1 test`` and publish a snapshot (verified 2026-10-26). The argv was
+    untouched; only the environment moved.
+
+    The check is deliberately narrow -- it looks for the two hook module names
+    Python imports automatically, not for "any path outside the repo". A venv
+    or a CI harness legitimately puts its own directories on ``PYTHONPATH``;
+    refusing those would break working setups without stopping the attack.
+    """
+    env = os.environ if environ is None else environ
+    rcfile = env.get('COVERAGE_RCFILE')
+    if rcfile:
+        return (
+            f'环境变量 COVERAGE_RCFILE={rcfile} 替换了覆盖率测量基准'
+            f'（仓库自带的是 {REPO_ROOT / ".coveragerc"}）。'
+            '自定义 rc 可以只统计个别文件，把未达标的数字伪装成 100%'
+        )
+    for entry in (env.get('PYTHONPATH') or '').split(os.pathsep):
+        if not entry:
+            continue
+        for hook in _STARTUP_HOOKS:
+            candidate = Path(entry) / hook
+            if candidate.is_file():
+                return (
+                    f'PYTHONPATH 上的 {entry} 含 {hook}。'
+                    'Python 启动时会先导入它，它可以替换 unittest 的用例发现，'
+                    '而命令行完全看不出来；这会把全量运行变成任意条数'
+                )
+    return None
+
+
+def _basis_replacement_reason(options: argparse.Namespace, unknown: list[str]) -> str | None:
+    """Why the measurement basis (not just the selection) has been replaced.
+
+    Covers everything that changes *what the numbers mean* rather than *which
+    already-discovered tests run*: runner/settings/pythonpath/top-level
+    substitutions, a changed discovery pattern, and a replaced coverage
+    configuration. Kept separate from ``_subset_reason`` so that "is this a
+    subset" and "may this subset be published" cannot drift apart again.
+    """
+    return _substitution_reason(options) or _discovery_basis_reason(options)
+
+
+def _discovery_basis_reason(options: argparse.Namespace) -> str | None:
+    """Why discovery itself would reach a different set of files than default.
+
+    ``--pattern`` is not a filter over discovered tests: it is the glob
+    discovery uses, so ``--pattern chat/tests/test_protocol.py`` shrinks the
+    denominator along with the numerator. Treating it as a benign filter let
+    ``--allow-subset`` publish a one-file "coverage" number (review P13).
+    """
+    pattern = getattr(options, 'pattern', None)
+    if pattern is not None and pattern != _DEFAULT_PATTERN:
+        return (
+            f'--pattern={pattern} 改变了用例发现基准（默认 {_DEFAULT_PATTERN}），'
+            '分母会随之缩小，不能由 --allow-subset 授权发布'
+        )
+    return None
 
 
 def _substitution_reason(options: argparse.Namespace) -> str | None:
@@ -202,7 +281,11 @@ def _substitution_reason(options: argparse.Namespace) -> str | None:
 
     top_level = getattr(options, 'top_level', None)
     if top_level and str(top_level) not in ('.', ''):
-        return f'--top-level-directory={top_level} 改变了用例发现根目录'
+        # ``-t <repo>`` is the same "import from the repo root" as
+        # ``--pythonpath <repo>``; only a *different* root changes discovery.
+        # Symmetry with `_pythonpath_is_repo_root` (review P18).
+        if not _pythonpath_is_repo_root(top_level):
+            return f'--top-level-directory={top_level} 改变了用例发现根目录'
 
     module, source = _effective_settings_module(options)
     if module != _DEFAULT_SETTINGS_MODULE:
@@ -239,15 +322,19 @@ def _subset_reason(options: argparse.Namespace, unknown: list[str]) -> str | Non
     decision; the snapshot guard needs the *reason* as well, because a refusal
     the operator cannot understand gets worked around instead of fixed.
 
-    Order matters for the message only, not for the decision: substitution is
+    Order matters for the message only, not for the decision: the basis is
     checked first so that ``--settings=<alt> chat`` reports the dangerous cause
-    (swapped runner) rather than the benign one (a label).
+    (swapped runner) rather than the benign one (a label), and
+    ``--pattern=x --tag=y`` reports the changed discovery basis.
     """
     if unknown:
         return f'无法识别的测试参数（Django 会以 exit 2 拒绝）：{" ".join(unknown)}'
-    substitution = _substitution_reason(options)
-    if substitution is not None:
-        return substitution
+    coverage_basis = _coverage_basis_reason()
+    if coverage_basis is not None:
+        return coverage_basis
+    basis = _basis_replacement_reason(options, unknown)
+    if basis is not None:
+        return basis
     if getattr(options, 'args', None):
         return f'命令行指定了测试标签：{" ".join(str(a) for a in options.args)}'
     if getattr(options, 'tags', None):
@@ -256,9 +343,6 @@ def _subset_reason(options: argparse.Namespace, unknown: list[str]) -> str | Non
         return f'--exclude-tag 排除了带指定标签的用例：{", ".join(options.exclude_tags)}'
     if getattr(options, 'test_name_patterns', None):
         return f'-k 只运行匹配 {options.test_name_patterns} 的用例'
-    pattern = getattr(options, 'pattern', None)
-    if pattern is not None and pattern != _DEFAULT_PATTERN:
-        return f'--pattern={pattern} 会改变发现范围（默认 {_DEFAULT_PATTERN}）'
     return None
 
 
@@ -319,14 +403,17 @@ def _default_test_runner() -> str:
 
 
 def _subset_refusal(options: argparse.Namespace, unknown: list[str]) -> str | None:
-    """Operator-facing refusal text for a subset run, or ``None`` for a full run."""
+    """Operator-facing refusal text for a subset run, or ``None`` for a full run.
+
+    Delegates to ``_refusal_text`` so this and ``main()`` cannot drift apart
+    (review P16); ``test_count`` is left out because no tests have run yet.
+    """
     reason = _subset_reason(options, unknown)
     if reason is None:
         return None
-    return (
-        f'拒绝写入 docs/quality/coverage-report.md：{reason}\n'
-        '本次运行只代表子集，覆盖率数字不能当作全量快照。\n'
-        f'如需全量统计，请去掉上述选项后重跑（默认 settings 为 {_DEFAULT_SETTINGS_MODULE}）。'
+    return _refusal_text(
+        reason,
+        unpublishable=_subset_is_unpublishable(options, unknown),
     )
 
 
@@ -374,6 +461,26 @@ def _safe_echo(text: str, stream=None) -> None:
     stream.flush()
 
 
+def _coverage_child_env(data_file: Path | None = None) -> dict:
+    """The environment every coverage child process runs under.
+
+    Review P11: ``COVERAGE_RCFILE`` made a 404-test run report 6/6 statements
+    and 0/0 branches (100.00%, "已达标") with no argv at all, because all three
+    ``coverage`` invocations inherited it. Refusing it in the guard is the
+    primary defence; the child additionally gets a *constructed* environment, so
+    a variable the guard has not learned about yet cannot reach the measurement
+    either. Each command also passes ``--rcfile`` explicitly, so the basis is
+    named twice and cannot be supplied implicitly.
+    """
+    env = dict(os.environ)
+    env.pop('COVERAGE_RCFILE', None)
+    if data_file is not None:
+        # Pin the data file to this run: a stale .coverage elsewhere would be
+        # read back as if it were this run's numbers.
+        env['COVERAGE_FILE'] = str(data_file)
+    return env
+
+
 def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
     """Run the suite under coverage.
 
@@ -385,12 +492,18 @@ def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
     ``--pythonpath`` is refused before this runs (see ``_substitution_reason``):
     it changes which ``ichat_pro`` package the child resolves, so the child may
     execute a different runner than the one this process inspected.
+
+    ``--rcfile`` is passed explicitly (review P11). Refusing a foreign
+    ``COVERAGE_RCFILE`` is the primary guard, but the rc also decides *what is
+    measured*; pinning it here means a future relaxed check cannot silently
+    change the basis, and the three coverage commands cannot disagree.
     """
     command = [
         sys.executable,
         '-m',
         'coverage',
         'run',
+        f'--rcfile={REPO_COVERAGERC}',
         'manage.py',
         'test',
         *extra_args,
@@ -400,6 +513,7 @@ def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
     process = subprocess.Popen(
         command,
         cwd=REPO_ROOT,
+        env=_coverage_child_env(REPO_ROOT / '.coverage'),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -423,6 +537,30 @@ def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
     skip_match = skip_pattern.search(output)
     skipped = int(skip_match.group(1)) if skip_match else 0
     return exit_code, test_count, skipped
+
+
+def _refusal_text(reason: str, *, unpublishable: bool, test_count: int | None = None) -> str:
+    """The one place that words a snapshot refusal.
+
+    Review P16: ``main()`` and ``_subset_refusal()`` used to build two slightly
+    different messages, so a fix in one path could miss the other. Both now go
+    through here, and the wording depends only on *why* the run cannot publish.
+    """
+    lead = (
+        f'本次只运行了 {test_count} 个用例，'
+        if test_count is not None
+        else ''
+    )
+    tail = (
+        '\n这类改动改变了覆盖率数字的基准，无法从命令行判断实际统计范围，'
+        '--allow-subset 也不能绕过。'
+        if unpublishable
+        else '\n如需强制写入，加 --allow-subset。'
+    )
+    return (
+        f'{lead}未写入 docs/quality/coverage-report.md。\n'
+        f'原因：{reason}{tail}'
+    )
 
 
 def _snapshot_decision(
@@ -449,10 +587,11 @@ def _snapshot_decision(
     is embedded in the refusal so the operator learns which option made the run
     untrustworthy instead of only that it was refused.
 
-    ``subset_is_unpublishable`` marks the settings/runner substitutions, whose
-    suite size is not knowable from the command line at all. ``--allow-subset``
-    acknowledges a subset the operator *chose*; it must not bless a runner that
-    decided on its own how much to run (same reasoning as ``--parallel``).
+    ``subset_is_unpublishable`` marks the runs whose *basis* changed (settings,
+    runner, pythonpath, pattern, coverage config), whose statistical scope is
+    not knowable from the command line at all. ``--allow-subset`` acknowledges
+    a subset the operator *chose*; it must not bless a run that decided on its
+    own how much to measure (same reasoning as ``--parallel``).
     """
     if parallel > 1:
         return (
@@ -468,28 +607,32 @@ def _snapshot_decision(
             '未写入 docs/quality/coverage-report.md。',
         )
     if is_subset and (subset_is_unpublishable or not allow_subset):
-        detail = f'\n原因：{subset_reason}' if subset_reason else ''
-        hint = (
-            '\n这类替代无法从命令行判断实际跑了多少用例，'
-            '--allow-subset 也不能绕过。'
-            if subset_is_unpublishable
-            else '\n如需强制写入，加 --allow-subset。'
-        )
         return (
             'refuse',
-            f'本次只运行了 {test_count} 个用例，未写入 docs/quality/coverage-report.md。'
-            f'{detail}{hint}',
+            _refusal_text(
+                subset_reason or '本次运行只覆盖了部分用例',
+                unpublishable=subset_is_unpublishable,
+                test_count=test_count,
+            ),
         )
     return 'write', ''
 
 
 def _collect_json() -> dict:
-    """Export the current .coverage database to JSON and parse it."""
+    """Export the current .coverage database to JSON and parse it.
+
+    ``--rcfile`` is pinned and the environment is constructed for the same
+    reason as in ``_run_coverage``: this step decides which recorded files end
+    up in the published totals, so it must read the same basis and the same
+    data file the run wrote.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         target = Path(tmpdir) / 'coverage.json'
         subprocess.run(
-            [sys.executable, '-m', 'coverage', 'json', '-o', str(target), '-q'],
+            [sys.executable, '-m', 'coverage', 'json',
+             f'--rcfile={REPO_COVERAGERC}', '-o', str(target), '-q'],
             cwd=REPO_ROOT,
+            env=_coverage_child_env(REPO_ROOT / '.coverage'),
             check=True,
         )
         return json.loads(target.read_text(encoding='utf-8'))
@@ -740,8 +883,10 @@ def main() -> int:
         return exit_code
 
     report = subprocess.run(
-        [sys.executable, '-m', 'coverage', 'report', '-m'],
+        [sys.executable, '-m', 'coverage', 'report', '-m',
+         f'--rcfile={REPO_COVERAGERC}'],
         cwd=REPO_ROOT,
+        env=_coverage_child_env(REPO_ROOT / '.coverage'),
         check=False,
     )
     if report.returncode != 0:

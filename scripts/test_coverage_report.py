@@ -325,10 +325,16 @@ class SettingsAndRunnerDetectionTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 options, unknown = _parsed(*arguments)
                 self.assertTrue(report._subset_is_unpublishable(options, unknown))
-        for arguments in (['--tag', 'slow'], ['chat'], ['-kfoo'], ['--pattern=t_*.py']):
+        for arguments in (['--tag', 'slow'], ['chat'], ['-kfoo']):
             with self.subTest(arguments=arguments):
                 options, unknown = _parsed(*arguments)
                 self.assertFalse(report._subset_is_unpublishable(options, unknown))
+        # `--pattern` is *not* in this list: it changes the discovery basis
+        # rather than filtering discovered tests (review P13).
+        for arguments in (['--pattern=t_*.py'], ['-p', 't_*.py']):
+            with self.subTest(arguments=arguments):
+                options, unknown = _parsed(*arguments)
+                self.assertTrue(report._subset_is_unpublishable(options, unknown))
 
     def test_allow_subset_cannot_publish_a_hidden_runner(self):
         # ``--allow-subset`` acknowledges a subset the operator *chose*. A
@@ -583,14 +589,14 @@ class SubstitutionScopeTests(unittest.TestCase):
                               'the reason must name the dangerous cause')
 
     def test_a_benign_filter_alone_stays_authorisable(self):
-        # The opposite direction: an operator-chosen subset may still be
+        # The opposite direction: an operator-chosen *selection* may still be
         # published with --allow-subset, which is a documented workflow.
+        # `--pattern` is deliberately absent -- it is a basis change (P13).
         for arguments in (
             ['chat'],
             ['--tag=slow'],
             ['-kx'],
             ['--exclude-tag=y'],
-            ['--pattern=t_*.py'],
         ):
             with self.subTest(arguments=arguments):
                 subset, unpublishable, _ = self._flags(*arguments)
@@ -625,6 +631,153 @@ class SubstitutionScopeTests(unittest.TestCase):
                 self.assertTrue(subset)
                 self.assertTrue(unpublishable)
                 self.assertIn('pythonpath', reason)
+
+
+class CoverageBasisTests(unittest.TestCase):
+    """P11 (round 3): the coverage configuration is part of the basis.
+
+    ``COVERAGE_RCFILE`` pointed coverage at a forged rc whose ``[report]
+    include`` kept only ``ichat_pro/test_runner.py``. With **no argv at all**
+    the suite still ran 404 tests, exit 0, and the published snapshot said
+    "6/6 statements, 0/0 branches, 100.00%, 已达标" -- turning an unmet 70.49%
+    baseline into a satisfied one, in a committed artefact.
+
+    ``PYTHONPATH`` entries outside the repo are the same class: a
+    ``sitecustomize.py`` there is imported before any project code and can
+    replace ``unittest.TestLoader.discover``.
+    """
+
+    def setUp(self):
+        self._env = mock.patch.dict(os.environ, {}, clear=False)
+        self._env.start()
+        for key in ('COVERAGE_RCFILE', 'COVERAGE_FILE', 'DJANGO_SETTINGS_MODULE',
+                    'PYTHONPATH'):
+            os.environ.pop(key, None)
+        self.addCleanup(self._env.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+
+    def _flags(self, *arguments):
+        options, unknown = _parsed(*arguments)
+        return (
+            report._is_subset_run(options, unknown),
+            report._subset_is_unpublishable(options, unknown),
+            report._subset_reason(options, unknown),
+        )
+
+    def test_foreign_coverage_rcfile_is_unpublishable(self):
+        forged = str(Path(tempfile.gettempdir()) / 'forged.coveragerc')
+        with mock.patch.dict(os.environ, {'COVERAGE_RCFILE': forged}):
+            subset, unpublishable, reason = self._flags()
+        self.assertTrue(subset, 'a foreign rc must make the run a subset')
+        self.assertTrue(unpublishable, '--allow-subset must not launder it')
+        self.assertIn('COVERAGE_RCFILE', reason)
+        self.assertIn('测量基准', reason)
+
+    def test_repo_coverage_rcfile_via_env_is_still_refused(self):
+        # The guard refuses COVERAGE_RCFILE outright rather than comparing
+        # paths: coverage also accepts .coveragerc, setup.cfg and tox.ini, so
+        # "is this the repo's file" cannot be decided by name alone.
+        with mock.patch.dict(
+            os.environ, {'COVERAGE_RCFILE': str(report.REPO_COVERAGERC)}
+        ):
+            subset, unpublishable, _ = self._flags()
+        self.assertTrue(subset)
+        self.assertTrue(unpublishable)
+
+    def test_foreign_pythonpath_with_a_startup_hook_is_unpublishable(self):
+        shadow = self.tmp / 'hookdir'
+        shadow.mkdir()
+        (shadow / 'sitecustomize.py').write_text('', encoding='utf-8')
+        with mock.patch.dict(
+            os.environ,
+            {'PYTHONPATH': os.pathsep.join([str(shadow), str(REPO_ROOT)])},
+        ):
+            subset, unpublishable, reason = self._flags()
+        self.assertTrue(subset)
+        self.assertTrue(unpublishable)
+        self.assertIn('sitecustomize.py', reason)
+        self.assertIn(str(shadow), reason)
+
+    def test_plain_pythonpath_entries_are_not_a_substitution(self):
+        # A normal venv/harness directory is not an attack: only a module that
+        # Python imports at startup (sitecustomize/usercustomize) is.
+        plain = self.tmp / 'plainlib'
+        plain.mkdir()
+        (plain / 'some_module.py').write_text('', encoding='utf-8')
+        with mock.patch.dict(
+            os.environ,
+            {'PYTHONPATH': os.pathsep.join([str(plain), str(REPO_ROOT)])},
+        ):
+            subset, unpublishable, reason = self._flags()
+        self.assertFalse(subset)
+        self.assertFalse(unpublishable)
+        self.assertIsNone(reason)
+
+    def test_repo_only_pythonpath_is_not_a_substitution(self):
+        with mock.patch.dict(os.environ, {'PYTHONPATH': str(REPO_ROOT)}):
+            subset, unpublishable, reason = self._flags()
+        self.assertFalse(subset)
+        self.assertFalse(unpublishable)
+        self.assertIsNone(reason)
+
+    def test_coverage_file_is_pinned_rather_than_refused(self):
+        # Moving the raw data file is a legitimate convenience; the script
+        # pins it for its children instead, so it must NOT be refused.
+        with mock.patch.dict(
+            os.environ, {'COVERAGE_FILE': str(Path(tempfile.gettempdir()) / 'x.coverage')}
+        ):
+            self.assertIsNone(report._coverage_basis_reason())
+
+    def test_child_env_drops_the_rcfile_override(self):
+        with mock.patch.dict(os.environ, {'COVERAGE_RCFILE': 'C:/forged.rc'}):
+            env = report._coverage_child_env(Path('C:/tmp/data.coverage'))
+        self.assertNotIn('COVERAGE_RCFILE', env)
+        self.assertEqual(env['COVERAGE_FILE'], str(Path('C:/tmp/data.coverage')))
+
+    def test_pattern_is_a_basis_change_not_a_filter(self):
+        # P13: `--pattern` is the glob discovery uses, so the denominator
+        # shrinks with the numerator. It cannot be authorised.
+        for arguments in (
+            ['--pattern=chat/tests/test_protocol.py'],
+            ['--pattern', 'chat/tests/test_protocol.py'],
+            ['-p', 'chat/tests/test_protocol.py'],
+        ):
+            with self.subTest(arguments=arguments):
+                subset, unpublishable, reason = self._flags(*arguments)
+                self.assertTrue(subset)
+                self.assertTrue(unpublishable)
+                self.assertIn('--pattern', reason)
+
+    def test_top_level_repo_root_is_not_a_substitution(self):
+        # P18: symmetric with --pythonpath <repo>.
+        self.assertFalse(self._flags('-t', str(REPO_ROOT))[0])
+        subset, unpublishable, reason = self._flags('-t', 'chat')
+        self.assertTrue(subset)
+        self.assertTrue(unpublishable)
+        self.assertIn('top-level-directory', reason)
+
+    def test_refusal_text_has_one_source(self):
+        # P16: `_subset_refusal` and `_snapshot_decision` must not drift.
+        with mock.patch.dict(os.environ, {'COVERAGE_RCFILE': 'C:/forged.rc'}):
+            options, unknown = _parsed()
+            from_refusal = report._subset_refusal(options, unknown)
+        from_decision = report._snapshot_decision(
+            is_subset=True,
+            allow_subset=False,
+            test_count=404,
+            min_tests=1,
+            subset_reason=report._subset_reason(options, unknown) or '',
+            subset_is_unpublishable=True,
+        )[1]
+        # Same wording apart from the "N tests" lead-in the decision adds.
+        self.assertIn('未写入 docs/quality/coverage-report.md', from_refusal)
+        self.assertIn('未写入 docs/quality/coverage-report.md', from_decision)
+        self.assertIn('原因：', from_refusal)
+        self.assertIn('原因：', from_decision)
+        self.assertIn('--allow-subset 也不能绕过', from_refusal)
+        self.assertIn('--allow-subset 也不能绕过', from_decision)
 
 
 class ProcessLevelSnapshotTests(unittest.TestCase):
@@ -732,12 +885,18 @@ class IChatTestRunner(DiscoverRunner):
         return text
 
     def _run(self, forwarded, *, own=()):
-        """Run the real script against the real worktree, one case at a time."""
+        """Run the real script against the real worktree, one case at a time.
+
+        The temp directory goes on ``PYTHONPATH`` so ``--settings=<temp>``
+        resolves. That is not a P11 bypass: the guard only refuses a
+        ``PYTHONPATH`` entry that contains a startup hook, and this directory
+        deliberately contains none.
+        """
         env = dict(os.environ)
         env['PYTHONPATH'] = os.pathsep.join([str(self.tmp), str(REPO_ROOT)])
         env['PYTHONIOENCODING'] = 'utf-8'
         env.pop('DJANGO_SETTINGS_MODULE', None)
-        env['COVERAGE_FILE'] = str(self.tmp / 'qa02.coverage')
+        env.pop('COVERAGE_RCFILE', None)
         command = [
             sys.executable, '-B', str(REPO_ROOT / 'scripts' / 'coverage_report.py'),
             *own, '--', *[str(arg).replace('{shadow}', str(self.shadow))
@@ -809,7 +968,7 @@ class IChatTestRunner(DiscoverRunner):
         env['PYTHONPATH'] = os.pathsep.join([str(self.tmp), str(REPO_ROOT)])
         env['PYTHONIOENCODING'] = 'utf-8'
         env['DJANGO_SETTINGS_MODULE'] = 'qa02_alt_settings'
-        env['COVERAGE_FILE'] = str(self.tmp / 'qa02-env.coverage')
+        env.pop('COVERAGE_RCFILE', None)
         completed = subprocess.run(
             [sys.executable, '-B',
              str(REPO_ROOT / 'scripts' / 'coverage_report.py'),
@@ -823,6 +982,76 @@ class IChatTestRunner(DiscoverRunner):
         self.assertEqual(before, after, 'snapshot overwritten via env settings')
         self.assertEqual(self.snapshot.read_text(encoding='utf-8'), sentinel)
         self.assertIn('DJANGO_SETTINGS_MODULE', output)
+
+    # -- P11 / P13 (round 3): the measurement basis -------------------------
+
+    FORGED_RC = (
+        '[run]\n'
+        'branch = True\n'
+        'source = ichat_pro\n'
+        '\n'
+        '[report]\n'
+        'include = ichat_pro/test_runner.py\n'
+    )
+
+    def test_foreign_coverage_rcfile_cannot_publish(self):
+        """P11: one environment variable must not rewrite the baseline.
+
+        The forged rc reports only ``ichat_pro/test_runner.py``, so a full
+        404-test run publishes "6/6 statements, 0/0 branches, 100.00%" and
+        marks NEW-TST-006/007 as met. No argv is suspicious at all.
+        """
+        rcfile = self.tmp / 'forged.coveragerc'
+        rcfile.write_text(self.FORGED_RC, encoding='utf-8')
+        sentinel = self._sentinel('rcfile')
+        before = hashlib.sha256(self.snapshot.read_bytes()).hexdigest()
+        env = dict(os.environ)
+        env['PYTHONPATH'] = str(REPO_ROOT)
+        env['PYTHONIOENCODING'] = 'utf-8'
+        env['COVERAGE_RCFILE'] = str(rcfile)
+        env.pop('DJANGO_SETTINGS_MODULE', None)
+        completed = subprocess.run(
+            [sys.executable, '-B',
+             str(REPO_ROOT / 'scripts' / 'coverage_report.py'),
+             '--', '--parallel', '1'],
+            cwd=str(REPO_ROOT), env=env, text=True, encoding='utf-8',
+            errors='replace', capture_output=True, timeout=900,
+        )
+        output = completed.stdout + completed.stderr
+        after = hashlib.sha256(self.snapshot.read_bytes()).hexdigest()
+        self.assertNotEqual(completed.returncode, 0,
+                            f'a forged rc must fail the command\n{output[-2000:]}')
+        self.assertEqual(before, after,
+                         f'the published snapshot was overwritten\n{output[-2000:]}')
+        self.assertEqual(self.snapshot.read_text(encoding='utf-8'), sentinel)
+        self.assertNotIn('已写入', output)
+        self.assertIn('COVERAGE_RCFILE', output)
+        self.assertIn('测量基准', output)
+
+    def test_pattern_allow_subset_cannot_publish(self):
+        """P13: ``--pattern`` shrinks the denominator, so it is a basis change.
+
+        The pattern below matches no discovered module, so the run also trips
+        the ``--min-tests`` floor. Both refuse; what matters here is the exit
+        code and the untouched snapshot -- the *reason* for an ambiguous
+        pattern must not be the benign "--allow-subset would allow this".
+        """
+        for label, forwarded in (
+            ('pattern-eq', ['--pattern=chat/tests/test_protocol.py']),
+            ('pattern-short', ['-p', 'chat/tests/test_protocol.py']),
+        ):
+            with self.subTest(label=label):
+                output = self._assert_refused(
+                    label, forwarded, own=('--allow-subset',),
+                )
+                self.assertNotIn('如需强制写入，加 --allow-subset', output)
+                self.assertIn('未写入', output)
+
+    def test_pattern_basis_is_named_even_when_the_run_is_empty(self):
+        """The refusal must name the basis change, not only the empty run."""
+        options, unknown = _parsed('--pattern=chat/tests/test_protocol.py')
+        self.assertIn('--pattern', report._subset_reason(options, unknown))
+        self.assertTrue(report._subset_is_unpublishable(options, unknown))
 
 
 if __name__ == '__main__':

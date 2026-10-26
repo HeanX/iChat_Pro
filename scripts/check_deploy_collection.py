@@ -214,16 +214,44 @@ def main(argv: list[str] | None = None) -> int:
 
     # bash is a hard requirement: without it the shell regressions skip, and a
     # skipped check must never look green.
+    #
+    # Review P15: the ops modules do not all honour ICHAT_TEST_BASH --
+    # `deploy/tests/support.py` does, but `test_release_audit.py` calls
+    # `shutil.which("bash")` directly. Setting only the env var therefore
+    # leaves 27 tests skip-marked and this guard red, which is the right
+    # direction but a confusing one, so say which knob is missing.
     bash = os.environ.get('ICHAT_TEST_BASH') or shutil.which('bash')
+    on_path = shutil.which('bash')
     if not bash or not Path(bash).is_file():
         problems.append(
             'bash 不在 PATH 上（也未设置 ICHAT_TEST_BASH）；'
-            '依赖 shell 的运维用例会 skip，skip 不算通过'
+            '依赖 shell 的运维用例会 skip，skip 不算通过。'
+            '请把 bash 放进 PATH（Git Bash: C:\\Program Files\\Git\\bin），'
+            '仅设 ICHAT_TEST_BASH 不够：test_release_audit 只认 PATH'
+        )
+    elif not on_path:
+        problems.append(
+            f'ICHAT_TEST_BASH={bash} 可用，但 bash 不在 PATH 上；'
+            'test_release_audit.py 直接调用 shutil.which("bash")，'
+            '它的 27 条 shell 用例仍会被 skip。请把 bash 目录加进 PATH'
         )
 
+    # Review P14: Django's default discovery starts at the *current directory*
+    # (`build_suite([])` passes `start_dir='.'`), while REPO_ROOT comes from this
+    # file's location. Running the guard from `chat/` therefore reported
+    # "默认发现 0" for a perfectly good tree. `top_level` alone does not fix it,
+    # so the cwd is pinned for the duration of the collection and restored
+    # afterwards.
     runner = DiscoverRunner(verbosity=0, interactive=False)
     requested = list(DEPLOY_TEST_MODULES) + extras
-    explicit_suite = runner.build_suite(requested)
+    previous_cwd = os.getcwd()
+    try:
+        os.chdir(REPO_ROOT)
+        explicit_suite = runner.build_suite(requested)
+        discovered_default = list(flatten(runner.build_suite([])))
+    finally:
+        os.chdir(previous_cwd)
+
     collected = list(flatten(explicit_suite))
     deploy_ids = [test_id for test_id in collected if test_id.startswith('deploy.')]
 
@@ -258,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     # `__init__.py`, so `deploy.tests` becomes a namespace package) is visible
     # *only* here. Review P2: it used to be reported and ignored, so the guard
     # printed "QA-01 OK ... 0" for exactly the failure it was written to catch.
-    discovered_default = list(flatten(runner.build_suite([])))
+    # (`discovered_default` was collected above with the cwd pinned to REPO_ROOT.)
     default_deploy_ids = [
         test_id for test_id in discovered_default
         if test_id.startswith('deploy.')

@@ -99,7 +99,14 @@ jobs:
       # package, so `manage.py test` collected 404 tests and zero `deploy.*`
       # ones even though naming the modules collected 82 (review evidence:
       # cloud-ops-default-discovery.json).
-      - name: Guard that the deploy modules are collected
+      #
+      # PRECONDITION (review P12): these steps require the ops suite, i.e.
+      # `deploy/__init__.py` and `deploy/tests/` from
+      # feat/p4-t49-test-environment. On a branch without them this step fails
+      # by design (a missing ops suite must never look green), so the QA branch
+      # is only expected to be green once it is integrated with that branch.
+      # See .review/phase4-remediation-20261026/evidence/qa3-ci-dependency.md.
+      - name: Guard that the deploy modules are collected (requires the ops suite from feat/p4-t49-test-environment)
         env:
           ICHAT_TEST_BASH: /bin/bash
         run: python scripts/check_deploy_collection.py
@@ -107,7 +114,7 @@ jobs:
       - name: Run tests
         run: python manage.py test
 
-      - name: Run the deploy/ops regression suite explicitly
+      - name: Run the deploy/ops regression suite explicitly (requires the ops suite from feat/p4-t49-test-environment)
         env:
           ICHAT_TEST_BASH: /bin/bash
         run: |
@@ -183,13 +190,16 @@ jobs:
       # QA-01: the same two guards as the `test` job. The ops suite is the one
       # that exercises release gates, so it must not depend on this job's
       # implicit discovery either, and the shell it needs must really exist.
+      #
+      # PRECONDITION (review P12): requires the ops suite from
+      # feat/p4-t49-test-environment; see the same note in the `test` job.
       - name: Require bash for the ops shell regressions
         run: |
           set -euo pipefail
           command -v bash
           bash --version | head -n 1
 
-      - name: Guard that the deploy modules are collected
+      - name: Guard that the deploy modules are collected (requires the ops suite from feat/p4-t49-test-environment)
         env:
           ICHAT_TEST_BASH: /bin/bash
         run: python scripts/check_deploy_collection.py
@@ -197,7 +207,7 @@ jobs:
       - name: Run tests against PostgreSQL and Redis
         run: python manage.py test --parallel 1
 
-      - name: Run the deploy/ops regression suite explicitly
+      - name: Run the deploy/ops regression suite explicitly (requires the ops suite from feat/p4-t49-test-environment)
         env:
           ICHAT_TEST_BASH: /bin/bash
         run: |

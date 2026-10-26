@@ -288,8 +288,13 @@
 > 它**不是**客户端应当信任其内容的凭据。浏览器端必须以**用户实际点击的那条本地请求快照**
 > 作为授权对象，只在 `action=accept`、服务端确认的 `id`/`requester_id`/`responder_id`
 > 与该快照一致，且重新拉取的 active key 仍等于快照里的指纹与版本时，才把该指纹写入
-> 本地信任库（`ichat_peer_identity:<uid>`）与发送缓存。回包若指向其他联系人或其它版本，
-> 一律不授予任何信任并提示用户。`decline` / `cancel` / `expired` / 普通刷新永不授予信任。
+> 本地信任库（`ichat_peer_identity:<uid>`）与发送缓存。回包若指向其他联系人、其它版本或
+> 其它 `id`，一律不授予任何信任并提示用户。`decline` / `cancel` / `expired` / 普通刷新永不授予信任。
+>
+> 同一契约适用于 WebSocket 的 `key.verification.new` 事件：`event="accepted"` 只是服务端
+> 的陈述，**不是用户授权**。客户端必须把事件与本地托盘快照比对；**没有本地快照时不授予
+> 任何人信任**（用户从未看到该请求，就谈不上同意），并提示用户重新发起验证。
+> 成功提示只能在真正写入本地信任之后显示。
 >
 > 详见 `docs/phase4/t08-acceptance-evidence.md` 的「客户端信任规则」一节。
 

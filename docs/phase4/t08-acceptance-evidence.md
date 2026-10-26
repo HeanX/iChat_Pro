@@ -86,7 +86,7 @@ test_concurrent_conflicting_id_across_conversations (chat.tests.test_t32_review.
 
 ```text
 $ npm run test:e2ee
-tests 107 / pass 107 / fail 0
+tests 111 / pass 111 / fail 0
 
 $ node --check static/js/chat.js
 exit=0
@@ -99,9 +99,19 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
 
 | 文件 | 条数 | 覆盖 |
 | --- | --- | --- |
-| `chat/tests/js/key_trust_decline.test.js` | 23 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链 |
+| `chat/tests/js/key_trust_decline.test.js` | 27 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链 |
 | `chat/tests/js/settings_key_export.test.js` | 9 | 从真实模板抽取并执行独立设置页的 `keyMgrExport()` |
-| 合计 | 107 | 其中 4 个独立脚本（private/group/connection/desktop-config）+ `node --test` 99 条 |
+
+口径说明（避免重复计数）：`npm run test:e2ee` = **111** 条，全部来自 `node --test` 阶段；
+另有 4 个独立脚本（`private_chat_e2ee`、`group_chat_e2ee`、`chat_connection`、`desktop_config`）
+在 `node --test` 之前用 `node <file>` 直接执行，只打印 `all tests passed`、**不产生计数**，
+因此不计入 111。逐文件实测：`message_accepted` 12、`public_key_cache` 2、
+`key_change_reminder` 13、`key_trust_decline` 27、`settings_key_export` 9、`desktop_branding` 1、
+`desktop_tray` 15、`chat_notifications` 13、`desktop_notifications` 7、`notification_integration` 12
+= 111。
+
+> 另注：若用 `node --test 'chat/tests/js/*.test.js'` 一次性跑**全部** 14 个文件（含上述 4 个
+> 独立脚本，每个算 1 条），总数是 115，与 `test:e2ee` 的 111 不是同一口径，不要混用。
 
 > 数字随代码演进会变，以当次 `npm run test:e2ee` 输出为准；上表为 2026-10-26 实测。
 
@@ -112,27 +122,31 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
 1. **只有一种授予路径**：`refreshKeyVerificationAfterChange(userId, { grantTrustFor })`
    是唯一会调用 `window.iChatPrivateE2EE.trustPeerKey()` 的地方；不传 `grantTrustFor`
    时它只刷新展示，不写信任。
-2. **授权对象取自本地快照**：`respondToKeyVerification()` 以
-   `pendingKeyVerificationRequests` 中用户实际点击的那条请求为准，
-   `verificationConfirmation()` 只用回包核对 `id` / `requester_id` / `responder_id`。
-   回包指向其它联系人或其它版本时**不授予任何人信任**并提示用户。
-   WebSocket `accepted` 事件同样经 `verificationIdentifiesSameRequest()` 与托盘快照比对，
-   未在托盘中出现过的请求、或点名其它联系人的事件，一律不授予。
+2. **授权对象取自本地快照，且是唯一来源**：
+   - `respondToKeyVerification()` 以 `pendingKeyVerificationRequests` 中用户实际点击的那条
+     请求为准，`verificationConfirmation()` 只用回包核对 `id` / `requester_id` / `responder_id`；
+     回包指向其它联系人、其它版本或其它 `id` 时**不授予任何人信任**并提示用户。
+   - WebSocket `accepted` 事件同样以托盘快照为授权对象，并须通过
+     `verificationIdentifiesSameRequest()`；**没有本地快照时失败关闭**——用户从未在本标签页
+     看到该请求，服务端说 accepted 不等于用户同意，因此不授予任何人并提示重新发起验证。
 3. **双重比对**：`acceptedVerificationPeer()` 要求 `status === "accepted"` 且自己是当事人；
    `keyStatusMatchesAcceptedVerification()` 要求服务端当前 active key 的指纹**和版本**
    都等于快照所 pin 的值。
 4. **作用域不扩散**：`peer.userId === userId` 保证授权只作用于被点名的那位联系人；
    当前打开的**另一位**联系人只刷新展示，绝不会被顺带信任。
-5. **不授予的情形**：拒绝、取消、过期（含服务端 `409`）、普通刷新、`fetchContactKeyStatus`
-   失败、`respond` 抛错，一律不新增本地信任；失败时还会清空状态缓存，避免残留"已验证"外观。
-6. **拒绝与失败不报成功**：`accept` 未能真正授予时提示"密钥已变化，本次验证未授予信任"，
-   而不是显示成功。
+5. **不授予的情形**：拒绝、取消、过期（含服务端 `409`）、普通刷新、无本地快照的 socket
+   事件、`fetchContactKeyStatus` 失败、`respond` 抛错（含 204/空回包），一律不新增本地信任；
+   失败时还会清空状态缓存，避免残留"已验证"外观。
+6. **拒绝与失败不报成功**：成功文案只在 `refreshKeyVerificationAfterChange()` 返回
+   `{granted: true}` 之后显示；未能真正授予时提示"密钥已变化，本次验证未授予信任"或
+   "服务端未返回确认信息"，而不是显示成功。
 7. **双击幂等**：`keyVerificationResponsesInFlight` 保证同一条请求只发一次 `respond`，
    不会出现两个相反 toast。
 
 对应回归用例见 `chat/tests/js/key_trust_decline.test.js`，其中包含
-"回包点名另一位联系人不得授予任何人"、"decline 遇回包声称 accepted 仍不授予"、
-"双击只发一次请求"等定向场景。
+"回包点名另一位联系人不得授予任何人"、"回包 id 不同视为不匹配"、
+"decline 遇回包声称 accepted 仍不授予"、"无本地快照的 socket 事件零授予并提示"、
+"快照一致时正常授予并报成功"、"双击只发一次请求"等定向场景。
 
 ## 3.2 独立设置页的密钥导出（WEB-04 / #170 依赖）
 
@@ -175,6 +189,7 @@ $ git status --short -- media/
 | 5 | 独立子 Agent（新上下文，10 场景矩阵） | PASS WITH FINDINGS | 语义变更正确、无回归；MAJOR：DELETE 注释引用了 `agent-handoff.md` 里不存在的规则 | 删除虚构引用，改注释放置位置，补"显式 untrusted"用例 |
 | 6 | 独立子 Agent（重开，新上下文） | **PASS**（无 BLOCKER / MAJOR / MINOR） | 仅 2 条过程记录：审查区间口径（ff3ea42..d80c836）、worktree 内 `.review/` 为审查痕迹 | 无需处理 |
 | 7 | 独立子 Agent（Phase4 修复轮，新上下文） | PASS WITH FINDINGS | WEB-03 主路径已修，但 3 MAJOR：授权对象取自服务端回包、文档未同步、导出入口门禁与实现不一致；另有 m-1 双击、m-4 死代码等 MINOR | 全部处理：授权改取本地快照并拒绝回包替换、同步本文件与 API 文档、删除重复门禁、加 in-flight 守卫、删除死代码入口；并补上能覆盖 M2/M7 变异的用例 |
+| 8 | 独立子 Agent（第 2 轮，新上下文） | PASS WITH FINDINGS | HTTP 路径 35/35 确认修好、M-3 与 m-1/m-4 确认修好；**MAJOR：socket `accepted` 分支仍把事件负载当授权对象**（G2）；MINOR：回包 `id` 维无覆盖（F-1）、本文件数字自相矛盾（F-2）、204 提示不可读（F-3） | socket 改为无快照即失败关闭并给可读提示、成功 toast 移到 `granted` 之后；补 `id` 不匹配与 204 用例；按实测 111/27/9 统一数字 |
 
 
 **未验证范围**（不得当作通过）：

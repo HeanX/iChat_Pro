@@ -285,8 +285,8 @@ live_psql_role() {  # live_psql_role <db-url>; echoes the role, or nothing
     printf '%s' "$out"
 }
 
-live_redis_db() {  # live_redis_db <redis-url>; echoes SELECTed db index
-    local url=$1 host port out
+live_redis_db() {  # live_redis_db <redis-url>; echoes the db index in use
+    local url=$1 host port path db from_url out reply
     local rest=${url#*://}
     rest=${rest#*@}
     host=${rest%%/*}
@@ -295,10 +295,40 @@ live_redis_db() {  # live_redis_db <redis-url>; echoes SELECTed db index
         port=${host##*:}
         host=${host%:*}
     fi
-    # `SELECT <n>` returns OK; ask the server which db we are on.
-    out=$(redis-cli -h "${host:-127.0.0.1}" -p "$port" --no-auth-warning \
-        client info 2>/dev/null | sed -n 's/^db=\([0-9]*\).*/\1/p')
-    [[ -n "$out" ]] || return 1
+    # The URL names the logical database after the last '/'. It must be passed
+    # to redis-cli: without -n, every check connects to db 0, so two correctly
+    # separated servers both report 0 and a GOOD staging install is judged a
+    # violation (review finding F-07, second half).
+    path=${rest#*/}
+    path=${path%%\?*}
+    from_url=${path##*/}
+    if [[ ! "$from_url" =~ ^[0-9]+$ ]]; then
+        # No usable index in the URL: cannot tell which db this URL means, so
+        # report "unverified" rather than guessing 0 and producing a wrong
+        # verdict.
+        return 1
+    fi
+    # Ask the server which db THIS connection is on. Real `CLIENT INFO` is a
+    # single line beginning with id=, with db= in the middle:
+    #   id=3 addr=127.0.0.1:... fd=8 name= age=0 ... db=0 sub=0 psub=0 ...
+    # The previous `sed -n 's/^db=...'` only matched the test stub's shape and
+    # failed against a real server (review finding F-07).
+    reply=$(redis-cli -h "${host:-127.0.0.1}" -p "$port" -n "$from_url" \
+        --no-auth-warning client info 2>/dev/null) || return 1
+    out=$(printf '%s\n' "$reply" | grep -o 'db=[0-9][0-9]*' | head -1)
+    out=${out#db=}
+    if [[ -z "$out" ]]; then
+        # A server that answered without a db= field (or an ACL-restricted
+        # CLIENT INFO) leaves the value unknown: fail closed.
+        return 1
+    fi
+    if [[ "$out" != "$from_url" ]]; then
+        # The server says we are not on the db the URL asked for. That is a
+        # real finding, but it is about the connection, not about isolation,
+        # so surface it as its own message from the caller.
+        printf 'mismatch:%s:%s' "$from_url" "$out"
+        return 0
+    fi
     printf '%s' "$out"
 }
 
@@ -330,7 +360,12 @@ if [[ "$CHECK_DATA" == "true" ]]; then
     else
         staging_live_db=$(live_redis_db "$staging_redis") || staging_live_db=""
         prod_live_db=$(live_redis_db "$prod_redis") || prod_live_db=""
-        if [[ -z "$staging_live_db" ]]; then
+        # "mismatch:<wanted>:<actual>" means the server answered but is not on
+        # the db the URL names. Neither side can then be compared, so it is
+        # UNVERIFIED (fail-closed), not a violation of isolation.
+        if [[ "$staging_live_db" == mismatch:* || "$prod_live_db" == mismatch:* ]]; then
+            violation "live redis: the server is not on the logical db the URL names (${staging_live_db#mismatch:} / ${prod_live_db#mismatch:}); the comparison is UNVERIFIED"
+        elif [[ -z "$staging_live_db" ]]; then
             violation "live redis: could not query the staging server, so its logical db is UNVERIFIED"
         elif [[ -z "$prod_live_db" ]]; then
             violation "live redis: could not query the production server, so the comparison is UNVERIFIED"

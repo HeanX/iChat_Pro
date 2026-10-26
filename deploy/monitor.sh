@@ -90,13 +90,59 @@ ENV_FILE_KEYS=(
 # Load one whitelisted key. Assigns by reference (printf -v) rather than
 # exporting, so the value reaches the variables the script uses instead of
 # every unrelated child process.
+#
+# The syntax accepted here mirrors what systemd's EnvironmentFile already does
+# for this exact file, because a value systemd honours but the monitor ignores
+# silently reverts a threshold to its default (review finding F-05):
+#   KEY=value
+#   KEY="value"           -> the quotes are stripped, value taken literally
+#   KEY='value'           -> same, with no expansion of any kind
+#   KEY=value  # comment  -> the comment is stripped ONLY when preceded by
+#                            whitespace and outside quotes (systemd does the
+#                            same); "#" inside a value is otherwise literal.
+# Nothing is evaluated: the result is assigned with printf -v, never passed to
+# eval, so a hostile line stays data.
+strip_env_value() {  # strip_env_value <raw> -> cleaned value on stdout
+    local value=$1
+    # Trailing comment: whitespace + '#' outside quotes.
+    local out='' c quote='' i
+    for (( i = 0; i < ${#value}; i++ )); do
+        c=${value:i:1}
+        if [[ -n "$quote" ]]; then
+            [[ "$c" == "$quote" ]] && quote=''
+            out+=$c
+            continue
+        fi
+        case "$c" in
+            '"'|"'") quote=$c; out+=$c ;;
+            '#')
+                # A '#' preceded by whitespace starts a comment; a '#' glued to
+                # a value (pa#ssword) is data.
+                if [[ -z "$out" || "$out" == *[[:space:]] ]]; then
+                    break
+                fi
+                out+=$c
+                ;;
+            *) out+=$c ;;
+        esac
+    done
+    value=$out
+    # Trim surrounding whitespace, then one layer of matching quotes.
+    value=${value#"${value%%[![:space:]]*}"}
+    value=${value%"${value##*[![:space:]]}"}
+    if [[ ${#value} -ge 2 ]]; then
+        if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+            value=${value:1:${#value}-2}
+        fi
+    fi
+    printf '%s' "$value"
+}
+
 load_env_file() {
-    local file=$1 line key value wanted allowed
+    local file=$1 line key value allowed
     [[ -f "$file" ]] || return 0
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # "KEY=value" only: skip comments, blanks and continuation-looking
-        # lines. The value is taken verbatim after the FIRST '=' so a password
-        # containing '=' survives.
+        # Skip blanks and whole-line comments.
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ "$line" == *=* ]] || continue
         key=${line%%=*}
@@ -107,6 +153,8 @@ load_env_file() {
         # ride along on the value and make every numeric threshold fail its
         # ^[0-9]+$ check, silently reverting to the default.
         value=${value%$'\r'}
+        # Strip quotes and trailing comments (see strip_env_value).
+        value=$(strip_env_value "$value")
         for allowed in "${ENV_FILE_KEYS[@]}"; do
             if [[ "$key" == "$allowed" ]]; then
                 # The caller's environment wins over the file.

@@ -45,8 +45,8 @@ class EnvironmentBoundaryTests(unittest.TestCase):
     def test_each_coverage_command_uses_the_isolated_interpreter(self):
         for action in ('run', 'json', 'report'):
             command = report._coverage_command(action)
-            self.assertEqual(command[:7],
-                             [sys.executable, '-I', '-X', 'utf8', '-m', 'coverage', action])
+            self.assertEqual(command[:5], [sys.executable, '-I', '-X', 'utf8', '-c'])
+            self.assertEqual(command[6:8], [str(report.REPO_ROOT), action])
             self.assertIn(f'--rcfile={report.REPO_COVERAGERC}', command)
 
     def test_real_child_imports_the_venv_coverage_with_poisoned_pythonpath(self):
@@ -65,6 +65,26 @@ class EnvironmentBoundaryTests(unittest.TestCase):
             origin, isolated = json.loads(process.stdout)
             self.assertTrue(Path(origin).resolve().is_relative_to(Path(sys.prefix).resolve()))
             self.assertEqual(isolated, 1)
+
+    def test_real_coverage_run_json_and_report_can_import_the_trusted_repo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / 'probe.py'
+            script.write_text('from ichat_pro import settings\nprint(settings.TEST_RUNNER)\n')
+            env = report._coverage_child_env(root / 'probe.coverage')
+            for action, arguments in (
+                ('run', [str(script)]),
+                ('json', ['-o', str(root / 'result.json'), '-q']),
+                ('report', []),
+            ):
+                process = subprocess.run(report._coverage_command(action, *arguments),
+                                         cwd=report.REPO_ROOT, env=env, capture_output=True,
+                                         text=True, encoding='utf-8', timeout=60)
+                self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+                if action == 'run':
+                    self.assertIn(report._EXPECTED_TEST_RUNNER, process.stdout)
+            data = json.loads((root / 'result.json').read_text(encoding='utf-8'))
+            self.assertGreater(data['totals']['num_statements'], 5000)
 
 
 class DenominatorTests(unittest.TestCase):

@@ -58,7 +58,7 @@
 | P4 T40 | WP05 | 设计并实现设备身份模型 | 模型、迁移、接口 | 同一账号不同设备可独立识别 | P1 | P4 T38 | 未完成（[Issue #167](https://github.com/HeanX/iChat_Pro/issues/167) 开放）；2026-10-18 设计阶段已交：ADR-P4-05（`docs/phase4/adr-p4-05-device-identity.md`）含 Device 模型设计、两阶段切分与待决问题 Q1–Q5，待迁移负责人会签后进入实现；跨平台/设备增强待验收 |
 | P4 T41 | WP05 | 实现设备列表与撤销 | 设置页面、接口和测试 | 被撤销设备不接收后续消息密钥 | P1 | P4 T40 | 未完成（[Issue #168](https://github.com/HeanX/iChat_Pro/issues/168) 开放）；跨平台/设备增强待验收 |
 | P4 T42 | WP05 | 实现多设备新消息密钥分发 | 协议、代码和测试 | 每个有效设备可解密新消息 | P1 | P4 T40、P4 T41 | 未完成（[Issue #169](https://github.com/HeanX/iChat_Pro/issues/169) 开放）；跨平台/设备增强待验收 |
-| P4 T43 | WP05 | 研究历史密钥迁移 | 设计文档或安全原型 | 仅经用户授权，失败和撤销路径明确 | P2 | P4 T42 | 未完成（[Issue #170](https://github.com/HeanX/iChat_Pro/issues/170) 开放）；跨平台/设备增强待验收 |
+| P4 T43 | WP05 | 研究历史密钥迁移 | 设计文档或安全原型 | 仅经用户授权，失败和撤销路径明确 | P2 | P4 T42 | 未完成（[Issue #170](https://github.com/HeanX/iChat_Pro/issues/170) 开放）；2026-10-18 研究阶段已交：`docs/phase4/t43-historical-key-migration-study.md`（方案 A/B/C 评估 + 逐场景失败/撤销表，1 轮独立评审勘误后复验），推荐 v1=产品化既有 JSON 备份、v2=在线交接（依赖 #167）；**待人类确认归档**；跨平台/设备增强待验收 |
 | P4 T44 | WP07 | 接入静态检查和格式门禁 | CI 配置 | 检查失败时流水线失败 | P0 | P4 T02 | 未完成（[Issue #171](https://github.com/HeanX/iChat_Pro/issues/171) 开放） |
 | P4 T45 | WP07 | 接入 Django、迁移和自动化测试 | CI 配置 | 任一核心测试失败时禁止合并 | P0 | P4 Test T01、P4 T02 | 未完成（[Issue #172](https://github.com/HeanX/iChat_Pro/issues/172) 开放）；四项 CI 已运行；主分支 required_status_checks 未配置，完整门禁未验收 |
 | P4 T46 | WP07 | 接入覆盖率门禁 | CI 报告 | 低于阈值时阻断或产生审批例外记录 | P0 | P4 Test T12 | 未完成（[Issue #173](https://github.com/HeanX/iChat_Pro/issues/173) 开放） |

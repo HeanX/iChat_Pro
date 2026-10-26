@@ -17,8 +17,10 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -197,6 +199,172 @@ class SubsetDetectionTests(unittest.TestCase):
         self.assertFalse(_is_subset('--parallel=auto'))
         self.assertGreater(_parallel('--parallel'), 1)
         self.assertGreater(_parallel('--parallel=auto'), 1)
+
+
+class SettingsAndRunnerDetectionTests(unittest.TestCase):
+    """QA-02: the settings module decides the runner, and the runner the suite.
+
+    The defect this pins: ``--settings=<alt>`` made Django use that module's
+    ``TEST_RUNNER``, which built a single-case suite. ``_is_subset_run`` only
+    looked at the argv ``testrunner`` dest, returned False, and the script
+    overwrote the published snapshot with a 1-test coverage run.
+
+    Every case here is pure: the settings module is a temporary file, and the
+    environment is patched so no ambient ``DJANGO_SETTINGS_MODULE`` leaks in.
+    """
+
+    def setUp(self):
+        self._env = mock.patch.dict(os.environ, {}, clear=False)
+        self._env.start()
+        os.environ.pop('DJANGO_SETTINGS_MODULE', None)
+        self.addCleanup(self._env.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        if str(self.tmp) not in sys.path:
+            sys.path.insert(0, str(self.tmp))
+        self.addCleanup(lambda: sys.path.remove(str(self.tmp)) if str(self.tmp) in sys.path else None)
+
+    def _write_settings(self, name, body):
+        (self.tmp / f'{name}.py').write_text(body, encoding='utf-8')
+        sys.modules.pop(name, None)
+        self.addCleanup(sys.modules.pop, name, None)
+        return name
+
+    def _reason(self, *arguments):
+        options, unknown = _parsed(*arguments)
+        return report._subset_reason(options, unknown)
+
+    def test_default_settings_module_is_not_a_subset(self):
+        for arguments in (
+            [],
+            ['--settings', 'ichat_pro.settings'],
+            ['--settings=ichat_pro.settings'],
+            ['--sett=ichat_pro.settings'],
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertFalse(_is_subset(*arguments))
+                self.assertIsNone(self._reason(*arguments))
+
+    def test_any_other_settings_module_is_a_subset(self):
+        # Even an `import *` clone: the runner can be overridden in it, which is
+        # exactly how the one-test run was published.
+        name = self._write_settings(
+            'qa02_clone_settings', 'from ichat_pro.settings import *\n')
+        for arguments in (
+            [f'--settings={name}'],
+            [f'--settings', name],
+            [f'--sett={name}'],  # argparse abbreviation
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertTrue(_is_subset(*arguments))
+                reason = self._reason(*arguments)
+                self.assertTrue(reason)
+                self.assertIn(name, reason, 'the refusal must name the module')
+                self.assertIn('--settings', reason, 'and where it came from')
+
+    def test_environment_settings_module_is_a_subset(self):
+        name = self._write_settings(
+            'qa02_env_settings', 'from ichat_pro.settings import *\n')
+        with mock.patch.dict(os.environ, {'DJANGO_SETTINGS_MODULE': name}):
+            self.assertTrue(_is_subset())
+            reason = self._reason()
+        self.assertIn(name, reason)
+        self.assertIn('DJANGO_SETTINGS_MODULE', reason)
+
+    def test_default_settings_in_the_environment_stays_a_full_run(self):
+        # A CI job exporting the default module explicitly is not a subset.
+        with mock.patch.dict(
+            os.environ, {'DJANGO_SETTINGS_MODULE': 'ichat_pro.settings'}
+        ):
+            self.assertFalse(_is_subset())
+
+    def test_missing_settings_module_is_refused_not_assumed_full(self):
+        # The script cannot import it, so it cannot prove which runner would run:
+        # an unverifiable run must never publish a snapshot.
+        self.assertTrue(_is_subset('--settings=qa02_does_not_exist_settings'))
+        reason = self._reason('--settings=qa02_does_not_exist_settings')
+        self.assertTrue(reason)
+        self.assertIn('qa02_does_not_exist_settings', reason)
+
+    def test_settings_module_with_a_different_test_runner_is_refused(self):
+        # The default module path, but the runner is swapped inside it. Done by
+        # patching the settings module's attribute, which is what a settings
+        # module that assigns TEST_RUNNER looks like after import.
+        import ichat_pro.settings as project_settings
+
+        with mock.patch.object(
+            project_settings, 'TEST_RUNNER', 'qa02_one_case_runner.OneTestRunner'
+        ):
+            self.assertTrue(_is_subset())
+            reason = self._reason()
+        self.assertIn('qa02_one_case_runner.OneTestRunner', reason)
+        self.assertIn('TEST_RUNNER', reason)
+
+    def test_settings_module_with_the_same_runner_is_not_a_subset(self):
+        import ichat_pro.settings as project_settings
+
+        self.assertEqual(
+            report._test_runner_for('ichat_pro.settings'),
+            project_settings.TEST_RUNNER,
+        )
+        self.assertIsNone(self._reason())
+
+    def test_refusal_is_unpublishable_for_runner_or_settings(self):
+        # A plain filter is an understood subset (exit 0, snapshot untouched);
+        # a hidden runner means the operator silently got no snapshot, so it
+        # must be visible to CI as a non-zero exit.
+        name = self._write_settings(
+            'qa02_error_settings', 'from ichat_pro.settings import *\n')
+        for arguments in (
+            [f'--settings={name}'],
+            ['--testrunner=qa02_one_case_runner.OneTestRunner'],
+        ):
+            with self.subTest(arguments=arguments):
+                options, unknown = _parsed(*arguments)
+                self.assertTrue(report._subset_is_unpublishable(options, unknown))
+        for arguments in (['--tag', 'slow'], ['chat'], ['-kfoo'], ['--pattern=t_*.py']):
+            with self.subTest(arguments=arguments):
+                options, unknown = _parsed(*arguments)
+                self.assertFalse(report._subset_is_unpublishable(options, unknown))
+
+    def test_allow_subset_cannot_publish_a_hidden_runner(self):
+        # ``--allow-subset`` acknowledges a subset the operator *chose*. A
+        # runner that decided on its own how much to run is not that, so it is
+        # refused even with the flag -- same rule as ``--parallel``.
+        decision, reason = report._snapshot_decision(
+            is_subset=True,
+            allow_subset=True,
+            test_count=1,
+            min_tests=1,
+            subset_reason='生效的 TEST_RUNNER 是 X',
+            subset_is_unpublishable=True,
+        )
+        self.assertEqual(decision, 'refuse')
+        self.assertIn('--allow-subset 也不能绕过', reason)
+        self.assertIn('TEST_RUNNER', reason)
+        # A chosen subset still honours the flag.
+        decision, _ = report._snapshot_decision(
+            is_subset=True, allow_subset=True, test_count=11, min_tests=1,
+        )
+        self.assertEqual(decision, 'write')
+
+    def test_refusal_text_is_readable_and_says_why(self):
+        name = self._write_settings(
+            'qa02_readable_settings',
+            'from ichat_pro.settings import *\n'
+            "TEST_RUNNER = 'qa02_one_case_runner.OneTestRunner'\n",
+        )
+        options, unknown = _parsed(f'--settings={name}')
+        text = report._subset_refusal(options, unknown)
+        self.assertIsNotNone(text)
+        self.assertIn('coverage-report.md', text)
+        self.assertIn(name, text)
+        self.assertIn('TEST_RUNNER', text)
+        self.assertNotIn('Traceback', text)
+        # No refusal for a real full run.
+        options, unknown = _parsed('--parallel', '1')
+        self.assertIsNone(report._subset_refusal(options, unknown))
 
 
 class ParallelRequestedTests(unittest.TestCase):

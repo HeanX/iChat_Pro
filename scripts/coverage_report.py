@@ -19,11 +19,17 @@ Exit codes:
   * --parallel >1 / auto  -> 2, the run still executes but is not traceable
   * subset without opt-in -> 0, snapshot untouched
   * success (full run)    -> 0, snapshot updated
+
+A run is a "subset" when anything about it can narrow the suite or redirect
+which settings/runner decide what "the whole suite" is -- including a
+``--settings`` (or ``DJANGO_SETTINGS_MODULE``) pointing anywhere but
+``ichat_pro.settings``, and a ``TEST_RUNNER`` other than the project's own.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import platform
@@ -40,6 +46,22 @@ MARKDOWN_PATH = REPO_ROOT / 'docs' / 'quality' / 'coverage-report.md'
 # ``--pattern``'s argparse default: it matches every test file, so only an
 # explicitly different value narrows the run.
 _DEFAULT_PATTERN = 'test*.py'
+
+# The settings module the published snapshot is produced from. Anything else
+# (via ``--settings`` or ``DJANGO_SETTINGS_MODULE``) is not comparable: a
+# different module can install a different TEST_RUNNER, database or app set,
+# which is exactly how a one-test run used to masquerade as the full suite.
+_DEFAULT_SETTINGS_MODULE = 'ichat_pro.settings'
+
+# Django's own default, used only if the project settings cannot be imported.
+_FRAMEWORK_TEST_RUNNER = 'django.test.runner.DiscoverRunner'
+
+# The runner ``ichat_pro/settings.py`` ships with. Pinned instead of read back
+# from the settings module on purpose: if the two ever disagree, the tooling
+# must refuse to publish rather than quietly accept whatever runner the module
+# happens to name. Changing the project's runner therefore requires changing
+# this constant in the same commit -- a deliberate, reviewable act.
+_EXPECTED_TEST_RUNNER = 'ichat_pro.test_runner.IChatTestRunner'
 
 
 # Sentinel for "Django picks its own process count" (bare ``--parallel`` or the
@@ -85,33 +107,178 @@ def _parse_test_args(extra_args: list[str]) -> tuple[argparse.Namespace, list[st
 def _is_subset_run(options: argparse.Namespace, unknown: list[str]) -> bool:
     """True when the parsed arguments narrow the suite to a partial run.
 
+    Thin boolean wrapper over ``_subset_reason`` (the reason itself is what the
+    refusal message needs); the precedence between the individual checks lives
+    there, in one place.
+    """
+    return _subset_reason(options, unknown) is not None
+
+
+def _subset_is_unpublishable(options: argparse.Namespace, unknown: list[str]) -> bool:
+    """True when this is a *subset* that ``--allow-subset`` must not publish.
+
+    Plain filters (``--tag``, ``-k``, labels) are a deliberate, understood
+    subset: the run succeeded and the historical exit-0 behaviour is kept.
+    ``--parallel`` already exits 2 elsewhere. A swapped settings module or
+    ``TEST_RUNNER`` is different on two counts:
+
+    * the operator asked for a full snapshot and silently got none, which is
+      how a stale snapshot got mistaken for a fresh one -- so this exits
+      non-zero and CI can see it;
+    * ``--allow-subset`` must not override it, because the runner -- not the
+      operator -- decided how much of the suite to run, and the command line
+      cannot tell how much that was.
+
+    A full run is never unpublishable, whatever options were spelled.
+    """
+    if not _is_subset_run(options, unknown):
+        return False
+    if unknown or getattr(options, 'args', None):
+        return False
+    if getattr(options, 'tags', None) or getattr(options, 'exclude_tags', None):
+        return False
+    if getattr(options, 'test_name_patterns', None):
+        return False
+    pattern = getattr(options, 'pattern', None)
+    if pattern is not None and pattern != _DEFAULT_PATTERN:
+        return False
+    # Anything left is runner/settings-driven, or an explicit --testrunner.
+    return True
+
+
+def _effective_settings_module(options: argparse.Namespace) -> tuple[str, str]:
+    """The settings module this run would really use, and where it came from.
+
+    ``manage.py`` exports ``DJANGO_SETTINGS_MODULE`` before Django is set up, so
+    the environment variable is the effective value. An explicit ``--settings``
+    is what Django's ``handle_default_options`` overwrites it with, so it wins.
+
+    Returns ``(module, source)`` where source is ``'--settings'``,
+    ``'DJANGO_SETTINGS_MODULE'`` or ``'default'``. The source matters to the
+    refusal message: it tells the operator which knob to stop turning.
+    """
+    explicit = getattr(options, 'settings', None)
+    if explicit:
+        return str(explicit), '--settings'
+    from_env = os.environ.get('DJANGO_SETTINGS_MODULE')
+    if from_env and from_env != _DEFAULT_SETTINGS_MODULE:
+        return from_env, 'DJANGO_SETTINGS_MODULE'
+    return _DEFAULT_SETTINGS_MODULE, 'default'
+
+
+def _test_runner_for(settings_module: str) -> str | None:
+    """``TEST_RUNNER`` as the *effective* settings module defines it.
+
+    The parser only ever sees ``--testrunner``; a ``TEST_RUNNER`` baked into a
+    custom settings module is invisible to argv. That gap is the whole QA-02
+    defect: ``--settings=some_alt_settings`` whose ``TEST_RUNNER`` builds a
+    single-case suite ran one test, looked like a full run, and overwrote the
+    published snapshot. Importing the module read-only (no ``django.setup()``,
+    no app loading) and reading the attribute closes it.
+
+    Returns ``None`` when the module cannot be imported here -- the caller must
+    then treat the run as unverifiable rather than as a full run.
+    """
+    if settings_module not in sys.modules and str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    try:
+        module = importlib.import_module(settings_module)
+    except Exception:  # noqa: BLE001 - any import failure is "cannot verify"
+        return None
+    value = getattr(module, 'TEST_RUNNER', None)
+    return str(value) if value else None
+
+
+def _default_test_runner() -> str:
+    """The project's own runner, as the snapshot expects it.
+
+    The pinned constant is authoritative so a settings-module edit cannot
+    redefine "the default" in the same breath as it swaps the runner. It falls
+    back to what ``ichat_pro.settings`` really says, then to Django's default,
+    only to keep the refusal message accurate when the constant drifts.
+    """
+    if _EXPECTED_TEST_RUNNER:
+        return _EXPECTED_TEST_RUNNER
+    return _test_runner_for(_DEFAULT_SETTINGS_MODULE) or _FRAMEWORK_TEST_RUNNER
+
+
+def _subset_reason(options: argparse.Namespace, unknown: list[str]) -> str | None:
+    """Why this run cannot speak for the whole suite, or ``None`` if it can.
+
+    The boolean ``_is_subset_run`` exists for callers that only need the
+    decision; the snapshot guard needs the *reason* as well, because a refusal
+    the operator cannot understand gets worked around instead of fixed.
+    """
+    if unknown:
+        return f'无法识别的测试参数（Django 会以 exit 2 拒绝）：{" ".join(unknown)}'
+    if getattr(options, 'args', None):
+        return f'命令行指定了测试标签：{" ".join(str(a) for a in options.args)}'
+    if getattr(options, 'tags', None):
+        return f'--tag 只运行带指定标签的用例：{", ".join(options.tags)}'
+    if getattr(options, 'exclude_tags', None):
+        return f'--exclude-tag 排除了带指定标签的用例：{", ".join(options.exclude_tags)}'
+    if getattr(options, 'test_name_patterns', None):
+        return f'-k 只运行匹配 {options.test_name_patterns} 的用例'
+    pattern = getattr(options, 'pattern', None)
+    if pattern is not None and pattern != _DEFAULT_PATTERN:
+        return f'--pattern={pattern} 会改变发现范围（默认 {_DEFAULT_PATTERN}）'
+    if getattr(options, 'testrunner', None):
+        return (
+            f'显式 --testrunner={options.testrunner} 可能只运行部分用例；'
+            f'快照必须来自默认 runner（{_default_test_runner()}）'
+        )
+
+    module, source = _effective_settings_module(options)
+    if module != _DEFAULT_SETTINGS_MODULE:
+        # Even a module that imports * from ichat_pro.settings is refused: the
+        # point of the guard is that the published numbers come from one known
+        # configuration, and settings can hide a TEST_RUNNER that narrows the
+        # suite (that is precisely how the 1-test snapshot was published).
+        return (
+            f'生效的 settings 模块是 {module}（来自 {source}），'
+            f'不是默认的 {_DEFAULT_SETTINGS_MODULE}。'
+            '自定义 settings 会用其中的 TEST_RUNNER 决定跑哪些用例，'
+            '本次运行不能代表全量测试。'
+        )
+
+    expected_runner = _default_test_runner()
+    effective_runner = _test_runner_for(module)
+    if effective_runner is None:
+        return (
+            f'无法导入生效的 settings 模块 {module}，因此无法确认本次运行使用的 '
+            f'TEST_RUNNER 是否与默认的 {expected_runner} 一致。'
+        )
+    if effective_runner != expected_runner:
+        return (
+            f'生效的 TEST_RUNNER 是 {effective_runner}，与默认的 {expected_runner} '
+            '不同；自定义 runner 可以静默地只收集部分用例，本次运行不能代表全量测试。'
+        )
+    return None
+
+
+def _is_subset_run(options: argparse.Namespace, unknown: list[str]) -> bool:
+    """True when the run cannot speak for the whole suite.
+
     Judged on *parsed* values, so every spelling argparse accepts is handled by
     construction: labels, ``--tag``/``--exclude-tag``/``-k`` in any spelling,
     an explicitly given ``--pattern`` (whose default ``test*.py`` matches
-    everything), and any unrecognised option (which Django itself would reject
-    with exit 2).
+    everything), any unrecognised option (which Django itself would reject with
+    exit 2), and -- the QA-02 fix -- an effective settings module or
+    ``TEST_RUNNER`` that differs from the project defaults.
     """
-    if unknown:
-        # An option Django does not know would exit 2 at run time; refuse here
-        # too rather than trying to interpret it.
-        return True
-    if getattr(options, 'args', None):
-        return True
-    # dest names are Django's own (verified against DiscoverRunner.add_arguments).
-    if getattr(options, 'tags', None) or getattr(options, 'exclude_tags', None):
-        return True
-    if getattr(options, 'test_name_patterns', None):
-        return True
-    pattern = getattr(options, 'pattern', None)
-    if pattern is not None and pattern != _DEFAULT_PATTERN:
-        # ``--pattern`` defaults to ``test*.py`` (matches every test file), so
-        # only an explicit, different pattern narrows discovery.
-        return True
-    if getattr(options, 'testrunner', None):
-        # A swapped test runner can change what "the whole suite" means, so a
-        # non-default runner is treated as a suspicious partial run.
-        return True
-    return False
+    return _subset_reason(options, unknown) is not None
+
+
+def _subset_refusal(options: argparse.Namespace, unknown: list[str]) -> str | None:
+    """Operator-facing refusal text for a subset run, or ``None`` for a full run."""
+    reason = _subset_reason(options, unknown)
+    if reason is None:
+        return None
+    return (
+        f'拒绝写入 docs/quality/coverage-report.md：{reason}\n'
+        '本次运行只代表子集，覆盖率数字不能当作全量快照。\n'
+        f'如需全量统计，请去掉上述选项后重跑（默认 settings 为 {_DEFAULT_SETTINGS_MODULE}）。'
+    )
 
 
 def _parallel_requested(options: argparse.Namespace) -> int:
@@ -136,13 +303,25 @@ def _safe_echo(text: str, stream=None) -> None:
     Django's test output and the guard messages contain non-ASCII characters
     that GBK consoles cannot encode. A refusal reason is the one thing the
     operator must be able to read, so both stdout and stderr go through here.
+
+    When the stream cannot represent the text, the bytes are written as UTF-8
+    instead of being replaced with ``?``: a redirected (piped) stream has no
+    code page of its own, so ASCII-only mangling would turn the whole refusal
+    into mojibake the operator cannot act on. Decoding that UTF-8 instead of
+    the locale is what ``*_echo`` consumers should do.
     """
     stream = stream or sys.stdout
     try:
         stream.write(text)
     except UnicodeEncodeError:
-        encoding = stream.encoding or 'utf-8'
-        stream.write(text.encode(encoding, errors='replace').decode(encoding, errors='replace'))
+        buffer = getattr(stream, 'buffer', None)
+        if buffer is not None:
+            buffer.write(text.encode('utf-8'))
+        else:  # e.g. StringIO under test: keep it legible, never raise
+            encoding = stream.encoding or 'utf-8'
+            stream.write(
+                text.encode(encoding, errors='replace').decode(encoding, errors='replace')
+            )
     stream.flush()
 
 
@@ -200,6 +379,8 @@ def _snapshot_decision(
     test_count: int,
     min_tests: int,
     parallel: int = 1,
+    subset_reason: str = '',
+    subset_is_unpublishable: bool = False,
 ) -> tuple[str, str]:
     """Decide whether a run may overwrite the published coverage snapshot.
 
@@ -210,6 +391,15 @@ def _snapshot_decision(
     neither ``--allow-subset`` nor ``--min-tests 0`` can get past it. A
     ``parallel`` above 1 is refused outright -- the tests do run, but coverage
     cannot see the worker processes, so the totals would be silently wrong.
+
+    ``subset_reason`` is the readable *why* produced by ``_subset_reason``; it
+    is embedded in the refusal so the operator learns which option made the run
+    untrustworthy instead of only that it was refused.
+
+    ``subset_is_unpublishable`` marks the settings/runner substitutions, whose
+    suite size is not knowable from the command line at all. ``--allow-subset``
+    acknowledges a subset the operator *chose*; it must not bless a runner that
+    decided on its own how much to run (same reasoning as ``--parallel``).
     """
     if parallel > 1:
         return (
@@ -224,11 +414,18 @@ def _snapshot_decision(
             f'本次只运行了 {test_count} 个用例（低于下限 {floor}），'
             '未写入 docs/quality/coverage-report.md。',
         )
-    if is_subset and not allow_subset:
+    if is_subset and (subset_is_unpublishable or not allow_subset):
+        detail = f'\n原因：{subset_reason}' if subset_reason else ''
+        hint = (
+            '\n这类替代无法从命令行判断实际跑了多少用例，'
+            '--allow-subset 也不能绕过。'
+            if subset_is_unpublishable
+            else '\n如需强制写入，加 --allow-subset。'
+        )
         return (
             'refuse',
-            f'本次只运行了 {test_count} 个用例，未写入 docs/quality/coverage-report.md。\n'
-            '如需强制写入，加 --allow-subset。',
+            f'本次只运行了 {test_count} 个用例，未写入 docs/quality/coverage-report.md。'
+            f'{detail}{hint}',
         )
     return 'write', ''
 
@@ -461,7 +658,9 @@ def main() -> int:
     # argparse spelling (abbreviations, bundled short options, int coercions)
     # means exactly what it means in the real command.
     options, unknown = _parse_test_args(extra)
-    is_subset = _is_subset_run(options, unknown)
+    subset_reason = _subset_reason(options, unknown)
+    is_subset = subset_reason is not None
+    unpublishable = _subset_is_unpublishable(options, unknown)
     parallel = _parallel_requested(options)
 
     # ``--parallel >1`` forks test processes that coverage cannot see, so the
@@ -476,6 +675,7 @@ def main() -> int:
             test_count=0,
             min_tests=args.min_tests,
             parallel=parallel,
+            subset_reason=subset_reason or '',
         )
         _safe_echo(f'\n{reason}\n', sys.stderr)
         exit_code, _test_count, _skipped = _run_coverage(extra)
@@ -506,10 +706,12 @@ def main() -> int:
         test_count=test_count,
         min_tests=args.min_tests,
         parallel=parallel,
+        subset_reason=subset_reason or '',
+        subset_is_unpublishable=unpublishable,
     )
     if decision == 'refuse':
         _safe_echo(f'\n{reason}\n', sys.stderr)
-        return 0
+        return 2 if unpublishable else 0
 
     data = _collect_json()
     MARKDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)

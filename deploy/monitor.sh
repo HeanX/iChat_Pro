@@ -55,19 +55,74 @@ set -uo pipefail
 
 ENV_FILE=${ICHAT_ENV_FILE:-/opt/ichat/.env}
 STATE_DIR=${ICHAT_MONITOR_STATE:-/var/lib/ichat/monitor}
-HEALTH_URL=${ICHAT_BASE_URL:-https://127.0.0.1:8443}
 
-# Pull the knobs we act on out of .env without sourcing it: .env carries DB
-# credentials that must not leak into every child process of a monitor run.
-if [[ -f "$ENV_FILE" ]]; then
-    while IFS='=' read -r key value; do
-        case "$key" in
-            ICHAT_ALERT_WEBHOOK|DJANGO_ALLOWED_HOSTS|ICHAT_DB_URL|DATABASE_URL)
-                export "$key=$value"
-                ;;
-        esac
-    done < <(grep -E '^(ICHAT_ALERT_WEBHOOK|DJANGO_ALLOWED_HOSTS|ICHAT_DB_URL|DATABASE_URL)=' "$ENV_FILE" 2>/dev/null)
-fi
+# Configured from $ENV_FILE as well as the process environment (see below).
+# HEALTH_URL is derived from ICHAT_BASE_URL only *after* the file is read:
+# assigning it here made the documented ICHAT_BASE_URL in .env a no-op
+# (review finding OPS-05).
+
+# Keys the runbook documents as living in /opt/ichat/.env. The file is PARSED
+# with this whitelist, never `source`d: .env carries DB credentials that must
+# not leak into every child process of a monitor run, and an unlucky or
+# hostile line must not be able to execute (review finding OPS-05).
+#
+# Precedence is caller environment > .env > default. Only names in this list
+# are accepted; everything else in the file is ignored, which is why the list
+# has to stay in step with the "Configuration" block above and with runbook
+# §3b — a threshold that is documented but not listed here silently reverts to
+# its default.
+ENV_FILE_KEYS=(
+    ICHAT_ALERT_WEBHOOK
+    ICHAT_ALERT_MIN_SECS
+    ICHAT_ALERT_TEST
+    ICHAT_BASE_URL
+    ICHAT_CERT_MIN_DAYS
+    ICHAT_DB_URL
+    ICHAT_DISK_PCT
+    ICHAT_PG_MAX_CONN
+    ICHAT_READY_MAX_FAILS
+    ICHAT_REDIS_MAX_MB
+    ICHAT_SERVICE_NAME
+    DJANGO_ALLOWED_HOSTS
+    DATABASE_URL
+)
+
+# Load one whitelisted key. Assigns by reference (printf -v) rather than
+# exporting, so the value reaches the variables the script uses instead of
+# every unrelated child process.
+load_env_file() {
+    local file=$1 line key value wanted allowed
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # "KEY=value" only: skip comments, blanks and continuation-looking
+        # lines. The value is taken verbatim after the FIRST '=' so a password
+        # containing '=' survives.
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" == *=* ]] || continue
+        key=${line%%=*}
+        value=${line#*=}
+        key=${key#"${key%%[![:space:]]*}"}    # ltrim
+        key=${key%"${key##*[![:space:]]}"}    # rtrim
+        # A .env edited on Windows has CRLF endings; the CR would otherwise
+        # ride along on the value and make every numeric threshold fail its
+        # ^[0-9]+$ check, silently reverting to the default.
+        value=${value%$'\r'}
+        for allowed in "${ENV_FILE_KEYS[@]}"; do
+            if [[ "$key" == "$allowed" ]]; then
+                # The caller's environment wins over the file.
+                if [[ -z "${!key:-}" ]]; then
+                    printf -v "$key" '%s' "$value"
+                fi
+                break
+            fi
+        done
+    done < "$file"
+}
+load_env_file "$ENV_FILE"
+
+# The origin the readiness probe dials: the caller's environment, else
+# ICHAT_BASE_URL from .env, else the production front door.
+HEALTH_URL=${HEALTH_URL:-${ICHAT_BASE_URL:-https://127.0.0.1:8443}}
 
 ALLOWED_HOST=${DJANGO_ALLOWED_HOSTS:-}
 HOST_HEADER=()
@@ -86,9 +141,12 @@ MIN_ALERT_SECS=$(num_or_default "${ICHAT_ALERT_MIN_SECS:-}" 1800)
 NOW=$(date -u +%s)
 
 # Paths are injectable so the checks can be exercised off-host (tests); the
-# defaults are the production locations.
+# defaults are the production locations. The unit name follows the same
+# staging overrides deploy.sh uses, so a staging monitor watches
+# ichat-staging.service rather than production's log.
 PG_DATA_DIR=${ICHAT_PG_DATA_DIR:-/var/lib/postgresql}
 LETLS_DIR=${ICHAT_LETLS_DIR:-/etc/letsencrypt/live}
+JOURNAL_UNIT=${ICHAT_SERVICE_NAME:-ichat}
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 STATE_WRITABLE=0
@@ -215,6 +273,11 @@ check_disk() {
 
 # Parse DATABASE_URL into libpq env vars so the password travels through the
 # environment (invisible in ps) rather than as a psql argv element.
+#
+# The URL itself is handed to the parser on STDIN, never on the command line:
+# `python -c ... "$url"` put the full userinfo -- password included -- into
+# the child's argv, where `ps` and any argv recorder can read it (review
+# finding OPS-07). The parser echoes the fields one per line.
 load_pg_env() {
     local url=${ICHAT_DB_URL:-${DATABASE_URL:-}}
     [[ "$url" == postgres* ]] || return 1
@@ -234,15 +297,17 @@ load_pg_env() {
     fi
     [[ -n "$py" ]] || return 1
     local parsed
-    parsed=$("$py" -c '
+    # No URL anywhere in argv: it goes in on stdin, the fields come back on
+    # stdout. `-` tells the script to read sys.stdin.
+    parsed=$(printf '%s\n' "$url" | "$py" -c '
 import sys, urllib.parse as up
-p = up.urlparse(sys.argv[1])
+p = up.urlparse(sys.stdin.readline().rstrip("\n"))
 print(p.hostname or "")
 print(p.port or 5432)
 print(up.unquote(p.username or ""))
 print(up.unquote(p.password or ""))
 print((p.path or "/").lstrip("/"))
-' "$url" 2>/dev/null) || return 1
+' 2>/dev/null) || return 1
     local host port user pass db
     { read -r host; read -r port; read -r user; read -r pass; read -r db; } <<< "$parsed"
     [[ -n "$host" && -n "$user" ]] || return 1
@@ -330,12 +395,22 @@ check_journal_errors() {
         check_failed "journal" "journalctl not installed"
         return 0
     }
-    local count
-    count=$(journalctl -u ichat --since "-10 min" -p err 2>/dev/null | grep -c . || true)
+    local out rc=0 count
+    # Capture the query's own status. `journalctl ... 2>/dev/null | grep -c .`
+    # takes grep's exit code and reports 0 lines for a FAILED query, so a
+    # permission/journald problem read as "no errors" (review finding OPS-06).
+    # A query that could not run is unobservable, exactly like a missing tool.
+    out=$(journalctl -u "$JOURNAL_UNIT" --since "-10 min" -p err 2>&1) || rc=$?
+    if (( rc != 0 )); then
+        # First line only: journalctl's message, not the whole run.
+        check_failed "journal" "journalctl -u $JOURNAL_UNIT exited $rc: $(printf '%s' "$out" | head -1)"
+        return 0
+    fi
+    count=$(printf '%s\n' "$out" | grep -c . || true)
     # journalctl prints the header lines too; subtract the two-line banner.
     count=$(( count > 2 ? count - 2 : 0 ))
     if (( count >= 10 )); then
-        send_alert "journal" "$count error-level ichat journal entries in the last 10 min (threshold 10)"
+        send_alert "journal" "$count error-level $JOURNAL_UNIT journal entries in the last 10 min (threshold 10)"
     else
         log "journal errors (10 min): $count (ok)"
     fi

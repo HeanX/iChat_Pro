@@ -69,7 +69,11 @@ const CHAT_SUPPORT = [
 // The WEB-03 rule helper only exists after the fix; before it the entry points
 // still load, so the behavioural assertions (not a missing declaration) are
 // what fail.
-const CHAT_TRUST_RULE = ['acceptedVerificationPeer', 'keyStatusMatchesAcceptedVerification'];
+const CHAT_TRUST_RULE = [
+  'acceptedVerificationPeer',
+  'keyStatusMatchesAcceptedVerification',
+  'verificationConfirmation',
+];
 const CHAT_ENTRY_POINTS = [
   'refreshKeyVerificationAfterChange',
   'respondToKeyVerification',
@@ -132,6 +136,8 @@ function createWorld(options = {}) {
     contactKeyStatusCacheByUserId: {},
     keyTrustListCache: null,
     pendingKeyVerificationRequests: options.pending || [],
+    // Production's in-flight guard state, reset per world.
+    keyVerificationResponsesInFlight: {},
     TRUST_STORAGE_PREFIX: TRUST_KEY,
     IDENTITY_ALGORITHM: 'ECDH-P256',
     PrivateChatCryptoError: class PrivateChatCryptoError extends Error {},
@@ -525,7 +531,10 @@ test('an accepted socket event trusts only a fingerprint matching the accepted r
   );
 });
 
-test('the server-confirmed request wins over a stale pending copy', async () => {
+test('a response body naming another version never becomes the authorisation', async () => {
+  // Round-2 review M-1: the authorisation must come from the snapshot the user
+  // clicked, never from the response body. Here the tray held v1/AAAA while the
+  // 2xx body claims it accepted v2/BBBB.
   const stalePending = {
     ...incomingRequest,
     requester_key_version: 1,
@@ -546,14 +555,145 @@ test('the server-confirmed request wins over a stale pending copy', async () => 
 
   await world.context.respondToKeyVerification(42, 'accept');
 
+  assert.deepEqual(
+    world.versions(7),
+    { 1: 'AAAA' },
+    'the body must not upgrade the authorisation to a fingerprint the user never approved'
+  );
+  assert.deepEqual(world.cacheCalls, [], 'and it must not reach the send cache either');
+});
+
+test('a response body naming another contact cannot grant trust to anyone', async () => {
+  // Round-2 review M-1: a hostile or buggy relay swaps the peer in the 2xx body.
+  const world = createWorld({
+    stored: {
+      [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } },
+      [TRUST_KEY + 8]: { user_id: 8, versions: { 1: 'EEEE' } },
+    },
+    pending: [{ ...incomingRequest }],
+    status: [
+      rotatedContactStatus('BBBB', { trust: 'verified' }),
+      keyStatusPayload({ userId: 8, version: 5, fingerprint: 'EVIL', trust: 'verified' }),
+    ],
+    api: async () => ({
+      status: 'ok',
+      request: {
+        ...incomingRequest,
+        requester_id: 8,
+        requester_key_version: 5,
+        requester_key_fingerprint: 'EVIL',
+        status: 'accepted',
+      },
+    }),
+  });
+
+  await world.context.respondToKeyVerification(42, 'accept');
+
+  assert.deepEqual(world.versions(8), { 1: 'EEEE' }, 'the substituted contact is never trusted');
+  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'and neither is a peer the user did not confirm');
+  assert.deepEqual(world.cacheCalls, [], 'no send key may be replaced by the substituted fingerprint');
   assert.equal(
-    world.versions(7)['2'],
-    'BBBB',
-    'the fingerprint the server confirmed is the one the user accepted'
+    world.toasts[world.toasts.length - 1].includes('Security verification completed'),
+    false,
+    'a refused substitution must not report success'
   );
 });
 
+test('the local action, not the response body, decides whether trust is granted', async () => {
+  // Round-2 review H1 / mutation M2: a decline whose 2xx body claims "accepted"
+  // must still grant nothing. Without this case, widening the first gate to
+  // `action === "accept" || action === "decline"` stays invisible to the suite.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    api: async () => ({ status: 'ok', request: acceptedVerification(incomingRequest) }),
+  });
+
+  await world.context.respondToKeyVerification(42, 'decline');
+
+  assert.deepEqual(
+    world.versions(7),
+    { 1: 'AAAA' },
+    'the user clicked decline, so the server-side "accepted" body is not an authorisation'
+  );
+  assert.deepEqual(world.cacheCalls, [], 'no send key may be replaced by a declined request');
+});
+
+test('a double click sends one respond request and reports one outcome', async () => {
+  // Round-2 review m-1: two POSTs raced two contradictory toasts.
+  let posts = 0;
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    api: async () => {
+      posts += 1;
+      return { status: 'ok', request: acceptedVerification(incomingRequest) };
+    },
+  });
+
+  await Promise.all([
+    world.context.respondToKeyVerification(42, 'accept'),
+    world.context.respondToKeyVerification(42, 'accept'),
+  ]);
+
+  assert.equal(posts, 1, 'the in-flight guard keeps the authorization single-shot');
+  assert.equal(world.toasts.length, 1, 'only one outcome is reported');
+  assert.equal(world.versions(7)['2'], 'BBBB', 'and the single request still grants correctly');
+});
+
+test('the local snapshot, not the response body, is the authorisation object', async () => {
+  // Round-2 review M-1: even when the body is honest about the request id, a
+  // substituted fingerprint must not be trusted.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [keyStatusPayload({ userId: 7, version: 9, fingerprint: 'XXXX', trust: 'verified' })],
+    api: async () => ({
+      status: 'ok',
+      request: {
+        ...incomingRequest,
+        requester_key_version: 9,
+        requester_key_fingerprint: 'XXXX',
+        status: 'accepted',
+      },
+    }),
+  });
+
+  await world.context.respondToKeyVerification(42, 'accept');
+
+  assert.deepEqual(
+    world.versions(7),
+    { 1: 'AAAA' },
+    'the body cannot pick a different version of the approved contact'
+  );
+  assert.equal(
+    world.toasts[world.toasts.length - 1],
+    'Keys changed. Nothing was trusted. Start verification again.',
+    'the user is told nothing was trusted instead of seeing a success toast'
+  );
+});
+
+test('an honest accept of the held snapshot still grants and reports success', async () => {
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    api: async () => ({ status: 'ok', request: acceptedVerification(incomingRequest) }),
+  });
+
+  await world.context.respondToKeyVerification(42, 'accept');
+
+  assert.equal(world.versions(7)['2'], 'BBBB', 'the approved fingerprint is still trusted');
+  assert.equal(world.cacheCalls.length, 1, 'and still replaces the cached send key');
+  assert.equal(world.toasts[world.toasts.length - 1], 'Security verification completed');
+});
+
 test('granting trust is scoped to the contact the verification named', async () => {
+  // Contact 8 must publish the very fingerprint contact 7's request pinned,
+  // otherwise the fingerprint comparison alone would reject and this case would
+  // pass even with the `peer.userId === userId` guard removed (review M7).
   const world = createWorld({
     stored: {
       [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } },
@@ -561,11 +701,11 @@ test('granting trust is scoped to the contact the verification named', async () 
     },
     status: [
       rotatedContactStatus('BBBB', { trust: 'verified' }),
-      keyStatusPayload({ userId: 8, version: 2, fingerprint: 'FFFF' }),
+      keyStatusPayload({ userId: 8, version: 2, fingerprint: 'BBBB', trust: 'verified' }),
     ],
   });
 
-  await world.context.refreshKeyVerificationAfterChange(8, {
+  const outcome = await world.context.refreshKeyVerificationAfterChange(8, {
     grantTrustFor: acceptedVerification(incomingRequest),
   });
 
@@ -574,7 +714,8 @@ test('granting trust is scoped to the contact the verification named', async () 
     { 1: 'EEEE' },
     'the accepted request named contact 7, so contact 8 stays untouched'
   );
-  assert.deepEqual(world.cacheCalls, []);
+  assert.deepEqual(world.cacheCalls, [], 'and contact 8 never becomes the send key');
+  assert.equal(outcome.granted, false, 'no grant is reported for the wrong contact');
 });
 
 test('an accept without a response body still trusts only the held request fingerprint', async () => {

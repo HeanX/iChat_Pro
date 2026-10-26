@@ -58,9 +58,15 @@ FAILURES=0
 # Scratch space: prefer TMPDIR, then /tmp, then $HOME, then the CWD. Git Bash
 # on Windows ships a /tmp that is not writable for every shell, and a deploy
 # must not fail for that reason alone.
+#
+# Every expansion here must tolerate an unset variable: this script runs under
+# `set -u`, and the CI runner and the test harness invoke it with a deliberately
+# minimal environment (no HOME, no PWD). A bare "$HOME" aborted the gate with
+# "HOME: unbound variable" before any check ran, so every smoke assertion then
+# failed for the wrong reason (CI run 40343782825).
 make_workdir() {
     local base candidate
-    for base in "${TMPDIR:-}" /tmp "$HOME" "${PWD:-/}"; do
+    for base in "${TMPDIR:-}" /tmp "${HOME:-}" "${PWD:-/}"; do
         [[ -n "$base" && -d "$base" && -w "$base" ]] || continue
         candidate=$(mktemp -d "${base%/}/ichat-smoke.XXXXXXXX" 2>/dev/null) || continue
         printf '%s' "$candidate"

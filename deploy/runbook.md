@@ -58,8 +58,8 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 - **统一入口：`/opt/ichat/bin/deploy.sh`**（仓库 checkout 之外的稳定副本）。调用仓库内副本时脚本会自动 `install` 自身到该路径并 re-exec——回滚到旧 commit 会把仓库里的 deploy.sh 一并回退，稳定副本保证工具行为不受影响。
 - 发布：`sudo ICHAT_APPROVAL='<ticket-or-PR>' /opt/ichat/bin/deploy.sh`（审批门禁 → 校验配置 → migrate → collectstatic → restart → readiness 门禁 → 冒烟门禁 → 审计记录）。
 - **审批门禁（T50 / #177）**：发布必须带 `ICHAT_APPROVAL`（工单/PR/变更号），否则在**改动服务之前**就拒绝。回滚（`--commit`）不需要审批——逃生通道不能依赖纸面流程。`ICHAT_REQUIRE_APPROVAL=0` 是已知良好紧急发布的口子，会被记成 `approval=none` 并在 stderr 警告。
-- **readiness 门禁**：带生产 Host 头经本机 Nginx TLS（`https://127.0.0.1:8443`）请求 `/health/ready/` 并校验 JSON body——对任意被部署版本都有效（旧版本会把 http 探测 301 到 https），301/400 不会误判成功。
-- **冒烟门禁（T23 / #204）**：readiness 通过后执行 `deploy/smoke.sh`，断言 `health/live`、`health/ready`、登录表单与 CSRF、登录会话、`/api/conversations/`、`/api/profile/me/`，以及未认证 `/api/` 返回 401。任一失败则**不写 `DEPLOYMENTS.log` 并 exit 1**——"能连上但登录坏了"的版本不算发布成功。服务此时已重启，需用 `--commit <上一个SHA>` 回退。
+- **readiness 门禁**：带 Host 头经本机 Nginx TLS 请求 `/health/ready/` 并校验 JSON body——对任意被部署版本都有效（旧版本会把 http 探测 301 到 https），301/400 不会误判成功。origin 由解析后的安装配置推导：`https://127.0.0.1:${ICHAT_TLS_PORT:-8443}`，回落 `http://127.0.0.1:${ICHAT_HTTP_PORT:-8000}`（staging 即 8444/8001，不会打到生产端口）；需要非常规 origin 时用 `ICHAT_READY_ORIGIN`/`ICHAT_LOOPBACK_ORIGIN` 覆盖。
+- **冒烟门禁（T23 / #204）**：readiness 通过后执行 `deploy/smoke.sh`，断言 `health/live`、`health/ready`、登录表单与 CSRF、登录会话、`/api/conversations/`、`/api/profile/me/`，以及未认证 `/api/` 返回 401。任一失败则**不写 `DEPLOYMENTS.log` 并 exit 1**——"能连上但登录坏了"的版本不算发布成功。目标树**没有** `deploy/smoke.sh` 时，前向发布一律**失败且不写日志**；只有明确的历史回滚（`--commit <40位SHA>`，`IS_ROLLBACK=1`）才允许跳过并记 `smoke=skipped-no-script`。服务此时已重启，需用 `--commit <上一个SHA>` 回退。
 - **审计记录（T50 / #177）**：每次成功发布向 `/opt/ichat/DEPLOYMENTS.log` 追加**一行**结构化记录：
 
   ```text
@@ -92,11 +92,11 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 */5 * * * * /opt/ichat/repo/deploy/monitor.sh >> /var/log/ichat-monitor.log 2>&1
 ```
 
-配置（写入 `/opt/ichat/.env`）：`ICHAT_ALERT_WEBHOOK`（Slack/Discord/通用 webhook，缺省时只进 syslog 与 stderr，不算告警通道）；`ICHAT_ALERT_MIN_SECS=1800`（同一 key 限频，防告警风暴）；上表阈值均可覆盖（`ICHAT_DISK_PCT`/`ICHAT_PG_MAX_CONN`/`ICHAT_REDIS_MAX_MB`/`ICHAT_READY_MAX_FAILS`/`ICHAT_CERT_MIN_DAYS`）。
+配置（写入 `/opt/ichat/.env`，脚本按白名单逐行解析，**不 source**）：`ICHAT_ALERT_WEBHOOK`（Slack/Discord/通用 webhook，缺省时只进 syslog 与 stderr，不算告警通道）；`ICHAT_ALERT_MIN_SECS=1800`（同一 key 限频，防告警风暴）；`ICHAT_BASE_URL`（readiness 探针 origin，缺省 `https://127.0.0.1:8443`）；`ICHAT_SERVICE_NAME`（journal 检查的单元名，缺省 `ichat`）；`DJANGO_ALLOWED_HOSTS`（探针的 `Host` 头取第一个域名，与 .env 其余配置共用）；上表阈值均可覆盖（`ICHAT_DISK_PCT`/`ICHAT_PG_MAX_CONN`/`ICHAT_REDIS_MAX_MB`/`ICHAT_READY_MAX_FAILS`/`ICHAT_CERT_MIN_DAYS`）。白名单是 `monitor.sh` 的 `ENV_FILE_KEYS`：**只有列出的名字生效**，进程环境同名变量优先于 `.env`，其余行一律忽略。
 
 '自检：`ICHAT_ALERT_TEST=1 /opt/ichat/repo/deploy/monitor.sh` 发一条测试告警，用于验证 webhook 连通。
 
-**pg-conn 的认证前提**：root 的 cron 环境走 peer 认证不会映射到 `ichat` 角色，所以脚本从 `.env` 的 `DATABASE_URL`（或 `ICHAT_DB_URL`）解析连接参数，经 `PGPASSWORD` 环境变量交给 libpq（密码不进 argv/ps）。若该项缺失或认证失败，该轮以 `CHECK FAILED: pg-conn` 告警并以 exit 1 结束——"查不到连接数"不会伪装成"一切正常"。**任何检查跑不成**（工具缺失、证书不可读、状态目录不可写）都会触发 `monitor` 告警并 exit 1。
+**pg-conn 的认证前提**：root 的 cron 环境走 peer 认证不会映射到 `ichat` 角色，所以脚本从 `.env` 的 `DATABASE_URL`（或 `ICHAT_DB_URL`）解析连接参数，经 `PGPASSWORD` 环境变量交给 libpq（密码不进 argv/ps）；解析器本身也**只从 stdin 读 URL**——命令行参数会出现在 `ps` 与任何 argv 记录器里。若该项缺失或认证失败，该轮以 `CHECK FAILED: pg-conn` 告警并以 exit 1 结束——"查不到连接数"不会伪装成"一切正常"。**任何检查跑不成**（工具缺失、证书不可读、状态目录不可写、`journalctl` 查询失败）都会触发 `monitor` 告警并 exit 1。
 
 投递失败的补偿：限频时间戳只在 webhook **成功**后写入，投递失败下一轮会重试（日志模式下仍写入时间戳，避免每 5 分钟刷屏）。'
 
@@ -104,7 +104,18 @@ AWS 安全组需放行 TCP 80、8443（入站 0.0.0.0/0）。TLS 证书由 Let's
 
 ## 3c. 独立测试环境（T49 / #176）
 
-staging 与生产共用一台 t3.small，但**不共享任何配置、数据、密钥或运行时**。`deploy.sh` 的路径/服务名已可经环境变量注入（`ICHAT_APP_DIR`/`ICHAT_MEDIA_DIR`/`ICHAT_SERVICE_NAME`/`ICHAT_SERVICE_USER`），同一脚本既能发布生产也能发布 staging。
+staging 与生产共用一台 t3.small，但**不共享任何配置、数据、密钥或运行时**。`deploy.sh` 的安装身份**从 `$ICHAT_APP_DIR/.env` 解析**（与 systemd 的 `EnvironmentFile` 同一个文件），调用进程的环境变量优先：
+
+| 变量 | 作用 | 生产缺省 | staging 应设 |
+| --- | --- | --- | --- |
+| `ICHAT_APP_DIR` | 安装树（决定读哪个 `.env`） | `/opt/ichat` | `/opt/ichat-staging` |
+| `ICHAT_SERVICE_NAME` | 重启/启用的单元 | `ichat` | `ichat-staging` |
+| `ICHAT_SERVICE_USER` | media 属主 | `ichat` | `ichat-staging` |
+| `ICHAT_MEDIA_DIR` | media 根 | `/var/lib/ichat/media` | `/var/lib/ichat-staging/media` |
+| `ICHAT_TLS_PORT` | readiness 经 Nginx 的端口 | `8443` | `8444` |
+| `ICHAT_HTTP_PORT` | readiness 回落 Daphne 的端口 | `8000` | `8001` |
+
+**只写在 staging `.env` 里就够了**，不必每次在命令行重复 export。若安装树不是生产树、而身份仍是生产缺省值（单元/用户/media/端口任一），`deploy.sh` 会在**改动任何东西之前**以 exit 2 拒绝执行——不完整的 staging 身份不会被当成可用的 staging。`ICHAT_PROD_APP_DIR` 用于声明真正的生产树（缺省 `/opt/ichat`）。readiness 与冒烟门禁的 origin 由同一份解析结果推导，staging 因此不会回落到生产的 8443/8000。
 
 布局（全部独立于生产）：
 
@@ -115,6 +126,8 @@ staging 与生产共用一台 t3.small，但**不共享任何配置、数据、�
 | 数据库 | `ichat`（角色 ichat） | `ichat_staging`（角色 ichat_staging，独立密码） |
 | Redis 逻辑库 | db 0 | db 1 |
 | media | `/var/lib/ichat/media` | `/var/lib/ichat-staging/media` |
+| static | `/opt/ichat/staticfiles` | `/opt/ichat-staging/staticfiles`（**不得**在生产根目录之内） |
+| 发布端口 | `ICHAT_TLS_PORT=8443` / `ICHAT_HTTP_PORT=8000` | `ICHAT_TLS_PORT=8444` / `ICHAT_HTTP_PORT=8001` |
 | 秘密 | `/opt/ichat/.env` | `/opt/ichat-staging/.env`（**全新 SECRET_KEY，绝不复制生产**） |
 | 入口 | `https://chat.20060810.xyz:8443` | staging 专用 origin:8444（nginx server 块单独配） |
 
@@ -128,10 +141,9 @@ sudo -u postgres psql -c "CREATE DATABASE ichat_staging OWNER ichat_staging;"
 # 填 deploy/staging/env.staging.example -> /opt/ichat-staging/.env (600, ichat-staging)
 sudo cp deploy/staging/ichat-staging.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo ICHAT_APP_DIR=/opt/ichat-staging ICHAT_MEDIA_DIR=/var/lib/ichat-staging/media \
-     ICHAT_SERVICE_NAME=ichat-staging ICHAT_SERVICE_USER=ichat-staging \
-     ICHAT_REQUIRE_APPROVAL=0 \
-     sudo -E /opt/ichat-staging/bin/deploy.sh --branch main
+# 身份/端口全部写在那个 .env 里；命令行只需选安装树与审批开关
+sudo ICHAT_APP_DIR=/opt/ichat-staging ICHAT_REQUIRE_APPROVAL=0 \
+     /opt/ichat-staging/bin/deploy.sh --branch main
 ```
 
 隔离证据（每次 staging 变更后复跑，可归档进 Issue）：
@@ -140,7 +152,9 @@ sudo ICHAT_APP_DIR=/opt/ichat-staging ICHAT_MEDIA_DIR=/var/lib/ichat-staging/med
 sudo deploy/staging/check_isolation.sh --check-data
 ```
 
-它逐项断言：SECRET_KEY/DATABASE_URL/CSRF origin 与生产不同、staging 库名（从 URL path 解析）为 `ichat_staging`、Redis 逻辑库不同、media/static 路径互不嵌套（先做 `/`/`..` 规范化，尾斜杠与相对跳转绕不过）、代码树/服务单元/服务用户不同、daphne 端口非 8000（unit 找不到时报 "port UNVERIFIED" 而非静默通过）、（`--check-data` 时）活库与 Redis 实例隔离。任何 key 缺失都会报告而不是静默中断；秘密值只以 SHA-256 前缀形式出现，绝不明文打印。
+它逐项断言（任一违反即 exit 1）：SECRET_KEY 与生产不同；`DATABASE_URL` **逐维度**比较——登录角色名与角色密码各自必须不同（只改库名不算秘密隔离），staging 库名（从 URL path 解析）必须是 `ichat_staging`；CSRF origin 不同；Redis 逻辑库不同；**media 与 static 两类根目录**互不相等、互不为祖先（先做 `/` 与 `..` 规范化，尾斜杠、重复分隔符与相对跳转都绕不过；static 用 `collectstatic --clear`，嵌套会互删文件）；代码树/服务单元/服务用户不同；daphne 端口非 8000（unit 找不到时报 "port UNVERIFIED" 而非静默通过）。任何 key 缺失都会报告而不是静默中断；秘密值只以 SHA-256 前缀形式出现，绝不明文打印。
+
+`--check-data` 会**真的连接**：用 `psql` 读两库各自的 `current_user`（登录角色），用 `redis-cli` 读各自实际所在的逻辑库，再比较。psql/redis-cli 缺失、连不上或登录被拒绝时该维度报 `UNVERIFIED` 并 exit 1——不会把"没查"写成 `ISOLATED`。凭据只走 `PGPASSWORD` 环境变量，不出现在 argv。
 
 staging 的发布走同一条 deploy.sh（审批门禁可用 `ICHAT_REQUIRE_APPROVAL=0`，因为 staging 本身就是审批前验证环节），冒烟门禁照常运行（staging 有自己的 `SMOKE_USERNAME/SMOKE_PASSWORD`）。
 ## 4. 备份与恢复（T13）

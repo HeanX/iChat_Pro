@@ -80,6 +80,7 @@
 | [docs/phase4/e2ee-threat-model.md](phase4/e2ee-threat-model.md) | 现行说明/专题；ADR-P4-04 跨平台 E2EE 威胁模型与数据流（资产/攻击面/信任边界/不可保存数据），2026-10-18 新增 |
 | [docs/phase4/protocol.md](phase4/protocol.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/requirements.md](phase4/requirements.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/adr-p4-05-device-identity.md](phase4/adr-p4-05-device-identity.md) | 现行说明/专题；P4 T40 设备身份模型设计决策与阶段切分；随 #167 实现/会签进展更新 |
 | [docs/phase4/risk-register.md](phase4/risk-register.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/t20-late-ack-validation.md](phase4/t20-late-ack-validation.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/tasks.md](phase4/tasks.md) | 逐行更新状态，保持编号/验收/优先级/依赖不变 |

@@ -86,6 +86,10 @@ _CHILD_ENV_KEYS = frozenset({
     'CSP_ALLOW_UNSAFE_INLINE_STYLE',
 })
 _MIN_BASIS_FRACTION = 0.8
+_COVERAGE_BOOTSTRAP = (
+    'import sys; from coverage.cmdline import main; '
+    'sys.path.insert(0, sys.argv.pop(1)); raise SystemExit(main(sys.argv[1:]))'
+)
 
 # The settings module the published snapshot is produced from. Anything else
 # (via ``--settings`` or ``DJANGO_SETTINGS_MODULE``) is not comparable: a
@@ -491,9 +495,11 @@ def _coverage_child_env(data_file: Path | None = None) -> dict:
 
 
 def _coverage_command(action: str, *arguments: str) -> list[str]:
-    # -I prevents both user-site hooks and module shadowing when resolving
-    # ``-m coverage``. The venv's installed packages remain available.
-    return [sys.executable, '-I', '-X', 'utf8', '-m', 'coverage', action,
+    # Resolve coverage from the isolated venv first, then add exactly the
+    # trusted repository root for manage.py/Django. -I's safe_path otherwise
+    # prevents coverage's script runner from adding even this trusted path.
+    return [sys.executable, '-I', '-X', 'utf8', '-c', _COVERAGE_BOOTSTRAP,
+            str(REPO_ROOT), action,
             f'--rcfile={REPO_COVERAGERC}', *arguments]
 
 

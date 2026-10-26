@@ -19,7 +19,8 @@ python -m unittest scripts.test_coverage_report scripts.test_check_deploy_collec
 退出码。解释器、venv 依赖及仓库源码是受信输入；这不是任意恶意 Python 启动代码
 的沙箱。外部启动代码若在脚本执行前直接改文件，已经超出报告工具的运行边界。
 
-测量、文本报告和 JSON 导出统一使用 `python -I -m coverage`、仓库 `.coveragerc`
+测量、文本报告和 JSON 导出统一通过隔离解释器先加载 venv 的 coverage 入口，随后
+仅加入受信的仓库根供 Django 导入，并统一使用仓库 `.coveragerc`
 和**本次运行独有**的临时数据文件。三个步骤不会读取另一轮留下的 `.coverage`。
 子进程环境由显式白名单构造，保留操作系统运行所需设置、数据库/Redis 连接设置、
 Django 应用设置和 `ICHAT_TEST_BASH`；调用者的 `COVERAGE_*`、`PYTHONHOME` 和任意

@@ -73,9 +73,17 @@ const liveReload = process.argv.indexOf('--live-reload') !== -1;
 const resolved = resolveMobileConfig(process.env, { liveReload: liveReload });
 
 if (resolved.mode !== 'configured') {
-  // Exit before writing anything: the committed capacitor.config.json stays as
-  // reviewed. A stale mobile-env.js is removed rather than merely reported,
-  // because `cap sync` would otherwise bake the previous origin into the APK.
+  // Exit before writing anything. Two artifacts are cleaned up here, for the
+  // same reason: `cap sync` copies whatever is on disk into the APK, so a
+  // leftover from an earlier build silently ships a stale configuration.
+  //
+  //   (a) mobile-env.js: would carry the previous origin, and the start screen
+  //       would claim "就绪" while pointing at the wrong server.
+  //   (b) capacitor.config.json: would carry a `server` block left by an
+  //       earlier `--live-reload` run, which is not a release shape at all.
+  //       It is rewritten to the release shape (no `server`) rather than left
+  //       alone, because "unchanged" is only safe if the previous state was a
+  //       release build.
   let hadStaleEnv = false;
   let staleEnvStuck = false;
   try {
@@ -92,13 +100,53 @@ if (resolved.mode !== 'configured') {
   }
   unlinkQuietly(envTarget + '.tmp');
 
+  const releaseConfig = JSON.stringify(buildCapacitorConfig(null), null, 2) + '\n';
+  let configReset = false;
+  let staleServerBlock = false;
+  let previousConfig = null;
+  try {
+    previousConfig = fs.readFileSync(target, 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') previousConfig = null;
+  }
+  if (previousConfig !== null) {
+    // Compare SEMANTICALLY, not byte-wise: a Windows working tree checked out
+    // with core.autocrlf=true has CRLF here, and rewriting an already-correct
+    // file would just churn line endings on every failed run.
+    try {
+      const parsed = JSON.parse(previousConfig);
+      staleServerBlock = parsed !== null && typeof parsed === 'object' &&
+        Object.prototype.hasOwnProperty.call(parsed, 'server');
+    } catch (err) {
+      // Unparseable: treat it as stale so it gets replaced by a known-good file.
+      staleServerBlock = true;
+    }
+    if (staleServerBlock) {
+      try {
+        writeAtomic(target, releaseConfig);
+        configReset = true;
+      } catch (err) {
+        console.error('[iChat mobile] 警告：无法把 ' + target + ' 重置为发布形态：' + err.message);
+        console.error('[iChat mobile] 警告：该文件仍含 server 块，打包会产出热重载形态的 APK。');
+      }
+    }
+  }
+
   console.error('[iChat mobile] 配置无效，未写入 ' + target);
   console.error('[iChat mobile] 原因：' + resolved.message);
-  console.error('[iChat mobile] 现有 capacitor.config.json 保持不变。');
   if (hadStaleEnv) {
     console.error('[iChat mobile] 已删除上一次构建遗留的 ' + envTarget + '（否则旧地址会随 cap sync 进包）。');
   } else if (!staleEnvStuck) {
     console.error('[iChat mobile] 未生成 ' + envTarget + '（本次未写入该文件）。');
+  }
+  if (configReset) {
+    console.error('[iChat mobile] ' + target +
+      ' 上次是 --live-reload 形态（含 server 块），已重置为发布形态（无 server 块）。');
+  } else if (previousConfig !== null) {
+    console.error('[iChat mobile] ' + target + ' 已是发布形态，保持不变。');
+  }
+  if (staleEnvStuck) {
+    console.error('[iChat mobile] 警告：产物不干净，打包前请先修复上面两个问题。');
   }
   process.exit(1);
 }

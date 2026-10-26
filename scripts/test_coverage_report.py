@@ -15,7 +15,9 @@ same level -- including the spellings that previously slipped through.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -510,6 +512,317 @@ class SnapshotDecisionTests(unittest.TestCase):
             with self.subTest(parallel=parallel):
                 decision, _ = self._decide(parallel=parallel)
                 self.assertEqual(decision, 'write')
+
+
+class SubstitutionScopeTests(unittest.TestCase):
+    """P6/P7 (review round 2): what counts as replacing the runner.
+
+    Two real bypasses survived round 1:
+
+    * ``--pythonpath <dir>`` put a shadow ``ichat_pro`` package first on
+      ``sys.path``. Its ``settings.py`` declared the *same* ``TEST_RUNNER``
+      string, so comparing names saw nothing, while its runner built one case.
+    * ``--allow-subset --settings=<alt> <label|--tag|-k>`` let a benign filter
+      downgrade the settings swap into an authorisable "known subset".
+
+    Both are pure classification questions, so they are pinned here; the real
+    subprocess behaviour is pinned in ``ProcessLevelSnapshotTests`` below.
+    """
+
+    def setUp(self):
+        self._env = mock.patch.dict(os.environ, {}, clear=False)
+        self._env.start()
+        os.environ.pop('DJANGO_SETTINGS_MODULE', None)
+        self.addCleanup(self._env.stop)
+
+    def _flags(self, *arguments):
+        options, unknown = _parsed(*arguments)
+        return (
+            report._is_subset_run(options, unknown),
+            report._subset_is_unpublishable(options, unknown),
+            report._subset_reason(options, unknown),
+        )
+
+    def test_pythonpath_is_always_unpublishable(self):
+        # Anything that is not the repo root can shadow ichat_pro. (The repo
+        # root itself is covered by test_a_full_run_is_never_unpublishable.)
+        for arguments in (
+            ['--pythonpath', 'shadow'],
+            ['--pythonpath=shadow'],
+            ['--pythonp', 'shadow'],          # argparse abbreviation
+        ):
+            with self.subTest(arguments=arguments):
+                subset, unpublishable, reason = self._flags(*arguments)
+                self.assertTrue(subset)
+                self.assertTrue(unpublishable, '--pythonpath cannot be authorised')
+                self.assertIn('pythonpath', reason)
+
+    def test_top_level_directory_is_unpublishable_when_it_changes_the_root(self):
+        subset, unpublishable, reason = self._flags('-t', 'chat')
+        self.assertTrue(subset)
+        self.assertTrue(unpublishable)
+        self.assertIn('top-level-directory', reason)
+        # The default value is not a narrowing.
+        self.assertEqual(self._flags('-t', '.')[0], False)
+
+    def test_a_benign_filter_cannot_launder_a_swapped_settings_module(self):
+        # This is the P7 shape: the filter is real, but it must not demote the
+        # dangerous cause. Every combination stays unpublishable.
+        for arguments in (
+            ['--settings=alt', 'chat'],
+            ['--settings=alt', '--tag=x'],
+            ['--settings=alt', '-kx'],
+            ['--settings=alt', '--exclude-tag=y'],
+            ['--settings=alt', '--pattern=t_*.py'],
+        ):
+            with self.subTest(arguments=arguments):
+                subset, unpublishable, reason = self._flags(*arguments)
+                self.assertTrue(subset)
+                self.assertTrue(unpublishable)
+                self.assertIn('settings', reason,
+                              'the reason must name the dangerous cause')
+
+    def test_a_benign_filter_alone_stays_authorisable(self):
+        # The opposite direction: an operator-chosen subset may still be
+        # published with --allow-subset, which is a documented workflow.
+        for arguments in (
+            ['chat'],
+            ['--tag=slow'],
+            ['-kx'],
+            ['--exclude-tag=y'],
+            ['--pattern=t_*.py'],
+        ):
+            with self.subTest(arguments=arguments):
+                subset, unpublishable, _ = self._flags(*arguments)
+                self.assertTrue(subset)
+                self.assertFalse(unpublishable, 'chosen filters stay authorisable')
+
+    def test_a_full_run_is_never_unpublishable(self):
+        for arguments in (
+            [],
+            ['--parallel', '1'],
+            ['--settings=ichat_pro.settings'],
+            ['--keepdb', '--shuffle=1234'],
+            # Pointing --pythonpath at the repo root it already imports from
+            # cannot swap the package, so it is not a substitution.
+            ['--pythonpath', '.'],
+            ['--pythonpath', str(REPO_ROOT)],
+        ):
+            with self.subTest(arguments=arguments):
+                subset, unpublishable, reason = self._flags(*arguments)
+                self.assertFalse(subset)
+                self.assertFalse(unpublishable)
+                self.assertIsNone(reason)
+
+    def test_pythonpath_elsewhere_is_still_unpublishable(self):
+        # The P6 shape: a directory that is not the repo root wins sys.path.
+        for arguments in (
+            ['--pythonpath', 'shadow'],
+            ['--pythonpath', str(Path(tempfile.gettempdir()) / 'not-the-repo')],
+        ):
+            with self.subTest(arguments=arguments):
+                subset, unpublishable, reason = self._flags(*arguments)
+                self.assertTrue(subset)
+                self.assertTrue(unpublishable)
+                self.assertIn('pythonpath', reason)
+
+
+class ProcessLevelSnapshotTests(unittest.TestCase):
+    """P8 (review round 2): the real script, in a real subprocess.
+
+    Round 1's suite was 100% pure functions, so it could not observe either
+    bypass: ``--pythonpath`` only misbehaves in the *child's* ``sys.path``, and
+    the combination bug only appears through ``main()``'s decision path.
+
+    Each case spawns ``scripts/coverage_report.py`` exactly as an operator
+    would, with a throwaway settings module (and, for P6, a shadow ``ichat_pro``
+    package) in a temp directory that is never committed. The published
+    snapshot is backed up, replaced by a sentinel, and restored in ``finally``;
+    the tests assert on the sentinel and on the hash, so a regression that
+    writes the snapshot fails loudly *and* leaves the tree unchanged.
+
+    The suite here is the project's own, so these runs execute one test through
+    a one-case TEST_RUNNER -- deliberately tiny, the point is the guard.
+    """
+
+    #: A runner that builds exactly one test, used by the temp settings module.
+    ONE_CASE_RUNNER = '''\
+import unittest
+
+from ichat_pro.test_runner import IChatTestRunner
+
+
+class OneCase(unittest.TestCase):
+    def test_one(self):
+        self.assertEqual(1, 1)
+
+
+class OneTestRunner(IChatTestRunner):
+    def build_suite(self, test_labels=None, extra_tests=None, **kwargs):
+        return unittest.defaultTestLoader.loadTestsFromTestCase(OneCase)
+'''
+
+    SHADOW_SETTINGS = '''\
+"""Shadow ichat_pro.settings: identical TEST_RUNNER string, one-case suite."""
+
+DEBUG = True
+SECRET_KEY = 'qa02-shadow-only'
+ALLOWED_HOSTS = ['*']
+INSTALLED_APPS = ['django.contrib.contenttypes', 'django.contrib.auth']
+DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
+USE_TZ = True
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+TEST_RUNNER = 'ichat_pro.test_runner.IChatTestRunner'
+'''
+
+    SHADOW_RUNNER = '''\
+import unittest
+
+from django.test.runner import DiscoverRunner
+
+
+class OneCase(unittest.TestCase):
+    def test_one(self):
+        self.assertEqual(1, 1)
+
+
+class IChatTestRunner(DiscoverRunner):
+    def build_suite(self, test_labels=None, extra_tests=None, **kwargs):
+        return unittest.defaultTestLoader.loadTestsFromTestCase(OneCase)
+'''
+
+    def setUp(self):
+        # A real subprocess of the real suite is slow; keep it to a few cases.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.snapshot = report.MARKDOWN_PATH
+        self.original = (
+            self.snapshot.read_bytes() if self.snapshot.exists() else b''
+        )
+        self.addCleanup(self._restore_snapshot)
+
+        (self.tmp / 'qa02_test_runner.py').write_text(
+            self.ONE_CASE_RUNNER, encoding='utf-8'
+        )
+        (self.tmp / 'qa02_alt_settings.py').write_text(
+            "from ichat_pro.settings import *  # noqa: F401,F403\n"
+            "TEST_RUNNER = 'qa02_test_runner.OneTestRunner'\n",
+            encoding='utf-8',
+        )
+        shadow = self.tmp / 'shadow'
+        (shadow / 'ichat_pro').mkdir(parents=True)
+        (shadow / 'ichat_pro' / '__init__.py').write_text('', encoding='utf-8')
+        (shadow / 'ichat_pro' / 'settings.py').write_text(
+            self.SHADOW_SETTINGS, encoding='utf-8'
+        )
+        (shadow / 'ichat_pro' / 'test_runner.py').write_text(
+            self.SHADOW_RUNNER, encoding='utf-8'
+        )
+        self.shadow = shadow
+
+    def _restore_snapshot(self):
+        self.snapshot.parent.mkdir(parents=True, exist_ok=True)
+        self.snapshot.write_bytes(self.original)
+
+    def _sentinel(self, label: str) -> str:
+        text = f'qa02-process-test-sentinel-{label}\n'
+        self.snapshot.parent.mkdir(parents=True, exist_ok=True)
+        self.snapshot.write_text(text, encoding='utf-8', newline='\n')
+        return text
+
+    def _run(self, forwarded, *, own=()):
+        """Run the real script against the real worktree, one case at a time."""
+        env = dict(os.environ)
+        env['PYTHONPATH'] = os.pathsep.join([str(self.tmp), str(REPO_ROOT)])
+        env['PYTHONIOENCODING'] = 'utf-8'
+        env.pop('DJANGO_SETTINGS_MODULE', None)
+        env['COVERAGE_FILE'] = str(self.tmp / 'qa02.coverage')
+        command = [
+            sys.executable, '-B', str(REPO_ROOT / 'scripts' / 'coverage_report.py'),
+            *own, '--', *[str(arg).replace('{shadow}', str(self.shadow))
+                          for arg in forwarded],
+        ]
+        completed = subprocess.run(
+            command, cwd=str(REPO_ROOT), env=env, text=True,
+            encoding='utf-8', errors='replace', capture_output=True,
+            timeout=900,
+        )
+        return completed, completed.stdout + completed.stderr
+
+    def _assert_refused(self, label, forwarded, *, own=()):
+        sentinel = self._sentinel(label)
+        before = hashlib.sha256(self.snapshot.read_bytes()).hexdigest()
+        completed, output = self._run(forwarded, own=own)
+        after = hashlib.sha256(self.snapshot.read_bytes()).hexdigest()
+        text = self.snapshot.read_text(encoding='utf-8')
+        self.assertNotEqual(
+            completed.returncode, 0,
+            f'{label}: a refused snapshot must exit non-zero\n{output[-2000:]}',
+        )
+        self.assertEqual(
+            before, after,
+            f'{label}: the published snapshot was overwritten\n{output[-2000:]}',
+        )
+        self.assertEqual(text, sentinel, f'{label}: snapshot content changed')
+        self.assertNotIn('已写入', output, f'{label}: script claimed a write')
+        self.assertIn(
+            '未写入 docs/quality/coverage-report.md', output,
+            f'{label}: refusal must say the snapshot was not written',
+        )
+        return output
+
+    def test_pythonpath_shadow_package_cannot_publish_a_snapshot(self):
+        # P6: the shadow declares the same TEST_RUNNER string but runs 1 test.
+        output = self._assert_refused(
+            'pythonpath-shadow', ['--pythonpath={shadow}', '--parallel', '1'],
+        )
+        self.assertIn('pythonpath', output)
+        self.assertRegex(output, r'Ran 1 test')
+
+    def test_pythonpath_cannot_be_laundered_by_allow_subset(self):
+        output = self._assert_refused(
+            'pythonpath-allow-subset',
+            ['--pythonpath={shadow}', '--parallel', '1'],
+            own=('--allow-subset',),
+        )
+        self.assertIn('--allow-subset 也不能绕过', output)
+
+    def test_swapped_settings_with_a_filter_cannot_publish(self):
+        # P7: the filter is real; it must not demote the settings swap.
+        for label, forwarded in (
+            ('settings-label', ['--settings=qa02_alt_settings', 'chat']),
+            ('settings-tag', ['--settings=qa02_alt_settings', '--tag=x']),
+            ('settings-k', ['--settings=qa02_alt_settings', '-kx']),
+        ):
+            with self.subTest(label=label):
+                output = self._assert_refused(
+                    label, forwarded, own=('--allow-subset',),
+                )
+                self.assertIn('qa02_alt_settings', output)
+                self.assertIn('--allow-subset 也不能绕过', output)
+
+    def test_swapped_settings_from_the_environment_cannot_publish(self):
+        sentinel = self._sentinel('env-settings')
+        before = hashlib.sha256(self.snapshot.read_bytes()).hexdigest()
+        env = dict(os.environ)
+        env['PYTHONPATH'] = os.pathsep.join([str(self.tmp), str(REPO_ROOT)])
+        env['PYTHONIOENCODING'] = 'utf-8'
+        env['DJANGO_SETTINGS_MODULE'] = 'qa02_alt_settings'
+        env['COVERAGE_FILE'] = str(self.tmp / 'qa02-env.coverage')
+        completed = subprocess.run(
+            [sys.executable, '-B',
+             str(REPO_ROOT / 'scripts' / 'coverage_report.py'),
+             '--', '--parallel', '1'],
+            cwd=str(REPO_ROOT), env=env, text=True, encoding='utf-8',
+            errors='replace', capture_output=True, timeout=900,
+        )
+        output = completed.stdout + completed.stderr
+        after = hashlib.sha256(self.snapshot.read_bytes()).hexdigest()
+        self.assertNotEqual(completed.returncode, 0, output[-2000:])
+        self.assertEqual(before, after, 'snapshot overwritten via env settings')
+        self.assertEqual(self.snapshot.read_text(encoding='utf-8'), sentinel)
+        self.assertIn('DJANGO_SETTINGS_MODULE', output)
 
 
 if __name__ == '__main__':

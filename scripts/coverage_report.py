@@ -115,35 +115,151 @@ def _is_subset_run(options: argparse.Namespace, unknown: list[str]) -> bool:
 
 
 def _subset_is_unpublishable(options: argparse.Namespace, unknown: list[str]) -> bool:
-    """True when this is a *subset* that ``--allow-subset`` must not publish.
+    """True when ``--allow-subset`` must NOT be able to publish this run.
 
-    Plain filters (``--tag``, ``-k``, labels) are a deliberate, understood
-    subset: the run succeeded and the historical exit-0 behaviour is kept.
-    ``--parallel`` already exits 2 elsewhere. A swapped settings module or
-    ``TEST_RUNNER`` is different on two counts:
+    ``--allow-subset`` means "I know I narrowed the run; publish it anyway".
+    That is a legitimate statement about filters the *operator* chose -- a
+    label, ``--tag``, ``-k``, ``--pattern``.
 
-    * the operator asked for a full snapshot and silently got none, which is
-      how a stale snapshot got mistaken for a fresh one -- so this exits
-      non-zero and CI can see it;
-    * ``--allow-subset`` must not override it, because the runner -- not the
-      operator -- decided how much of the suite to run, and the command line
-      cannot tell how much that was.
+    It is not a statement about a swapped settings module, a swapped
+    ``TEST_RUNNER`` or a ``--pythonpath`` that changes which ``ichat_pro`` gets
+    imported: there the *runner* decided how much of the suite to run, and the
+    command line cannot even tell how much that was. So this check asks only
+    about those substitutions and deliberately ignores the benign filters --
+    otherwise ``--allow-subset --settings=<alt> <label>`` would launder a
+    1-test run into the published snapshot (review P7).
 
     A full run is never unpublishable, whatever options were spelled.
     """
-    if not _is_subset_run(options, unknown):
+    if unknown:
+        # Django rejects unknown options itself; nothing to launder here.
         return False
-    if unknown or getattr(options, 'args', None):
+    return _substitution_reason(options) is not None
+
+
+def _substitution_scope(options: argparse.Namespace) -> str:
+    """A stable, human-readable signature of the code that will run the tests.
+
+    Every input that can change *which* settings/runner/package the child
+    process resolves is folded in here. Two runs with the same signature must
+    load the same code; if the signature cannot be computed, the caller treats
+    the run as unverifiable.
+
+    ``--pythonpath`` belongs here for a concrete reason: ``manage.py test``
+    calls ``handle_default_options``, which does ``sys.path.insert(0,
+    options.pythonpath)``. A directory holding a shadow ``ichat_pro`` package
+    then wins over the repository copy -- with an identical ``TEST_RUNNER``
+    string, so comparing names alone sees nothing wrong (review P6).
+    """
+    parts = [f'settings={_effective_settings_module(options)[0]}']
+    pythonpath = getattr(options, 'pythonpath', None)
+    if pythonpath:
+        try:
+            resolved = Path(str(pythonpath)).resolve()
+        except OSError:
+            resolved = Path(str(pythonpath))
+        parts.append(f'pythonpath={resolved}')
+    top_level = getattr(options, 'top_level', None)
+    if top_level and str(top_level) not in ('.', ''):
+        parts.append(f'top_level={top_level}')
+    return '; '.join(parts)
+
+
+def _pythonpath_is_repo_root(pythonpath: str) -> bool:
+    """Whether ``--pythonpath`` points at the repository root itself.
+
+    ``--pythonpath .`` (or an absolute path that resolves to the repo) inserts
+    the directory this script already imports from, so it cannot swap
+    ``ichat_pro`` for a shadow copy and is not a substitution. Anything else is.
+    """
+    try:
+        return Path(str(pythonpath)).resolve() == REPO_ROOT
+    except (OSError, RuntimeError):
         return False
-    if getattr(options, 'tags', None) or getattr(options, 'exclude_tags', None):
-        return False
+
+
+def _substitution_reason(options: argparse.Namespace) -> str | None:
+    """Why the effective settings/runner differs from the project default.
+
+    Independent of any narrowing filter on purpose: an operator may combine a
+    swapped runner with a label, and the swapped runner must still block the
+    snapshot (review P7). ``None`` means "the defaults are in force".
+    """
+    explicit_runner = getattr(options, 'testrunner', None)
+    if explicit_runner:
+        return (
+            f'显式 --testrunner={explicit_runner} 替换了默认 runner'
+            f'（{_default_test_runner()}）'
+        )
+
+    pythonpath = getattr(options, 'pythonpath', None)
+    if pythonpath and not _pythonpath_is_repo_root(pythonpath):
+        return (
+            f'--pythonpath={pythonpath} 会把该目录插到 sys.path 最前面，'
+            '子进程解析到的 ichat_pro 包可能不是本仓库里的那一份'
+            '（同名 settings/runner 的字符串完全相同，仅比对名字看不出来）'
+        )
+
+    top_level = getattr(options, 'top_level', None)
+    if top_level and str(top_level) not in ('.', ''):
+        return f'--top-level-directory={top_level} 改变了用例发现根目录'
+
+    module, source = _effective_settings_module(options)
+    if module != _DEFAULT_SETTINGS_MODULE:
+        # Even a module that imports * from ichat_pro.settings is refused: the
+        # point of the guard is that the published numbers come from one known
+        # configuration, and settings can hide a TEST_RUNNER that narrows the
+        # suite (that is precisely how the 1-test snapshot was published).
+        return (
+            f'生效的 settings 模块是 {module}（来自 {source}），'
+            f'不是默认的 {_DEFAULT_SETTINGS_MODULE}。'
+            '自定义 settings 会用其中的 TEST_RUNNER 决定跑哪些用例，'
+            '本次运行不能代表全量测试。'
+        )
+
+    expected_runner = _default_test_runner()
+    effective_runner = _test_runner_for(module)
+    if effective_runner is None:
+        return (
+            f'无法导入生效的 settings 模块 {module}，因此无法确认本次运行使用的 '
+            f'TEST_RUNNER 是否与默认的 {expected_runner} 一致。'
+        )
+    if effective_runner != expected_runner:
+        return (
+            f'生效的 TEST_RUNNER 是 {effective_runner}，与默认的 {expected_runner} '
+            '不同；自定义 runner 可以静默地只收集部分用例，本次运行不能代表全量测试。'
+        )
+    return None
+
+
+def _subset_reason(options: argparse.Namespace, unknown: list[str]) -> str | None:
+    """Why this run cannot speak for the whole suite, or ``None`` if it can.
+
+    The boolean ``_is_subset_run`` exists for callers that only need the
+    decision; the snapshot guard needs the *reason* as well, because a refusal
+    the operator cannot understand gets worked around instead of fixed.
+
+    Order matters for the message only, not for the decision: substitution is
+    checked first so that ``--settings=<alt> chat`` reports the dangerous cause
+    (swapped runner) rather than the benign one (a label).
+    """
+    if unknown:
+        return f'无法识别的测试参数（Django 会以 exit 2 拒绝）：{" ".join(unknown)}'
+    substitution = _substitution_reason(options)
+    if substitution is not None:
+        return substitution
+    if getattr(options, 'args', None):
+        return f'命令行指定了测试标签：{" ".join(str(a) for a in options.args)}'
+    if getattr(options, 'tags', None):
+        return f'--tag 只运行带指定标签的用例：{", ".join(options.tags)}'
+    if getattr(options, 'exclude_tags', None):
+        return f'--exclude-tag 排除了带指定标签的用例：{", ".join(options.exclude_tags)}'
     if getattr(options, 'test_name_patterns', None):
-        return False
+        return f'-k 只运行匹配 {options.test_name_patterns} 的用例'
     pattern = getattr(options, 'pattern', None)
     if pattern is not None and pattern != _DEFAULT_PATTERN:
-        return False
-    # Anything left is runner/settings-driven, or an explicit --testrunner.
-    return True
+        return f'--pattern={pattern} 会改变发现范围（默认 {_DEFAULT_PATTERN}）'
+    return None
 
 
 def _effective_settings_module(options: argparse.Namespace) -> tuple[str, str]:
@@ -200,73 +316,6 @@ def _default_test_runner() -> str:
     if _EXPECTED_TEST_RUNNER:
         return _EXPECTED_TEST_RUNNER
     return _test_runner_for(_DEFAULT_SETTINGS_MODULE) or _FRAMEWORK_TEST_RUNNER
-
-
-def _subset_reason(options: argparse.Namespace, unknown: list[str]) -> str | None:
-    """Why this run cannot speak for the whole suite, or ``None`` if it can.
-
-    The boolean ``_is_subset_run`` exists for callers that only need the
-    decision; the snapshot guard needs the *reason* as well, because a refusal
-    the operator cannot understand gets worked around instead of fixed.
-    """
-    if unknown:
-        return f'无法识别的测试参数（Django 会以 exit 2 拒绝）：{" ".join(unknown)}'
-    if getattr(options, 'args', None):
-        return f'命令行指定了测试标签：{" ".join(str(a) for a in options.args)}'
-    if getattr(options, 'tags', None):
-        return f'--tag 只运行带指定标签的用例：{", ".join(options.tags)}'
-    if getattr(options, 'exclude_tags', None):
-        return f'--exclude-tag 排除了带指定标签的用例：{", ".join(options.exclude_tags)}'
-    if getattr(options, 'test_name_patterns', None):
-        return f'-k 只运行匹配 {options.test_name_patterns} 的用例'
-    pattern = getattr(options, 'pattern', None)
-    if pattern is not None and pattern != _DEFAULT_PATTERN:
-        return f'--pattern={pattern} 会改变发现范围（默认 {_DEFAULT_PATTERN}）'
-    if getattr(options, 'testrunner', None):
-        return (
-            f'显式 --testrunner={options.testrunner} 可能只运行部分用例；'
-            f'快照必须来自默认 runner（{_default_test_runner()}）'
-        )
-
-    module, source = _effective_settings_module(options)
-    if module != _DEFAULT_SETTINGS_MODULE:
-        # Even a module that imports * from ichat_pro.settings is refused: the
-        # point of the guard is that the published numbers come from one known
-        # configuration, and settings can hide a TEST_RUNNER that narrows the
-        # suite (that is precisely how the 1-test snapshot was published).
-        return (
-            f'生效的 settings 模块是 {module}（来自 {source}），'
-            f'不是默认的 {_DEFAULT_SETTINGS_MODULE}。'
-            '自定义 settings 会用其中的 TEST_RUNNER 决定跑哪些用例，'
-            '本次运行不能代表全量测试。'
-        )
-
-    expected_runner = _default_test_runner()
-    effective_runner = _test_runner_for(module)
-    if effective_runner is None:
-        return (
-            f'无法导入生效的 settings 模块 {module}，因此无法确认本次运行使用的 '
-            f'TEST_RUNNER 是否与默认的 {expected_runner} 一致。'
-        )
-    if effective_runner != expected_runner:
-        return (
-            f'生效的 TEST_RUNNER 是 {effective_runner}，与默认的 {expected_runner} '
-            '不同；自定义 runner 可以静默地只收集部分用例，本次运行不能代表全量测试。'
-        )
-    return None
-
-
-def _is_subset_run(options: argparse.Namespace, unknown: list[str]) -> bool:
-    """True when the run cannot speak for the whole suite.
-
-    Judged on *parsed* values, so every spelling argparse accepts is handled by
-    construction: labels, ``--tag``/``--exclude-tag``/``-k`` in any spelling,
-    an explicitly given ``--pattern`` (whose default ``test*.py`` matches
-    everything), any unrecognised option (which Django itself would reject with
-    exit 2), and -- the QA-02 fix -- an effective settings module or
-    ``TEST_RUNNER`` that differs from the project defaults.
-    """
-    return _subset_reason(options, unknown) is not None
 
 
 def _subset_refusal(options: argparse.Namespace, unknown: list[str]) -> str | None:
@@ -328,10 +377,14 @@ def _safe_echo(text: str, stream=None) -> None:
 def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
     """Run the suite under coverage.
 
-    Returns ``(exit_code, test_count)``. The test count is parsed from Django's
-    own ``Ran N test(s)`` line and is used as an independent guard: an option
-    that filters the suite without being recognised as a filter would still
-    show up as a suspiciously small count.
+    Returns ``(exit_code, test_count, skipped)``. The test count is parsed from
+    Django's own ``Ran N test(s)`` line and is used as an independent guard: an
+    option that filters the suite without being recognised as a filter would
+    still show up as a suspiciously small count.
+
+    ``--pythonpath`` is refused before this runs (see ``_substitution_reason``):
+    it changes which ``ichat_pro`` package the child resolves, so the child may
+    execute a different runner than the one this process inspected.
     """
     command = [
         sys.executable,

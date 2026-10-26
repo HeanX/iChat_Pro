@@ -294,6 +294,13 @@ reject_sovereign_in_env() {  # reject_sovereign_in_env <file>
         for allowed in "${SOVEREIGN_KEYS[@]}"; do
             [[ "$key" == "$allowed" ]] && found+=("$key")
         done
+        # The caller's identity snapshot lives in _SOV_* variables, which this
+        # script assigns before `source` and reads after it. `set -a` exports
+        # every assignment in .env, so a tree that writes `_SOV_PROD_APP_DIR`
+        # (or `_SOV_SKIP_SMOKE`) overwrites the caller's snapshot and re-opens
+        # exactly the hole this guard closes (review R2-01/R2-02). The whole
+        # prefix is reserved — nothing legitimate in .env starts with it.
+        [[ "$key" == _SOV_* ]] && found+=("$key")
     done < "$file"
     if (( ${#found[@]} > 0 )); then
         echo "ERROR: $file sets deployment-identity keys, which this script" >&2

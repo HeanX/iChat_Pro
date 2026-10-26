@@ -237,6 +237,119 @@ if [[ ! -f "$APP_DIR/.env" ]]; then
     exit 1
 fi
 
+# --- resolved install configuration (P4 T49; review findings OPS-01 / OPS-02) --
+# ONE resolution feeds the service unit, the media root, the readiness probe and
+# the smoke gate. Before this, the runtime identity was fixed from the caller's
+# environment *before* .env was read, so an install that declares
+# ICHAT_SERVICE_NAME in its .env — the documented staging layout — silently
+# restarted the PRODUCTION unit and probed production's ports.
+#
+# Precedence, highest first:
+#   1. the caller's environment — `sudo ICHAT_SERVICE_NAME=... deploy.sh`
+#   2. $APP_DIR/.env — the same file systemd loads through EnvironmentFile
+#   3. the production default
+#
+# APP_DIR itself is deliberately NOT re-read from the file: the caller picks
+# the install tree, and that choice decides which .env is read at all.
+#
+# The caller's values are snapshotted first, because `source` would otherwise
+# let the file silently overwrite an explicit operator override.
+_CALLER_SERVICE_NAME=${ICHAT_SERVICE_NAME:-}
+_CALLER_SERVICE_USER=${ICHAT_SERVICE_USER:-}
+_CALLER_MEDIA_DIR=${ICHAT_MEDIA_DIR:-}
+_CALLER_TLS_PORT=${ICHAT_TLS_PORT:-}
+_CALLER_HTTP_PORT=${ICHAT_HTTP_PORT:-}
+
+set -a; source "$APP_DIR/.env"; set +a
+
+[[ -n "$_CALLER_SERVICE_NAME" ]] && ICHAT_SERVICE_NAME=$_CALLER_SERVICE_NAME
+[[ -n "$_CALLER_SERVICE_USER" ]] && ICHAT_SERVICE_USER=$_CALLER_SERVICE_USER
+[[ -n "$_CALLER_MEDIA_DIR" ]] && ICHAT_MEDIA_DIR=$_CALLER_MEDIA_DIR
+[[ -n "$_CALLER_TLS_PORT" ]] && ICHAT_TLS_PORT=$_CALLER_TLS_PORT
+[[ -n "$_CALLER_HTTP_PORT" ]] && ICHAT_HTTP_PORT=$_CALLER_HTTP_PORT
+
+PROD_SERVICE_NAME=ichat
+PROD_SERVICE_USER=ichat
+PROD_MEDIA_DIR=/var/lib/ichat/media
+
+MEDIA_DIR=${ICHAT_MEDIA_DIR:-$PROD_MEDIA_DIR}
+SERVICE_NAME=${ICHAT_SERVICE_NAME:-$PROD_SERVICE_NAME}
+SERVICE_USER=${ICHAT_SERVICE_USER:-$PROD_SERVICE_USER}
+SERVICE_UNIT=$SERVICE_NAME.service
+
+# Ports are parsed, not trusted: a typo must not silently become port 0.
+resolve_port() {  # resolve_port <name> <value> <default>
+    local name=$1 value=${2:-} default=$3
+    if [[ -z "$value" ]]; then
+        printf '%s' "$default"
+    elif [[ "$value" =~ ^[0-9]{1,5}$ ]] && (( value >= 1 && value <= 65535 )); then
+        printf '%s' "$value"
+    else
+        echo "ERROR: $name='$value' is not a TCP port (1-65535)." >&2
+        exit 2
+    fi
+}
+TLS_PORT=$(resolve_port ICHAT_TLS_PORT "${ICHAT_TLS_PORT:-}" 8443)
+HTTP_PORT=$(resolve_port ICHAT_HTTP_PORT "${ICHAT_HTTP_PORT:-}" 8000)
+
+# Probe origins come from the SAME resolved config as the unit above, so a
+# staging install (Daphne 8001 / Nginx 8444) cannot fall back to production's
+# 8443/8000 through an omission.
+TLS_ORIGIN=${ICHAT_READY_ORIGIN:-https://127.0.0.1:$TLS_PORT}
+LOOPBACK_ORIGIN=${ICHAT_LOOPBACK_ORIGIN:-http://127.0.0.1:$HTTP_PORT}
+
+# A non-production tree that resolves to a PRODUCTION resource has an
+# incomplete staging identity; it is not a working install. Refuse BEFORE the
+# restart: "restarted the wrong unit" cannot be undone by the script, and
+# "wrote staging media into production" cannot be undone either.
+#
+# ICHAT_PROD_APP_DIR names the tree that IS production (default /opt/ichat).
+# It exists because the production defaults are the ones that must never be
+# inherited by accident: an install elsewhere that leaves them unset is
+# refused rather than quietly pointed at them. Point it at a different tree
+# only when production itself really lives there.
+normalise_dir() {  # strip trailing/duplicate separators; keep the root
+    local p=${1:-}
+    while [[ "$p" == */ ]]; do p=${p%/}; done
+    printf '%s' "${p:-/}"
+}
+PROD_APP_DIR=${ICHAT_PROD_APP_DIR:-/opt/ichat}
+PROD_APP_NORM=$(normalise_dir "$PROD_APP_DIR")
+if [[ "$(normalise_dir "$APP_DIR")" != "$PROD_APP_NORM" ]]; then
+    if [[ "$SERVICE_NAME" == "$PROD_SERVICE_NAME" ]]; then
+        echo "ERROR: install tree $APP_DIR would restart the PRODUCTION unit" >&2
+        echo "       '$SERVICE_UNIT' because ICHAT_SERVICE_NAME is unset." >&2
+        echo "       Set ICHAT_SERVICE_NAME (and ICHAT_SERVICE_USER) in" >&2
+        echo "       $APP_DIR/.env or in the caller's environment." >&2
+        echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
+        exit 2
+    fi
+    if [[ "$SERVICE_USER" == "$PROD_SERVICE_USER" ]]; then
+        echo "ERROR: install tree $APP_DIR would create media as the production" >&2
+        echo "       user '$PROD_SERVICE_USER' because ICHAT_SERVICE_USER is unset." >&2
+        echo "       Set ICHAT_SERVICE_USER in $APP_DIR/.env." >&2
+        echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
+        exit 2
+    fi
+    if [[ "$(normalise_dir "$MEDIA_DIR")" == "$PROD_MEDIA_DIR" ]]; then
+        echo "ERROR: install tree $APP_DIR would use the PRODUCTION media root" >&2
+        echo "       $PROD_MEDIA_DIR because ICHAT_MEDIA_DIR is unset." >&2
+        echo "       Set ICHAT_MEDIA_DIR in $APP_DIR/.env." >&2
+        echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
+        exit 2
+    fi
+    if [[ "$TLS_PORT" == "8443" || "$HTTP_PORT" == "8000" ]]; then
+        echo "ERROR: install tree $APP_DIR would probe PRODUCTION's ports" >&2
+        echo "       ($TLS_ORIGIN / $LOOPBACK_ORIGIN) because ICHAT_TLS_PORT /" >&2
+        echo "       ICHAT_HTTP_PORT are unset. Set them in $APP_DIR/.env to the" >&2
+        echo "       staging front door and Daphne port (8444 / 8001)." >&2
+        echo "       Nothing was changed: no fetch, no checkout, no restart." >&2
+        exit 2
+    fi
+fi
+echo "==> Install: tree=$APP_DIR unit=$SERVICE_UNIT user=$SERVICE_USER media=$MEDIA_DIR"
+echo "==> Probes: ready=$TLS_ORIGIN fallback=$LOOPBACK_ORIGIN"
+
 # --- code (bootstrap clone on first deploy, then fetch/pin) ---
 if [[ ! -d "$REPO_DIR/.git" ]]; then
     echo "==> First deploy: cloning repository into $REPO_DIR"
@@ -257,12 +370,14 @@ DEPLOYED_SHA=$(git -C "$REPO_DIR" rev-parse HEAD)
 "$VENV_DIR/bin/pip" install --quiet -r "$REPO_DIR/requirements.txt"
 
 # --- state dirs ---
-SERVICE_USER=${ICHAT_SERVICE_USER:-ichat}
-SERVICE_NAME=${ICHAT_SERVICE_NAME:-ichat}
+# SERVICE_USER / SERVICE_NAME / MEDIA_DIR were resolved from .env above; this
+# is the only place that creates them, so the ownership matches the unit that
+# is about to be restarted.
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$MEDIA_DIR" "$MEDIA_DIR/avatars" "$MEDIA_DIR/uploads"
 
 # --- config validation before touching the running service ---
-set -a; source "$APP_DIR/.env"; set +a
+# (.env is already sourced: the resolved install config above needs it, and a
+# second `source` here would let the file overwrite an operator override.)
 "$VENV_DIR/bin/python" "$REPO_DIR/manage.py" check
 "$VENV_DIR/bin/python" "$REPO_DIR/manage.py" makemigrations --check --dry-run
 
@@ -271,28 +386,31 @@ set -a; source "$APP_DIR/.env"; set +a
 "$VENV_DIR/bin/python" "$REPO_DIR/manage.py" collectstatic --noinput --clear
 
 echo "==> Restarting service"
-systemctl restart "$SERVICE_NAME.service"
-systemctl enable "$SERVICE_NAME.service" >/dev/null 2>&1 || true
+systemctl restart "$SERVICE_UNIT"
+systemctl enable "$SERVICE_UNIT" >/dev/null 2>&1 || true
 
 # --- readiness gate ---
 # Primary: probe through the local Nginx TLS front door — works for ANY
 # deployed version (old versions redirect plain http to https) and exercises
 # the full request path (TLS, proxy, app, DB, Redis).
-# Fallback: when nothing listens on 8443 (fresh host before Nginx is set up),
-# probe Daphne over loopback http with the production Host header; this is
-# only valid on versions that exempt health paths from the SSL redirect.
+# Fallback: when nothing listens on the TLS port (fresh host before Nginx is
+# set up), probe Daphne over loopback http with the production Host header;
+# this is only valid on versions that exempt health paths from the SSL
+# redirect.
 # Both paths assert the readiness JSON body — never trust a bare connection
 # success (a 301/400 body would pass a plain `curl -f`).
+# Both origins are resolved from install config (OPS-02): a staging install
+# probes ITS OWN 8444/8001, never production's.
 ALLOWED_HOST=${DJANGO_ALLOWED_HOSTS%%,*}
 BODY=""
 for i in $(seq 1 30); do
     BODY=$(curl -fkS --max-time 5 \
         -H "Host: $ALLOWED_HOST" \
-        https://127.0.0.1:8443/health/ready/ 2>/dev/null || true)
+        "$TLS_ORIGIN/health/ready/" 2>/dev/null || true)
     if [[ "$BODY" != *'"status": "ok"'* ]]; then
         BODY=$(curl -fsS --max-time 5 \
             -H "Host: $ALLOWED_HOST" \
-            http://127.0.0.1:8000/health/ready/ 2>/dev/null || true)
+            "$LOOPBACK_ORIGIN/health/ready/" 2>/dev/null || true)
     fi
     if [[ "$BODY" == *'"status": "ok"'* ]]; then
         echo "==> Readiness OK: db+cache reachable"
@@ -302,7 +420,8 @@ for i in $(seq 1 30); do
     sleep 1
 done
 if [[ "${READY:-0}" != "1" ]]; then
-    echo "ERROR: readiness probe failed after restart (last body: ${BODY:-none}); check 'journalctl -u $SERVICE_NAME -n 50'" >&2
+    echo "ERROR: readiness probe failed after restart (last body: ${BODY:-none});" >&2
+    echo "       probed $TLS_ORIGIN then $LOOPBACK_ORIGIN; check 'journalctl -u $SERVICE_NAME -n 50'" >&2
     exit 1
 fi
 
@@ -341,6 +460,7 @@ else
     fi
     echo "==> Post-deploy smoke gate"
     AUTO_BASE_URL=1 SMOKE_INSECURE_TLS=1 SMOKE_PYTHON="$VENV_DIR/bin/python" \
+        SMOKE_TLS_ORIGIN="$TLS_ORIGIN" SMOKE_LOOPBACK_ORIGIN="$LOOPBACK_ORIGIN" \
         bash "$REPO_DIR/deploy/smoke.sh" || {
         echo "ERROR: post-deploy smoke gate FAILED — release $DEPLOYED_SHA is NOT recorded." >&2
         echo "       The service was restarted, so the old process is already gone." >&2

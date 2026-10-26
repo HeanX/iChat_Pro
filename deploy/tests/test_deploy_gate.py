@@ -94,6 +94,10 @@ class DeployGateLoggingTests(unittest.TestCase):
             "BIN_COPY=/opt/ichat/bin/deploy.sh\n"
             f"DEPLOYED_SHA={FAKE_SHA}\n"
             "TARGET=main\n"
+            # Resolved install config the real script computes before the gate;
+            # the block hands these origins to smoke.sh (OPS-02).
+            "TLS_ORIGIN=https://127.0.0.1:8443\n"
+            "LOOPBACK_ORIGIN=http://127.0.0.1:8000\n"
             f"COMMIT={commit!r}\n"
             f"IS_ROLLBACK={1 if is_rollback else 0}\n"
             f'ICHAT_SKIP_SMOKE={"1" if skip else "0"}\n'

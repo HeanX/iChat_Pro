@@ -37,6 +37,12 @@ class DeployConfigTests(StubbedHostTestCase, unittest.TestCase):
         self.host = self.make_host()
 
     def staging_env(self, **overrides):
+        """Staging identity for the CALLER's environment.
+
+        These keys are caller-only (review finding F-01): a deployed tree must
+        not be able to select the unit it restarts or the ports it probes, so
+        they travel on the command line, not in $APP_DIR/.env.
+        """
         values = {
             "ICHAT_SERVICE_NAME": "ichat-staging",
             "ICHAT_SERVICE_USER": "ichat-staging",
@@ -48,12 +54,12 @@ class DeployConfigTests(StubbedHostTestCase, unittest.TestCase):
         return values
 
     # --- OPS-01: the runtime identity comes from the resolved config ------
-    def test_staging_env_alone_restarts_the_staging_unit(self):
-        """Only the .env declares the staging identity — no caller overrides."""
-        self.host.write_env(**self.staging_env())
+    def test_identity_on_the_command_line_restarts_the_staging_unit(self):
+        """The caller's identity reaches systemctl and install verbatim."""
+        self.host.write_env()
         self.host.write_smoke_stub()
 
-        result = self.host.run("--branch", "main")
+        result = self.host.run("--branch", "main", env=self.staging_env())
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, msg=output)
 
@@ -71,19 +77,15 @@ class DeployConfigTests(StubbedHostTestCase, unittest.TestCase):
             msg=output,
         )
 
-    def test_caller_environment_still_overrides_the_env_file(self):
-        """Precedence: an explicit operator override beats the file."""
-        self.host.write_env(**self.staging_env(ICHAT_SERVICE_NAME="from-the-file"))
+    def test_explicit_caller_identity_is_used_verbatim(self):
+        """Whatever the operator types is what gets restarted."""
+        self.host.write_env()
         self.host.write_smoke_stub()
 
-        result = self.host.run(
-            "--branch",
-            "main",
-            env={
-                "ICHAT_SERVICE_NAME": "explicit-unit",
-                "ICHAT_SERVICE_USER": "explicit-user",
-            },
+        env = self.staging_env(
+            ICHAT_SERVICE_NAME="explicit-unit", ICHAT_SERVICE_USER="explicit-user"
         )
+        result = self.host.run("--branch", "main", env=env)
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn(
             "systemctl restart explicit-unit.service",
@@ -92,10 +94,15 @@ class DeployConfigTests(StubbedHostTestCase, unittest.TestCase):
 
     def test_incomplete_staging_identity_is_refused_before_any_restart(self):
         """A non-production tree that would touch production must not run."""
-        self.host.write_env(ICHAT_MEDIA_DIR="/var/lib/ichat-staging/media")
+        self.host.write_env()
         self.host.write_smoke_stub()
 
-        result = self.host.run("--branch", "main")
+        # Only the media root is supplied: the unit and the user still resolve
+        # to production, so the run must be refused.
+        result = self.host.run(
+            "--branch", "main",
+            env={"ICHAT_MEDIA_DIR": str(self.host.workdir / "staging-media")},
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 2, msg=output)
         self.assertIn("PRODUCTION unit", output)
@@ -104,12 +111,13 @@ class DeployConfigTests(StubbedHostTestCase, unittest.TestCase):
         self.assertEqual(self.host.read("GITLOG"), "", msg="the tree must not be touched")
 
     def test_staging_guard_names_the_missing_media_root(self):
-        self.host.write_env(
-            **self.staging_env(ICHAT_MEDIA_DIR="/var/lib/ichat/media")
-        )
+        self.host.write_env()
         self.host.write_smoke_stub()
 
-        result = self.host.run("--branch", "main")
+        result = self.host.run(
+            "--branch", "main",
+            env=self.staging_env(ICHAT_MEDIA_DIR="/var/lib/ichat/media"),
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 2, msg=output)
         self.assertIn("PRODUCTION media root", output)
@@ -119,10 +127,10 @@ class DeployConfigTests(StubbedHostTestCase, unittest.TestCase):
         env = self.staging_env()
         del env["ICHAT_TLS_PORT"]
         del env["ICHAT_HTTP_PORT"]
-        self.host.write_env(**env)
+        self.host.write_env()
         self.host.write_smoke_stub()
 
-        result = self.host.run("--branch", "main")
+        result = self.host.run("--branch", "main", env=env)
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 2, msg=output)
         self.assertIn("PRODUCTION's ports", output)
@@ -131,10 +139,10 @@ class DeployConfigTests(StubbedHostTestCase, unittest.TestCase):
 
     # --- OPS-02: probes follow the resolved config, never production -----
     def test_staging_readiness_probes_the_staging_ports(self):
-        self.host.write_env(**self.staging_env())
+        self.host.write_env()
         self.host.write_smoke_stub()
 
-        result = self.host.run("--branch", "main")
+        result = self.host.run("--branch", "main", env=self.staging_env())
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, msg=output)
 
@@ -170,10 +178,13 @@ class DeployConfigTests(StubbedHostTestCase, unittest.TestCase):
         self.assertIn("SMOKE_LOOPBACK_ORIGIN=http://127.0.0.1:8000", smoke_env, msg=smoke_env)
 
     def test_bad_port_is_a_config_error_not_port_zero(self):
-        self.host.write_env(**self.staging_env(ICHAT_TLS_PORT="84o4"))
+        self.host.write_env()
         self.host.write_smoke_stub()
 
-        result = self.host.run("--branch", "main")
+        result = self.host.run(
+            "--branch", "main",
+            env=self.staging_env(ICHAT_TLS_PORT="84o4"),
+        )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 2, msg=output)
         self.assertIn("is not a TCP port", output)

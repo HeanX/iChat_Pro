@@ -654,7 +654,8 @@ class SecretArgvTests(MonitorTestBase):
         wrapper = self.workdir / "argv-python.sh"
         wrapper.write_text(
             "#!/usr/bin/env bash\n"
-            'LOG="$(to_posix "$ARGV_LOG_WIN")"\n'
+            + TO_POSIX_SH
+            + 'LOG="$(to_posix "$ARGV_LOG_WIN")"\n'
             "for arg in \"$@\"; do printf '%s\\n' \"$arg\" >> \"$LOG\"; done\n"
             'printf -- "----\\n" >> "$LOG"\n'
             f'exec "{sys.executable}" "$@"\n',
@@ -689,8 +690,8 @@ class SecretArgvTests(MonitorTestBase):
         )
         env_log = self.workdir / "psql-env.log"
         (self.bindir / "psql").write_text(
-            "#!/usr/bin/env bash\n"
-            'printf "PGHOST=%s\\n" "$PGHOST" > "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
+            "#!/usr/bin/env bash\n" + TO_POSIX_SH
+            + 'printf "PGHOST=%s\\n" "$PGHOST" > "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
             'printf "PGPORT=%s\\n" "$PGPORT" >> "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
             'printf "PGUSER=%s\\n" "$PGUSER" >> "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
             'printf "PGDATABASE=%s\\n" "$PGDATABASE" >> "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'

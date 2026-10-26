@@ -46,22 +46,50 @@ TO_POSIX_SH = r'''
 # cygpath exists only in Git Bash; a Linux CI runner has none, and an empty
 # substitution there turned PATH into "[:/mingw64/bin:/usr/bin]" and
 # ICHAT_APP_DIR into "" -> deploy.sh fell back to /opt/ichat and exited 1.
-# The fallback rewrites C:\x\y to /c/x/y and passes POSIX/empty values
-# through unchanged, so the same wrapper runs on both platforms.
+#
+# cygpath is used only when it EXISTS *and* actually converts a non-empty input
+# to a non-empty result: a broken or shadowed cygpath otherwise yields "" for
+# every path, which is the same failure the fallback exists to prevent.
+# The fallback uses shell builtins only (printf is a bash builtin, parameter
+# expansion is builtin), so it keeps working even with PATH stripped bare.
 # ICHAT_FORCE_NO_CYGPATH=1 exercises the fallback branch on a Git Bash host.
 to_posix() {
-    local p=$1
+    local p=$1 out
     if [[ "${ICHAT_FORCE_NO_CYGPATH:-0}" != "1" ]] && command -v cygpath >/dev/null 2>&1; then
-        cygpath -u "$p"
-        return 0
+        out=$(cygpath -u "$p" 2>/dev/null) || out=""
+        if [[ -n "$p" && -z "$out" ]]; then
+            : # broken cygpath: fall through to the builtin conversion
+        else
+            printf '%s' "$out"
+            return 0
+        fi
     fi
     case "$p" in
         [A-Za-z]:[\\/]*)
             local drive=${p%%:*} rest=${p#*:}
+            # Backslashes to forward slashes.
             rest=${rest//\\//}
-            printf '/%s%s' "$(printf '%s' "$drive" | tr 'A-Z' 'a-z')" "$rest"
+            # Strip every leading separator in one expansion, then the printf
+            # below supplies exactly one: /d/ + "Code/x". (A ${x#/} alone left
+            # //Code/x for "D:\Code".)
+            while [[ "$rest" == /* ]]; do rest=${rest#/}; done
+            # Lower-case the drive letter with a case statement: tr may be
+            # missing from a stripped PATH, and this is a builtin construct.
+            case "$drive" in
+                A) drive=a ;; B) drive=b ;; C) drive=c ;; D) drive=d ;;
+                E) drive=e ;; F) drive=f ;; G) drive=g ;; H) drive=h ;;
+                I) drive=i ;; J) drive=j ;; K) drive=k ;; L) drive=l ;;
+                M) drive=m ;; N) drive=n ;; O) drive=o ;; P) drive=p ;;
+                Q) drive=q ;; R) drive=r ;; S) drive=s ;; T) drive=t ;;
+                U) drive=u ;; V) drive=v ;; W) drive=w ;; X) drive=x ;;
+                Y) drive=y ;; Z) drive=z ;;
+            esac
+            printf '/%s/%s' "$drive" "$rest"
             ;;
-        *) printf '%s' "$p" ;;
+        *)
+            # Already POSIX, relative, or empty: leave it alone.
+            printf '%s' "$p"
+            ;;
     esac
 }
 '''

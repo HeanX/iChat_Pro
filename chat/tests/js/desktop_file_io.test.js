@@ -1374,3 +1374,226 @@ test('a download that keeps streaming is never reclaimed as stale', () => {
     { fileName: path.basename(target), bytes: 9 });
   assert.equal(fs.readFileSync(target, 'utf8'), 'ABCABCABC');
 });
+
+// ── QA-03 (review MINOR-1): the real button entry point ─────────────────────
+//
+// The 11 MiB case above extracts four helpers and calls runFileDownload
+// directly, so it stayed green when renderFileMessageBubble's
+// `return runFileDownload(this, div, conv, fileId);` was replaced with
+// `return null;` -- the bubble's click binding is the actual product
+// behaviour, and nothing pinned it.
+//
+// This case starts where a user starts: render the bubble through the real
+// renderFileMessageBubble, take the Download button it rendered, and fire the
+// click listener *that render bound*. It then follows the bytes all the way to
+// disk through the real file-transfer.js and the real desktop/file-io.js.
+
+/** Minimal DOM node good enough for the bubble render and the button states. */
+function bubbleNode(tagName = 'div') {
+  const classes = new Set();
+  const node = {
+    tagName: String(tagName).toUpperCase(),
+    className: '',
+    innerHTML: '',
+    type: '',
+    disabled: false,
+    children: [],
+    attributes: {},
+    listeners: {},
+    parentNode: null,
+    classList: {
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name),
+    },
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    getAttribute(name) { return this.attributes[name] === undefined ? null : this.attributes[name]; },
+    addEventListener(name, fn) { this.listeners[name] = fn; },
+    appendChild(child) {
+      child.parentNode = this;
+      this.children.push(child);
+      return child;
+    },
+    removeChild(child) {
+      const index = this.children.indexOf(child);
+      if (index >= 0) this.children.splice(index, 1);
+      return child;
+    },
+    remove() {
+      if (this.parentNode) this.parentNode.removeChild(this);
+    },
+    querySelector() { return null; },
+  };
+  return node;
+}
+
+test('the rendered file bubble download button really saves a large image', async () => {
+  // The whole point: no helper is called from the test except through the
+  // click listener renderFileMessageBubble attached itself.
+  const target = tempPath('chosen-from-bubble.png');
+  const bytes = Buffer.alloc(11 * 1024 * 1024, 0x5a); // > AUTO_IMAGE_PREVIEW_LIMIT_BYTES
+  const api = io.createFileIo();
+  const calls = { fetch: 0, pick: 0, seal: 0, offsets: [], writes: 0 };
+  let fetchConversationType = null;
+  let fetchFileId = null;
+
+  const envelope = (operation) => {
+    try {
+      return { ok: true, value: operation() };
+    } catch (error) {
+      return { ok: false, code: error.code || error.message };
+    }
+  };
+
+  // The desktop bridge, with desktop/file-io.js behind it -- the same policy
+  // the shipped main process enforces.
+  const files = {
+    pickSaveTarget: (payload) => envelope(() => {
+      calls.pick += 1;
+      return { canceled: false, ...api.createSaveGrant({ ...payload, senderId: 1, filePath: target }) };
+    }),
+    writeChunk: (payload) => envelope(() => {
+      calls.writes += 1;
+      calls.offsets.push(payload.offset);
+      return api.writeChunk({ ...payload, senderId: 1 });
+    }),
+    seal: (payload) => envelope(() => {
+      calls.seal += 1;
+      return api.sealGrant({ ...payload, senderId: 1 });
+    }),
+    release: (payload) => envelope(() => api.releaseGrant({ ...payload, senderId: 1 })),
+    openDownloaded: (payload) => envelope(() => api.openTarget({ ...payload, senderId: 1 })),
+  };
+
+  const toasts = [];
+  const documentBody = bubbleNode('body');
+  const context = vm.createContext({
+    console, Blob, Uint8Array, Promise, Object, String, Number, Math, JSON, Error,
+    Array, Boolean, parseInt, isNaN,
+    btoa: (value) => Buffer.from(value, 'binary').toString('base64'),
+    atob: (value) => Buffer.from(value, 'base64').toString('binary'),
+    URL: { createObjectURL: () => 'blob:qa03-bubble' },
+    setTimeout: () => 0,
+    clearTimeout() {},
+    lucide: { createIcons() {} },
+    // The bubble creates the preview <img> and, on the browser fallback, an
+    // <a download>. Both are real element lookups; everything else about the
+    // download path is the shipped code.
+    document: {
+      body: documentBody,
+      createElement: (tagName) => bubbleNode(tagName),
+    },
+    isSelectingMessages: false,
+    selectedMessageIds: [],
+    AUTO_IMAGE_PREVIEW_LIMIT_BYTES: 10 * 1024 * 1024,
+    escapeHtml: (value) => String(value == null ? '' : value)
+      .replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])),
+    renderStatusIconHtml: () => '',
+    getMessageSenderName: () => 'Peer',
+    getSenderAvatarInfo: () => ({ avatarUrl: '', colorClass: '', initials: 'P', safeStyle: '' }),
+    // renderInlineReplyQuote is deliberately absent: the real function guards
+    // it with `typeof ... === 'function'`, so this exercises that branch the
+    // way a page without the module would.
+    window: {
+      showToast: (message) => toasts.push(message),
+      iChatDesktop: { files },
+      iChatFileTransfer: {},
+    },
+  });
+  context.window.window = context.window;
+
+  // Real renderer streaming code, then the real bubble renderer and the real
+  // helpers it calls. Nothing is re-implemented here.
+  vm.runInContext(fileTransferSource, context, { filename: 'file-transfer.js' });
+  context.window.iChatFileTransfer.fetchAndDecryptFile = async (fileId, conversationType) => {
+    calls.fetch += 1;
+    fetchFileId = fileId;
+    fetchConversationType = conversationType;
+    return {
+      blob: new Blob([bytes], { type: 'image/png' }),
+      metadata: { original_name: 'peer-suggested.png' },
+    };
+  };
+  const rendererNames = [
+    'renderFileMessageBubble', 'runFileDownload', 'saveOrDownloadBlob',
+    'offerOpenSavedFile', 'applySaveResultToDownloadButton', 'formatFileSize',
+  ];
+  vm.runInContext(
+    rendererNames.map((name) => extractFunction(chatSource, name)).join('\n'),
+    context, { filename: 'chat.js:file-bubble' },
+  );
+
+  // ── render the bubble the way the message list does ──
+  const row = bubbleNode('div');
+  const button = bubbleNode('button');
+  const preview = bubbleNode('div');
+  preview.className = 'file-bubble-preview hidden';
+  // The bubble's own querySelector resolves the two elements it looks for.
+  row.querySelector = (selector) => {
+    if (selector === '.file-download-btn') return button;
+    if (selector === '.file-bubble-preview') return preview;
+    if (selector === '[data-lucide]') return null; // skip the icon refresh
+    return null;
+  };
+
+  context.renderFileMessageBubble(row, {
+    id: 77,
+    isSelf: true,
+    message_type: 'image', // image *over* the preview limit -> plain bubble
+    file_id: 42,
+    file: { total_size_bytes: bytes.length },
+    time: '12:00',
+  }, { type: 'single' }, {});
+
+  assert.ok(row.innerHTML.includes('file-download-btn'),
+    'an 11 MiB image must render the plain bubble with a Download button');
+  assert.ok(row.innerHTML.includes('Download'),
+    'the button must start in its Download state');
+  assert.equal(typeof button.listeners.click, 'function',
+    'renderFileMessageBubble must bind the download click on the rendered button');
+
+  // ── click it, exactly as a user would ──
+  const clickResult = button.listeners.click.call(button, {
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.ok(clickResult && typeof clickResult.then === 'function',
+    'the bound click must return the download promise (a `return null` binding would not)');
+  const saved = await clickResult;
+
+  // fetch -> pick -> seal, each at least once, through the real helpers.
+  assert.equal(calls.fetch, 1, 'the click must fetch the file exactly once');
+  assert.equal(calls.pick, 1, 'and ask the shell where to save it exactly once');
+  assert.equal(calls.seal, 1, 'and seal the completed download exactly once');
+  assert.equal(fetchFileId, 42, "the button's data-file-id drives the fetch");
+  assert.equal(fetchConversationType, 'single', 'the conversation type is passed through');
+  sameShape(saved, {
+    status: 'saved',
+    token: saved && saved.token,
+    fileName: path.basename(target),
+  });
+
+  // The bytes on disk are the decrypted blob, all of them, in order.
+  assert.ok(fs.existsSync(target), 'the click must have written the file');
+  const onDisk = fs.readFileSync(target);
+  assert.equal(onDisk.length, bytes.length, 'every byte must land on disk');
+  assert.ok(onDisk.equals(bytes), 'and the contents must be unchanged');
+  assert.equal(crypto.createHash('sha256').update(onDisk).digest('hex'),
+    crypto.createHash('sha256').update(bytes).digest('hex'),
+    'the sha256 of the saved file must match the source blob');
+  // 11 MiB at the renderer's 2 MiB chunk size, in ascending offsets.
+  assert.deepEqual(calls.offsets,
+    [0, 2 * 1024 * 1024, 4 * 1024 * 1024, 6 * 1024 * 1024, 8 * 1024 * 1024, 10 * 1024 * 1024],
+    'the renderer must stream in ascending 2 MiB chunks');
+
+  // Success is reported on the very button that was clicked.
+  assert.match(button.innerHTML, /Done/, 'a saved download reports Done');
+  assert.equal(button.classList.contains('downloaded'), true);
+  assert.equal(button.classList.contains('downloading'), false);
+  // The user-chosen name wins over the peer's suggestion.
+  assert.ok(toasts.some((message) => message.includes(path.basename(target))),
+    'the saved-to toast must name the file the user chose');
+  // The preview is presentation only; it must still have been filled.
+  assert.equal(preview.classList.contains('hidden'), false);
+  assert.ok(preview.children.length >= 1, 'an image blob still renders its preview');
+});

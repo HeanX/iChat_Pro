@@ -86,7 +86,7 @@ test_concurrent_conflicting_id_across_conversations (chat.tests.test_t32_review.
 
 ```text
 $ npm run test:e2ee
-tests 105 / pass 105 / fail 0
+tests 107 / pass 107 / fail 0
 
 $ node --check static/js/chat.js
 exit=0
@@ -99,9 +99,9 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
 
 | 文件 | 条数 | 覆盖 |
 | --- | --- | --- |
-| `chat/tests/js/key_trust_decline.test.js` | 21 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链 |
+| `chat/tests/js/key_trust_decline.test.js` | 23 | 真实 `respondToKeyVerification` / `refreshKeyVerificationAfterChange` / `handleKeyVerificationNew` 的授权链 |
 | `chat/tests/js/settings_key_export.test.js` | 9 | 从真实模板抽取并执行独立设置页的 `keyMgrExport()` |
-| 合计 | 105 | 其中 4 个独立脚本（private/group/connection/desktop-config）+ `node --test` 97 条 |
+| 合计 | 107 | 其中 4 个独立脚本（private/group/connection/desktop-config）+ `node --test` 99 条 |
 
 > 数字随代码演进会变，以当次 `npm run test:e2ee` 输出为准；上表为 2026-10-26 实测。
 
@@ -116,6 +116,8 @@ Phase4 修复轮（WEB-03 / WEB-04，分支 `codex/web-e2ee-trust-export`）又�
    `pendingKeyVerificationRequests` 中用户实际点击的那条请求为准，
    `verificationConfirmation()` 只用回包核对 `id` / `requester_id` / `responder_id`。
    回包指向其它联系人或其它版本时**不授予任何人信任**并提示用户。
+   WebSocket `accepted` 事件同样经 `verificationIdentifiesSameRequest()` 与托盘快照比对，
+   未在托盘中出现过的请求、或点名其它联系人的事件，一律不授予。
 3. **双重比对**：`acceptedVerificationPeer()` 要求 `status === "accepted"` 且自己是当事人；
    `keyStatusMatchesAcceptedVerification()` 要求服务端当前 active key 的指纹**和版本**
    都等于快照所 pin 的值。

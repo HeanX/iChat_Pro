@@ -729,19 +729,31 @@ test('a socket accept naming another contact grants nothing', async () => {
   assert.deepEqual(world.cacheCalls, []);
 });
 
-test('a socket accept for a request the tray never showed grants nothing', async () => {
-  const world = createWorld({
+test('a socket accept with no tray snapshot still fails closed on a rotated key', async () => {
+  // When this tab has no local snapshot the event is the only statement
+  // available, so it is used — but the pinned fingerprint is still compared with
+  // the live endpoint, and a rotation there grants nothing.
+  const rotated = createWorld({
     stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
-    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    status: [rotatedContactStatus('CCCC')],
   });
-
-  world.context.handleKeyVerificationNew({
+  rotated.context.handleKeyVerificationNew({
     data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
   });
   await flush();
+  assert.deepEqual(rotated.versions(7), { 1: 'AAAA' }, 'a rotated key is never trusted');
+  assert.deepEqual(rotated.cacheCalls, []);
 
-  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'no snapshot means no authorisation');
-  assert.deepEqual(world.cacheCalls, []);
+  // And a matching endpoint does grant, so the path is not simply dead.
+  const matching = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+  });
+  matching.context.handleKeyVerificationNew({
+    data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
+  });
+  await flush();
+  assert.equal(matching.versions(7)['2'], 'BBBB');
 });
 
 test('granting trust is scoped to the contact the verification named', async () => {

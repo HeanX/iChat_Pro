@@ -5159,25 +5159,49 @@ function handleKeyVerificationNew(data) {
   if (payload.event === "requested" && verification.direction === "incoming") {
     window.showToast(currentLanguage === "zh" ? "收到安全验证请求" : "Security verification request received");
   } else if (payload.event === "accepted") {
-    // The socket event is the server-confirmed accept for this verification. It
-    // may authorise trust, but only when it is identifiable as the same request
-    // the user saw in the tray -- otherwise a crafted event could name any
-    // contact. The fingerprint is still re-checked against the live endpoint by
-    // keyStatusMatchesAcceptedVerification().
-    const authorisation = snapshot && verificationIdentifiesSameRequest(snapshot, verification)
-      ? Object.assign({}, snapshot, { status: "accepted" })
-      : null;
+    // The socket event is a server statement that this verification was
+    // accepted. When the tray still holds the request the user saw, the event
+    // must identify that same request -- otherwise a crafted event could name
+    // any contact and silently trust it. When there is no local snapshot (the
+    // tray was already cleared, or this tab never fetched it), the event is the
+    // only available statement, so it is used directly; the pinned fingerprint
+    // and version are still re-checked against the live endpoint by
+    // keyStatusMatchesAcceptedVerification(), which fails closed.
+    let authorisation = null;
+    if (snapshot) {
+      if (verificationIdentifiesSameRequest(snapshot, verification)) {
+        authorisation = Object.assign({}, snapshot, { status: "accepted" });
+      }
+    } else if (verification.status === "accepted" && acceptedVerificationPeer(verification)) {
+      authorisation = verification;
+    }
+    const peer = snapshot || verification;
     refreshKeyVerificationAfterChange(
-      keyVerificationOtherUserId(snapshot || verification),
+      keyVerificationOtherUserId(peer),
       authorisation ? { grantTrustFor: authorisation } : undefined
-    ).catch(function(err) {
-      // This branch is not awaited by the caller, so an unawaited rejection here
-      // used to surface as a console error next to a success toast.
+    ).then(function(outcome) {
+      // The caller does not await this branch, so report the real outcome here
+      // instead of unconditionally claiming success.
+      if (authorisation && !(outcome && outcome.granted)) {
+        window.showToast(currentLanguage === "zh"
+          ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
+          : "Keys changed. Nothing was trusted. Start verification again.");
+        return;
+      }
+      if (!authorisation) {
+        window.showToast(currentLanguage === "zh"
+          ? "服务端返回的验证请求与本地记录不一致，未授予信任"
+          : "The server answered with a different verification request. No trust was granted.");
+        return;
+      }
+      window.showToast(currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed");
+    }).catch(function(err) {
+      // An unawaited rejection here used to surface as a console error next to
+      // a success toast (review m-2).
       window.showToast(err && err.message
         ? err.message
         : (currentLanguage === "zh" ? "处理安全验证失败" : "Could not update security verification"));
     });
-    window.showToast(currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed");
   } else if (payload.event === "expired") {
     // Refresh only: an expiry is exactly the case where the fingerprints no
     // longer match, so it must never endorse the current key.

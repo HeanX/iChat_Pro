@@ -73,6 +73,7 @@ const CHAT_TRUST_RULE = [
   'acceptedVerificationPeer',
   'keyStatusMatchesAcceptedVerification',
   'verificationConfirmation',
+  'verificationIdentifiesSameRequest',
 ];
 const CHAT_ENTRY_POINTS = [
   'refreshKeyVerificationAfterChange',
@@ -506,8 +507,12 @@ test('a failed respond call leaves no verified-looking local state', async () =>
 });
 
 test('an accepted socket event trusts only a fingerprint matching the accepted request', async () => {
+  // The event must be identifiable as the request the tray showed, so the
+  // snapshot has to be present (round-2 M-1: a crafted event naming another
+  // contact must not be able to pick who gets trusted).
   const matching = createWorld({
     stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
     status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
   });
   matching.context.handleKeyVerificationNew({
@@ -518,6 +523,7 @@ test('an accepted socket event trusts only a fingerprint matching the accepted r
 
   const mismatched = createWorld({
     stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
     status: [rotatedContactStatus('CCCC')],
   });
   mismatched.context.handleKeyVerificationNew({
@@ -688,6 +694,54 @@ test('an honest accept of the held snapshot still grants and reports success', a
   assert.equal(world.versions(7)['2'], 'BBBB', 'the approved fingerprint is still trusted');
   assert.equal(world.cacheCalls.length, 1, 'and still replaces the cached send key');
   assert.equal(world.toasts[world.toasts.length - 1], 'Security verification completed');
+});
+
+test('a socket accept naming another contact grants nothing', async () => {
+  // Round-2 M-1, socket form: the tray held contact 7, the event names contact 8.
+  const world = createWorld({
+    stored: {
+      [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } },
+      [TRUST_KEY + 8]: { user_id: 8, versions: { 1: 'EEEE' } },
+    },
+    pending: [{ ...incomingRequest }],
+    status: [
+      rotatedContactStatus('BBBB', { trust: 'verified' }),
+      keyStatusPayload({ userId: 8, version: 5, fingerprint: 'EVIL', trust: 'verified' }),
+    ],
+  });
+
+  world.context.handleKeyVerificationNew({
+    data: {
+      event: 'accepted',
+      verification: {
+        ...incomingRequest,
+        requester_id: 8,
+        requester_key_version: 5,
+        requester_key_fingerprint: 'EVIL',
+        status: 'accepted',
+      },
+    },
+  });
+  await flush();
+
+  assert.deepEqual(world.versions(8), { 1: 'EEEE' }, 'the substituted contact is never trusted');
+  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'nor is a peer the user did not confirm');
+  assert.deepEqual(world.cacheCalls, []);
+});
+
+test('a socket accept for a request the tray never showed grants nothing', async () => {
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+  });
+
+  world.context.handleKeyVerificationNew({
+    data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
+  });
+  await flush();
+
+  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'no snapshot means no authorisation');
+  assert.deepEqual(world.cacheCalls, []);
 });
 
 test('granting trust is scoped to the contact the verification named', async () => {

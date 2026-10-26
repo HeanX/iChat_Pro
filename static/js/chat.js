@@ -5039,11 +5039,20 @@ function verificationConfirmation(snapshot, data) {
   if (!snapshot) return "rejected";
   const confirmed = data && data.request ? data.request : null;
   if (!confirmed) return "accepted";
-  if (Number(confirmed.id) !== Number(snapshot.id)) return "mismatch";
-  if (Number(confirmed.requester_id) !== Number(snapshot.requester_id)) return "mismatch";
-  if (Number(confirmed.responder_id) !== Number(snapshot.responder_id)) return "mismatch";
-  if (confirmed.status !== "accepted") return "rejected";
-  return "accepted";
+  return verificationIdentifiesSameRequest(snapshot, confirmed)
+    ? (confirmed.status === "accepted" ? "accepted" : "rejected")
+    : "mismatch";
+}
+
+// True when two verification payloads describe the same request between the
+// same two parties. Only identity is compared here; the runtime state of the
+// keys is checked later, against the live fingerprint endpoint.
+function verificationIdentifiesSameRequest(snapshot, candidate) {
+  if (!snapshot || !candidate) return false;
+  if (Number(candidate.id) !== Number(snapshot.id)) return false;
+  if (Number(candidate.requester_id) !== Number(snapshot.requester_id)) return false;
+  if (Number(candidate.responder_id) !== Number(snapshot.responder_id)) return false;
+  return true;
 }
 
 function keyVerificationOtherUserId(verification) {
@@ -5129,6 +5138,11 @@ function handleKeyVerificationNew(data) {
   const payload = data.data || {};
   const verification = payload.verification;
   if (!verification) return;
+  // Captured before the tray is updated: the accepted/expired branches need the
+  // request the user actually saw, and the update below drops terminal entries.
+  const snapshot = pendingKeyVerificationRequests.find(function(item) {
+    return Number(item.id) === Number(verification.id);
+  });
   if (verification.status === "pending") {
     const idx = pendingKeyVerificationRequests.findIndex(function(item) {
       return Number(item.id) === Number(verification.id);
@@ -5145,18 +5159,29 @@ function handleKeyVerificationNew(data) {
   if (payload.event === "requested" && verification.direction === "incoming") {
     window.showToast(currentLanguage === "zh" ? "收到安全验证请求" : "Security verification request received");
   } else if (payload.event === "accepted") {
-    // The socket event is itself the server-confirmed accept for this
-    // verification, so it authorises trust -- but only for the fingerprint the
-    // accepted request pinned, never for whatever the contact now reports.
+    // The socket event is the server-confirmed accept for this verification. It
+    // may authorise trust, but only when it is identifiable as the same request
+    // the user saw in the tray -- otherwise a crafted event could name any
+    // contact. The fingerprint is still re-checked against the live endpoint by
+    // keyStatusMatchesAcceptedVerification().
+    const authorisation = snapshot && verificationIdentifiesSameRequest(snapshot, verification)
+      ? Object.assign({}, snapshot, { status: "accepted" })
+      : null;
     refreshKeyVerificationAfterChange(
-      keyVerificationOtherUserId(verification),
-      { grantTrustFor: verification }
-    );
+      keyVerificationOtherUserId(snapshot || verification),
+      authorisation ? { grantTrustFor: authorisation } : undefined
+    ).catch(function(err) {
+      // This branch is not awaited by the caller, so an unawaited rejection here
+      // used to surface as a console error next to a success toast.
+      window.showToast(err && err.message
+        ? err.message
+        : (currentLanguage === "zh" ? "处理安全验证失败" : "Could not update security verification"));
+    });
     window.showToast(currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed");
   } else if (payload.event === "expired") {
     // Refresh only: an expiry is exactly the case where the fingerprints no
     // longer match, so it must never endorse the current key.
-    refreshKeyVerificationAfterChange(keyVerificationOtherUserId(verification));
+    refreshKeyVerificationAfterChange(keyVerificationOtherUserId(verification)).catch(function() {});
     window.showToast(currentLanguage === "zh" ? "密钥已变化，请重新发起安全验证" : "Keys changed. Start verification again.");
   }
 }

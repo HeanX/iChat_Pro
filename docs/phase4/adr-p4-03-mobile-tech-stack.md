@@ -167,12 +167,14 @@ mobile/
 │       └── shell.js                # 启动页渲染，仅读 window.ICHAT_MOBILE_ENV
 ├── tests/
 │   ├── mobile-config.test.js       # node:test，13 条：origin/HTTPS/WSS/live-reload 契约
-│   └── mobile-env.test.js          # node:test，12 条：注入链路、未配置路径、陈旧产物、脚本顺序
+│   └── mobile-env.test.js          # node:test，16 条：注入链路、未配置/陈旧产物、行尾无关、脚本顺序与位置
 └── android/                        # Capacitor CLI 真实生成的原生工程
 ```
 
-> 测试共 **25 条**（13 + 12）。`npm run test:mobile` 同时加载两个文件；手写 `node --test` 时
-> 两个文件都要给，只跑 `mobile-config.test.js` 会漏掉注入链路那 12 条。
+> 测试共 **29 条**（13 + 16，实测值）。`npm run test:mobile` 同时加载两个文件；手写 `node --test` 时
+> 两个文件都要给，只跑 `mobile-config.test.js` 会漏掉注入链路那 16 条。
+> 行尾无关性单独有 3 条用例（`normaliseEol` 让整套断言在 `core.autocrlf=true` 的 CRLF 工作树下等价），
+> 见 §8.5。
 
 ### 4.2 固定工具链版本
 
@@ -220,6 +222,8 @@ npm install --no-audit --no-fund
 # -> added 101 packages in 14s
 
 # 生成原生工程（真实执行，非手抄）
+# 【仅首次创建工程时需要】mobile/android/ 已在仓库里；对既有工程重复执行会
+# exit 1（"android platform already exists"）。日常构建请从下面的 config:generate 开始。
 npx cap add android
 # -> √ Adding native android project in android
 #    [info] Found 3 Capacitor plugins for android:
@@ -294,7 +298,7 @@ AND-01 整改后重新构建的产物（当前形态，2026-10-26，`config:gene
 > **这个 SHA 只在同一环境下可复现**：它含 Gradle/AGP 的时间戳与签名差异，换机器、换 Gradle 版本
 > 都会变（前几轮的 ①–④ 也是同一原因各不相同）。要复核"包内资源对不对"，**比对 SHA 无用，比对
 > 包内 `assets/public/**` 的字节才有意义**，见下面 §5.1 的资源清单。
-> 复现命令：`npm run config:generate` → `npx cap sync android` → `cd android; gradlew assembleDebug`。
+> 复现命令：`npm run config:generate` → `npx cap sync android` → `cd android; .\gradlew.bat assembleDebug`。
 
 > 构建历史（每次的差异都是实质改动，不是重建噪声）：
 > ① 初版 3.94 MB / `F10D3570…CDFCD2`；
@@ -328,14 +332,23 @@ AndroidManifest 中被加固的三项（从 APK 内反查，不是看源码）�
   android:fullBackupContent=false
   android:dataExtractionRules=@0x7f100001
 
-assets/public/index.html            4017
-assets/public/js/mobile-config.js   8766
-assets/public/js/mobile-env.js       389   <- 构建期注入，含本次 origin；未配置构建无此文件
-assets/public/js/shell.js           1702
-assets/public/css/mobile-shell.css  2478
+assets/public/index.html              4017
+assets/public/js/mobile-config.js     8766
+assets/public/js/mobile-env.js         389   <- 构建期注入，含本次 origin；未配置构建无此文件
+assets/public/js/mobile-env.example.js 1037  <- 形态说明，不被 index.html 加载
+assets/public/js/shell.js             1702
+assets/public/css/mobile-shell.css    2478
+assets/public/cordova.js                 0   <- Capacitor 占位（空文件）
+assets/public/cordova_plugins.js         0   <- Capacitor 占位（空文件）
 ```
 
-> 上面五个数字是**从 AND-01 产物 `14B41ADA…EB48E9` 的 zip 目录直接读出的未压缩字节数**，
+> **为什么上面是 8 条而不是 5 条**（第 5 轮 F-07）：`assets/public/` 下共 8 个条目，其中 3 条不是我们
+> 手写的页面资源——`mobile-env.example.js` 是随 `www/` 一起被 `cap sync` 复制的形态说明，
+> `cordova.js` / `cordova_plugins.js` 是 Capacitor 自身生成的空占位。此前只列 5 条，容易让人误以为
+> APK 里就这些文件。**5 条"我们自己的"资源仍逐字节核对**；另外 3 条不参与核对（两条是 0 字节占位，
+> 一条是示例文件）。
+>
+> 8 个数字是**从 AND-01 产物 `14B41ADA…EB48E9` 的 zip 目录直接读出的未压缩字节数**，
 > 并已逐字节比对确认与 `mobile/www/` 下同名文件完全一致（`mobile-env.js` 除外——它是构建产物，
 > 与 `mobile/www/js/mobile-env.js` 一致，而后者不入库）。
 > 注意 `assets/public/js/mobile-env.example.js`（1037 B）也会随 `www/` 一起进包：它只是形态说明、
@@ -394,8 +407,8 @@ stderr                        -> 配置无效 + 原因 + "现有 capacitor.confi
 | --- | --- | --- |
 | 能复用现有页面并生成 Android 工程 | **部分满足**：工程已生成且可构建出 APK；"复用现有页面"的**运行时**验证需 T24 出包后在设备上加载 Django 页面 | §5.1 的 `npx cap add android` 输出 + APK 产物 + `launchable-activity` |
 | 相关代码或配置经过非作者成员评审 | **证据不足，不能由本卡判定通过**：三轮独立审查均有结论，但审查者是子 Agent、产物在 `.review/`（已 gitignore），**git 里 9 个提交作者全是同一人**。可审计性上这条**不成立**，需真人评审后在 Issue 留痕 | §8（三轮记录是文字，不是可审计产物） |
-| 适用的自动化或人工测试已执行并保存证据 | `cd mobile && npm run test:mobile`（同时加载 `tests/mobile-config.test.js` + `tests/mobile-env.test.js`）**25/25 通过**；仓库根 `node --test mobile/tests/*.test.js` 同为 25/25。`manage.py check` / `makemigrations --check` / `npm run test:e2ee` 62/62 均实跑；**设备安装/启动/截图未执行** | §5.1 |
-| 需求、部署或测试文档已同步更新 | 本 ADR + `docs/phase4/tasks.md` T22 行 + `docs/handoff/android-mobile.md` §1/§6.1 + `docs/documentation-status.md` 已更新；**但三轮审查中各出现一次"文档数字与事实不符"，说明这条在本卡内反复失守过** | §8.1–§8.3 |
+| 适用的自动化或人工测试已执行并保存证据 | `cd mobile && npm run test:mobile`（同时加载 `tests/mobile-config.test.js` + `tests/mobile-env.test.js`）**29/29 通过**；仓库根 `node --test mobile/tests/*.test.js` 同为 29/29；**CRLF 工作树（`core.autocrlf=true`）下同为 29/29**。`manage.py check` / `makemigrations --check` / `npm run test:e2ee` 62/62 均实跑；**设备安装/启动/截图未执行** | §5.1 |
+| 需求、部署或测试文档已同步更新 | 本次（2026-10-26）同步了**四份已跟踪文档**：本 ADR、`docs/handoff/android-mobile.md`（§1 清单/§6 命令块）、`docs/phase4/tasks.md`（T22 行）、`docs/documentation-status.md`（两段增补）。三者均已 `git ls-files` 确认在版本控制内，条数统一为实测 **29**、旧 SHA 已标注过期、`config:generate` 已写入必经步骤。**但必须承认**：前四轮里有三轮出现过"文档数字与事实不符"，第 4 轮还把 `android-mobile.md` 误判为未跟踪而漏改（§8.5 F-01），说明这条在本卡内**反复失守过**，不能凭本轮通过就认为流程可靠 | §8.1–§8.5 |
 
 ### 5.3 明确未完成的项（不得当作通过）
 
@@ -488,6 +501,7 @@ adb shell am start -n com.ichat.pro/.MainActivity
 | 2 | 新的独立审查子 Agent（不复用第 1 轮会话） | **PASS WITH FINDINGS** | 0 BLOCKER / 3 MAJOR / 6 MINOR | 见 §8.2 |
 | 3 | 又一个新的独立审查子 Agent（复核第 2 轮整改） | **PASS WITH FINDINGS** | 0 BLOCKER / 3 MAJOR / 4 MINOR | 见 §8.3 |
 | 4 | 又一个新的独立审查子 Agent（复核 AND-01 整改 `ac14a37`） | **PASS WITH FINDINGS** | 0 BLOCKER / 1 MAJOR / 4 MINOR | 见 §8.4 |
+| 5 | 又一个新的独立审查子 Agent（复核第 4 轮整改 `3129122`/`62d673e`） | **PASS WITH FINDINGS** | 0 BLOCKER / 1 MAJOR / 5 MINOR | 见 §8.5 |
 
 ### 8.1 第 1 轮发现项与整改
 
@@ -570,12 +584,34 @@ adb shell am start -n com.ichat.pro/.MainActivity
 | MINOR (F-04) | `mobile-config.js` 顶层函数泄漏成 7 个 window 全局（基线已有 6 个，本轮 +1） | 整体包进 IIFE，浏览器只暴露 `window.iChatMobileConfig`；Node 侧 `module.exports` 不变（测试与生成器仍 `require`）。正文**故意不重新缩进**，`git diff -w` 只有包装层，便于审查。实测全局从 7 个降为 1 个 |
 | MINOR (F-05) | 作者的 before/after 探针 DOM 桩过宽：`getElementById` 对不存在的 id **伪造**元素，且 `DOMContentLoaded` 在注册时立即触发 | 改为缺失 id 返回 `null` 并记录到 `accessedMissing`（断言必须为空），事件在全部脚本执行完后才派发。收紧后结论不变（before=未配置 / after=就绪），`accessedMissing=[]` |
 
-第 4 轮整改后复验：`npm run test:mobile` **25/25**、仓库根 `node --test mobile/tests/*.test.js` **25/25**、
-F-01 变异 6/6 检出、完整文档步骤在临时目录重走一遍并产出 `14B41ADA…EB48E9`（包内资源逐字节一致、
-无 `server` 块、`allowBackup=false`）。**仍无真机/模拟器，未调用 `.\gradlew.bat`（wrapper 8.14.3 未解包）**。
+第 4 轮整改后复验：`npm run test:mobile` **27/27**（该轮实测值；第 5 轮增至 29）、仓库根
+`node --test mobile/tests/*.test.js` **27/27**、F-01 变异 6/6 检出、完整文档步骤在临时目录重走一遍并产出
+`14B41ADA…EB48E9`（包内资源逐字节一致、无 `server` 块、`allowBackup=false`）。
+**仍无真机/模拟器，未调用 `.\gradlew.bat`（wrapper 8.14.3 未解包）**。
 
-> **待交接文档负责人同步（本卡未改，因为 `docs/handoff/android-mobile.md` 目前是未跟踪的用户材料）**：
-> 该文件 §1 与 §6 仍写"13 条"、构建步骤仍是 `npm install → cap sync → gradlew`，缺 `npm run config:generate`。
-> 建议同步为：① 测试 25 条（`test:mobile` 含两个文件）；② `cd mobile` → 设 `ICHAT_MOBILE_SERVER_URL`
-> → `npm run config:generate` → `npx cap sync android` → 构建；③ 说明 `www/js/mobile-env.js` 是 gitignore
-> 的构建产物、由 `config:generate` 生成，未配置时不生成且会删除陈旧副本；④ 强调生成器**不读 `.env`**。
+> **第 4 轮记录更正（第 5 轮审查指出，已修）**：本节上一版写着"`docs/handoff/android-mobile.md`
+> 是未跟踪的用户材料，本卡未改"。**这是错的**：该文件在 `3cc4fc7`（T22 首个提交）就已入库，
+> `git ls-files docs/handoff/android-mobile.md` 可证。工作区里另有一份同名未跟踪副本属于用户，
+> 与已跟踪版本不是同一份。因此下面三份**已跟踪**文档当时仍停在修复前，第 5 轮一并改掉，见 §8.5。
+
+### 8.5 第 5 轮（最终复核）发现项与整改
+
+第 5 轮仍是全新上下文。**0 BLOCKER**。它复核了第 4 轮的五项整改，确认 F-06 六处、F-01 假守卫、
+F-02 陈旧产物、F-04 全局泄漏、F-05 DOM 桩**全部真修好**（11 组 HTML 变异 10/10 应红全红），
+并独立复测了 `62d673e` 的行尾修复（`3129122` 在 `autocrlf=true` 检出下 24/25 红，`62d673e` 下 27/27 绿）。
+剩余 1 MAJOR + 5 MINOR：
+
+| 级别 | 问题 | 整改 |
+| --- | --- | --- |
+| **MAJOR (F-01)** | 第 4 轮误判 `docs/handoff/android-mobile.md` 为"未跟踪用户材料"而未改，导致**三份已跟踪文档**仍停在修复前，而本 ADR §5.2 却声称文档"已更新" | 改 `docs/handoff/android-mobile.md`（§1 清单、§6 命令块、§6.1 前提示）、`docs/phase4/tasks.md` T22 行、`docs/documentation-status.md` 2026-10-18 段：条数统一 29、补 `config:generate` 步骤与"不读 `.env`"、旧 SHA 标注过期、新产物写清复现口径 |
+| MINOR (F-02b) | `62d673e` 把测试改成 27 条后，本 ADR 多处仍写 25 | 全部改为实测值（本轮收敛为 **29**）；§8.4 保留"当时是 27"的历史口径并注明后续变化 |
+| MINOR (F-03) | `--live-reload` 成功后再跑**无效配置**，`capacitor.config.json` 仍带 `server.url`，`cap copy` 会把它写进 APK | 无效分支检测到 `server` 块时**重置为发布形态**（无 `server` 块）；已是发布形态则不动（不做无谓的行尾改写）。新增用例覆盖三段：live-reload → 无效 → 断言无 `server`；再看一次仍不变 |
+| MINOR (F-04) | "config 写失败时回滚 env"的逻辑**零覆盖**，删掉它测试仍全绿 | 新增用例：用同名目录占位让 config rename 失败，断言 `mobile-env.js` 被回滚删除且无 `.tmp` 残留。变异复核：删掉回滚 → 该用例转红 |
+| MINOR (F-05) | 守卫只比相对次序，把 env 标签挪进 `<head>` 仍绿 | 断言三个 `<script>` 都在 `<body>` 之后、`</body>` 之前；变异（挪进 head）实测 `insideBody=false` 能被检出 |
+| MINOR (F-06) | §5.1 复现命令写成 `gradlew assembleDebug`，Windows 下 CommandNotFoundException | 改为 `.\gradlew.bat assembleDebug` |
+| MINOR (F-07/09) | §5.1 资源清单只列 5 项，`assets/public/` 实际 8 条；`npx cap add android` 在既有工程上 exit 1 未注明 | 清单补齐并说明另 3 条来源；`cap add android` 标注"仅首次创建工程时需要" |
+
+第 5 轮整改后复验：`npm run test:mobile` **29/29**（LF 与模拟 CRLF 工作树各一次）、
+仓库根 `node --test mobile/tests/*.test.js` **29/29**、F-03/F-04/F-05 三条新用例各有变异证明。
+`docs/handoff/android-mobile.md` 里指向本 ADR 的相对链接 `../phase4/adr-p4-03-mobile-tech-stack.md`
+已核实可解析（ADR 随本分支入库）。**仍无真机/模拟器；本轮未重打包 APK。**

@@ -12,6 +12,8 @@
 
 2026-10-18 增补：[ADR-P4-03 移动端技术路线与工程骨架](phase4/adr-p4-03-mobile-tech-stack.md)（P4 T22 / #149）。记录 Capacitor 8 混合路线、转原生的三条触发条件、Session 认证复用、固定工具链版本与本机构建环境缺口；同步更新 [Android/移动端交接文档](handoff/android-mobile.md) §1 与 [docs/phase4/tasks.md](phase4/tasks.md) T22 行。**debug APK 已构建**（4.22 MB，SHA256 `67104134…26C878`，manifest 已禁用备份）；**真机/模拟器安装与启动、WebView 加载 Django 页面均未执行，不计为通过。**
 
+2026-10-26 增补（AND-01 整改）：启动页的配置指引已与实现对齐，服务地址改为**构建期注入**——`npm run config:generate`（读进程环境变量，**不读** `mobile/.env`）生成 `mobile/www/js/mobile-env.js`，随 `npx cap sync android` 进 APK；未配置时生成器 `exit 1` 并删除陈旧产物。同步更新 [ADR-P4-03](phase4/adr-p4-03-mobile-tech-stack.md) §3.1/§5.1/§5.1.2/§8.4–§8.5、[Android/移动端交接文档](handoff/android-mobile.md) §1/§6 与 [docs/phase4/tasks.md](phase4/tasks.md) T22 行。测试 **29/29**（LF 与 `core.autocrlf=true` 的 CRLF 工作树各跑一次）。**APK 数字口径**：上文 2026-10-18 的 `67104134…26C878` **已过期**（修复前产物）；AND-01 后为 4,138,535 B / `14B41ADA…EB48E9`，但 SHA 不可跨环境复现，核对产物应比对 `assets/public/**` 与 `mobile/www/` 的**字节**。**真机/模拟器仍未执行。**
+
 | 文档 | 用途与本次维护 |
 | --- | --- |
 | [.github/ISSUE_TEMPLATE/task.md](../.github/ISSUE_TEMPLATE/task.md) | 提交/任务模板；补文档与真实验收证据约束 |

@@ -10,19 +10,29 @@
 > 更新 2026-10-18（分支 `feature/p4-t22-mobile-adr-and-skeleton`）：T22（#149）已定稿
 > [ADR-P4-03](../phase4/adr-p4-03-mobile-tech-stack.md) 并落地 `mobile/` 骨架。
 > **能力边界没变：登录、WS 收发、E2EE、通知、文件一件都没实现。** T23–T30 全部 0 进度。
+>
+> 更新 2026-10-26（AND-01 整改）：服务地址改为**构建期注入**——`npm run config:generate` 生成
+> `mobile/www/js/mobile-env.js`（`window.ICHAT_MOBILE_ENV`），随 `npx cap sync` 进 APK。
+> 在此之前"按文档操作"无法离开"未配置"状态，详见 ADR §3.1 与 §5.1.2。
 
 ```
 仓库里现在有：
   mobile/                     Capacitor 8.5.3 工程（package.json / capacitor.config.json / www/）
   mobile/android/             Capacitor CLI 真实生成的 Android 工程（不是占位目录）
-  mobile/tests/               node:test 配置契约测试（13 条，纯 Node，无需模拟器）
+  mobile/tests/               node:test 配置契约测试（29 条，纯 Node，无需模拟器）
   docs/phase4/adr-p4-03-*.md  技术决策记录
-  app-debug.apk               已构建成功（4.22 MB，SHA256 67104134…26C878，见 ADR §5.1）
+  app-debug.apk               已构建成功（AND-01 后 4,138,535 B，SHA256 14B41ADA…EB48E9，见 ADR §5.1）
 仓库里仍然没有：
   提交进库的 APK / AAB          （产物在 build/ 下，已 gitignore；不可安装到设备）
   真机或模拟器的运行记录        （0 次：adb devices 为空，无 emulator 包，无 Hyper-V）
   任何 Android 仪器化/UI 测试   （0 测试）
 ```
+
+> **APK 数字口径**：`mobile/android/app/build/outputs/apk/debug/app-debug.apk` 目前留在工作区的
+> 那一份是 **2026-10-18 的修复前产物**（4.22 MB / `67104134…26C878`，已过期），它里面的
+> `index.html` 仍是旧文案、没有 `mobile-env.js`。要拿到当前形态必须按 §6 重新构建。
+> SHA256 **不能跨环境复现**（Gradle/AGP 时间戳与签名差异），核对产物请比对
+> `assets/public/**` 与 `mobile/www/` 的**字节**，不要比 SHA。
 
 WP04 的 9 项任务（#149–#157）中 **仅 #149 部分完成**；#150–#157 为 0/9。
 
@@ -156,14 +166,26 @@ adb devices
 # 本仓库的实际入口（不要用 npm create，工程已存在）
 cd mobile
 npm install
-npx cap sync android
+
+# 【必经】注入服务地址。读的是进程环境变量，不读 mobile/.env。
+# 不设这一步 = 打出没有 origin 的包 = 启动页永远停在"未配置"（AND-01 原缺陷）。
+$env:ICHAT_MOBILE_SERVER_URL = 'https://<你的服务器>:8443'
+npm run config:generate            # 写出 www/js/mobile-env.js + capacitor.config.json（后者仍无 server 块）
+
+npx cap sync android               # 把 www/（含 mobile-env.js）复制进原生工程
 cd android
 .\gradlew.bat assembleDebug      # 产物 app/build/outputs/apk/debug/app-debug.apk
 ```
 
 **不要**把 `capacitor.config.json` 的 `server.url` 热重载配置当成正式方案——它会让 App 依赖开发机。
-骨架已用 `mobile/www/js/mobile-config.js` + 13 条测试把这条规则固化：发布解析结果恒为
+骨架已用 `mobile/www/js/mobile-config.js` + 29 条测试把这条规则固化：发布解析结果恒为
 `serverUrl: null`，生成的 `capacitor.config.json` 不含 `server` 块，只有显式 `--live-reload` 才会写入。
+若上一次跑过 `--live-reload`、随后又以**无效配置**运行，生成器会把 `capacitor.config.json`
+**重置回发布形态**并把 `mobile-env.js` 删掉（ADR §5.1.2），所以不会把热重载配置带进包。
+
+> **`www/js/mobile-env.js` 是构建产物，已 gitignore**（形态见 `www/js/mobile-env.example.js`）。
+> 未配置时生成器 `exit 1`、不写该文件，并**删除**上一次构建遗留的副本，避免旧地址随
+> `npx cap sync` 进包。所以 `git status` 里看不到它属于正常现象。
 
 > **改 `mobile/www/**` 之后必须先 `npx cap sync android` 再 `assembleDebug`。**
 > Gradle 只打包已经同步进 `android/app/src/main/assets/public/` 的副本，不会回头看 `www/`。

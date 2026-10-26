@@ -56,13 +56,13 @@ function removeScratch(scratch) {
 }
 
 /** Run the generator with a scrubbed environment (never inherits the host's). */
-function runGenerator(scratch, extraEnv) {
+function runGenerator(scratch, extraEnv, extraArgs) {
   const env = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (key !== 'ICHAT_MOBILE_SERVER_URL') env[key] = value;
   }
   Object.assign(env, extraEnv || {});
-  return spawnSync(process.execPath, [SCRIPT_REL], {
+  return spawnSync(process.execPath, [SCRIPT_REL].concat(extraArgs || []), {
     cwd: scratch, env, encoding: 'utf8', windowsHide: true,
   });
 }
@@ -220,6 +220,75 @@ test('a failed write leaves no .tmp litter behind', () => {
   }
 });
 
+test('a config write failure rolls back the freshly written mobile-env.js', () => {
+  // Review F-04: the rollback on "config write failed" had zero coverage — a
+  // mutation that deleted it left the suite green. Without the rollback the tree
+  // is left with a NEW mobile-env.js and an OLD capacitor.config.json, i.e. the
+  // exact "new env + old config" pair the write ordering exists to avoid.
+  const scratch = makeScratch();
+  try {
+    // Put a directory where capacitor.config.json must go so its rename fails,
+    // while mobile-env.js (written first) succeeds.
+    const cfgPath = path.join(scratch, 'capacitor.config.json');
+    fs.rmSync(cfgPath, { force: true });
+    fs.mkdirSync(cfgPath, { recursive: true });
+
+    const run = runGenerator(scratch, {
+      ICHAT_MOBILE_SERVER_URL: 'https://chat.example.com:8443',
+    });
+    assert.strictEqual(run.status, 1, 'a failed config write exits non-zero');
+    assert.ok(run.stderr.indexOf('已回滚') !== -1,
+      'stderr reports the rollback: ' + run.stderr);
+    assert.strictEqual(fs.existsSync(path.join(scratch, ENV_REL)), false,
+      'mobile-env.js must be deleted again, not left paired with a stale config');
+    assert.strictEqual(fs.existsSync(path.join(scratch, ENV_REL) + '.tmp'), false,
+      'no env .tmp left behind');
+  } finally {
+    removeScratch(scratch);
+  }
+});
+
+test('an invalid run resets a --live-reload capacitor.config.json to the release shape', () => {
+  // Review F-03: a successful `--live-reload` run leaves a `server` block in
+  // capacitor.config.json. A later run with an invalid configuration used to
+  // leave it there, so the next `cap copy` would stamp a hot-reload config into
+  // the APK. The invalid path must restore the release shape.
+  const scratch = makeScratch();
+  try {
+    const cfgPath = path.join(scratch, 'capacitor.config.json');
+
+    // 1) live reload succeeds and writes a server block.
+    const live = runGenerator(scratch, {
+      ICHAT_MOBILE_SERVER_URL: 'http://localhost:8000',
+    }, ['--live-reload']);
+    assert.strictEqual(live.status, 0, 'live reload generation succeeds: ' + live.stderr);
+    const liveCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    assert.strictEqual(liveCfg.server.url, 'http://localhost:8000', 'precondition: server block present');
+    assert.strictEqual(fs.existsSync(path.join(scratch, ENV_REL)), true);
+
+    // 2) the same tree, now unconfigured: everything must be cleaned up.
+    const invalid = runGenerator(scratch, {});
+    assert.strictEqual(invalid.status, 1);
+    assert.strictEqual(fs.existsSync(path.join(scratch, ENV_REL)), false,
+      'stale mobile-env.js is removed');
+    const afterCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    assert.strictEqual(afterCfg.server, undefined,
+      'server block must be gone, got: ' + JSON.stringify(afterCfg.server));
+    assert.deepStrictEqual(Object.keys(afterCfg).sort(),
+      ['android', 'appId', 'appName', 'webDir'], 'config is back to the release shape');
+    assert.strictEqual(afterCfg.android.allowMixedContent, false);
+
+    // 3) a release-shaped config is left byte-identical (no needless rewrite).
+    const beforeHash = fs.readFileSync(cfgPath, 'utf8');
+    const again = runGenerator(scratch, {});
+    assert.strictEqual(again.status, 1);
+    assert.strictEqual(fs.readFileSync(cfgPath, 'utf8'), beforeHash,
+      'an already-release config is not rewritten');
+  } finally {
+    removeScratch(scratch);
+  }
+});
+
 test('an unconfigured resolution renders the null script, never an empty global', () => {
   // Defence in depth for the "write an empty object" alternative: an unconfigured
   // build must ship no file, because `window.ICHAT_MOBILE_ENV = {}` in a stale
@@ -335,6 +404,22 @@ test('index.html loads mobile-env.js before mobile-config.js and shell.js', () =
       load.src + ' must not be deferred/async: ' + load.attrs);
     assert.ok(!/\btype\s*=\s*["']?module/i.test(load.attrs),
       load.src + ' must not be a module: ' + load.attrs);
+  }
+
+  // Review F-05: comparing relative order alone still passes if all three tags
+  // are moved into <head> or after </body>. Pin their location too: the tags must
+  // sit inside <body> and before </body>, which is where the markup keeps them.
+  const bodyOpen = html.indexOf('<body');
+  const bodyClose = html.lastIndexOf('</body>');
+  assert.ok(bodyOpen !== -1 && bodyClose !== -1, 'the page has a body');
+  const tagPositions = EXPECTED_ORDER.map((src) => {
+    const re = new RegExp('<script\\b[^>]*src\\s*=\\s*["\']' + src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']');
+    return { src: src, at: html.search(re) };
+  });
+  for (const pos of tagPositions) {
+    assert.ok(pos.at !== -1, pos.src + ' tag found');
+    assert.ok(pos.at > bodyOpen, pos.src + ' must be inside <body> (after <body> at ' + bodyOpen + ')');
+    assert.ok(pos.at < bodyClose, pos.src + ' must be before </body> at ' + bodyClose);
   }
 });
 

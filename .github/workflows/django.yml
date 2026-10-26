@@ -80,8 +80,8 @@ jobs:
       # P4 Test T12 (#193): the coverage tooling's own guard tests. Django's
       # default discovery only collects accounts/chat/ichat_pro, so these
       # would otherwise never run anywhere.
-      - name: Test the coverage tooling
-        run: python -m unittest scripts.test_coverage_report -v
+      - name: Test coverage integrity and deploy collection guards
+        run: python -m unittest scripts.test_coverage_report scripts.test_check_deploy_collection scripts.test_coverage_security -v
 
       # QA-01: bash is a hard requirement for the ops suite. The five modules
       # below skip themselves when `shutil.which("bash")` is empty, and a
@@ -105,7 +105,7 @@ jobs:
       # feat/p4-t49-test-environment. On a branch without them this step fails
       # by design (a missing ops suite must never look green), so the QA branch
       # is only expected to be green once it is integrated with that branch.
-      # See .review/phase4-remediation-20261026/evidence/qa3-ci-dependency.md.
+      # See docs/quality/coverage-integrity.md (ops-suite prerequisite).
       - name: Guard that the deploy modules are collected (requires the ops suite from feat/p4-t49-test-environment)
         env:
           ICHAT_TEST_BASH: /bin/bash
@@ -133,6 +133,10 @@ jobs:
           # merely started. A "Ran 0 tests" that still exits 0 is the failure
           # mode this whole job exists to prevent.
           grep -q '^Ran [1-9][0-9]* tests\? in ' deploy-tests.log
+          if grep -Eq '^OK .*skipped=[1-9][0-9]*' deploy-tests.log; then
+            echo 'ERROR: skipped deploy regressions are not a passing result' >&2
+            exit 1
+          fi
 
   # P4 Test T14: real-dependency integration (NEW-TST-012/013) — the SQLite /
   # in-memory job above must not be the only validation of migrations and
@@ -218,3 +222,7 @@ jobs:
           # `| tee` produces an empty log and the grep below can never match.
           python manage.py test ${MODULES} --parallel 1 -v 2 2>&1 | tee deploy-tests.log
           grep -q '^Ran [1-9][0-9]* tests\? in ' deploy-tests.log
+          if grep -Eq '^OK .*skipped=[1-9][0-9]*' deploy-tests.log; then
+            echo 'ERROR: skipped deploy regressions are not a passing result' >&2
+            exit 1
+          fi

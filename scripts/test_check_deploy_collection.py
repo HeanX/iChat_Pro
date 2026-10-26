@@ -101,6 +101,32 @@ class RequiredModulesTests(unittest.TestCase):
         self.assertEqual(list(guard.flatten(suite)), ['a', 'b', 'c'])
 
 
+class SkipMarkTests(unittest.TestCase):
+    def test_method_and_class_skips_are_rejected_in_nested_suites(self):
+        class Cases(unittest.TestCase):
+            @unittest.skipUnless(False, 'method is unavailable')
+            def test_method(self):
+                pass
+
+            def test_control(self):
+                pass
+
+        @unittest.skip('class is unavailable')
+        class SkippedClass(unittest.TestCase):
+            def test_class(self):
+                pass
+
+        suite = unittest.TestSuite([
+            unittest.defaultTestLoader.loadTestsFromTestCase(Cases),
+            unittest.TestSuite([SkippedClass('test_class')]),
+        ])
+        marked = guard._skip_marked_tests(suite)
+        self.assertEqual(len(marked), 2)
+        self.assertEqual({reason for _, reason in marked},
+                         {'method is unavailable', 'class is unavailable'})
+        self.assertFalse(any(name.endswith('test_control') for name, _ in marked))
+
+
 class NamespacePackageRegressionTests(unittest.TestCase):
     """P2 (review round 2): the guard must be red when default discovery is 0.
 
@@ -176,7 +202,7 @@ print(json.dumps({"exit_code": code, "stdout": out.getvalue(),
             )
         return root
 
-    def _run_guard(self, tree: Path) -> dict:
+    def _run_guard(self, tree: Path, *, bash_only_via_env=False) -> dict:
         env = dict(os.environ)
         env['PYTHONPATH'] = str(tree)
         env['PYTHONIOENCODING'] = 'utf-8'
@@ -187,6 +213,9 @@ print(json.dumps({"exit_code": code, "stdout": out.getvalue(),
         bash_dir = r'C:\Program Files\Git\bin'
         if Path(bash_dir, 'bash.exe').is_file():
             env['PATH'] = env.get('PATH', '') + os.pathsep + bash_dir
+        if bash_only_via_env:
+            env['ICHAT_TEST_BASH'] = str(Path(bash_dir) / 'bash.exe')
+            env['PATH'] = ''
         completed = subprocess.run(
             [sys.executable, '-B', '-c', self.DRIVER, str(tree),
              str(REPO_ROOT / 'scripts' / 'check_deploy_collection.py')],
@@ -214,6 +243,13 @@ print(json.dumps({"exit_code": code, "stdout": out.getvalue(),
         self.assertNotIn('QA-01 OK', result['stdout'])
         self.assertIn('默认发现', result['stderr'])
         self.assertIn('namespace package', result['stderr'])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows PATH-independent Git Bash regression')
+    def test_explicit_bash_outside_path_is_green(self):
+        result = self._run_guard(self._build('explicit-bash', regular_package=True),
+                                 bash_only_via_env=True)
+        self.assertEqual(result['exit_code'], 0, result['stderr'])
+        self.assertIn('QA-01 OK', result['stdout'])
 
 
 if __name__ == '__main__':

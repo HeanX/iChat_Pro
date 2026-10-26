@@ -2,8 +2,8 @@
 
 | | |
 | --- | --- |
-| 状态 | 提案（Proposed）——已通过独立技术评审（见下方评审记录），**待单一迁移负责人会签后进入实现** |
-| 日期 | 2026-10-18 |
+| 状态 | 提案（Proposed）——已通过独立技术评审（见下方评审记录），**待单一迁移负责人会签后进入实现**；2026-10-26 修复 ACC-01 关系冲突（见 §4.6） |
+| 日期 | 2026-10-18（2026-10-26 修订 D1/D2 的关系命名与轮换语义） |
 | 决策者 | 账号与公钥信任模块负责人（本 ADR 作者）；会签人 = 单一迁移负责人（约束 `accounts/models.py`、`chat/models.py` 与迁移编号，见 conventions §5），会签结论以 Issue #167 评论区留档 |
 | 关联 | Issue #167（本 ADR）；下游 #168（设备列表与撤销）、#169（多设备密钥分发）、#170（历史密钥迁移） |
 | 前置 | [ADR-P4-04 E2EE 威胁模型](e2ee-threat-model.md)（T38，另一分支交付）——其"不覆盖"一节明确把设备级身份/撤销留白 |
@@ -65,9 +65,13 @@ Device
 ├── device_id     CharField(64), 不可空        # 客户端生成的随机 opaque ID（UUID4 hex）
 ├── name          CharField(120), 不可空       # 用户可见名，如"桌面 Chrome"
 ├── platform      CharField(32), 不可空        # web / windows / android / ios
-├── public_key    OneToOneField → UserPublicKey, null=True, blank=True,
-│                 on_delete=SET_NULL, related_name="device"
-│                 # 设备的身份密钥；创建设备时可先不绑（见 D3 的两阶段上线）
+├── current_public_key  OneToOneField → UserPublicKey, null=True, blank=True,
+│                 on_delete=SET_NULL, related_name="current_device"
+│                 # "当前密钥指针"：设备的身份密钥**现在**是哪一版。全表唯一的
+│                 # mutable 关系；轮换时只改这一列（见 §4.6）。
+│                 # 反向名必须是 current_device，**不能**是 device —— "device" 是
+│                 # UserPublicKey 上的真实字段名（D2），重名会被 Django 判为
+│                 # fields.E302/E303（本节末给出可复现证据）。
 ├── public_key_fingerprint  CharField(64), null=True, blank=True, db_index=True
 │                 # 冗余展示列：撤销广播/审计场景避免反复 join UserPublicKey；
 │                 # 由服务端在改绑/轮换时写入，不参与任何唯一性
@@ -82,13 +86,15 @@ Device
          索引：Index(fields=["user", "revoked_at"])
 ```
 
-**为什么是 `OneToOne` 而不是外键多对一？** 一台设备任一时刻只有一把身份密钥；密钥**轮换**时新建 `UserPublicKey` 行并改绑（历史行通过 `device` 反查保留审计，与 #189 确立的"旧记录保留"一致）。
+**为什么是 `OneToOne` 而不是外键多对一？** 一台设备任一时刻只有**一把当前**身份密钥；密钥**轮换**时新建 `UserPublicKey` 行、把 `current_public_key` 改指新行，历史行**保持原样**通过 `UserPublicKey.device` 反查保留审计（与 #189 确立的"旧记录保留"一致）。两条关系的分工见 §4.6；`OneToOne` 在数据库层保证"一把密钥最多被一台设备当成当前密钥"。
 
-**D2：`UserPublicKey` 增加可选 `device` 外键（`null=True`），唯一键 `(user, key_version)` 不动。**
+**D2：`UserPublicKey` 增加可选 `device` 外键（`null=True`）表示"这一版密钥属于哪台设备"，唯一键 `(user, key_version)` 不动。**
 
 ```text
 UserPublicKey.device = FK → Device, null=True, blank=True,
                        on_delete=SET_NULL, related_name="public_keys"
+                       # 归属（ownership），**不是**当前指针：
+                       # 写了就不改——轮换只插入新行，不回写旧行的 device。
 ```
 
 - `device=NULL` 的行 = **账号级密钥**（现状），单设备用户、以及历史上传的密钥自动落入此态；
@@ -188,6 +194,81 @@ opaque UUID，服务端只做唯一性约束。**不**用 fingerprint、不用 I
 ——这正是 R-03 处置建议的初衷（统一服务层返回 viewer payloads），建议与 #169 合并实施，
 合并范围**必须包含群聊判定**，避免下一次语义变更再漏改一处。
 
+### 4.6 两条关系的分工与轮换语义（2026-10-26 修订，修 ACC-01 / #167）
+
+**问题**：本 ADR 初稿在 D1 声明 `Device.public_key = OneToOneField(UserPublicKey, related_name="device")`，
+又在 D2 声明 `UserPublicKey.device = ForeignKey(Device, related_name="public_keys")`。
+前者要在 `UserPublicKey` 上创建反向访问器/反向查询名 `device`，与后者**真实字段名** `device` 撞车。
+Django 的系统检查对此报 `fields.E302`（反向访问器冲突）与 `fields.E303`（反向查询名冲突），
+`manage.py check` 直接失败——这个提案照字面实现**无法建表**。
+
+**修订后的方案：两条关系各承担一件事，命名互不重叠。**
+
+| 关系 | 语义 | 可空 | 反向名 | 谁写 | 轮换时是否改 |
+| --- | --- | --- | --- | --- | --- |
+| `Device.current_public_key`（OneToOne） | **当前指针**：这台设备此刻用哪一版密钥 | 可空（设备可先注册、后传密钥） | `current_device` | 设备绑定/轮换流程 | **只有它改** |
+| `UserPublicKey.device`（FK） | **归属/历史**：这一版密钥是哪台设备产生的 | 可空（账号级旧数据） | `public_keys` | 上传该版本时写一次 | **永不改** |
+
+四条必须写死的语义：
+
+1. **轮换时更新哪条关系**：只更新 `Device.current_public_key`（指向新 `UserPublicKey` 行）。
+   新行的 `UserPublicKey.device` 在创建时写入，**旧行保持原值**——历史归属不可变。
+2. **谁持有 current 指针**：**设备**持有（`Device.current_public_key`），不是 `UserPublicKey`。
+   理由：`UserPublicKey` 是**不可变的版本流水**（只插入、只翻 `is_active`），把"当前"写进流水行会让
+   "哪一行是当前"出现两个真源（`is_active` 与指针）。`UserPublicKey.is_active` 继续表示
+   "**账号级**当前密钥"，与设备级指针是不同粒度，不互相推导。
+3. **历史版本如何归属**：`device.public_keys.all()`（经 `UserPublicKey.device` 反查）给出该设备**历来**
+   产生的所有版本，按 `key_version` 排序即可重建该设备的密钥时间线。
+   `device.current_public_key` 只给出当前的那一版。**两者不可互相替代**：
+   撤销一台设备（#168）要读的是 `public_keys`（历史全集），而"它现在用什么"读的是 `current_public_key`。
+4. **`UserPublicKey.device` 可空（账号级旧数据）如何兼容**：
+   - 既有行 `device=NULL`，语义 = 账号级密钥（#189 的现状语义），**不回填**（零迁移成本，G4）；
+   - `device=NULL` 的行**不参与任何设备级判断**：#168 的"设备撤销后不再收新密钥"不因这些行而放宽，
+     #169 的"每设备信封"也不把它们算作某台设备的信封；
+   - 一个账号可以同时存在 `device=NULL` 的行与设备行（例如先有账号级密钥、后注册设备），
+     唯一约束 `(user, key_version)` 仍然覆盖全部行，版本号在全账号内单调递增；
+   - 设备注册时**不**自动把 `device=NULL` 的历史行"认领"给该设备——归属一旦猜测错误，
+     审计就变成伪证。归属只由"这一版是在哪台设备上上传的"决定。
+
+**可验证的 schema 证据**（临时 probe，未提交进产品代码）：
+
+- probe：`.review/phase4-remediation-20261026/acc01_schema_probe.py`（本机实际执行）
+- 做法：把上面两条关系声明**逐字翻译**成独立 app label（`probeapp`）下的 Django 模型，用独立
+  `probe_settings.py` + 内存 SQLite 跑 `manage.py check`；**不导入仓库任何模型、不建表、不改迁移**。
+- 对照：同一脚本先跑"修正前"（`related_name="device"`），再跑"修正后"（`related_name="current_device"`）。
+
+```text
+$ .venv\Scripts\python.exe -B .review\phase4-remediation-20261026\acc01_schema_probe.py
+
+===== variant: before =====
+SystemCheckError: System check identified some issues:
+
+ERRORS:
+probeapp.Device.public_key: (fields.E302) Reverse accessor 'UserPublicKey.device' for 'probeapp.Device.public_key' clashes with field name 'probeapp.UserPublicKey.device'.
+	HINT: Rename field 'probeapp.UserPublicKey.device', or add/change a related_name argument to the definition for field 'probeapp.Device.public_key'.
+probeapp.Device.public_key: (fields.E303) Reverse query name for 'probeapp.Device.public_key' clashes with field name 'probeapp.UserPublicKey.device'.
+	HINT: Rename field 'probeapp.UserPublicKey.device', or add/change a related_name argument to the definition for field 'probeapp.Device.public_key'.
+
+System check identified 2 issues (0 silenced).
+[exit code: 1]
+
+===== variant: after =====
+System check identified no issues (0 silenced).
+[exit code: 0]
+
+before: fields.E302/E303 reproduced (exit 1) ; after: 0 errors (exit 0) ; finding_fixed=true
+[exit code: 0]
+```
+
+原始输出存档：`.review/phase4-remediation-20261026/evidence/docs-acc01-schema-probe.log`
+与 `.review/phase4-remediation-20261026/evidence/acc01-schema-probe.json`（含两个变体的完整
+stdout/stderr 与退出码）。
+
+**边界（不要据此声称模型已实现）**：probe 只证明"这两条关系声明可以共存、`check` 0 errors"，
+它**不**证明迁移可跑、不证明 `unique_user_device` 与真实 `UserPublicKey` 上的
+`unique_user_public_key_version` 能共存于同一迁移、也不证明任何接口行为。
+这些都属于实现 PR（§7 清单）的验收范围。本卡仍只交付**设计**。
+
 ## 5. 验收对照（#167 验收原句）
 
 | 验收项 | ADR 阶段（本卡） | 实现阶段（后续 PR） |
@@ -199,10 +280,15 @@ opaque UUID，服务端只做唯一性约束。**不**用 fingerprint、不用 I
 
 ## 6. 待决问题（需要会签时回答）
 
-1. **Q1**：阶段 2 里，一台设备可否同时持有"账号级密钥"与"设备级密钥"？（影响 `UserPublicKey.device`
-   是否允许多行指向同一设备）**并请一并回答**：设备上传**自己的**密钥时走既有的
+1. **Q1**：阶段 2 里，一台设备可否同时持有"账号级密钥"与"设备级密钥"？**§4.6 之后这个问题的形态变了**：
+   `UserPublicKey.device` 是普通 FK，**数据层本来就允许多行指向同一设备**（历史版本就是多行），
+   `Device.current_public_key` 的 `OneToOne` 才保证"只有一个当前"。所以待决的不是"允不允许多行"，
+   而是**策略**：`device=NULL` 的账号级行是否还要在设备存在后继续产生？
+   **并请一并回答**：设备上传**自己的**密钥时走既有的
    `upload_public_key_view`（账号级轮换语义：轮换会把全账号 `is_active` 置 False、`key_version`
-   按账号内递增）还是新接口？走旧视图会把设备密钥和账号密钥搅进同一条版本序列。
+   按账号内递增）还是新接口？走旧视图会把设备密钥和账号密钥搅进同一条版本序列，且旧视图
+   **不写** `UserPublicKey.device`（`accounts/views.py:1060-1074` 的 `create()` 只传 user/公钥/指纹/
+   算法/版本），设备归属会全部落成 NULL。
 2. **Q2**：`recipients` 扩展（#169）采用"每设备一个信封"还是"设备组密钥"？前者流量 N 倍，后者需要新的群密钥协商，倾向前者起步。
 3. **Q3**：设备撤销后，其历史 `KeyTrust` 记录是否需要向对端广播"该设备密钥已作废"？涉及协议新增事件类型，需消息模块同意。
 4. **Q4**：`device_id` 在客户端卸载重装后会变（浏览器 localStorage 清空即变），是否允许"同设备不同 ID"产生两条记录？倾向允许 + 以 `last_seen_at` 自动归档僵尸记录（需 #168 定义阈值）。**需同时决定归档形态**：
@@ -214,8 +300,12 @@ opaque UUID，服务端只做唯一性约束。**不**用 fingerprint、不用 I
 ## 7. 实施清单（阶段 1，供实现 PR 使用）
 
 ```text
-[ ] accounts.0016_device 迁移（含 unique_user_device 约束与索引）
+[ ] accounts.0016_device 迁移（含 unique_user_device 约束与索引），字段名按 §4.6：
+    Device.current_public_key（related_name="current_device"）——不得再叫 public_key/related_name="device"
 [ ] UserPublicKey.device 可空外键迁移（可并入上一条）
+[ ] schema probe 复跑：实现时把 §4.6 的 probe 指向真实模型，确认 check 0 errors 且迁移可生成
+[ ] 针对 §4.6 四条语义的测试：轮换只改 current 指针、旧行 device 不变、
+    device.public_keys 给出历史全集、device=NULL 行不参与设备级判断
 [ ] POST /api/devices/register/（幂等：同 (user, device_id) 更新而非重复插入）
 [ ] GET  /api/devices/（仅返回自己的设备，含 revoked 状态）
 [ ] 每账号活跃（未撤销）设备数上限，超限拒绝（上限值待会签，建议 ≤10）
@@ -239,6 +329,7 @@ opaque UUID，服务端只做唯一性约束。**不**用 fingerprint、不用 I
 | 1 | 独立子 Agent（全新上下文，仅给文档路径 + Issue 原文 + 核对清单） | PASS WITH FINDINGS | 6 条事实性声明全部属实（`UserPublicKey`/`KeyTrust` 模型与约束位置、`sender_copy` 字段、迁移编号 0015/0021、`rate_limited` 未注册、session 不是设备）。**MAJOR-1**：§5 把"非作者评审"全部推给实现阶段，与 conventions §1"独立评审已完成即构成证据"矛盾——已按建议拆分为"ADR 阶段 / 实现阶段"两列并补本节。MINOR：设备表缺公钥指纹冗余列（已采纳，见 D1）、缺撤销审计字段（**处理方式 = 有意不立字段，延后理由见 D1 字段树注释**：阶段 1 无撤销入口，先立只会造出永远为空的列；#168 实施时随迁移补 `revoked_by`/`revoked_reason`）、缺每账号设备数上限（已采纳进 §7 清单与 §4.4）、跨账号 device_id 409 信息泄露未定义（已采纳进 §4.4）、错误码注册不应进阶段 1 清单（已采纳，见 §7 下方说明）、Q 漏数据保留问题（已补 Q5）并充实 Q1。 |
 | 2 | 独立子 Agent（全新上下文，复审第一轮处理 + 新增内容事实核对） | PASS WITH FINDINGS | 第一轮 7 项处理中 5 项确认已修复、MINOR-2 延后处理判定合理。**MAJOR-2（本轮新引入）**：§4.5 曾照抄 risk-register.md R-03 的代码行号（`consumers.py:120-135`、`views.py:2457-2477`），经逐行核实分别指向连接计数器与清缓存 stub、与 `sender_copy` 无关——那组行号基于 T36 重构前的快照已漂移；且 R-03 所述"两条规则不同的路径"已被 T36 消解（`views.py:2246` 注释自证同规则）。**已按当前代码改写 §4.5**：真正的残留风险是 `serialize_private_message`（consumers.py:700 起）与 `_private_message_payload_for_viewer`（views.py:4101 起）两份**同规则副本**需同步修改，并建议借 #169 合并为单一实现。**流程项**：documentation-status/tasks/traceability 的登记改动当时未提交（已随本提交补上）。MINOR-A（评审记录回链延后理由，见本轮第 1 行括注）与 MINOR-B（提交登记文件）一并处理。 |
 | 3 | 独立子 Agent（全新上下文，仅复核第二轮处理） | PASS WITH FINDINGS | §4.5 新表述逐行核实全部相符（含 `views.py:2246` 注释、勘误时间线自洽）；MINOR-A 回链、登记文件落地均确认。**MINOR-C**：§4.5"两份副本"漏了群聊第三处同规则判定（`serialize_group_recipient`，consumers.py:798-803）——已补，现为"三处副本、合并范围必须含群聊"；顺带修正 L4103-4108 的 1 行偏移。 |
+| 4 | Phase4 全量审查（独立 Agent，最小 schema probe 复现） | **FAIL（ACC-01，MAJOR）** | `Device.public_key` 的 `related_name="device"` 与 `UserPublicKey.device` 正向字段重名 → `fields.E302`/`E303`。**已修**：D1 改名为 `current_public_key` / `related_name="current_device"`，新增 §4.6 写死"current 指针 vs 历史归属"的四条语义，并用同一 probe 给出修正前（E302+E303, exit 1）与修正后（0 errors, exit 0）的对照输出。修复仅限设计，不含模型/迁移/接口实现。 |
 | 待定 | 单一迁移负责人（会签） | — | 回答 Q1–Q5 后进入实现 |
 
 > 本次评审由 AI 子 Agent 完成，构成 conventions §1 意义上的独立技术评审记录；

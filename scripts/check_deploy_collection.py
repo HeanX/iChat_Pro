@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -119,9 +120,14 @@ def _skip_marked_tests(suite) -> list[tuple[str, str]]:
             if isinstance(item, unittest.TestSuite):
                 walk(item)
                 continue
+            method = getattr(item, getattr(item, '_testMethodName', ''), None)
             if getattr(item, '__unittest_skip__', False):
                 marked.append(
                     (item.id(), str(getattr(item, '__unittest_skip_why__', '')))
+                )
+            elif getattr(method, '__unittest_skip__', False):
+                marked.append(
+                    (item.id(), str(getattr(method, '__unittest_skip_why__', '')))
                 )
 
     walk(suite)
@@ -212,29 +218,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    # bash is a hard requirement: without it the shell regressions skip, and a
-    # skipped check must never look green.
-    #
-    # Review P15: the ops modules do not all honour ICHAT_TEST_BASH --
-    # `deploy/tests/support.py` does, but `test_release_audit.py` calls
-    # `shutil.which("bash")` directly. Setting only the env var therefore
-    # leaves 27 tests skip-marked and this guard red, which is the right
-    # direction but a confusing one, so say which knob is missing.
+    # The current ops helpers honour ICHAT_TEST_BASH even outside PATH. Check
+    # that the selected interpreter really executes, rather than assuming its
+    # presence means the shell regressions can run.
     bash = os.environ.get('ICHAT_TEST_BASH') or shutil.which('bash')
-    on_path = shutil.which('bash')
     if not bash or not Path(bash).is_file():
         problems.append(
             'bash 不在 PATH 上（也未设置 ICHAT_TEST_BASH）；'
             '依赖 shell 的运维用例会 skip，skip 不算通过。'
-            '请把 bash 放进 PATH（Git Bash: C:\\Program Files\\Git\\bin），'
-            '仅设 ICHAT_TEST_BASH 不够：test_release_audit 只认 PATH'
+            '请安装 bash 或设置 ICHAT_TEST_BASH 为可执行文件的完整路径'
         )
-    elif not on_path:
-        problems.append(
-            f'ICHAT_TEST_BASH={bash} 可用，但 bash 不在 PATH 上；'
-            'test_release_audit.py 直接调用 shutil.which("bash")，'
-            '它的 27 条 shell 用例仍会被 skip。请把 bash 目录加进 PATH'
-        )
+    else:
+        try:
+            probe = subprocess.run([bash, '-c', 'exit 0'], capture_output=True, timeout=30)
+            if probe.returncode:
+                problems.append(f'bash 探测失败，退出码 {probe.returncode}；skip 不算通过')
+        except (OSError, subprocess.SubprocessError) as error:
+            problems.append(f'bash 无法执行：{error}；skip 不算通过')
 
     # Review P14: Django's default discovery starts at the *current directory*
     # (`build_suite([])` passes `start_dir='.'`), while REPO_ROOT comes from this

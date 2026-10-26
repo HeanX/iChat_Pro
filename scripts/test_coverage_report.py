@@ -89,6 +89,7 @@ class SubsetDetectionTests(unittest.TestCase):
             ['--top-level-directory', '.'],
             ['--settings', 'ichat_pro.settings'],
             ['--pythonpath', '.'],
+            ['--testrunner', 'ichat_pro.test_runner.IChatTestRunner'],
             # Abbreviations of *non-filter* options stay full runs.
             ['--noin'],
             ['--para=1'],
@@ -675,16 +676,15 @@ class CoverageBasisTests(unittest.TestCase):
         self.assertIn('COVERAGE_RCFILE', reason)
         self.assertIn('测量基准', reason)
 
-    def test_repo_coverage_rcfile_via_env_is_still_refused(self):
-        # The guard refuses COVERAGE_RCFILE outright rather than comparing
-        # paths: coverage also accepts .coveragerc, setup.cfg and tox.ini, so
-        # "is this the repo's file" cannot be decided by name alone.
+    def test_repo_coverage_rcfile_via_env_is_allowed(self):
+        # Every invocation explicitly names this file; the same resolved
+        # value in the environment cannot substitute another configuration.
         with mock.patch.dict(
             os.environ, {'COVERAGE_RCFILE': str(report.REPO_COVERAGERC)}
         ):
             subset, unpublishable, _ = self._flags()
-        self.assertTrue(subset)
-        self.assertTrue(unpublishable)
+        self.assertFalse(subset)
+        self.assertFalse(unpublishable)
 
     def test_foreign_pythonpath_with_a_startup_hook_is_unpublishable(self):
         shadow = self.tmp / 'hookdir'
@@ -700,9 +700,9 @@ class CoverageBasisTests(unittest.TestCase):
         self.assertIn('sitecustomize.py', reason)
         self.assertIn(str(shadow), reason)
 
-    def test_plain_pythonpath_entries_are_not_a_substitution(self):
-        # A normal venv/harness directory is not an attack: only a module that
-        # Python imports at startup (sitecustomize/usercustomize) is.
+    def test_plain_foreign_pythonpath_entries_are_a_substitution(self):
+        # Foreign paths can shadow any dependency, with or without a named
+        # startup hook. Only the repo and this interpreter's own venv qualify.
         plain = self.tmp / 'plainlib'
         plain.mkdir()
         (plain / 'some_module.py').write_text('', encoding='utf-8')
@@ -711,9 +711,9 @@ class CoverageBasisTests(unittest.TestCase):
             {'PYTHONPATH': os.pathsep.join([str(plain), str(REPO_ROOT)])},
         ):
             subset, unpublishable, reason = self._flags()
-        self.assertFalse(subset)
-        self.assertFalse(unpublishable)
-        self.assertIsNone(reason)
+        self.assertTrue(subset)
+        self.assertTrue(unpublishable)
+        self.assertIn('PYTHONPATH', reason)
 
     def test_repo_only_pythonpath_is_not_a_substitution(self):
         with mock.patch.dict(os.environ, {'PYTHONPATH': str(REPO_ROOT)}):
@@ -887,13 +887,11 @@ class IChatTestRunner(DiscoverRunner):
     def _run(self, forwarded, *, own=()):
         """Run the real script against the real worktree, one case at a time.
 
-        The temp directory goes on ``PYTHONPATH`` so ``--settings=<temp>``
-        resolves. That is not a P11 bypass: the guard only refuses a
-        ``PYTHONPATH`` entry that contains a startup hook, and this directory
-        deliberately contains none.
+        Basis substitutions are refused before executing them. This leaves
+        the path clean so the diagnostic identifies the supplied argv.
         """
         env = dict(os.environ)
-        env['PYTHONPATH'] = os.pathsep.join([str(self.tmp), str(REPO_ROOT)])
+        env['PYTHONPATH'] = str(REPO_ROOT)
         env['PYTHONIOENCODING'] = 'utf-8'
         env.pop('DJANGO_SETTINGS_MODULE', None)
         env.pop('COVERAGE_RCFILE', None)
@@ -937,7 +935,7 @@ class IChatTestRunner(DiscoverRunner):
             'pythonpath-shadow', ['--pythonpath={shadow}', '--parallel', '1'],
         )
         self.assertIn('pythonpath', output)
-        self.assertRegex(output, r'Ran 1 test')
+        self.assertNotRegex(output, r'Ran \d+ tests?')
 
     def test_pythonpath_cannot_be_laundered_by_allow_subset(self):
         output = self._assert_refused(
@@ -965,7 +963,7 @@ class IChatTestRunner(DiscoverRunner):
         sentinel = self._sentinel('env-settings')
         before = hashlib.sha256(self.snapshot.read_bytes()).hexdigest()
         env = dict(os.environ)
-        env['PYTHONPATH'] = os.pathsep.join([str(self.tmp), str(REPO_ROOT)])
+        env['PYTHONPATH'] = str(REPO_ROOT)
         env['PYTHONIOENCODING'] = 'utf-8'
         env['DJANGO_SETTINGS_MODULE'] = 'qa02_alt_settings'
         env.pop('COVERAGE_RCFILE', None)

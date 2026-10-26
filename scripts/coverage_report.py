@@ -2,7 +2,7 @@
 
 Usage (from the repository root, with the project venv):
 
-    .\\.venv\\Scripts\\python.exe scripts\\coverage_report.py
+    .\\.venv\\Scripts\\python.exe -I scripts\\coverage_report.py
 
     # opt out of writing the Markdown snapshot
     .\\.venv\\Scripts\\python.exe scripts\\coverage_report.py --no-markdown
@@ -28,14 +28,33 @@ which settings/runner decide what "the whole suite" is -- including a
 
 from __future__ import annotations
 
+import os
+import sys
+
+# Enter an isolated process before importing Django or the coverage tool.
+# Keep the original environment for diagnostics; measurement children receive
+# a separate, explicitly constructed environment below.
+if __name__ == '__main__' and not sys.flags.isolated:
+    # Windows' CRT exec overlay does not propagate the replacement process's
+    # exit status reliably. Wait explicitly, and import the launcher only from
+    # the interpreter's libraries, without the caller's PYTHONPATH entries.
+    _trusted_prefixes = tuple(os.path.normcase(os.path.abspath(prefix)) + os.sep
+                              for prefix in (sys.prefix, sys.base_prefix))
+    sys.path[:] = [entry for entry in sys.path
+                   if os.path.normcase(os.path.abspath(entry)).startswith(_trusted_prefixes)]
+    import subprocess as _bootstrap_subprocess
+
+    raise SystemExit(_bootstrap_subprocess.call(
+        [sys.executable, '-I', '-X', 'utf8', os.path.abspath(__file__), *sys.argv[1:]]))
+
 import argparse
+import fnmatch
 import importlib
 import json
-import os
+import math
 import platform
 import re
 import subprocess
-import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,10 +71,21 @@ REPO_COVERAGERC = REPO_ROOT / '.coveragerc'
 # explicitly different value narrows the run.
 _DEFAULT_PATTERN = 'test*.py'
 
-#: Module names CPython imports automatically from ``sys.path`` at startup. A
-#: file with one of these names runs before any project code, so it can replace
-#: unittest's discovery without leaving a trace in argv (review P11).
-_STARTUP_HOOKS = ('sitecustomize.py', 'usercustomize.py')
+# Only operating-system, application and test-service settings cross the
+# measurement boundary. New Python/coverage configuration variables are not
+# inherited merely because this version of the tool has not heard of them.
+_CHILD_ENV_KEYS = frozenset({
+    'PATH', 'PATHEXT', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'COMSPEC',
+    'TEMP', 'TMP', 'TMPDIR', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
+    'APPDATA', 'LOCALAPPDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)',
+    'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'USER', 'USERNAME', 'LOGNAME',
+    'CI', 'GITHUB_ACTIONS', 'RUNNER_OS', 'ICHAT_TEST_BASH',
+    'DATABASE_URL', 'REDIS_URL', 'DJANGO_SECRET_KEY', 'DJANGO_DEBUG',
+    'DJANGO_ALLOWED_HOSTS', 'DJANGO_STATIC_ROOT', 'DJANGO_MEDIA_ROOT',
+    'DJANGO_CSRF_TRUSTED_ORIGINS', 'CSP_ALLOW_UNSAFE_INLINE_SCRIPT',
+    'CSP_ALLOW_UNSAFE_INLINE_STYLE',
+})
+_MIN_BASIS_FRACTION = 0.8
 
 # The settings module the published snapshot is produced from. Anything else
 # (via ``--settings`` or ``DJANGO_SETTINGS_MODULE``) is not comparable: a
@@ -94,10 +124,17 @@ def _django_test_parser():
     # settings -- the script normally runs before Django is set up.
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ichat_pro.settings')
-    if not django.conf.settings.configured:
-        django.setup()
-    return Command().create_parser('manage.py', 'test')
+    previous = os.environ.get('DJANGO_SETTINGS_MODULE')
+    os.environ['DJANGO_SETTINGS_MODULE'] = _DEFAULT_SETTINGS_MODULE
+    try:
+        if not django.conf.settings.configured:
+            django.setup()
+        return Command().create_parser('manage.py', 'test')
+    finally:
+        if previous is None:
+            os.environ.pop('DJANGO_SETTINGS_MODULE', None)
+        else:
+            os.environ['DJANGO_SETTINGS_MODULE'] = previous
 
 
 def _parse_test_args(extra_args: list[str]) -> tuple[argparse.Namespace, list[str]]:
@@ -159,72 +196,49 @@ def _pythonpath_is_repo_root(path: str) -> bool:
     and are not substitutions. Anything else is.
     """
     try:
-        return Path(str(path)).resolve() == REPO_ROOT
+        candidate = Path(str(path))
+        if not candidate.is_absolute():
+            candidate = REPO_ROOT / candidate
+        return candidate.resolve() == REPO_ROOT
     except (OSError, RuntimeError):
         return False
-
-
-def _path_inside(path: str | Path, root: Path) -> bool:
-    """Whether ``path`` resolves to ``root`` or somewhere below it."""
-    try:
-        resolved = Path(str(path)).resolve()
-    except (OSError, RuntimeError):
-        return False
-    try:
-        resolved.relative_to(root)
-    except ValueError:
-        return False
-    return True
 
 
 def _coverage_basis_reason(environ=None) -> str | None:
-    """Why the coverage measurement itself would use a non-repo configuration.
+    """Refuse measurement overrides by category, before importing Django.
 
-    P11: coverage reads ``COVERAGE_RCFILE`` from the environment and otherwise
-    falls back to ``.coveragerc``. A forged rc that reports only
-    ``ichat_pro/test_runner.py`` turned a 70.49% / 54.49% baseline into
-    "6/6 statements, 0/0 branches, 100.00%, 已达标" with **no argv at all**, and
-    overwrote the published snapshot. The rc decides what is measured, so it is
-    exactly as load-bearing as ``TEST_RUNNER``: same class, same refusal.
-
-    ``COVERAGE_FILE`` is deliberately *not* refused: it only says where the raw
-    data lives, and pointing it somewhere else is a legitimate CI convenience.
-    It would become a bypass only if a stale file there were read back as this
-    run's data, so instead of refusing it, every coverage child is handed
-    ``COVERAGE_FILE=<repo>/.coverage`` (see ``_coverage_child_env``). The knob
-    stays usable and stops being able to lie.
-
-    ``PYTHONPATH`` entries outside the repository are refused for the same
-    reason ``--pythonpath`` is. A directory there containing ``sitecustomize.py``
-    is imported by the interpreter *before* any project code, and a stubbed
-    ``unittest.TestLoader.discover`` made a documented full-suite command report
-    ``Ran 1 test`` and publish a snapshot (verified 2026-10-26). The argv was
-    untouched; only the environment moved.
-
-    The check is deliberately narrow -- it looks for the two hook module names
-    Python imports automatically, not for "any path outside the repo". A venv
-    or a CI harness legitimately puts its own directories on ``PYTHONPATH``;
-    refusing those would break working setups without stopping the attack.
+    The repository root and this interpreter's own library directories are
+    redundant PYTHONPATH entries. Every other entry is a substitution, whether
+    it contains a file, a package, a zip archive, or no startup hook at all.
     """
     env = os.environ if environ is None else environ
-    rcfile = env.get('COVERAGE_RCFILE')
-    if rcfile:
-        return (
-            f'环境变量 COVERAGE_RCFILE={rcfile} 替换了覆盖率测量基准'
-            f'（仓库自带的是 {REPO_ROOT / ".coveragerc"}）。'
-            '自定义 rc 可以只统计个别文件，把未达标的数字伪装成 100%'
-        )
+    for key, value in sorted(env.items()):
+        name = key.upper()
+        if not value or not name.startswith('COVERAGE_') or name == 'COVERAGE_FILE':
+            continue
+        if name == 'COVERAGE_RCFILE':
+            candidate = Path(value)
+            if not candidate.is_absolute():
+                candidate = REPO_ROOT / candidate
+            if candidate.resolve() == REPO_COVERAGERC:
+                continue
+        return f'环境变量 {key} 替换了覆盖率测量基准；请移除该覆盖率配置'
+    trusted_paths = {
+        REPO_ROOT.resolve(),
+        (Path(sys.prefix) / 'Lib' / 'site-packages').resolve(),
+        (Path(sys.prefix) / 'lib' / f'python{sys.version_info.major}.{sys.version_info.minor}'
+         / 'site-packages').resolve(),
+    }
     for entry in (env.get('PYTHONPATH') or '').split(os.pathsep):
         if not entry:
             continue
-        for hook in _STARTUP_HOOKS:
-            candidate = Path(entry) / hook
-            if candidate.is_file():
-                return (
-                    f'PYTHONPATH 上的 {entry} 含 {hook}。'
-                    'Python 启动时会先导入它，它可以替换 unittest 的用例发现，'
-                    '而命令行完全看不出来；这会把全量运行变成任意条数'
-                )
+        candidate = Path(entry)
+        if not candidate.is_absolute():
+            candidate = REPO_ROOT / candidate
+        if candidate.resolve() not in trusted_paths:
+            return (f'PYTHONPATH={entry} 替换了覆盖率测量基准；只接受仓库根和当前 '
+                    'venv 的 site-packages。影子 coverage 包或 sitecustomize.py / '
+                    'sitecustomize 包都不能作为发布基准')
     return None
 
 
@@ -265,7 +279,7 @@ def _substitution_reason(options: argparse.Namespace) -> str | None:
     snapshot (review P7). ``None`` means "the defaults are in force".
     """
     explicit_runner = getattr(options, 'testrunner', None)
-    if explicit_runner:
+    if explicit_runner and explicit_runner != _default_test_runner():
         return (
             f'显式 --testrunner={explicit_runner} 替换了默认 runner'
             f'（{_default_test_runner()}）'
@@ -462,18 +476,13 @@ def _safe_echo(text: str, stream=None) -> None:
 
 
 def _coverage_child_env(data_file: Path | None = None) -> dict:
-    """The environment every coverage child process runs under.
-
-    Review P11: ``COVERAGE_RCFILE`` made a 404-test run report 6/6 statements
-    and 0/0 branches (100.00%, "已达标") with no argv at all, because all three
-    ``coverage`` invocations inherited it. Refusing it in the guard is the
-    primary defence; the child additionally gets a *constructed* environment, so
-    a variable the guard has not learned about yet cannot reach the measurement
-    either. Each command also passes ``--rcfile`` explicitly, so the basis is
-    named twice and cannot be supplied implicitly.
-    """
-    env = dict(os.environ)
-    env.pop('COVERAGE_RCFILE', None)
+    """Construct the measurement environment from an explicit allowlist."""
+    env = {key: value for key, value in os.environ.items()
+           if key.upper() in _CHILD_ENV_KEYS}
+    env['PYTHONPATH'] = str(REPO_ROOT)
+    env['PYTHONIOENCODING'] = 'utf-8'
+    env['PYTHONNOUSERSITE'] = '1'
+    env['DJANGO_SETTINGS_MODULE'] = _DEFAULT_SETTINGS_MODULE
     if data_file is not None:
         # Pin the data file to this run: a stale .coverage elsewhere would be
         # read back as if it were this run's numbers.
@@ -481,7 +490,14 @@ def _coverage_child_env(data_file: Path | None = None) -> dict:
     return env
 
 
-def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
+def _coverage_command(action: str, *arguments: str) -> list[str]:
+    # -I prevents both user-site hooks and module shadowing when resolving
+    # ``-m coverage``. The venv's installed packages remain available.
+    return [sys.executable, '-I', '-X', 'utf8', '-m', 'coverage', action,
+            f'--rcfile={REPO_COVERAGERC}', *arguments]
+
+
+def _run_coverage(extra_args: list[str], data_file: Path | None = None) -> tuple[int, int, int]:
     """Run the suite under coverage.
 
     Returns ``(exit_code, test_count, skipped)``. The test count is parsed from
@@ -498,22 +514,13 @@ def _run_coverage(extra_args: list[str]) -> tuple[int, int, int]:
     measured*; pinning it here means a future relaxed check cannot silently
     change the basis, and the three coverage commands cannot disagree.
     """
-    command = [
-        sys.executable,
-        '-m',
-        'coverage',
-        'run',
-        f'--rcfile={REPO_COVERAGERC}',
-        'manage.py',
-        'test',
-        *extra_args,
-    ]
+    command = _coverage_command('run', 'manage.py', 'test', *extra_args)
     print(f'$ {" ".join(command)}', flush=True)
 
     process = subprocess.Popen(
         command,
         cwd=REPO_ROOT,
-        env=_coverage_child_env(REPO_ROOT / '.coverage'),
+        env=_coverage_child_env(data_file or REPO_ROOT / '.coverage'),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -618,7 +625,7 @@ def _snapshot_decision(
     return 'write', ''
 
 
-def _collect_json() -> dict:
+def _collect_json(data_file: Path | None = None) -> dict:
     """Export the current .coverage database to JSON and parse it.
 
     ``--rcfile`` is pinned and the environment is constructed for the same
@@ -629,13 +636,151 @@ def _collect_json() -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         target = Path(tmpdir) / 'coverage.json'
         subprocess.run(
-            [sys.executable, '-m', 'coverage', 'json',
-             f'--rcfile={REPO_COVERAGERC}', '-o', str(target), '-q'],
+            _coverage_command('json', '-o', str(target), '-q'),
             cwd=REPO_ROOT,
-            env=_coverage_child_env(REPO_ROOT / '.coverage'),
+            env=_coverage_child_env(data_file or REPO_ROOT / '.coverage'),
             check=True,
         )
         return json.loads(target.read_text(encoding='utf-8'))
+
+
+def _git_read(*arguments: str) -> str:
+    return subprocess.run(
+        ['git', *arguments], cwd=REPO_ROOT, env=_coverage_child_env(),
+        capture_output=True, text=True, encoding='utf-8', check=True,
+    ).stdout
+
+
+def _source_basis() -> tuple[set[str], int, list[str]]:
+    """Independently count statements in the configured production sources.
+
+    ``analysis2`` reads source syntax; it does not trust the exported JSON's
+    totals or the set of files reached by the test runner.
+    """
+    import coverage
+
+    analyzer = coverage.Coverage(config_file=str(REPO_COVERAGERC), data_file=None)
+    sources = analyzer.get_option('run:source')
+    if set(sources or ()) != {'accounts', 'chat', 'ichat_pro'}:
+        raise ValueError('覆盖率 source 必须是 accounts/chat/ichat_pro')
+    omissions = analyzer.get_option('run:omit') or []
+    paths = [path for source in sources for path in (REPO_ROOT / source).rglob('*.py')
+             if not _omitted(path.relative_to(REPO_ROOT).as_posix(), omissions)]
+    files = {path.relative_to(REPO_ROOT).as_posix() for path in paths}
+    try:
+        statements = sum(len(analyzer.analysis2(str(path))[1]) for path in paths)
+    finally:
+        analyzer.get_data().close(force=True)
+    return files, statements, omissions
+
+
+def _omitted(relative: str, patterns: list[str]) -> bool:
+    absolute = (REPO_ROOT / relative).as_posix()
+    return any(fnmatch.fnmatchcase(relative, pattern.replace('\\', '/'))
+               or fnmatch.fnmatchcase(absolute, pattern.replace('\\', '/'))
+               for pattern in patterns)
+
+
+def _published_basis(omissions: list[str]) -> dict[str, int]:
+    """Read the committed baseline, never a mutable working-tree snapshot."""
+    text = _git_read('show', 'HEAD:docs/quality/coverage-report.md')
+    match = re.search(r'<!-- coverage-basis: (.+?) -->', text)
+    if match:
+        basis = json.loads(match.group(1))
+    else:
+        # Older snapshots contain raw statement/branch totals but no file
+        # count. Recover that count from the same committed source tree.
+        basis = {}
+        for label, key in (('语句', 'num_statements'), ('分支', 'num_branches')):
+            match = re.search(r'^\| ' + label + r' \| \d+ / (\d+) \|', text, re.M)
+            if match is None:
+                raise ValueError('已发布快照缺少可核验的原始分母')
+            basis[key] = int(match.group(1))
+        names = _git_read('ls-tree', '-r', '--name-only', 'HEAD', '--',
+                          'accounts', 'chat', 'ichat_pro').splitlines()
+        basis['num_files'] = sum(name.endswith('.py') and not _omitted(name, omissions)
+                                 for name in names)
+    for key in ('num_statements', 'num_branches', 'num_files'):
+        if type(basis.get(key)) is not int or basis[key] < 0:
+            raise ValueError(f'已发布快照的 {key} 无效')
+    if not basis['num_statements'] or not basis['num_files']:
+        raise ValueError('已发布快照的语句数/文件数不能为零')
+    return basis
+
+
+def _basis_problem(data: dict, baseline: dict, files: set[str], statements: int) -> str | None:
+    """Validate raw counts, source inventory and the historical denominator."""
+    try:
+        totals = data['totals']
+        measured = set()
+        sums = dict.fromkeys(('num_statements', 'covered_lines',
+                              'num_branches', 'covered_branches'), 0)
+        for filename, result in data['files'].items():
+            path = Path(filename.replace('\\', '/'))
+            if not path.is_absolute():
+                path = REPO_ROOT / path
+            relative = path.resolve().relative_to(REPO_ROOT).as_posix()
+            if relative in measured:
+                raise ValueError('JSON 含重复文件')
+            measured.add(relative)
+            summary = result['summary']
+            for key in sums:
+                value = summary[key]
+                if type(value) is not int or value < 0:
+                    raise ValueError(f'{key} 必须是非负整数')
+                sums[key] += value
+            if (summary['covered_lines'] > summary['num_statements']
+                    or summary['covered_branches'] > summary['num_branches']):
+                raise ValueError('覆盖数不能大于分母')
+        if measured != files:
+            return f'统计文件集合与源码不符（应有 {len(files)}，实际 {len(measured)}）'
+        if sums['num_statements'] != statements or not statements:
+            return f'语句分母与独立源码分析不符（应有 {statements}，实际 {sums["num_statements"]}）'
+        for key, value in sums.items():
+            if type(totals[key]) is not int or totals[key] != value:
+                return f'汇总 {key} 与逐文件原始计数不一致'
+        current = {**sums, 'num_files': len(measured)}
+        for key in ('num_statements', 'num_branches', 'num_files'):
+            if current[key] < baseline[key] * _MIN_BASIS_FRACTION:
+                return (f'{key} 分母从已发布的 {baseline[key]} 降至 {current[key]}，'
+                        '下降超过 20%；必须先审查统计范围，不能直接覆盖快照')
+        actual = _percent(sums['covered_lines'] + sums['covered_branches'],
+                          sums['num_statements'] + sums['num_branches'])
+        percent = float(totals['percent_covered'])
+        if not math.isfinite(percent) or abs(percent - actual) > 0.02:
+            return '汇总百分比与原始计数不一致'
+    except (KeyError, TypeError, ValueError, AttributeError, OSError) as error:
+        return f'覆盖率 JSON 不可核验：{error}'
+    return None
+
+
+def _denominator_reason(data: dict) -> str | None:
+    try:
+        files, statements, omissions = _source_basis()
+        return _basis_problem(data, _published_basis(omissions), files, statements)
+    except Exception as error:
+        # Missing Git history/config/source analysis is not permission to
+        # replace a published snapshot with unverifiable numbers.
+        return f'无法核验覆盖率分母：{type(error).__name__}: {error}'
+
+
+def _write_snapshot(text: str, original: bytes | None) -> None:
+    MARKDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    current = MARKDOWN_PATH.read_bytes() if MARKDOWN_PATH.exists() else None
+    if current != original:
+        raise ValueError('快照在测量期间已被另一进程修改，拒绝覆盖')
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='\n',
+                                         dir=MARKDOWN_PATH.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, MARKDOWN_PATH)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _percent(covered: int, total: int) -> float:
@@ -676,17 +821,10 @@ def _per_module(data: dict) -> list[tuple[str, dict]]:
 def _git_sha() -> str:
     """Short HEAD SHA, or ``unknown`` outside a git checkout."""
     try:
-        completed = subprocess.run(
-            ['git', 'rev-parse', '--short=12', 'HEAD'],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
+        value = _git_read('rev-parse', '--short=12', 'HEAD').strip()
+    except (OSError, subprocess.SubprocessError):
         return 'unknown'
-    value = completed.stdout.strip()
-    return value if completed.returncode == 0 and value else 'unknown'
+    return value or 'unknown'
 
 
 def _environment_line() -> str:
@@ -731,6 +869,11 @@ def _render_markdown(
     lines = [
         '# 覆盖率报告（P4 Test T12 / #193）',
         '',
+        '<!-- coverage-basis: ' + json.dumps({
+            'num_statements': totals['num_statements'],
+            'num_branches': totals['num_branches'], 'num_files': len(data['files']),
+        }, sort_keys=True) + ' -->',
+        '',
         '> 本文件由 `scripts/coverage_report.py` 生成，**不要手工编辑**。',
         f'> 生成时间：{generated_at}',
         f'> 代码版本：`{_git_sha()}`（被测代码所在提交；本报告随其后的提交一并'
@@ -738,7 +881,8 @@ def _render_markdown(
         f'> 环境：{_environment_line()}',
         f'> 用例数：{test_count if test_count is not None else "未知"}'
         f'（skip {skipped}）',
-        f'> 测试命令：`python -m coverage run manage.py test'
+        f'> 测试命令：`python -I scripts/coverage_report.py'
+        f'{" --allow-subset" if is_subset else ""} --'
         f'{" " + " ".join(extra_args) if extra_args else ""}`',
         f'> 测试结果：退出码 {exit_code}',
         '',
@@ -805,6 +949,8 @@ def _render_markdown(
         '`--pat` 这类前缀缩写与 `-kfoo` 这类紧凑写法）或自定义 `--testrunner` '
         '的运行只代表子集，默认不写快照。',
         '- 分支覆盖率原始数见"分模块"表的 covered/total 列，可单独核算。',
+        '- 发布前独立核对源码文件集合与语句数；语句/分支/文件分母相对 Git 中已发布快照'
+        '下降超过 20% 时拒写，`--allow-subset` 也不能豁免。',
         '',
     ]
     return '\n'.join(lines)
@@ -846,6 +992,14 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Refuse an untrusted environment before constructing Django's parser:
+    # parser creation itself imports settings and the configured test runner.
+    environment_reason = _coverage_basis_reason()
+    if environment_reason:
+        _safe_echo(_refusal_text(environment_reason, unpublishable=True) + '\n', sys.stderr)
+        return 2
+    os.chdir(REPO_ROOT)
+
     extra = [item for item in args.test_args if item != '--']
     if not extra:
         extra = ['--parallel', '1']
@@ -855,9 +1009,21 @@ def main() -> int:
     # means exactly what it means in the real command.
     options, unknown = _parse_test_args(extra)
     subset_reason = _subset_reason(options, unknown)
-    is_subset = subset_reason is not None
     unpublishable = _subset_is_unpublishable(options, unknown)
     parallel = _parallel_requested(options)
+
+    if unpublishable:
+        _safe_echo(_refusal_text(subset_reason or '覆盖率测量基准已改变',
+                                 unpublishable=True) + '\n', sys.stderr)
+        return 2
+    original = MARKDOWN_PATH.read_bytes() if MARKDOWN_PATH.exists() else None
+    with tempfile.TemporaryDirectory(prefix='ichat-coverage-') as directory:
+        return _measure_and_publish(args, extra, subset_reason, parallel,
+                                    Path(directory) / '.coverage', original)
+
+
+def _measure_and_publish(args, extra, subset_reason, parallel, data_file, original) -> int:
+    is_subset = subset_reason is not None
 
     # ``--parallel >1`` forks test processes that coverage cannot see, so the
     # collected totals collapse to a fraction of the real suite. That is not a
@@ -874,19 +1040,18 @@ def main() -> int:
             subset_reason=subset_reason or '',
         )
         _safe_echo(f'\n{reason}\n', sys.stderr)
-        exit_code, _test_count, _skipped = _run_coverage(extra)
+        exit_code, _test_count, _skipped = _run_coverage(extra, data_file)
         return exit_code if exit_code != 0 else 2
 
-    exit_code, test_count, skipped = _run_coverage(extra)
+    exit_code, test_count, skipped = _run_coverage(extra, data_file)
     if exit_code != 0:
         print(f'\n测试未通过（退出码 {exit_code}），不生成覆盖率报告。', file=sys.stderr)
         return exit_code
 
     report = subprocess.run(
-        [sys.executable, '-m', 'coverage', 'report', '-m',
-         f'--rcfile={REPO_COVERAGERC}'],
+        _coverage_command('report', '-m'),
         cwd=REPO_ROOT,
-        env=_coverage_child_env(REPO_ROOT / '.coverage'),
+        env=_coverage_child_env(data_file),
         check=False,
     )
     if report.returncode != 0:
@@ -905,19 +1070,23 @@ def main() -> int:
         min_tests=args.min_tests,
         parallel=parallel,
         subset_reason=subset_reason or '',
-        subset_is_unpublishable=unpublishable,
+        subset_is_unpublishable=False,
     )
     if decision == 'refuse':
         _safe_echo(f'\n{reason}\n', sys.stderr)
-        return 2 if unpublishable else 0
+        return 0
 
-    data = _collect_json()
-    MARKDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MARKDOWN_PATH.write_text(
-        _render_markdown(data, exit_code, extra, is_subset, test_count, skipped),
-        encoding='utf-8',
-        newline='\n',
-    )
+    data = _collect_json(data_file)
+    reason = _denominator_reason(data)
+    if reason:
+        _safe_echo(_refusal_text(reason, unpublishable=True) + '\n', sys.stderr)
+        return 2
+    try:
+        _write_snapshot(_render_markdown(data, exit_code, extra, is_subset,
+                                         test_count, skipped), original)
+    except (OSError, ValueError) as error:
+        _safe_echo(f'未写入 docs/quality/coverage-report.md：{error}\n', sys.stderr)
+        return 2
     print(f'\n已写入 {MARKDOWN_PATH.relative_to(REPO_ROOT)}')
     return 0
 

@@ -5019,16 +5019,12 @@ async function respondToKeyVerification(requestId, action) {
       authorisation ? { grantTrustFor: authorisation } : undefined
     );
     if (action === "accept" && !(outcome && outcome.granted)) {
-      // Two different reasons, two different messages: with no snapshot there
-      // was never an authorisation object in this page (someone else answered
-      // it), which is not the same thing as the key having rotated.
+      // The refresh reports WHY it did not grant: with no snapshot there was
+      // never an authorisation object in this page (someone else answered it),
+      // the endpoint may have been unreadable, or the key really did move.
       window.showToast(!snapshot
-        ? (currentLanguage === "zh"
-          ? "此验证请求已不在本页的待处理列表中，未授予信任。请重新发起安全验证。"
-          : "This verification request is no longer in this page's pending list, so nothing was trusted. Start verification again.")
-        : (currentLanguage === "zh"
-          ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
-          : "Keys changed. Nothing was trusted. Start verification again."));
+        ? keyVerificationRefusalMessage("no-authorisation")
+        : keyVerificationRefusalMessage(outcome && outcome.reason));
       return;
     }
     window.showToast(action === "accept"
@@ -5168,22 +5164,41 @@ function keyStatusMatchesAcceptedVerification(contactStatus, verification) {
 // the only way this function can extend local trust, so plain refreshes,
 // declines, cancels and expiries never do.
 //
-// Resolves to { granted } so a caller can report the truth instead of assuming
-// that asking for a grant produced one.
+// Resolves to { granted, reason } so a caller can report the truth instead of
+// assuming that asking for a grant produced one, and can tell the three
+// distinct failures apart:
+//   'granted'       -- the pinned fingerprint was written to the trust store
+//   'key-changed'   -- the live key no longer matches the pinned one
+//   'lookup-failed' -- the fingerprint endpoint could not be read at all
+//   'mismatch'      -- the authorisation names a different contact than userId
+//   'not-authorised'-- no authorisation was requested (plain refresh)
+// `fetchContactKeyStatus()` swallows its own errors and returns null, so a null
+// read is the only signal that the lookup failed; without surfacing it the UI
+// would report "keys changed" for what is really a transient network problem.
 async function refreshKeyVerificationAfterChange(userId = null, options = {}) {
   contactKeyStatusCacheByUserId = {};
   keyTrustListCache = null;
   const grantTrustFor = options && options.grantTrustFor ? options.grantTrustFor : null;
   let granted = false;
+  let reason = "not-authorised";
   if (userId) {
     const refreshed = await fetchContactKeyStatus(userId, { force: true });
     const peer = acceptedVerificationPeer(grantTrustFor);
     if (peer && peer.userId === Number(userId)) {
-      const verified = keyStatusMatchesAcceptedVerification(refreshed, grantTrustFor);
-      if (verified && window.iChatPrivateE2EE && window.iChatPrivateE2EE.trustPeerKey) {
-        window.iChatPrivateE2EE.trustPeerKey(verified);
-        granted = true;
+      if (refreshed === null || refreshed === undefined) {
+        reason = "lookup-failed";
+      } else {
+        const verified = keyStatusMatchesAcceptedVerification(refreshed, grantTrustFor);
+        if (verified && window.iChatPrivateE2EE && window.iChatPrivateE2EE.trustPeerKey) {
+          window.iChatPrivateE2EE.trustPeerKey(verified);
+          granted = true;
+          reason = "granted";
+        } else {
+          reason = "key-changed";
+        }
       }
+    } else if (peer) {
+      reason = "mismatch";
     }
   }
   const conv = activeChatId ? conversationsById[activeChatId] : null;
@@ -5198,7 +5213,27 @@ async function refreshKeyVerificationAfterChange(userId = null, options = {}) {
       setSecurityVerificationModalCopy(conv);
     }
   }
-  return { granted };
+  return { granted, reason };
+}
+
+// User-facing text for a refused verification, keyed by the reason the refresh
+// reported. "Could not read the key" and "the key changed" are different facts
+// and must not share a sentence.
+function keyVerificationRefusalMessage(reason) {
+  const zh = currentLanguage === "zh";
+  if (reason === "lookup-failed") {
+    return zh
+      ? "无法确认对方当前密钥，本次未授予信任。请检查网络后重试。"
+      : "Could not confirm the contact's current key, so nothing was trusted. Check your connection and try again.";
+  }
+  if (reason === "mismatch" || reason === "no-authorisation") {
+    return zh
+      ? "此验证请求已不在本页的待处理列表中，未授予信任。请重新发起安全验证。"
+      : "This verification request is no longer in this page's pending list, so nothing was trusted. Start verification again.";
+  }
+  return zh
+    ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
+    : "Keys changed. Nothing was trusted. Start verification again.";
 }
 
 function handleKeyVerificationNew(data) {
@@ -5274,11 +5309,9 @@ function handleKeyVerificationNew(data) {
         window.showToast(currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed");
         return;
       }
-      // The snapshot is gone by now (the caller cleared it), so distinguish the
-      // rotated-key case explicitly instead of borrowing the "this page" text.
-      window.showToast(currentLanguage === "zh"
-        ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
-        : "Keys changed. Nothing was trusted. Start verification again.");
+      // The refresh reports WHY it did not grant. A transient failure to read
+      // the fingerprint endpoint must not be described as "the key changed".
+      window.showToast(keyVerificationRefusalMessage(outcome && outcome.reason));
     }).catch(function(err) {
       // An unawaited rejection here used to surface as a console error next to
       // a success toast (review m-2).

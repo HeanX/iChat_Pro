@@ -74,6 +74,7 @@ const CHAT_TRUST_RULE = [
   'keyStatusMatchesAcceptedVerification',
   'verificationConfirmation',
   'verificationIdentifiesSameRequest',
+  'keyVerificationRefusalMessage',
   'rememberLocallyAnswered',
   'forgetLocallyAnswered',
   'isLocallyAnswered',
@@ -174,6 +175,9 @@ function createWorld(options = {}) {
     },
     fetchContactKeyStatus: async (userId, config = {}) => {
       statusCalls.push({ userId: Number(userId), force: Boolean(config && config.force) });
+      // Mirrors production: a failed read is swallowed and returns null, which
+      // is exactly the signal the refusal wording has to distinguish.
+      if (options.statusOverride) return options.statusOverride(Number(userId));
       const payload = statusByUser.get(Number(userId));
       return payload === undefined ? null : payload;
     },
@@ -586,6 +590,85 @@ test('a socket accept whose key rotated after the snapshot grants nothing and cl
     'no success may be claimed when the socket path granted nothing'
   );
   assert.match(world.toasts[world.toasts.length - 1], /Nothing was trusted/);
+});
+
+test('an unreadable fingerprint lookup says so instead of claiming the key changed', async () => {
+  // Round-4 review MINOR-1: fetchContactKeyStatus() swallows its own error and
+  // returns null, so the socket .catch() never fires and the old code reported
+  // "Keys changed" for what was really a failed read -- on both paths.
+  const socketWorld = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    // The endpoint answers 404: the page cannot see any active key.
+    statusOverride: () => null,
+  });
+
+  socketWorld.context.handleKeyVerificationNew({
+    data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
+  });
+  await flush();
+
+  assert.deepEqual(socketWorld.versions(7), { 1: 'AAAA' }, 'nothing is granted');
+  const socketText = socketWorld.toasts[socketWorld.toasts.length - 1];
+  assert.match(socketText, /Could not confirm the contact's current key/, 'the failure is named');
+  assert.doesNotMatch(socketText, /Keys changed/, 'and is not misreported as a rotation');
+  assert.doesNotMatch(socketText, /Security verification completed/, 'never a success');
+
+  const httpWorld = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    statusOverride: () => null,
+    api: async () => ({ status: 'ok', request: acceptedVerification(incomingRequest) }),
+  });
+
+  await httpWorld.context.respondToKeyVerification(42, 'accept');
+
+  assert.deepEqual(httpWorld.versions(7), { 1: 'AAAA' }, 'nothing is granted');
+  const httpText = httpWorld.toasts[httpWorld.toasts.length - 1];
+  assert.match(httpText, /Could not confirm the contact's current key/);
+  assert.doesNotMatch(httpText, /Keys changed/);
+});
+
+test('the refresh reports why it refused, and a rotation is still called a rotation', async () => {
+  // Control for the case above: same code path, but the endpoint answers and the
+  // key really did move, so the wording must remain "keys changed".
+  const rotatedWorld = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    status: [rotatedContactStatus('DDDD')],
+  });
+  const rotated = await rotatedWorld.context.refreshKeyVerificationAfterChange(7, {
+    grantTrustFor: acceptedVerification(incomingRequest),
+  });
+  // The result is a VM-realm object, so compare fields rather than structure.
+  assert.equal(rotated.granted, false);
+  assert.equal(rotated.reason, 'key-changed');
+
+  const unreadableWorld = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    statusOverride: () => null,
+  });
+  const unreadable = await unreadableWorld.context.refreshKeyVerificationAfterChange(7, {
+    grantTrustFor: acceptedVerification(incomingRequest),
+  });
+  assert.equal(unreadable.granted, false);
+  assert.equal(unreadable.reason, 'lookup-failed');
+
+  const grantedWorld = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+  });
+  const granted = await grantedWorld.context.refreshKeyVerificationAfterChange(7, {
+    grantTrustFor: acceptedVerification(incomingRequest),
+  });
+  assert.equal(granted.granted, true);
+  assert.equal(granted.reason, 'granted');
+
+  const refreshedOnly = await grantedWorld.context.refreshKeyVerificationAfterChange(7);
+  assert.equal(refreshedOnly.granted, false);
+  assert.equal(refreshedOnly.reason, 'not-authorised');
 });
 
 test('a failed respond call leaves no verified-looking local state', async () => {

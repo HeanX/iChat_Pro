@@ -312,7 +312,23 @@ covered via IntegrityError」），**不是覆盖漏洞**，因此不为此写�
 - **真实网络弱网/断线**：不在本卡范围（属 #200 P4 Test T19）。
 - **`storage_unavailable` / `database_busy` 的 HTTP 与 WS 路径**：未注入 `OperationalError`，
   仍由既有 `test_protocol.py` 间接覆盖，本卡未新增证据。
-- **`file_type_mismatch`**：未构造（需先有 kind/type 一致但内容不符的文件，属数据模块）。
+
+> **`file_type_mismatch` 不在此列（MSG-01 更正）**：它已由
+> `test_file_11_registered_file_type_mismatch_is_reachable`（`chat/tests/test_http_ws_integration.py:1021`）
+> 覆盖，走统一服务层 `validate_attached_file` 拿到**已注册**的 400；
+> 见 §2.5 的 `HTTP-FILE-11`、§3 错误码清单（22/25）与本文件第 2 轮整改记录（§8「第 2 轮」）。
+> 第 2 轮之后本节残留了一条"未构造"的旧表述，属**过期条目**，已删除。
+
+**「未覆盖」与「已知偏差」不是一回事**（本节只列未覆盖）：
+
+| 分类 | 含义 | 本卡的例子 |
+| --- | --- | --- |
+| **未覆盖** | 没有任何用例走到这条路径/这个码 | `storage_unavailable`、`database_busy`、`sync_cursor_expired`（见上） |
+| **已知偏差** | 用例**覆盖并断言**了当前行为，但该行为与契约不符，本卡只钉住不改 | §4 表的 5 项：`file_unavailable` 409 vs 410、HTTP 撤回超时返回裸文案、`message_type_mismatch`/`invalid_json`/`rate_limited`/`file_too_large`/`upload_forbidden` 未进注册表 |
+| **等价变异体** | 变异后用例仍绿，但语义等价（非漏测） | §5 的 M0 乐观重放分支 |
+
+`file_type_mismatch` 既不是未覆盖也不是已知偏差：它是**已注册且已覆盖**的码。
+
 - **跨端（Windows/Android）**：完全没有。本卡全是本机自动化，不能当作安装版或跨端验收。
 - **CI**：本卡未提交 PR，未产生 CI run。上面的数字全部来自本地单次执行。
 

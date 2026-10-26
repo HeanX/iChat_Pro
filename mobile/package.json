@@ -4,7 +4,7 @@
   "private": true,
   "description": "iChat Pro Android shell (P4 T22 skeleton) - Capacitor WebView wrapper around the existing Web client",
   "scripts": {
-    "test:mobile": "node --test ./tests/mobile-config.test.js",
+    "test:mobile": "node --test ./tests/mobile-config.test.js ./tests/mobile-env.test.js",
     "cap:sync": "npx --no-install cap sync android",
     "cap:copy": "npx --no-install cap copy android",
     "cap:open": "npx --no-install cap open android",

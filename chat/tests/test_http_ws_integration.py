@@ -112,7 +112,7 @@ WebSocket envelope — 5
 WebSocket receipts — 3
   WS-RCP-01     receipt on a foreign message -> message_not_found
   WS-RCP-02     receipt with an invalid status -> invalid_payload
-  WS-RCP-03     read receipt zeroes unread, sender is notified
+  WS-RCP-03     read receipt zeroes unread, sender is notified once
 
 WebSocket recall (single) — 4
   WS-RCL-01     message.recall by sender -> message.recalled
@@ -1281,7 +1281,17 @@ class WsReceiptTests(MessagingWsBase):
 
         async_to_sync(run)()
 
-    def test_rcp_03_read_receipt_clears_unread_and_never_rebumps(self):
+    def test_rcp_03_read_receipt_clears_unread_and_notifies_once(self):
+        """WS-RCP-03: one `read` receipt zeroes unread and notifies the sender once.
+
+        Scope note (MSG-02): the name says exactly what is asserted — a single
+        receipt, a single ``message.receipt.updated`` event for the sender, one
+        ack carrying ``request_id``, and ``unread_count == 0`` afterwards.
+
+        It deliberately does NOT claim monotonicity. "A later ``delivered`` (or
+        a new message) must not re-bump the count" is *not* exercised here:
+        there is no second receipt and no follow-up message in this case.
+        """
         async def run():
             sender = await self.connect(self.alice)
             receiver = await self.connect(self.bob)
@@ -1292,7 +1302,7 @@ class WsReceiptTests(MessagingWsBase):
                 "event": "message.receipt.update", "request_id": "rcp-3",
                 "data": {"conversation_type": "single", "message_id": message_id, "status": "read"},
             })
-            # sender sees the status update
+            # sender sees the status update — exactly one event
             update = await sender.receive_json_from()
             self.assertEqual(update["event"], "message.receipt.updated")
             self.assertEqual(update["data"]["status"], "read")

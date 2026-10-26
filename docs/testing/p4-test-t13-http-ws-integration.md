@@ -154,7 +154,7 @@
 | WS-ENV-06 | 异常 | 版本 9.9 → error 后 close **4003** | `test_env_06_unsupported_version_reports_then_closes_4003` |
 | WS-RCP-01 | 越权 | 非接收者发回执 → `message_not_found` | `test_rcp_01_receipt_for_a_foreign_message_is_not_found` |
 | WS-RCP-02 | 异常 | `status=exploded` → `invalid_payload` | `test_rcp_02_invalid_status_is_rejected` |
-| WS-RCP-03 | 成功 | read 回执清零 unread 且通知发送者 | `test_rcp_03_read_receipt_clears_unread_and_never_rebumps` |
+| WS-RCP-03 | 成功 | 单次 read 回执 → unread 归零 + 发送者**只**收到一次 `message.receipt.updated`（不含"不重复抬升"断言） | `test_rcp_03_read_receipt_clears_unread_and_notifies_once` |
 | WS-RCL-01 | 成功 | 发送者撤回 → `message.recalled` + 落库 `recalled` | `test_rcl_01_sender_recalls_over_websocket` |
 | WS-RCL-02 | 异常 | 二次撤回 → `already_recalled` | `test_rcl_02_second_recall_reports_already_recalled` |
 | WS-RCL-03 | 边界 | 31 分钟后 → `recall_timeout` | `test_rcl_03_recall_after_the_window_reports_recall_timeout` |
@@ -500,3 +500,22 @@ REGISTRY 25 断言 22、未覆盖 3 码及理由），并自选 12 个变异点�
 **结论**：第 4 轮以 `PASS WITH FINDINGS` 收敛（无 BLOCKER、无 MAJOR）。
 按 conventions §1，合并前最后一轮的 PASS 须来自**非作者**——本轮仍是同一会话派出的
 子 Agent，因此 `tasks.md` 的「非作者人类评审」仍保持未勾选，交由用户/小组完成。
+
+### Phase4 修复轮（2026-10-26，MSG-01 / MSG-02 / Issue #194）
+
+两处**文档与用例名精度**问题，均不涉及业务代码：
+
+| # | 问题 | 处理 |
+| --- | --- | --- |
+| MSG-01 | §6「未覆盖」仍列 `file_type_mismatch`，而 `test_file_11_registered_file_type_mismatch_is_reachable`（`chat/tests/test_http_ws_integration.py:1021`）自第 2 轮起就已经覆盖它并稳定通过——与同文 §3（22/25 码，含 `file_type_mismatch`）自相矛盾 | 删除该条过期项，改为指向 `HTTP-FILE-11` 的说明；并新增「未覆盖 / 已知偏差 / 等价变异体」三类对照表，明确 `file_type_mismatch` **既不是未覆盖也不是已知偏差**，而是已注册且已覆盖 |
+| MSG-02 | `test_rcp_03_read_receipt_clears_unread_and_never_rebumps` 的名字超出断言范围：用例只发**一次** read、断言**一次** `message.receipt.updated` 与 `unread_count == 0`，没有第二个 read/delivered，也没有后续新消息，"never rebumps" 未被证明 | 采纳方案 (a) **重命名**为 `test_rcp_03_read_receipt_clears_unread_and_notifies_once`，把"不证明单调性"写进 docstring；同步 §2.5 索引表、模块 docstring 索引与本节 |
+
+**验证**（改名后实际执行，非推断）：
+
+```powershell
+.\.venv\Scripts\python.exe manage.py test chat.tests.test_http_ws_integration --parallel 1
+# → see .review/phase4-remediation-20261026/evidence/docs-t13-tests.log
+```
+
+全量模块的真实条数与结果见该证据文件；本条记录不改变 §5 的历史数字（历史数字只追加，
+不改写）。

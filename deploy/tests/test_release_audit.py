@@ -23,11 +23,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from deploy.tests.support import bash, bash_unavailable_reason
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "deploy" / "deploy.sh"
 
-BASH = shutil.which("bash")
-HAS_BASH = BASH is not None and DEPLOY_SCRIPT.is_file()
 
 # The helpers block runs from the first audit helper through the banner that
 # starts --status, so sanitise() and every helper drawn from it are included.
@@ -102,8 +102,15 @@ def helpers_block():
     return extract(HELPERS_START, HELPERS_END)
 
 
-@unittest.skipUnless(HAS_BASH, "bash is not available; deploy.sh not executed")
 class AuditFieldTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Fail, never skip: an unexecuted approval/audit suite must not look
+        # green (review finding F-08).
+        reason = bash_unavailable_reason()
+        if reason:
+            raise AssertionError(reason)
+
     """actor/via/from/approval must be accurate and injection-safe."""
 
     def evaluate(self, expr, env):
@@ -121,7 +128,7 @@ class AuditFieldTests(unittest.TestCase):
         base_env = {"PATH": os.environ.get("PATH", ""), "TMPDIR": os.environ.get("TMPDIR") or os.environ.get("TEMP") or ""}
         base_env.update(env)
         result = subprocess.run(
-            [BASH, str(harness)],
+            [bash(), str(harness)],
             env=base_env,
             capture_output=True,
             text=True,
@@ -180,8 +187,15 @@ class AuditFieldTests(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(HAS_BASH, "bash is not available; deploy.sh not executed")
 class ApprovalGateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Fail, never skip: an unexecuted approval/audit suite must not look
+        # green (review finding F-08).
+        reason = bash_unavailable_reason()
+        if reason:
+            raise AssertionError(reason)
+
     """An unapproved release must be refused and must change nothing."""
 
     def run_gate(self, *, approval, commit, require="1"):
@@ -223,7 +237,7 @@ class ApprovalGateTests(unittest.TestCase):
             "ICHAT_REQUIRE_APPROVAL": require,
         }
         result = subprocess.run(
-            [BASH, str(harness)],
+            [bash(), str(harness)],
             env=env,
             capture_output=True,
             text=True,
@@ -340,8 +354,15 @@ class ApprovalGateTests(unittest.TestCase):
             )
 
 
-@unittest.skipUnless(HAS_BASH, "bash is not available; deploy.sh not executed")
 class ReleaseRecordTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Fail, never skip: an unexecuted approval/audit suite must not look
+        # green (review finding F-08).
+        reason = bash_unavailable_reason()
+        if reason:
+            raise AssertionError(reason)
+
     """The DEPLOYMENTS.log line must carry who/what/when/how-gated."""
 
     def run_record(self, *, commit, smoke="passed", approval="#177", actor="alice"):
@@ -362,6 +383,10 @@ class ReleaseRecordTests(unittest.TestCase):
             + "DEPLOYED_SHA=deadbeef\n"
             + "TARGET=main\n"
             + f"COMMIT={commit!r}\n"
+            + f"FROZEN_ACTOR={actor!r}\n"
+            + "FROZEN_VIA=direct\n"
+            + "FROZEN_ORIGIN=local-console\n"
+            + f"APPROVAL={approval!r}\n"
             + f"SMOKE_RESULT={smoke!r}\n"
             + f"ICHAT_DEPLOYER={actor!r}\n"
             + (
@@ -379,7 +404,7 @@ class ReleaseRecordTests(unittest.TestCase):
             "ICHAT_APPROVAL": approval,
         }
         result = subprocess.run(
-            [BASH, str(harness)],
+            [bash(), str(harness)],
             env=env,
             capture_output=True,
             text=True,
@@ -406,8 +431,15 @@ class ReleaseRecordTests(unittest.TestCase):
         self.assertIn("smoke=skipped", line)
 
 
-@unittest.skipUnless(HAS_BASH, "bash is not available; deploy.sh not executed")
 class DeployStateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Fail, never skip: an unexecuted approval/audit suite must not look
+        # green (review finding F-08).
+        reason = bash_unavailable_reason()
+        if reason:
+            raise AssertionError(reason)
+
     """current/previous must follow deployments, not git reflog.
 
     The rollback target an operator is told to use has to be the release that
@@ -430,6 +462,8 @@ class DeployStateTests(unittest.TestCase):
             + f"STATE_DIR={state_dir.as_posix()!r}\n"
             + f"DEPLOYED_SHA={sha!r}\n"
             + "TARGET=main\nCOMMIT=\nSMOKE_RESULT=passed\nICHAT_DEPLOYER=tester\n"
+            + "FROZEN_ACTOR=tester\nFROZEN_VIA=direct\n"
+            + "FROZEN_ORIGIN=local-console\nAPPROVAL=none\n"
             + (
                 "RELEASE_KIND=deploy\n"
             )
@@ -439,7 +473,7 @@ class DeployStateTests(unittest.TestCase):
         )
         harness.chmod(0o755)
         result = subprocess.run(
-            [BASH, str(harness)],
+            [bash(), str(harness)],
             env={
                 "PATH": os.environ.get("PATH", ""),
                 "TMPDIR": os.environ.get("TMPDIR") or os.environ.get("TEMP") or "",
@@ -513,8 +547,15 @@ class DeployStateTests(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(HAS_BASH, "bash is not available; deploy.sh not executed")
 class StatusOutputTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Fail, never skip: an unexecuted approval/audit suite must not look
+        # green (review finding F-08).
+        reason = bash_unavailable_reason()
+        if reason:
+            raise AssertionError(reason)
+
     """--status must answer "what is running" and "what came before"."""
 
     def test_status_lists_releases_and_running_sha(self):
@@ -540,7 +581,7 @@ class StatusOutputTests(unittest.TestCase):
         )
         harness.chmod(0o755)
         result = subprocess.run(
-            [BASH, str(harness)],
+            [bash(), str(harness)],
             env={
                 "PATH": os.environ.get("PATH", ""),
                 "TMPDIR": os.environ.get("TMPDIR") or os.environ.get("TEMP") or "",

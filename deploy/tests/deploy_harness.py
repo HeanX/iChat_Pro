@@ -14,10 +14,13 @@ run to completion:
 Every recorded file is a plain text log, so a test asserts on what the script
 *would have done* and can print that log as its failure message.
 
-Windows note: Git Bash only resolves ``/c/...``-style paths, so each test
-writes a wrapper that converts the Windows paths with ``cygpath`` before
-exec'ing the script. The conversion lives inside the shell, not in Python,
-because ``cygpath`` is the only reliable mapping available.
+Windows note: Git Bash only resolves ``/c/...``-style paths, while a Linux CI runner
+has no ``cygpath`` at all (review finding F-06: the substitution became
+empty and 39 tests ERRORed). Each test therefore writes a wrapper that
+converts paths through the generated ``to_posix`` shell function: it uses
+``cygpath`` when available and falls back to a pure-bash drive-letter
+rewrite otherwise, so the same harness runs on Windows and on
+ubuntu-latest.
 """
 
 from __future__ import annotations
@@ -35,6 +38,33 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "deploy" / "deploy.sh"
 
 FAKE_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+# Shell helper emitted into every generated wrapper (see module docstring).
+# Kept as a raw string so the shell's backslashes survive verbatim.
+TO_POSIX_SH = r'''
+# Portable Windows -> POSIX path conversion (review finding F-06).
+# cygpath exists only in Git Bash; a Linux CI runner has none, and an empty
+# substitution there turned PATH into "[:/mingw64/bin:/usr/bin]" and
+# ICHAT_APP_DIR into "" -> deploy.sh fell back to /opt/ichat and exited 1.
+# The fallback rewrites C:\x\y to /c/x/y and passes POSIX/empty values
+# through unchanged, so the same wrapper runs on both platforms.
+# ICHAT_FORCE_NO_CYGPATH=1 exercises the fallback branch on a Git Bash host.
+to_posix() {
+    local p=$1
+    if [[ "${ICHAT_FORCE_NO_CYGPATH:-0}" != "1" ]] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -u "$p"
+        return 0
+    fi
+    case "$p" in
+        [A-Za-z]:[\\/]*)
+            local drive=${p%%:*} rest=${p#*:}
+            rest=${rest//\\//}
+            printf '/%s%s' "$(printf '%s' "$drive" | tr 'A-Z' 'a-z')" "$rest"
+            ;;
+        *) printf '%s' "$p" ;;
+    esac
+}
+'''
 
 
 class StubbedHost:
@@ -60,8 +90,8 @@ class StubbedHost:
 
     # --- stubs ------------------------------------------------------------
     def _stub(self, name: str, body: str) -> Path:
-        prelude = "".join(
-            f'{key}="$(cygpath -u "$STUB_WIN_{key}")"\n' for key in self.logs
+        prelude = TO_POSIX_SH + "".join(
+            f'{key}="$(to_posix "$STUB_WIN_{key}")"\n' for key in self.logs
         )
         return write_script(self.bin / name, prelude + body)
 
@@ -133,8 +163,9 @@ class StubbedHost:
         # The venv's interpreter and pip live on hard-coded paths, not on PATH.
         write_script(
             self.venv / "bin" / "python",
-            'printf "python %s\\n" "$*" >> "$(cygpath -u "$STUB_WIN_PYTHON_LOG")"\n'
-            "exit 0\n",
+            TO_POSIX_SH
+            + 'printf "python %s\\n" "$*" >> "$(to_posix "$STUB_WIN_PYTHON_LOG")"\n'
+            + "exit 0\n",
         )
         write_script(self.venv / "bin" / "pip", "exit 0\n")
 
@@ -147,9 +178,10 @@ class StubbedHost:
         """
         write_script(
             self.repo / "deploy" / "smoke.sh",
-            textwrap.dedent(
+            TO_POSIX_SH
+            + textwrap.dedent(
                 f"""
-                OUT="$(cygpath -u "$STUB_WIN_SMOKE_ENV_LOG")"
+                OUT="$(to_posix "$STUB_WIN_SMOKE_ENV_LOG")"
                 {{
                   printf 'SMOKE_TLS_ORIGIN=%s\\n' "${{SMOKE_TLS_ORIGIN:-<unset>}}"
                   printf 'SMOKE_LOOPBACK_ORIGIN=%s\\n' "${{SMOKE_LOOPBACK_ORIGIN:-<unset>}}"
@@ -180,18 +212,19 @@ class StubbedHost:
     def run(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         wrapper = self.workdir / "run-deploy.sh"
         exports = "\n".join(
-            f'export {key}="$(cygpath -u "$STUB_WIN_{key}")"' for key in self.logs
+            f'export {key}="$(to_posix "$STUB_WIN_{key}")"' for key in self.logs
         )
         args_literal = " ".join(f"'{a}'" for a in args)
         wrapper.write_text(
             "#!/usr/bin/env bash\n"
-            'export PATH="$(cygpath -u "$ICHAT_STUB_BIN"):/mingw64/bin:/usr/bin"\n'
-            'export ICHAT_APP_DIR="$(cygpath -u "$ICHAT_APP_WIN")"\n'
+            + TO_POSIX_SH
+            + 'export PATH="$(to_posix "$ICHAT_STUB_BIN"):/usr/bin:/mingw64/bin"\n'
+            'export ICHAT_APP_DIR="$(to_posix "$ICHAT_APP_WIN")"\n'
             f"{exports}\n"
             # Optional: declare that THIS tree is production, for the tests
             # that pin the unchanged production defaults.
             '[[ -n "${STUB_WIN_PROD_APP:-}" ]] && '
-            'export ICHAT_PROD_APP_DIR="$(cygpath -u "$STUB_WIN_PROD_APP")"\n'
+            'export ICHAT_PROD_APP_DIR="$(to_posix "$STUB_WIN_PROD_APP")"\n'
             f'exec bash "{DEPLOY_SCRIPT.as_posix()}" {args_literal}\n',
             encoding="utf-8",
             newline="\n",

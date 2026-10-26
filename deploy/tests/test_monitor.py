@@ -21,6 +21,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+from deploy.tests.deploy_harness import TO_POSIX_SH
 from deploy.tests.support import bash, bash_unavailable_reason
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -143,22 +144,23 @@ class MonitorTestBase(unittest.TestCase):
         return f"http://127.0.0.1:{self.server.server_port}"
 
     def run_monitor(self, extra_env=None, live_url=None, state_dir=None):
-        # Git Bash needs an MSYS-style PATH (/c/... colon-separated). Neither
-        # a Windows PATH nor a D:/... form is honoured, so the stubs would be
-        # shadowed by the real tools and the thresholds would never fire.
-        # MSYS mounts (/c/...) only exist when bash inherits a PATH it can
-        # resolve, so the stub directory is converted *inside* the wrapper
-        # with cygpath instead of being pre-computed from Windows.
+        # Git Bash needs an MSYS-style PATH (/c/... colon-separated); a
+        # Linux runner has no cygpath and must not be handed Windows paths
+        # at all (review finding F-06). The stub directory and the
+        # path-typed knobs are therefore converted inside the wrapper by
+        # the generated to_posix helper, which is a no-op for paths that
+        # are already POSIX.
         wrapper = self.workdir / "run-monitor.sh"
         wrapper.write_text(
             "#!/usr/bin/env bash\n"
-            'export PATH="C:\\Program Files\\Git\\bin:$PATH"\n'
-            'STUB_MSYS=$(cygpath "$ICHAT_STUB_WIN")\n'
-            'export PATH="$STUB_MSYS:/mingw64/bin:/usr/bin"\n'
+            + TO_POSIX_SH
+            + 'export PATH="$PATH"\n'
+            'STUB_MSYS=$(to_posix "$ICHAT_STUB_WIN")\n'
+            'export PATH="$STUB_MSYS:/usr/bin:/mingw64/bin"\n'
             # Path-typed knobs must be converted too, or openssl -in receives
             # a Windows path it cannot open from inside bash.
-            '[[ -n "$ICHAT_LETLS_DIR" ]] && ICHAT_LETLS_DIR=$(cygpath "$ICHAT_LETLS_DIR")\n'
-            '[[ -n "$ICHAT_PG_DATA_DIR" ]] && ICHAT_PG_DATA_DIR=$(cygpath "$ICHAT_PG_DATA_DIR")\n'
+            '[[ -n "$ICHAT_LETLS_DIR" ]] && ICHAT_LETLS_DIR=$(to_posix "$ICHAT_LETLS_DIR")\n'
+            '[[ -n "$ICHAT_PG_DATA_DIR" ]] && ICHAT_PG_DATA_DIR=$(to_posix "$ICHAT_PG_DATA_DIR")\n'
             'export ICHAT_LETLS_DIR ICHAT_PG_DATA_DIR\n'
             f'exec bash "{MONITOR.as_posix()}"\n',
             encoding="utf-8",
@@ -170,7 +172,8 @@ class MonitorTestBase(unittest.TestCase):
             "ICHAT_MONITOR_STATE": str(state_dir or self.state),
             "ICHAT_ENV_FILE": str(self.env_file),
             "ICHAT_ALERT_WEBHOOK": "",
-            # Windows form; converted by cygpath inside the wrapper.
+            # Windows form on Git Bash; converted inside the wrapper by
+            # to_posix, which passes POSIX paths through unchanged.
             "ICHAT_STUB_WIN": str(self.bindir),
             # Consumed by the openssl stub; defaults to a far-future expiry.
             "STUB_DAYS": getattr(self, "cert_days", "3650"),
@@ -651,7 +654,7 @@ class SecretArgvTests(MonitorTestBase):
         wrapper = self.workdir / "argv-python.sh"
         wrapper.write_text(
             "#!/usr/bin/env bash\n"
-            'LOG="$(cygpath -u "$ARGV_LOG_WIN")"\n'
+            'LOG="$(to_posix "$ARGV_LOG_WIN")"\n'
             "for arg in \"$@\"; do printf '%s\\n' \"$arg\" >> \"$LOG\"; done\n"
             'printf -- "----\\n" >> "$LOG"\n'
             f'exec "{sys.executable}" "$@"\n',
@@ -687,12 +690,12 @@ class SecretArgvTests(MonitorTestBase):
         env_log = self.workdir / "psql-env.log"
         (self.bindir / "psql").write_text(
             "#!/usr/bin/env bash\n"
-            'printf "PGHOST=%s\\n" "$PGHOST" > "$(cygpath -u "$PSQL_ENV_LOG_WIN")"\n'
-            'printf "PGPORT=%s\\n" "$PGPORT" >> "$(cygpath -u "$PSQL_ENV_LOG_WIN")"\n'
-            'printf "PGUSER=%s\\n" "$PGUSER" >> "$(cygpath -u "$PSQL_ENV_LOG_WIN")"\n'
-            'printf "PGDATABASE=%s\\n" "$PGDATABASE" >> "$(cygpath -u "$PSQL_ENV_LOG_WIN")"\n'
+            'printf "PGHOST=%s\\n" "$PGHOST" > "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
+            'printf "PGPORT=%s\\n" "$PGPORT" >> "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
+            'printf "PGUSER=%s\\n" "$PGUSER" >> "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
+            'printf "PGDATABASE=%s\\n" "$PGDATABASE" >> "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
             '[[ -n "$PGPASSWORD" ]] && printf "PGPASSWORD=set\\n" '
-            '>> "$(cygpath -u "$PSQL_ENV_LOG_WIN")"\n'
+            '>> "$(to_posix "$PSQL_ENV_LOG_WIN")"\n'
             "echo 5\n",
             encoding="utf-8",
             newline="\n",

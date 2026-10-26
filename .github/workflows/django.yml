@@ -83,8 +83,44 @@ jobs:
       - name: Test the coverage tooling
         run: python -m unittest scripts.test_coverage_report -v
 
+      # QA-01: bash is a hard requirement for the ops suite. The five modules
+      # below skip themselves when `shutil.which("bash")` is empty, and a
+      # skipped suite reports green. ubuntu-latest ships bash, but a runner
+      # image change (or a container job) must fail here, not silently reduce
+      # the ops coverage to zero.
+      - name: Require bash for the ops shell regressions
+        run: |
+          set -euo pipefail
+          command -v bash
+          bash --version | head -n 1
+
+      # QA-01: the ops/cloud regression suite is named explicitly, never left
+      # to implicit discovery. `deploy/` used to be a PEP 420 namespace
+      # package, so `manage.py test` collected 404 tests and zero `deploy.*`
+      # ones even though naming the modules collected 82 (review evidence:
+      # cloud-ops-default-discovery.json).
+      - name: Guard that the deploy modules are collected
+        env:
+          ICHAT_TEST_BASH: /bin/bash
+        run: python scripts/check_deploy_collection.py
+
       - name: Run tests
         run: python manage.py test
+
+      - name: Run the deploy/ops regression suite explicitly
+        env:
+          ICHAT_TEST_BASH: /bin/bash
+        run: |
+          set -euo pipefail
+          # The module list comes from the guard, so a module added to
+          # deploy/tests/ later cannot be silently left out of this command.
+          MODULES=$(python scripts/check_deploy_collection.py --print-modules)
+          echo "deploy modules: ${MODULES}"
+          python manage.py test ${MODULES} --parallel 1 -v 2 | tee deploy-tests.log
+          # Belt and braces: the run must have executed the ops modules, not
+          # merely started. A "Ran 0 tests" that still exits 0 is the failure
+          # mode this whole job exists to prevent.
+          grep -q '^Ran [1-9][0-9]* tests\? in ' deploy-tests.log
 
   # P4 Test T14: real-dependency integration (NEW-TST-012/013) — the SQLite /
   # in-memory job above must not be the only validation of migrations and
@@ -139,5 +175,29 @@ jobs:
       - name: Apply migrations to PostgreSQL
         run: python manage.py migrate --noinput
 
+      # QA-01: the same two guards as the `test` job. The ops suite is the one
+      # that exercises release gates, so it must not depend on this job's
+      # implicit discovery either, and the shell it needs must really exist.
+      - name: Require bash for the ops shell regressions
+        run: |
+          set -euo pipefail
+          command -v bash
+          bash --version | head -n 1
+
+      - name: Guard that the deploy modules are collected
+        env:
+          ICHAT_TEST_BASH: /bin/bash
+        run: python scripts/check_deploy_collection.py
+
       - name: Run tests against PostgreSQL and Redis
         run: python manage.py test --parallel 1
+
+      - name: Run the deploy/ops regression suite explicitly
+        env:
+          ICHAT_TEST_BASH: /bin/bash
+        run: |
+          set -euo pipefail
+          MODULES=$(python scripts/check_deploy_collection.py --print-modules)
+          echo "deploy modules: ${MODULES}"
+          python manage.py test ${MODULES} --parallel 1 -v 2 | tee deploy-tests.log
+          grep -q '^Ran [1-9][0-9]* tests\? in ' deploy-tests.log

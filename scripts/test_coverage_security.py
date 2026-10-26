@@ -128,11 +128,20 @@ class DenominatorTests(unittest.TestCase):
             baseline[key] *= 2
             self.assertIn(key, self.problem(baseline=baseline))
 
-    def test_twenty_percent_drop_boundary_is_explicit(self):
-        baseline = {**self.baseline, 'num_statements': 125}
-        self.assertIsNone(self.problem(baseline=baseline))
-        baseline['num_statements'] = 126
-        self.assertIn('20%', self.problem(baseline=baseline))
+    def test_the_denominator_may_never_shrink_at_all(self):
+        """The basis is a hard floor, not a 20% allowance (review R4 F-1).
+
+        The baseline is read from the committed snapshot and publishing rewrites
+        that snapshot, so any positive tolerance compounds: two releases that
+        each "only" drop 20% take 5383 statements down to 3445 and turn 74.94%
+        into a published "89.02% - target met" while the real numbers never move.
+        """
+        # Exactly at the baseline: publishable.
+        self.assertIsNone(self.problem(baseline={**self.baseline}))
+        # One statement fewer is already refused, even though that is a 0.8% drop.
+        self.assertIsNotNone(self.problem(baseline={**self.baseline, 'num_statements': 126}))
+        # The old 20%-drop sweet spot is refused too.
+        self.assertIsNotNone(self.problem(baseline={**self.baseline, 'num_statements': 125}))
 
     def test_totals_must_equal_the_file_sums(self):
         data = copy.deepcopy(self.data)

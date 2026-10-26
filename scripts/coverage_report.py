@@ -85,7 +85,18 @@ _CHILD_ENV_KEYS = frozenset({
     'DJANGO_CSRF_TRUSTED_ORIGINS', 'CSP_ALLOW_UNSAFE_INLINE_SCRIPT',
     'CSP_ALLOW_UNSAFE_INLINE_STYLE',
 })
-_MIN_BASIS_FRACTION = 0.8
+# The published basis may never shrink. A tolerance here is not a safety margin,
+# it is an attack surface: the baseline is read from the committed snapshot and
+# publishing rewrites that snapshot, so any positive allowance compounds across
+# commits. Two releases that each drop "only 20%" take 5383 statements to 3445
+# and turn 74.94%/60.08% into a published "89.02%/75.66% - target met" while the
+# real numbers never moved (review R4 F-1, reproduced end to end).
+#
+# If the measurement basis genuinely has to change (a source tree really did
+# shrink), that is a reviewed decision: edit the `coverage-basis` comment in
+# docs/quality/coverage-report.md by hand and record why. The tool will not do
+# it silently.
+_MIN_BASIS_FRACTION = 1.0
 _COVERAGE_BOOTSTRAP = (
     'import sys; from coverage.cmdline import main; '
     'sys.path.insert(0, sys.argv.pop(1)); raise SystemExit(main(sys.argv[1:]))'
@@ -688,7 +699,15 @@ def _omitted(relative: str, patterns: list[str]) -> bool:
 
 
 def _published_basis(omissions: list[str]) -> dict[str, int]:
-    """Read the committed baseline, never a mutable working-tree snapshot."""
+    """Read the committed baseline, never a mutable working-tree snapshot.
+
+    The snapshot is read from ``HEAD`` rather than the working tree so that a
+    half-written or hand-edited copy cannot move the baseline. Because
+    publishing rewrites this same file, the baseline therefore advances one
+    commit at a time — which is exactly why the comparison below is a hard
+    floor (``_MIN_BASIS_FRACTION = 1.0``) instead of a tolerance: any allowance
+    would compound across releases (review R4 F-1).
+    """
     text = _git_read('show', 'HEAD:docs/quality/coverage-report.md')
     match = re.search(r'<!-- coverage-basis: (.+?) -->', text)
     if match:
@@ -748,8 +767,10 @@ def _basis_problem(data: dict, baseline: dict, files: set[str], statements: int)
         current = {**sums, 'num_files': len(measured)}
         for key in ('num_statements', 'num_branches', 'num_files'):
             if current[key] < baseline[key] * _MIN_BASIS_FRACTION:
-                return (f'{key} 分母从已发布的 {baseline[key]} 降至 {current[key]}，'
-                        '下降超过 20%；必须先审查统计范围，不能直接覆盖快照')
+                return (f'{key} 分母从已发布的 {baseline[key]} 降至 {current[key]}；'
+                        '统计范围不允许缩小（哪怕 1%）。若源码确实变少了，'
+                        '请人工修改 docs/quality/coverage-report.md 的 coverage-basis '
+                        '注释并记录理由，不要用本工具静默改写基线')
         actual = _percent(sums['covered_lines'] + sums['covered_branches'],
                           sums['num_statements'] + sums['num_branches'])
         percent = float(totals['percent_covered'])

@@ -17,6 +17,7 @@
 | [114 条需求矩阵](traceability-matrix.md) | 逐条映射和证据边界 |
 | [需求基线](requirements.md) | 原始目标与范围冲突处理 |
 | [技术方案](technical-design.md) / [现行协议](protocol.md) | 代码入口、已实现契约及待做设计 |
+| [E2EE 威胁模型](e2ee-threat-model.md) | ADR-P4-04：资产、信任边界、数据流、不可保存数据（Web/Windows；Android 未覆盖） |
 | [Agent 工作包](agent-handoff.md) | 文件边界与交接规则 |
 | [风险登记](risk-register.md) / [基线报告](baseline-report.md) | 原缺陷取证、处置与历史测试数据 |
 | [完成审计](completion-audit-20261007.md) | 逐卡完成判定与不能关闭的原因 |

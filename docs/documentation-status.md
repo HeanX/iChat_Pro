@@ -1,10 +1,16 @@
 # 全部文档维护索引
 
-> 复核日期：2026-10-07；代码基线 f2f60ec。所有受版本控制的 Markdown 已复核并更新，原二进制课程归档保留。
+> 复核日期：2026-10-13（事实快照 2026-10-07）。代码基线 f2f60ec：本地 HEAD 与基线之间只有文档改动与测试隔离修复，无产品代码逻辑差异。所有受版本控制的 Markdown 已复核并更新，原二进制课程归档保留。
 
 现行事实入口是 [项目现状](current-status.md)。同名旧 PDF/Word 并非 Markdown 本次状态补注的镜像；原需求/实验成果按当时版本归档，新交付状态报告另提供三个同步格式。未核实的姓名、学号、责任与验收不虚填。
 
 ## 文档清单
+
+2026-10-12 增补：[项目交接文档](项目交接文档.md) 与 [GitHub 协作开发指南](GitHub协作开发指南.md)。用于成员接手与共同开发，已核对本地配置、脚本和 CI 定义；生产、Issue 与专项验收沿用原日期证据，本次未复验。
+
+2026-10-13 增补：[第四次实验-单元测试与代码评审报告](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.md) 与 [项目中期完成情况报告](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.md)。测试与评审数据为本机实测，评审统计取自 Git 提交历史；同时修复了头像测试向仓库 `media/` 写入真实文件的测试污染缺陷。
+
+2026-10-18 增补：[ADR-P4-04 跨平台 E2EE 威胁模型与数据流](phase4/e2ee-threat-model.md)（P4 T38 / #165）。覆盖现有 Web 与 Windows 实现，含资产表、信任边界、DFD、攻击面、威胁清单与"不可保存数据"硬约束；Android 与设备级密钥明确标为未覆盖。代码基线 `cfe53be`，文中每条现行实现均标注 `文件:行`。**该文档不构成安全验收结论**，#165 仍保持开放。
 
 | 文档 | 用途与本次维护 |
 | --- | --- |
@@ -14,6 +20,8 @@
 | [deploy/runbook.md](../deploy/runbook.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [desktop/build/README.md](../desktop/build/README.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/README.md](README.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/GitHub协作开发指南.md](GitHub%E5%8D%8F%E4%BD%9C%E5%BC%80%E5%8F%91%E6%8C%87%E5%8D%97.md) | 现行说明/专题；成员加入、Issue、分支、PR、评审、冲突与 CI 约定 |
+| [docs/项目交接文档.md](%E9%A1%B9%E7%9B%AE%E4%BA%A4%E6%8E%A5%E6%96%87%E6%A1%A3.md) | 现行说明/专题；接手顺序、环境搭建、代码入口、待办与签收表 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告.docx](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A.docx) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告.pdf](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A.pdf) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
 | [docs/course-delivery/iChat Pro 项目课程交付总结报告_v2.docx](course-delivery/iChat%20Pro%20%E9%A1%B9%E7%9B%AE%E8%AF%BE%E7%A8%8B%E4%BA%A4%E4%BB%98%E6%80%BB%E7%BB%93%E6%8A%A5%E5%91%8A_v2.docx) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
@@ -30,6 +38,12 @@
 | [docs/course-testing/第一次实验-需求分析与任务拆解报告.pdf](course-testing/%E7%AC%AC%E4%B8%80%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E9%9C%80%E6%B1%82%E5%88%86%E6%9E%90%E4%B8%8E%E4%BB%BB%E5%8A%A1%E6%8B%86%E8%A7%A3%E6%8A%A5%E5%91%8A.pdf) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
 | [docs/course-testing/第二次实验-软件工程全链路与AI实践报告.md](course-testing/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E8%BD%AF%E4%BB%B6%E5%B7%A5%E7%A8%8B%E5%85%A8%E9%93%BE%E8%B7%AF%E4%B8%8EAI%E5%AE%9E%E8%B7%B5%E6%8A%A5%E5%91%8A.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/course-testing/第二次实验-软件工程全链路与AI实践报告.pdf](course-testing/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E8%BD%AF%E4%BB%B6%E5%B7%A5%E7%A8%8B%E5%85%A8%E9%93%BE%E8%B7%AF%E4%B8%8EAI%E5%AE%9E%E8%B7%B5%E6%8A%A5%E5%91%8A.pdf) | 原课程/需求/实验二进制快照；保留原文件，今日状态用新报告与现状页 |
+| [docs/course-testing/第四次实验-单元测试与代码评审报告.md](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.md) | 本次实验记录；单元测试分层/规模/设计与实测结果、代码评审流程与真实评审轮次、发现的测试缺陷 |
+| [docs/course-testing/第四次实验-单元测试与代码评审报告.pdf](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.pdf) | 本次实验提交格式；从同名 Markdown 生成并渲染核对 |
+| [docs/course-testing/第四次实验-单元测试与代码评审报告.docx](course-testing/%E7%AC%AC%E5%9B%9B%E6%AC%A1%E5%AE%9E%E9%AA%8C-%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95%E4%B8%8E%E4%BB%A3%E7%A0%81%E8%AF%84%E5%AE%A1%E6%8A%A5%E5%91%8A.docx) | 本次实验提交格式；从同名 Markdown 生成 |
+| [docs/course-testing/项目中期完成情况报告.md](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.md) | 本次实验记录；中期文档/界面/代码完成情况、Bug 与修复、需求中期调整 |
+| [docs/course-testing/项目中期完成情况报告.pdf](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.pdf) | 本次实验提交格式；从同名 Markdown 生成并渲染核对 |
+| [docs/course-testing/项目中期完成情况报告.docx](course-testing/%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%9C%9F%E5%AE%8C%E6%88%90%E6%83%85%E5%86%B5%E6%8A%A5%E5%91%8A.docx) | 本次实验提交格式；从同名 Markdown 生成 |
 | [docs/current-status.md](current-status.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/documentation-status.md](documentation-status.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/iChat Pro AI Assistant 增强整理文档.md](iChat%20Pro%20AI%20Assistant%20%E5%A2%9E%E5%BC%BA%E6%95%B4%E7%90%86%E6%96%87%E6%A1%A3.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
@@ -63,6 +77,7 @@
 | [docs/phase4/baseline-report.md](phase4/baseline-report.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/completion-audit-20261007.md](phase4/completion-audit-20261007.md) | 历史阶段/实测/规划；追加现行结论及日期，保留原结果 |
 | [docs/phase4/deploy-architecture.md](phase4/deploy-architecture.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
+| [docs/phase4/e2ee-threat-model.md](phase4/e2ee-threat-model.md) | 现行说明/专题；ADR-P4-04 跨平台 E2EE 威胁模型与数据流（资产/攻击面/信任边界/不可保存数据），2026-10-18 新增 |
 | [docs/phase4/protocol.md](phase4/protocol.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/requirements.md](phase4/requirements.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |
 | [docs/phase4/risk-register.md](phase4/risk-register.md) | 现行说明/专题；更新实现、运行/协议/存储/验收边界或文档入口 |

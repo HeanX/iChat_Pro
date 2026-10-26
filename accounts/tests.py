@@ -4,11 +4,14 @@ import base64
 import hashlib
 import io
 import json
+import shutil
+import tempfile
+from pathlib import Path
 
 from PIL import Image
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from chat.models import Conversation, ConversationMember
@@ -1398,6 +1401,17 @@ class QrCardApiTests(TestCase):
 # ── P2 T35: Multi-account context ────────────────────────────────
 
 class AvatarAndProfilePrivacyTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # avatar_crop_save_view writes through the default storage into the
+        # real MEDIA_ROOT. Point it at a throwaway directory so the suite
+        # never leaves files in media/avatars/. Keep the Path type used by
+        # settings, since other code builds paths with MEDIA_ROOT / '...'.
+        cls._media_root = Path(tempfile.mkdtemp(prefix='ichat-test-media-'))
+        cls.enterClassContext(override_settings(MEDIA_ROOT=cls._media_root))
+        cls.addClassCleanup(shutil.rmtree, cls._media_root, ignore_errors=True)
+        super().setUpClass()
+
     def setUp(self):
         self.alice = User.objects.create_user(username='avataralice', password='p')
         self.bob = User.objects.create_user(username='avatarbob', password='p')

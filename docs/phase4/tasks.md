@@ -53,7 +53,7 @@
 | P4 T35 | WP02 | 统一服务端时间和消息排序 | 排序规则及测试 | 设备时间偏差不造成明显乱序 | P0 | P4 T31 | 已完成（[Issue #162](https://github.com/HeanX/iChat_Pro/issues/162)）；sync 序号排序 + 历史 (created_at,id) tiebreaker |
 | P4 T36 | WP02 | 统一 HTTP fallback 与 WebSocket 规则 | 一致性测试与修复 | 两条发送路径执行相同权限、幂等和状态逻辑 | P0 | P4 T32、P4 T33 | 已完成（[Issue #163](https://github.com/HeanX/iChat_Pro/issues/163)）；两轮复审整改复验：全部写入路径入服务层，无视图旁路 |
 | P4 T37 | WP02 | 完成 Windows—Android 跨端聊天 | 综合演示与结果记录 | 两台独立设备双向文本消息通过 | P0 | P4 T20、P4 T26、P4 T31～P4 T36 | 未完成（[Issue #164](https://github.com/HeanX/iChat_Pro/issues/164) 开放） |
-| P4 T38 | WP05 | 编写 E2EE 威胁模型和数据流 | 威胁模型、数据流图 | 明确资产、攻击面、信任边界和不可保存数据 | P0 | P4 T01、P4 T04 | 未完成（[Issue #165](https://github.com/HeanX/iChat_Pro/issues/165) 开放）；浏览器文档已更新；完整跨平台威胁模型与数据流验收仍待做 |
+| P4 T38 | WP05 | 编写 E2EE 威胁模型和数据流 | 威胁模型、数据流图 | 明确资产、攻击面、信任边界和不可保存数据 | P0 | P4 T01、P4 T04 | 未完成（[Issue #165](https://github.com/HeanX/iChat_Pro/issues/165) 开放）；2026-10-18 已落笔 [ADR-P4-04 跨平台威胁模型](e2ee-threat-model.md)（Web/Windows 覆盖，含资产/攻击面/信任边界/不可保存数据/DFD），Android 与设备级未覆盖，待独立评审 |
 | P4 T39 | WP05 | 适配平台安全存储 | Windows/Android 密钥存储实现 | 普通存储或日志中无可直接读取私钥 | P0 | P4 T21、P4 T29 | 未完成（[Issue #166](https://github.com/HeanX/iChat_Pro/issues/166) 开放）；跨平台/设备增强待验收 |
 | P4 T40 | WP05 | 设计并实现设备身份模型 | 模型、迁移、接口 | 同一账号不同设备可独立识别 | P1 | P4 T38 | 未完成（[Issue #167](https://github.com/HeanX/iChat_Pro/issues/167) 开放）；跨平台/设备增强待验收 |
 | P4 T41 | WP05 | 实现设备列表与撤销 | 设置页面、接口和测试 | 被撤销设备不接收后续消息密钥 | P1 | P4 T40 | 未完成（[Issue #168](https://github.com/HeanX/iChat_Pro/issues/168) 开放）；跨平台/设备增强待验收 |

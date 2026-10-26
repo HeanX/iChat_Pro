@@ -1,0 +1,10 @@
+{
+  "appId": "com.ichat.pro",
+  "appName": "iChat Pro",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  }
+}

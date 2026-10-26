@@ -729,10 +729,33 @@ test('a socket accept naming another contact grants nothing', async () => {
   assert.deepEqual(world.cacheCalls, []);
 });
 
-test('a socket accept with no tray snapshot still fails closed on a rotated key', async () => {
-  // When this tab has no local snapshot the event is the only statement
-  // available, so it is used — but the pinned fingerprint is still compared with
-  // the live endpoint, and a rotation there grants nothing.
+test('a socket accept with no tray snapshot grants nothing and says so', async () => {
+  // Round-2 review G2 / M-1 (socket path): the user never saw this request in
+  // this tab, so "the server accepted it" is not "the user approved it". Even a
+  // self-consistent event with a matching live fingerprint must grant nothing.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+  });
+
+  world.context.handleKeyVerificationNew({
+    data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
+  });
+  await flush();
+
+  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'no snapshot means no user authorisation');
+  assert.deepEqual(world.cacheCalls, [], 'and nothing may reach the send cache');
+  assert.deepEqual(world.statusCalls, [], 'the fingerprint endpoint is not even consulted');
+  assert.equal(
+    world.toasts.some(text => text === 'Security verification completed'),
+    false,
+    'a refused event must not claim success'
+  );
+  assert.equal(world.toasts.length, 1, 'exactly one readable message is shown');
+  assert.match(world.toasts[0], /no longer in this page's pending list/);
+});
+
+test('a socket accept with no snapshot cannot trust a rotated or substituted key', async () => {
   const rotated = createWorld({
     stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
     status: [rotatedContactStatus('CCCC')],
@@ -742,18 +765,105 @@ test('a socket accept with no tray snapshot still fails closed on a rotated key'
   });
   await flush();
   assert.deepEqual(rotated.versions(7), { 1: 'AAAA' }, 'a rotated key is never trusted');
-  assert.deepEqual(rotated.cacheCalls, []);
 
-  // And a matching endpoint does grant, so the path is not simply dead.
-  const matching = createWorld({
+  const other = createWorld({
+    stored: {
+      [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } },
+      [TRUST_KEY + 9]: { user_id: 9, versions: { 1: 'OLD9' } },
+    },
+    status: [
+      rotatedContactStatus('BBBB', { trust: 'verified' }),
+      keyStatusPayload({ userId: 9, version: 2, fingerprint: 'EVIL', trust: 'verified' }),
+    ],
+  });
+  other.context.handleKeyVerificationNew({
+    data: {
+      event: 'accepted',
+      verification: {
+        ...incomingRequest,
+        requester_id: 9,
+        requester_key_version: 2,
+        requester_key_fingerprint: 'EVIL',
+        status: 'accepted',
+      },
+    },
+  });
+  await flush();
+  assert.deepEqual(other.versions(9), { 1: 'OLD9' }, 'an unrelated contact is never trusted');
+  assert.deepEqual(other.cacheCalls, []);
+});
+
+test('a socket accept with a matching snapshot grants and reports success', async () => {
+  // The counterpart of the two cases above: a real accept of the request the
+  // user actually saw still works end to end.
+  const world = createWorld({
     stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
     status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
   });
-  matching.context.handleKeyVerificationNew({
+
+  world.context.handleKeyVerificationNew({
     data: { event: 'accepted', verification: acceptedVerification(incomingRequest) },
   });
   await flush();
-  assert.equal(matching.versions(7)['2'], 'BBBB');
+
+  assert.equal(world.versions(7)['2'], 'BBBB', 'the pinned fingerprint is trusted');
+  assert.equal(world.versions(7)['1'], 'AAAA', 'history is preserved');
+  assert.equal(world.cacheCalls.length, 1, 'and the send cache follows');
+  assert.equal(
+    world.toasts[world.toasts.length - 1],
+    'Security verification completed',
+    'success is reported only after a real grant'
+  );
+  assert.equal(
+    world.toasts.some(text => /no longer in this page's pending list/.test(text)),
+    false
+  );
+});
+
+test('a response body with a different request id is treated as a mismatch', async () => {
+  // Round-2 review F-1: only the id comparison rejects this one, so without a
+  // dedicated case deleting that check would go unnoticed.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    api: async () => ({
+      status: 'ok',
+      request: { ...incomingRequest, id: 99, status: 'accepted' },
+    }),
+  });
+
+  await world.context.respondToKeyVerification(42, 'accept');
+
+  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'a different request id is not our accept');
+  assert.deepEqual(world.cacheCalls, []);
+  assert.equal(
+    world.toasts[world.toasts.length - 1].includes('Security verification completed'),
+    false
+  );
+  assert.match(world.toasts[world.toasts.length - 1], /different verification request/);
+});
+
+test('an unreadable 204-style response reports a readable message, not a JSON error', async () => {
+  // Round-2 review F-3: a 204 (or proxy-stripped body) makes apiFetch throw the
+  // raw parser error. Still safe, but the toast must be actionable.
+  const world = createWorld({
+    stored: { [TRUST_KEY + 7]: { user_id: 7, versions: { 1: 'AAAA' } } },
+    pending: [{ ...incomingRequest }],
+    status: [rotatedContactStatus('BBBB', { trust: 'verified' })],
+    api: async () => {
+      throw new SyntaxError('Unexpected end of JSON input');
+    },
+  });
+
+  await world.context.respondToKeyVerification(42, 'accept');
+
+  assert.deepEqual(world.versions(7), { 1: 'AAAA' }, 'nothing is granted');
+  const last = world.toasts[world.toasts.length - 1];
+  assert.equal(last.includes('Unexpected end of JSON input'), false, 'no raw parser text');
+  assert.match(last, /returned no confirmation/);
+  assert.match(last, /Start verification again/);
 });
 
 test('granting trust is scoped to the contact the verification named', async () => {

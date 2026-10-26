@@ -5023,7 +5023,18 @@ async function respondToKeyVerification(requestId, action) {
     // must not keep rendering a stale "verified" verdict either.
     contactKeyStatusCacheByUserId = {};
     keyTrustListCache = null;
-    window.showToast(err.message || (currentLanguage === "zh" ? "处理安全验证失败" : "Could not update security verification"));
+    // A 204 No Content (or a proxy-stripped body) makes apiFetch() throw a raw
+    // JSON parse error. That is safe -- nothing is granted -- but it is not a
+    // message a user can act on, so name what happened instead.
+    const raw = err && err.message ? String(err.message) : "";
+    const unreadable = /Unexpected end of JSON input|JSON parse|Unexpected token/i.test(raw);
+    window.showToast(
+      unreadable
+        ? (currentLanguage === "zh"
+          ? "服务端未返回确认信息，本次未授予信任。请重新发起安全验证。"
+          : "The server returned no confirmation, so nothing was trusted. Start verification again.")
+        : (raw || (currentLanguage === "zh" ? "处理安全验证失败" : "Could not update security verification"))
+    );
     await fetchPendingGroupInvitations();
   } finally {
     delete keyVerificationResponsesInFlight[actionKey];
@@ -5159,42 +5170,46 @@ function handleKeyVerificationNew(data) {
   if (payload.event === "requested" && verification.direction === "incoming") {
     window.showToast(currentLanguage === "zh" ? "收到安全验证请求" : "Security verification request received");
   } else if (payload.event === "accepted") {
-    // The socket event is a server statement that this verification was
-    // accepted. When the tray still holds the request the user saw, the event
-    // must identify that same request -- otherwise a crafted event could name
-    // any contact and silently trust it. When there is no local snapshot (the
-    // tray was already cleared, or this tab never fetched it), the event is the
-    // only available statement, so it is used directly; the pinned fingerprint
-    // and version are still re-checked against the live endpoint by
-    // keyStatusMatchesAcceptedVerification(), which fails closed.
+    // A socket event is a server statement, not a user authorisation. Local
+    // trust may only be extended for the request this tab actually showed the
+    // user, so the snapshot is the single source of the authorisation object:
+    //   * snapshot present  -> the event must identify that same request;
+    //   * snapshot absent   -> fail closed. The user never saw this request in
+    //     this tab, so "the server accepted it" is not "the user approved it".
+    // The pinned fingerprint and version are then re-checked against the live
+    // endpoint by keyStatusMatchesAcceptedVerification(), which also fails shut.
     let authorisation = null;
+    let refusal = null;
     if (snapshot) {
       if (verificationIdentifiesSameRequest(snapshot, verification)) {
         authorisation = Object.assign({}, snapshot, { status: "accepted" });
-      }
-    } else if (verification.status === "accepted" && acceptedVerificationPeer(verification)) {
-      authorisation = verification;
-    }
-    const peer = snapshot || verification;
-    refreshKeyVerificationAfterChange(
-      keyVerificationOtherUserId(peer),
-      authorisation ? { grantTrustFor: authorisation } : undefined
-    ).then(function(outcome) {
-      // The caller does not await this branch, so report the real outcome here
-      // instead of unconditionally claiming success.
-      if (authorisation && !(outcome && outcome.granted)) {
-        window.showToast(currentLanguage === "zh"
-          ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
-          : "Keys changed. Nothing was trusted. Start verification again.");
-        return;
-      }
-      if (!authorisation) {
-        window.showToast(currentLanguage === "zh"
+      } else {
+        refusal = currentLanguage === "zh"
           ? "服务端返回的验证请求与本地记录不一致，未授予信任"
-          : "The server answered with a different verification request. No trust was granted.");
-        return;
+          : "The server answered with a different verification request. No trust was granted.";
       }
-      window.showToast(currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed");
+    } else {
+      refusal = currentLanguage === "zh"
+        ? "此验证请求已不在本页的待处理列表中，未授予信任。请重新发起安全验证。"
+        : "This verification request is no longer in this page's pending list, so nothing was trusted. Start verification again.";
+    }
+    if (!authorisation) {
+      // Nothing to grant: report the refusal and stop. No success toast may be
+      // shown on this path.
+      window.showToast(refusal);
+      return;
+    }
+    refreshKeyVerificationAfterChange(
+      keyVerificationOtherUserId(authorisation),
+      { grantTrustFor: authorisation }
+    ).then(function(outcome) {
+      // The caller does not await this branch, so the toast is emitted here and
+      // only a real grant may claim success.
+      window.showToast(outcome && outcome.granted
+        ? (currentLanguage === "zh" ? "安全验证已完成" : "Security verification completed")
+        : (currentLanguage === "zh"
+          ? "密钥已变化，本次验证未授予信任，请重新发起安全验证"
+          : "Keys changed. Nothing was trusted. Start verification again."));
     }).catch(function(err) {
       // An unawaited rejection here used to surface as a console error next to
       // a success toast (review m-2).

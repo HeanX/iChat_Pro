@@ -636,7 +636,8 @@ F-02 陈旧产物、F-04 全局泄漏、F-05 DOM 桩**全部真修好**（11 组
 | 级别 | 问题 | 整改 |
 | --- | --- | --- |
 | **MAJOR (F-01)** | 第 4 轮误判 `docs/handoff/android-mobile.md` 为"未跟踪用户材料"而未改，导致**三份已跟踪文档**仍停在修复前，而本 ADR §5.2 却声称文档"已更新" | 改 `docs/handoff/android-mobile.md`（§1 清单、§6 命令块、§6.1 前提示）、`docs/phase4/tasks.md` T22 行、`docs/documentation-status.md` 2026-10-18 段：条数统一 29、补 `config:generate` 步骤与"不读 `.env`"、旧 SHA 标注过期、新产物写清复现口径 |
-| MINOR (F-02b) | `62d673e` 把测试改成 27 条后，本 ADR 多处仍写 25 | 全部改为实测值（当时收敛为 **29**，现为 **30**，见 §8.6）；§8.4 保留"当时是 27"的历史口径并注明后续变化 || MINOR (F-03) | `--live-reload` 成功后再跑**无效配置**，`capacitor.config.json` 仍带 `server.url`，`cap copy` 会把它写进 APK | 无效分支检测到 `server` 块时**重置为发布形态**（无 `server` 块）；已是发布形态则不动（不做无谓的行尾改写）。新增用例覆盖三段：live-reload → 无效 → 断言无 `server`；再看一次仍不变 |
+| MINOR (F-02b) | `62d673e` 把测试改成 27 条后，本 ADR 多处仍写 25 | 全部改为实测值（当时收敛为 **29**，现为 **30**，见 §8.6）；§8.4 保留"当时是 27"的历史口径并注明后续变化 |
+| MINOR (F-03) | `--live-reload` 成功后再跑**无效配置**，`capacitor.config.json` 仍带 `server.url`，`cap copy` 会把它写进 APK | 无效分支检测到 `server` 块时**重置为发布形态**（无 `server` 块）；已是发布形态则不动（不做无谓的行尾改写）。新增用例覆盖三段：live-reload → 无效 → 断言无 `server`；再看一次仍不变 |
 | MINOR (F-04) | "config 写失败时回滚 env"的逻辑**零覆盖**，删掉它测试仍全绿 | 新增用例：用同名目录占位让 config rename 失败，断言 `mobile-env.js` 被回滚删除且无 `.tmp` 残留。变异复核：删掉回滚 → 该用例转红 |
 | MINOR (F-05) | 守卫只比相对次序，把 env 标签挪进 `<head>` 仍绿 | 断言三个 `<script>` 都在 `<body>` 之后、`</body>` 之前；变异（挪进 head）实测 `insideBody=false` 能被检出 |
 | MINOR (F-06) | §5.1 复现命令写成 `gradlew assembleDebug`，Windows 下 CommandNotFoundException | 改为 `.\gradlew.bat assembleDebug` |

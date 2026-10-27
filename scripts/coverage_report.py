@@ -88,14 +88,22 @@ _CHILD_ENV_KEYS = frozenset({
 # The published basis may never shrink. A tolerance here is not a safety margin,
 # it is an attack surface: the baseline is read from the committed snapshot and
 # publishing rewrites that snapshot, so any positive allowance compounds across
-# commits. Two releases that each drop "only 20%" take 5383 statements to 3445
-# and turn 74.94%/60.08% into a published "89.02%/75.66% - target met" while the
-# real numbers never moved (review R4 F-1, reproduced end to end).
+# commits.
+#
+# The allowance has to be *underused*, not saturated: 5383 * 0.8 floors to 4306,
+# and 4306 / 5383 = 0.79993, which a 0.8 floor already refuses. The attack that
+# actually worked was a 10% cut per release -- 5383 -> 4844 -> 4359, publishing
+# 74.94% -> 83.28% -> 92.54% "target met" while the real covered-line count never
+# moved (review R4 F-1; recomputed against this function in
+# .review/phase4-remediation-20261026/evidence/audit-cc89c11-ratchet-twostage.py,
+# and reproduced through the real CLI in evidence/ratchet-stage1.log).
 #
 # If the measurement basis genuinely has to change (a source tree really did
 # shrink), that is a reviewed decision: edit the `coverage-basis` comment in
-# docs/quality/coverage-report.md by hand and record why. The tool will not do
-# it silently.
+# docs/quality/coverage-report.md by hand, record why, and COMMIT it. This
+# function reads the snapshot from HEAD, not from the working tree, so an
+# uncommitted edit has no effect and the refusal message would be telling the
+# operator to do what they just did.
 _MIN_BASIS_FRACTION = 1.0
 _COVERAGE_BOOTSTRAP = (
     'import sys; from coverage.cmdline import main; '
@@ -707,6 +715,12 @@ def _published_basis(omissions: list[str]) -> dict[str, int]:
     commit at a time — which is exactly why the comparison below is a hard
     floor (``_MIN_BASIS_FRACTION = 1.0``) instead of a tolerance: any allowance
     would compound across releases (review R4 F-1).
+
+    Consequence for the documented escape hatch: an operator who edits the
+    ``coverage-basis`` comment but does not commit it still sees the old
+    baseline, and therefore still gets refused. That is deliberate (it fails
+    closed and forces a reviewable diff), but it means the procedure has to say
+    "commit it" — see docs/quality/coverage-integrity.md.
     """
     text = _git_read('show', 'HEAD:docs/quality/coverage-report.md')
     match = re.search(r'<!-- coverage-basis: (.+?) -->', text)
@@ -770,7 +784,8 @@ def _basis_problem(data: dict, baseline: dict, files: set[str], statements: int)
                 return (f'{key} 分母从已发布的 {baseline[key]} 降至 {current[key]}；'
                         '统计范围不允许缩小（哪怕 1%）。若源码确实变少了，'
                         '请人工修改 docs/quality/coverage-report.md 的 coverage-basis '
-                        '注释并记录理由，不要用本工具静默改写基线')
+                        '注释、记录理由并**提交**（本工具读的是 git HEAD 中的快照，'
+                        '未提交的修改不生效），不要用本工具静默改写基线')
         actual = _percent(sums['covered_lines'] + sums['covered_branches'],
                           sums['num_statements'] + sums['num_branches'])
         percent = float(totals['percent_covered'])
@@ -980,7 +995,7 @@ def _render_markdown(
         '- 发布前独立核对源码文件集合与语句数；语句/分支/文件分母**一律不得小于**'
         'Git 中已发布快照（不接受任何百分比容差，因为发布本身会改写基线，容差会跨发布'
         '复利），`--allow-subset` 也不能豁免。统计范围确需缩小时须人工修改本文件的'
-        '`coverage-basis` 注释并记录理由。',
+        '`coverage-basis` 注释、记录理由并提交（工具读 git HEAD，未提交不生效）。',
         '',
     ]
     return '\n'.join(lines)

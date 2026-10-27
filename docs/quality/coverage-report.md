@@ -3,8 +3,8 @@
 <!-- coverage-basis: {"num_branches": 1548, "num_files": 32, "num_statements": 5383} -->
 
 > 本文件由 `scripts/coverage_report.py` 生成，**不要手工编辑**。
-> 生成时间：2026-10-27T04:42:18Z
-> 代码版本：`cc89c11da4c4`（被测代码所在提交；本报告随其后的提交一并入库，两者 accounts/chat/ichat_pro 代码一致）
+> 生成时间：2026-10-27T05:33:40Z
+> 代码版本：`4be05fba1c89`（被测代码所在提交；本报告随其后的提交一并入库，两者 accounts/chat/ichat_pro 代码一致）
 > 环境：Python 3.13.12 / Django 6.0.5 / coverage 7.16.2 / DB `sqlite3`
 > 用例数：672（skip 2）
 > 测试命令：`python -I scripts/coverage_report.py -- --parallel 1`
@@ -45,4 +45,4 @@
 - 必须用 `--parallel 1`（默认）。`--parallel`（含 `auto`、缩写 `--para=N`）会让测试在子进程运行，coverage 采集不到，脚本会拒绝写快照。
 - 带测试标签或过滤选项（`--tag`/`--exclude-tag`/`-k`/`--pattern`，含 `--pat` 这类前缀缩写与 `-kfoo` 这类紧凑写法）或自定义 `--testrunner` 的运行只代表子集，默认不写快照。
 - 分支覆盖率原始数见"分模块"表的 covered/total 列，可单独核算。
-- 发布前独立核对源码文件集合与语句数；语句/分支/文件分母**一律不得小于**Git 中已发布快照（不接受任何百分比容差，因为发布本身会改写基线，容差会跨发布复利），`--allow-subset` 也不能豁免。统计范围确需缩小时须人工修改本文件的`coverage-basis` 注释并记录理由。
+- 发布前独立核对源码文件集合与语句数；语句/分支/文件分母**一律不得小于**Git 中已发布快照（不接受任何百分比容差，因为发布本身会改写基线，容差会跨发布复利），`--allow-subset` 也不能豁免。统计范围确需缩小时须人工修改本文件的`coverage-basis` 注释、记录理由并提交（工具读 git HEAD，未提交不生效）。

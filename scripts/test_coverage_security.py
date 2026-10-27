@@ -132,9 +132,12 @@ class DenominatorTests(unittest.TestCase):
         """The basis is a hard floor, not a 20% allowance (review R4 F-1).
 
         The baseline is read from the committed snapshot and publishing rewrites
-        that snapshot, so any positive tolerance compounds: two releases that
-        each "only" drop 20% take 5383 statements down to 3445 and turn 74.94%
-        into a published "89.02% - target met" while the real numbers never move.
+        that snapshot, so any positive tolerance compounds. Note the allowance
+        has to be *underused*, not saturated: 5383 * 0.8 floors to 4306 and
+        4306 / 5383 = 0.79993, which a 0.8 floor already refuses. The cut that
+        actually compounded was 10% per release - 5383 -> 4844 -> 4359, turning
+        74.94% into a published "92.54% - target met" while the real covered-line
+        count never moved (evidence/audit-cc89c11-ratchet-twostage.py).
 
         Two things are pinned here, and both are needed:
 

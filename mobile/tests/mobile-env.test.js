@@ -155,6 +155,38 @@ test('a mobile/.env file alone is not read (the wording must not promise it)', (
   }
 });
 
+test('an unreadable capacitor.config.json is reported, not silently skipped', () => {
+  // Review F-10: the catch branch used to set previousConfig = null for every
+  // error, so "exists but cannot be read" was indistinguishable from "absent"
+  // and the whole reset block was skipped with ZERO output. If that file carried
+  // a live-reload `server` block, the pack could ship a hot-reload APK and nobody
+  // would be told.
+  //
+  // A real EACCES is awkward to arrange portably, so replace the file with a
+  // DIRECTORY of the same name: readFileSync then fails with EISDIR, which is the
+  // same "exists but unreadable" shape the code has to handle.
+  const scratch = makeScratch();
+  try {
+    const configPath = path.join(scratch, 'capacitor.config.json');
+    fs.rmSync(configPath, { force: true });
+    fs.mkdirSync(configPath);
+
+    const run = runGenerator(scratch, {});
+    assert.strictEqual(run.status, 1, 'an invalid run still exits 1');
+    assert.ok(run.stderr.indexOf('无法读取') !== -1,
+      'stderr says the config could not be read: ' + run.stderr);
+    assert.ok(run.stderr.indexOf('无法判断它是否含 server 块') !== -1,
+      'stderr names the actual risk: ' + run.stderr);
+    assert.ok(run.stderr.indexOf('未做任何处置') !== -1,
+      'stderr states that nothing was done about the config: ' + run.stderr);
+    // The read failure must not be misreported as "already release-shaped".
+    assert.strictEqual(run.stderr.indexOf('已是发布形态'), -1,
+      'an unreadable config must not be described as already correct: ' + run.stderr);
+  } finally {
+    removeScratch(scratch);
+  }
+});
+
 test('a remote plain-HTTP origin is rejected before any file is written', () => {
   const scratch = makeScratch();
   try {
@@ -350,6 +382,14 @@ function readText(file) {
  * Both `src="..."` and `src='...'` and a bare `src=path` are accepted so a
  * formatting change cannot make the test silently match nothing.
  *
+ * That assumption is now *enforced* rather than trusted: `stripInert` below
+ * removes HTML comments and `<template>` blocks, and the ordering test asserts
+ * that parsing the stripped document yields exactly the same list. Without that
+ * cross-check, wrapping the env tag in `<!-- -->` or `<template>` keeps this
+ * parser happy while the browser never executes the script — which revives the
+ * original AND-01 defect (page permanently "未配置") with a green suite
+ * (2026-10-27 round-3 review F-09).
+ *
  * Input is normalised to LF internally, so callers may pass CRLF text; the
  * result (src, attrs, order) is identical either way. `index` is deliberately
  * NOT returned: it is an offset into whatever string was passed, so it would
@@ -375,6 +415,28 @@ function parseScriptSrcs(html) {
   return loads;
 }
 
+/**
+ * Remove markup a browser parses but never executes.
+ *
+ * Two forms matter here and both revive the original defect while leaving a
+ * naive `<script` scan green:
+ *   - `<!-- <script src="js/mobile-env.js"></script> -->` — a comment;
+ *   - `<template><script src="js/mobile-env.js"></script></template>` — parsed
+ *     into a document fragment, so the script never runs.
+ *
+ * @param {string} html  document source, LF or CRLF
+ * @returns {string} source with comments and template blocks removed
+ */
+function stripInert(html) {
+  let out = normaliseEol(html);
+  // Comments first: a commented-out <template> is still inert, and removing it
+  // before the template pass keeps the two passes independent.
+  out = out.replace(/<!--[\s\S]*?-->/g, '');
+  // `<template>` cannot nest in HTML, so a non-greedy match is correct here.
+  out = out.replace(/<template\b[^>]*>[\s\S]*?<\/template\s*>/gi, '');
+  return out;
+}
+
 /** Expected load order of the shell's classic scripts. */
 const EXPECTED_ORDER = ['js/mobile-env.js', 'js/mobile-config.js', 'js/shell.js'];
 
@@ -387,6 +449,16 @@ test('index.html loads mobile-env.js before mobile-config.js and shell.js', () =
 
   assert.deepStrictEqual(order, EXPECTED_ORDER,
     'unexpected <script src> order: ' + JSON.stringify(order));
+
+  // Review F-09: every assertion below is about *executed* scripts. A tag that
+  // is commented out, or sitting in a <template>, is found by the scanner but
+  // never runs -- which is the original AND-01 defect wearing a green suite.
+  // Requiring the inert-stripped document to parse identically is what makes
+  // the rest of this test mean what it says.
+  assert.deepStrictEqual(
+    parseScriptSrcs(stripInert(html)).map((l) => l.src), order,
+    'a <script> tag is inside an HTML comment or a <template>, so it is parsed '
+    + 'but never executed');
 
   // Order is the whole point: re-state it as explicit pairwise comparisons so a
   // failure says which relationship broke.
@@ -464,6 +536,33 @@ test('parseScriptSrcs detects a moved or removed env script (guard self-check)',
     'a duplicated tag is detected');
   assert.notDeepStrictEqual(parseScriptSrcs(duplicated).map((l) => l.src), EXPECTED_ORDER,
     'a duplicated tag must not look like the expected order');
+
+  // 5) env commented out (review F-09). The tag is still there and the scanner
+  // still finds it, so only the stripInert cross-check can catch this.
+  const commented = html.replace(envTag,
+    '  <!-- <script src="js/mobile-env.js"></script> -->\n');
+  assert.deepStrictEqual(parseScriptSrcs(commented).map((l) => l.src), EXPECTED_ORDER,
+    'the naive scanner still sees a commented-out tag (this is the hazard)');
+  assert.notDeepStrictEqual(parseScriptSrcs(stripInert(commented)).map((l) => l.src),
+    EXPECTED_ORDER, 'a commented-out env tag must be detected');
+
+  // 6) env inside <template> (review F-09). Parsed into a fragment, never run.
+  const templated = html.replace(envTag,
+    '  <template><script src="js/mobile-env.js"></script></template>\n');
+  assert.deepStrictEqual(parseScriptSrcs(templated).map((l) => l.src), EXPECTED_ORDER,
+    'the naive scanner still sees a templated tag (this is the hazard)');
+  assert.notDeepStrictEqual(parseScriptSrcs(stripInert(templated)).map((l) => l.src),
+    EXPECTED_ORDER, 'a templated env tag must be detected');
+
+  // 7) a commented-out <template> is inert too, and the two passes must compose.
+  const nested = html.replace(envTag,
+    '  <!-- <template><script src="js/mobile-env.js"></script></template> -->\n');
+  assert.notDeepStrictEqual(parseScriptSrcs(stripInert(nested)).map((l) => l.src),
+    EXPECTED_ORDER, 'a commented-out template must be detected');
+
+  // 8) the real page must survive the strip: no false positive.
+  assert.deepStrictEqual(parseScriptSrcs(stripInert(html)).map((l) => l.src),
+    EXPECTED_ORDER, 'stripInert must not remove the real script tags');
 });
 
 test('parseScriptSrcs gives identical results for LF and CRLF input', () => {

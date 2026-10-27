@@ -104,10 +104,21 @@ if (resolved.mode !== 'configured') {
   let configReset = false;
   let staleServerBlock = false;
   let previousConfig = null;
+  // Three states, not two (2026-10-27 round-3 review F-10). Collapsing
+  // "does not exist" and "exists but cannot be read" into `null` meant the whole
+  // reset block was skipped with ZERO output: the file may well have carried a
+  // live-reload `server` block, and nobody would be told. An unreadable config is
+  // not the same thing as an absent one, so it gets its own warning.
+  let configUnreadable = false;
   try {
     previousConfig = fs.readFileSync(target, 'utf8');
   } catch (err) {
-    if (err.code !== 'ENOENT') previousConfig = null;
+    if (err.code !== 'ENOENT') {
+      configUnreadable = true;
+      console.error('[iChat mobile] 警告：无法读取 ' + target + '：' + err.message);
+      console.error('[iChat mobile] 警告：无法判断它是否含 server 块；'
+        + '若上一次用过 --live-reload，打包可能产出热重载形态的 APK。');
+    }
   }
   if (previousConfig !== null) {
     // Compare SEMANTICALLY, not byte-wise: a Windows working tree checked out
@@ -142,6 +153,8 @@ if (resolved.mode !== 'configured') {
   if (configReset) {
     console.error('[iChat mobile] ' + target +
       ' 上次是 --live-reload 形态（含 server 块），已重置为发布形态（无 server 块）。');
+  } else if (configUnreadable) {
+    console.error('[iChat mobile] ' + target + ' 无法读取，未做任何处置（见上方警告）。');
   } else if (previousConfig !== null) {
     console.error('[iChat mobile] ' + target + ' 已是发布形态，保持不变。');
   }

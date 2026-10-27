@@ -383,9 +383,37 @@ T29 仍需在 §2.3 的 (a)/(b)/(c) 中做出选择。
 ```
 exit code = 1
 www/js/mobile-env.js          -> 不写；若上一次构建留下过，会被删除
-capacitor.config.json         -> 逐字节不变（sha256 与运行前相同）
-stderr                        -> 配置无效 + 原因 + "现有 capacitor.config.json 保持不变"
+capacitor.config.json         -> 保持"发布形态"：不含 server 块
+stderr                        -> 配置无效 + 原因 + 对 config 与 mobile-env.js 的实际处置
 ```
+
+`capacitor.config.json` 这一行**不是**"逐字节不变"。2026-10-27 第 3 轮审查 F-08 更正：
+本段此前写的是 `逐字节不变（sha256 与运行前相同）`，并引用了一句 stderr
+`"现有 capacitor.config.json 保持不变"`——那句话已经从生成器里删掉了，而这个行为
+本身也已被同一轮提交改掉。实际行为是：
+
+- 上一次是**发布形态**（无 `server` 块）→ 内容逐字节不变；
+- 上一次是 `--live-reload` 形态（含 `server` 块）→ **被改写成发布形态**，
+  `server` 键被移除，sha256 因此改变（实测 `86b6fdb6…` → `595be125…`）。
+
+这是**故意**的：否则 hot-reload 的 `server.url` 会随 `cap sync` 进包。改写失败时会明确告警。
+残留缺口见 §5.1.3。
+
+### 5.1.3 已知残留：config 存在但不可读时静默跳过重置
+
+`mobile/scripts/write-capacitor-config.js:107-111` 在读取现有 `capacitor.config.json` 时，
+`catch` 分支把 `previousConfig` 置为 `null`。于是"上一次是 live-reload 形态"这个判断
+无从做出，整个重置块被**静默跳过，零输出**。
+
+- 只读文件（`EACCES`）**会**被正确告警——审查者实测过；
+- **不可读**（例如独占句柄、损坏的 ACL、中途被替换成目录）时**没有任何提示**。
+
+影响有限：这种情况下 `cap sync` 通常也会失败，包出不来；但"没有任何提示"意味着
+出包成功时没人知道 config 可能是 live-reload 形态。
+
+**未修**（2026-10-27 第 3 轮审查 F-10，MINOR）。正确修法是把 `previousConfig = null`
+换成显式三态（不存在 / 可读 / 不可读），不可读时同样走"告警 + 失败关闭"。
+这需要改生成器的错误处理分支并补一条不可读场景的用例，留作后续。
 
 于是随后 `npx cap sync` + `assembleDebug` 得到的是一个**不带 origin 的包**：APK 里没有
 `assets/public/js/mobile-env.js`，`www/index.html` 的 `<script src="js/mobile-env.js">` 404（经典脚本，

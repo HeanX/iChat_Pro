@@ -135,13 +135,33 @@ class DenominatorTests(unittest.TestCase):
         that snapshot, so any positive tolerance compounds: two releases that
         each "only" drop 20% take 5383 statements down to 3445 and turn 74.94%
         into a published "89.02% - target met" while the real numbers never move.
+
+        Two things are pinned here, and both are needed:
+
+        1. The constant itself. A one-unit drop can only disprove tolerances
+           *larger* than ``1/N`` for the fixture's ``N``, so counting-based
+           assertions alone can never rule out a small tolerance such as
+           ``0.999``. Asserting the constant closes that gap for every value
+           except ``1.0``.
+        2. The behaviour, as one-unit drops on each of the three denominators.
+
+        An earlier version compared the fixture (100) against baselines of
+        125/126, i.e. it exercised a ~20% drop and would still pass if the floor
+        were relaxed to 0.99 - which would let 101 -> 100 through
+        (2026-10-27 audit, finding 5).
         """
+        self.assertEqual(report._MIN_BASIS_FRACTION, 1.0)
         # Exactly at the baseline: publishable.
         self.assertIsNone(self.problem(baseline={**self.baseline}))
-        # One statement fewer is already refused, even though that is a 0.8% drop.
-        self.assertIsNotNone(self.problem(baseline={**self.baseline, 'num_statements': 126}))
-        # The old 20%-drop sweet spot is refused too.
-        self.assertIsNotNone(self.problem(baseline={**self.baseline, 'num_statements': 125}))
+        # One statement fewer: refused. 100 -> 99 is a 1% drop, not 20%.
+        self.assertIsNotNone(
+            self.problem(baseline={**self.baseline, 'num_statements': 101}))
+        # One branch fewer and one file fewer: refused too, so the floor covers
+        # all three denominators rather than only statements.
+        self.assertIsNotNone(
+            self.problem(baseline={**self.baseline, 'num_branches': 21}))
+        self.assertIsNotNone(
+            self.problem(baseline={**self.baseline, 'num_files': 3}))
 
     def test_totals_must_equal_the_file_sums(self):
         data = copy.deepcopy(self.data)

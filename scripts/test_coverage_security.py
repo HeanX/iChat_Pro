@@ -134,10 +134,14 @@ class DenominatorTests(unittest.TestCase):
         The baseline is read from the committed snapshot and publishing rewrites
         that snapshot, so any positive tolerance compounds. Note the allowance
         has to be *underused*, not saturated: 5383 * 0.8 floors to 4306 and
-        4306 / 5383 = 0.79993, which a 0.8 floor already refuses. The cut that
-        actually compounded was 10% per release - 5383 -> 4844 -> 4359, turning
-        74.94% into a published "92.54% - target met" while the real covered-line
-        count never moved (evidence/audit-cc89c11-ratchet-twostage.py).
+        4306 / 5383 = 0.79993, which a 0.8 floor already refuses.
+
+        The cut that actually compounded was 10% per release. That figure is a
+        MODEL result - 5383 -> 4844 -> 4359 computed against the guard itself,
+        turning 74.94% into a published "92.54% - target met"
+        (evidence/audit-cc89c11-ratchet-twostage.py). The real CLI was run too
+        and reaches only 79.29% (evidence/ratchet-clean-stage1.log and
+        -stage2.log); it never reached the target. Keep the two apart.
 
         Two things are pinned here, and both are needed:
 

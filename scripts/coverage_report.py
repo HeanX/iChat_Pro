@@ -91,12 +91,26 @@ _CHILD_ENV_KEYS = frozenset({
 # commits.
 #
 # The allowance has to be *underused*, not saturated: 5383 * 0.8 floors to 4306,
-# and 4306 / 5383 = 0.79993, which a 0.8 floor already refuses. The attack that
-# actually worked was a 10% cut per release -- 5383 -> 4844 -> 4359, publishing
-# 74.94% -> 83.28% -> 92.54% "target met" while the real covered-line count never
-# moved (review R4 F-1; recomputed against this function in
-# .review/phase4-remediation-20261026/evidence/audit-cc89c11-ratchet-twostage.py,
-# and reproduced through the real CLI in evidence/ratchet-stage1.log).
+# and 4306 / 5383 = 0.79993, which a 0.8 floor already refuses.
+#
+# Two different kinds of evidence, deliberately kept apart:
+#
+#   MODEL  A 10% cut per release (5383 -> 4844 -> 4359) publishes
+#          74.94% -> 83.28% -> 92.54% "target met" while the real covered-line
+#          count never moves. This is computed against _basis_problem itself, not
+#          measured: .review/phase4-remediation-20261026/evidence/
+#          audit-cc89c11-ratchet-twostage.py
+#
+#   CLI    On d2b89ce (the commit before this floor existed) the unmodified CLI,
+#          with nothing changed but .coveragerc exclude_lines, exits 0 twice and
+#          publishes 74.94% -> 76.49% -> 79.29%. Real run, but it reaches 79.29%,
+#          NOT 85%: .review/phase4-remediation-20261026/evidence/
+#          ratchet-clean-stage1.log and ratchet-clean-stage2.log
+#
+# The authoritative statement of what each number means is
+# .review/phase4-remediation-20261026/evidence/ratchet-EVIDENCE-STATUS.md.
+# Do not describe the 92.54% figure as measured, and do not describe the CLI run
+# as having reached the target.
 #
 # If the measurement basis genuinely has to change (a source tree really did
 # shrink), that is a reviewed decision: edit the `coverage-basis` comment in

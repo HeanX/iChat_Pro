@@ -132,16 +132,43 @@ class DenominatorTests(unittest.TestCase):
         """The basis is a hard floor, not a 20% allowance (review R4 F-1).
 
         The baseline is read from the committed snapshot and publishing rewrites
-        that snapshot, so any positive tolerance compounds: two releases that
-        each "only" drop 20% take 5383 statements down to 3445 and turn 74.94%
-        into a published "89.02% - target met" while the real numbers never move.
+        that snapshot, so any positive tolerance compounds. Note the allowance
+        has to be *underused*, not saturated: 5383 * 0.8 floors to 4306 and
+        4306 / 5383 = 0.79993, which a 0.8 floor already refuses.
+
+        The cut that actually compounded was 10% per release. That figure is a
+        MODEL result - 5383 -> 4844 -> 4359 computed against the guard itself,
+        turning 74.94% into a published "92.54% - target met"
+        (evidence/audit-cc89c11-ratchet-twostage.py). The real CLI was run too
+        and reaches only 79.29% (evidence/ratchet-clean-stage1.log and
+        -stage2.log); it never reached the target. Keep the two apart.
+
+        Two things are pinned here, and both are needed:
+
+        1. The constant itself. A one-unit drop can only disprove tolerances
+           *larger* than ``1/N`` for the fixture's ``N``, so counting-based
+           assertions alone can never rule out a small tolerance such as
+           ``0.999``. Asserting the constant closes that gap for every value
+           except ``1.0``.
+        2. The behaviour, as one-unit drops on each of the three denominators.
+
+        An earlier version compared the fixture (100) against baselines of
+        125/126, i.e. it exercised a ~20% drop and would still pass if the floor
+        were relaxed to 0.99 - which would let 101 -> 100 through
+        (2026-10-27 audit, finding 5).
         """
+        self.assertEqual(report._MIN_BASIS_FRACTION, 1.0)
         # Exactly at the baseline: publishable.
         self.assertIsNone(self.problem(baseline={**self.baseline}))
-        # One statement fewer is already refused, even though that is a 0.8% drop.
-        self.assertIsNotNone(self.problem(baseline={**self.baseline, 'num_statements': 126}))
-        # The old 20%-drop sweet spot is refused too.
-        self.assertIsNotNone(self.problem(baseline={**self.baseline, 'num_statements': 125}))
+        # One statement fewer: refused. 100 -> 99 is a 1% drop, not 20%.
+        self.assertIsNotNone(
+            self.problem(baseline={**self.baseline, 'num_statements': 101}))
+        # One branch fewer and one file fewer: refused too, so the floor covers
+        # all three denominators rather than only statements.
+        self.assertIsNotNone(
+            self.problem(baseline={**self.baseline, 'num_branches': 21}))
+        self.assertIsNotNone(
+            self.problem(baseline={**self.baseline, 'num_files': 3}))
 
     def test_totals_must_equal_the_file_sums(self):
         data = copy.deepcopy(self.data)

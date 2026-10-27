@@ -19,7 +19,7 @@
 仓库里现在有：
   mobile/                     Capacitor 8.5.3 工程（package.json / capacitor.config.json / www/）
   mobile/android/             Capacitor CLI 真实生成的 Android 工程（不是占位目录）
-  mobile/tests/               node:test 配置契约测试（29 条，纯 Node，无需模拟器）
+  mobile/tests/               node:test 配置契约测试（30 条，纯 Node，无需模拟器）
   docs/phase4/adr-p4-03-*.md  技术决策记录
   app-debug.apk               已构建成功（AND-01 后 4,138,535 B，SHA256 14B41ADA…EB48E9，见 ADR §5.1）
 仓库里仍然没有：
@@ -178,7 +178,7 @@ cd android
 ```
 
 **不要**把 `capacitor.config.json` 的 `server.url` 热重载配置当成正式方案——它会让 App 依赖开发机。
-骨架已用 `mobile/www/js/mobile-config.js` + 29 条测试把这条规则固化：发布解析结果恒为
+骨架已用 `mobile/www/js/mobile-config.js` + 30 条测试把这条规则固化：发布解析结果恒为
 `serverUrl: null`，生成的 `capacitor.config.json` 不含 `server` 块，只有显式 `--live-reload` 才会写入。
 若上一次跑过 `--live-reload`、随后又以**无效配置**运行，生成器会把 `capacitor.config.json`
 **重置回发布形态**并把 `mobile-env.js` 删掉（ADR §5.1.2），所以不会把热重载配置带进包。

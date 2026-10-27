@@ -167,12 +167,12 @@ mobile/
 │       └── shell.js                # 启动页渲染，仅读 window.ICHAT_MOBILE_ENV
 ├── tests/
 │   ├── mobile-config.test.js       # node:test，13 条：origin/HTTPS/WSS/live-reload 契约
-│   └── mobile-env.test.js          # node:test，16 条：注入链路、未配置/陈旧产物、行尾无关、脚本顺序与位置
+│   └── mobile-env.test.js          # node:test，17 条：注入链路、未配置/陈旧产物、行尾无关、脚本顺序与位置、不可读 config
 └── android/                        # Capacitor CLI 真实生成的原生工程
 ```
 
-> 测试共 **29 条**（13 + 16，实测值）。`npm run test:mobile` 同时加载两个文件；手写 `node --test` 时
-> 两个文件都要给，只跑 `mobile-config.test.js` 会漏掉注入链路那 16 条。
+> 测试共 **30 条**（13 + 17，实测值）。`npm run test:mobile` 同时加载两个文件；手写 `node --test` 时
+> 两个文件都要给，只跑 `mobile-config.test.js` 会漏掉注入链路那 17 条。
 > 行尾无关性单独有 3 条用例（`normaliseEol` 让整套断言在 `core.autocrlf=true` 的 CRLF 工作树下等价），
 > 见 §8.5。
 
@@ -383,9 +383,41 @@ T29 仍需在 §2.3 的 (a)/(b)/(c) 中做出选择。
 ```
 exit code = 1
 www/js/mobile-env.js          -> 不写；若上一次构建留下过，会被删除
-capacitor.config.json         -> 逐字节不变（sha256 与运行前相同）
-stderr                        -> 配置无效 + 原因 + "现有 capacitor.config.json 保持不变"
+capacitor.config.json         -> 保持"发布形态"：不含 server 块
+stderr                        -> 配置无效 + 原因 + 对 config 与 mobile-env.js 的实际处置
 ```
+
+`capacitor.config.json` 这一行**不是**"逐字节不变"。2026-10-27 第 3 轮审查 F-08 更正：
+本段此前写的是 `逐字节不变（sha256 与运行前相同）`，并引用了一句 stderr
+`"现有 capacitor.config.json 保持不变"`——那句话已经从生成器里删掉了，而这个行为
+本身也已被同一轮提交改掉。实际行为是：
+
+- 上一次是**发布形态**（无 `server` 块）→ 内容逐字节不变；
+- 上一次是 `--live-reload` 形态（含 `server` 块）→ **被改写成发布形态**，
+  `server` 键被移除，sha256 因此改变（实测 `86b6fdb6…` → `595be125…`）。
+
+这是**故意**的：否则 hot-reload 的 `server.url` 会随 `cap sync` 进包。改写失败时会明确告警。
+残留缺口见 §5.1.3。
+
+### 5.1.3 config 存在但不可读时的处置（已修）
+
+`mobile/scripts/write-capacitor-config.js` 读取现有 `capacitor.config.json` 失败时，
+**不再**把它当成"文件不存在"。三态：
+
+| 状态 | 行为 |
+| --- | --- |
+| 不存在（`ENOENT`） | 无需重置，正常继续 |
+| 可读 | 解析后判断是否含 `server` 块；含则改写成发布形态，不含则逐字节不动 |
+| **不可读** | **告警**：说明无法读取、无法判断是否含 `server` 块、可能产出热重载形态的 APK；并在汇总行注明"未做任何处置" |
+
+在 `3d902de` 修复之前这里是两态：`catch` 把 `previousConfig` 一律置 `null`，于是"不可读"
+被当成"不存在"，整个重置块**静默跳过、零输出**。
+
+> 2026-10-27 第 4 轮复审 F-13 更正：本节最初（同一提交内）写成"**未修**…留作后续"，
+> 而那个提交本身就把 F-10 修了，描述的修法与实现逐字一致。属自造的文档漂移，已改。
+
+用例 `an unreadable capacitor.config.json is reported, not silently skipped` 覆盖此路径；
+审查者另用真实 `EPERM`（`attrib +R` + `icacls /deny`）验证过与 `EISDIR` 走同一分支。
 
 于是随后 `npx cap sync` + `assembleDebug` 得到的是一个**不带 origin 的包**：APK 里没有
 `assets/public/js/mobile-env.js`，`www/index.html` 的 `<script src="js/mobile-env.js">` 404（经典脚本，
@@ -406,9 +438,9 @@ stderr                        -> 配置无效 + 原因 + "现有 capacitor.confi
 | 验收项 | 本卡状态 | 证据 |
 | --- | --- | --- |
 | 能复用现有页面并生成 Android 工程 | **部分满足**：工程已生成且可构建出 APK；"复用现有页面"的**运行时**验证需 T24 出包后在设备上加载 Django 页面 | §5.1 的 `npx cap add android` 输出 + APK 产物 + `launchable-activity` |
-| 相关代码或配置经过非作者成员评审 | **证据不足，不能由本卡判定通过**：三轮独立审查均有结论，但审查者是子 Agent、产物在 `.review/`（已 gitignore），**git 里 9 个提交作者全是同一人**。可审计性上这条**不成立**，需真人评审后在 Issue 留痕 | §8（三轮记录是文字，不是可审计产物） |
-| 适用的自动化或人工测试已执行并保存证据 | `cd mobile && npm run test:mobile`（同时加载 `tests/mobile-config.test.js` + `tests/mobile-env.test.js`）**29/29 通过**；仓库根 `node --test mobile/tests/*.test.js` 同为 29/29；**CRLF 工作树（`core.autocrlf=true`）下同为 29/29**。`manage.py check` / `makemigrations --check` / `npm run test:e2ee` 62/62 均实跑；**设备安装/启动/截图未执行** | §5.1 |
-| 需求、部署或测试文档已同步更新 | 本次（2026-10-26）同步了**四份已跟踪文档**：本 ADR、`docs/handoff/android-mobile.md`（§1 清单/§6 命令块）、`docs/phase4/tasks.md`（T22 行）、`docs/documentation-status.md`（两段增补）。三者均已 `git ls-files` 确认在版本控制内，条数统一为实测 **29**、旧 SHA 已标注过期、`config:generate` 已写入必经步骤。**但必须承认**：前四轮里有三轮出现过"文档数字与事实不符"，第 4 轮还把 `android-mobile.md` 误判为未跟踪而漏改（§8.5 F-01），说明这条在本卡内**反复失守过**，不能凭本轮通过就认为流程可靠 | §8.1–§8.5 |
+| 相关代码或配置经过非作者成员评审 | **证据不足，不能由本卡判定通过**：七轮独立审查均有结论，但审查者是子 Agent、产物在 `.review/`（已 gitignore），**本卡全部提交的作者只有一人**（`git log cc89c11..HEAD --format='%an' \| sort -u` 只有 `HeanX`；提交数会随补修增长，故不写死）。可审计性上这条**不成立**，需真人评审后在 Issue 留痕 | §8（各轮记录是文字，不是可审计产物） |
+| 适用的自动化或人工测试已执行并保存证据 | `cd mobile && npm run test:mobile`（同时加载 `tests/mobile-config.test.js` + `tests/mobile-env.test.js`）**30/30 通过**；仓库根 `node --test mobile/tests/*.test.js` 同为 30/30；**CRLF 工作树（`core.autocrlf=true`）下同为 30/30**。`manage.py check` / `makemigrations --check` 均实跑；`npm run test:e2ee` 实测 **170/170**（2026-10-27 更正：此前写 62/62，那是更早一轮的旧值，现已作废）；**设备安装/启动/截图未执行** | §5.1 |
+| 需求、部署或测试文档已同步更新 | 本次同步了**五份已跟踪文档**：本 ADR、`docs/handoff/android-mobile.md`（§1 清单/§6 命令块）、`docs/phase4/tasks.md`（T22 行）、`docs/documentation-status.md`（两段增补）、`docs/phase4/traceability-matrix.md`（NEW-TST-009 行）。五份均已 `git ls-files` 确认在版本控制内，**当前值**统一为实测 **30 条**（13 + 17）、旧 SHA 已标注过期、`config:generate` 已写入必经步骤。**但必须承认这条在本卡内反复失守**，按 §8 的记录至少五轮出过"文档与事实不符"：第 2 轮条数只同步一半（§8.2）、第 3 轮 `tasks.md` 漏改（§8.3）、第 4 轮把 `android-mobile.md` 误判为未跟踪（§8.5 F-01）、`3d902de` 把 29 加到 30 却一处文档都没更新（§8.6 F-14）、第 6 轮修 F-14 时又把历史记录一起改了（§8.6 N-01）。另有两条同类但非条数的：`3d902de` 新增的 §5.1.3 自称 F-10「未修」（§8.6 F-13，**该节在 `07815e6` 尚不存在**，首见于 `3d902de`）、以及 `adr:443` 自身两次把失误归错轮次。所以不能凭本轮通过就认为流程可靠 | §8.1–§8.6 |
 
 ### 5.3 明确未完成的项（不得当作通过）
 
@@ -552,7 +584,7 @@ adb shell am start -n com.ichat.pro/.MainActivity
 | --- | --- | --- |
 | MAJOR | `tasks.md` T22 行本轮换了 SHA 却没改同一行的 `11/11`（实际 13），而 §8.2 刚写完"四处表述已一致" | 改为 `13/13`；§8.2 那句已加注"当时是假的" |
 | MAJOR | ADR §8 汇总表两轮的 MINOR 计数（6/7）与 §8.1、§8.2 表内实际行数（5/6）各多报 1 | 汇总表改为 5/5/6，与表格实数对齐 |
-| MAJOR | 未 tracked 的 `docs/handoff/issue-backlog.md` 仍残留 `10/10` 与旧 SHA `0D05C92B…4B4976` | 该文件不属本卡改动范围，且整份交接文档尚未入库；**已在 §8.2 记录"提 PR 时需一并同步"**，本卡内不代改他人文件 |
+| MAJOR | `docs/handoff/issue-backlog.md` 仍残留 `10/10` 与旧 SHA `0D05C92B…4B4976` | 该文件在写这一行时**尚未入库**，故当时判为"不属本卡改动范围"，并在 §8.2 记录"提 PR 时需一并同步"。**2026-10-27 第 5 轮复审指出此判断已失效**：该文件随后在 `ff31f5e` 入库（`git log --diff-filter=A` 可证），那两处陈旧数字因此成为**已跟踪文档的现行错误**，本轮一并改正（`30/30` + 旧 SHA 标注过期） |
 | MINOR | §5.1 第 262 行把"旧实现含 `resolved.insecure === true`"写进了描述第④步的句子，字面自相矛盾（第 3 轮实测产物中确实不含该串） | 改为"第③步那个包里才是旧实现，现已不存在于产物中" |
 | MINOR | §5.1 把 1962/5152/1646/2346 说成"step ③ 的旧包大小"——实为把 **git blob（LF）大小**误当 APK 内（CRLF）大小；三个文件 blob 从未变过 | 已改写为口径说明：明确是"本机产物未压缩字节数"，并解释 CRLF/LF 差异 |
 | MINOR | `deploy/deploy.sh` 有两处 UTF-8 乱码（`鈥?`/`搂7`），在本分支 HEAD 里 | 属 T23/#204 范围，**不是本卡引入**；记录备查，不代改 |
@@ -604,14 +636,53 @@ F-02 陈旧产物、F-04 全局泄漏、F-05 DOM 桩**全部真修好**（11 组
 | 级别 | 问题 | 整改 |
 | --- | --- | --- |
 | **MAJOR (F-01)** | 第 4 轮误判 `docs/handoff/android-mobile.md` 为"未跟踪用户材料"而未改，导致**三份已跟踪文档**仍停在修复前，而本 ADR §5.2 却声称文档"已更新" | 改 `docs/handoff/android-mobile.md`（§1 清单、§6 命令块、§6.1 前提示）、`docs/phase4/tasks.md` T22 行、`docs/documentation-status.md` 2026-10-18 段：条数统一 29、补 `config:generate` 步骤与"不读 `.env`"、旧 SHA 标注过期、新产物写清复现口径 |
-| MINOR (F-02b) | `62d673e` 把测试改成 27 条后，本 ADR 多处仍写 25 | 全部改为实测值（本轮收敛为 **29**）；§8.4 保留"当时是 27"的历史口径并注明后续变化 |
+| MINOR (F-02b) | `62d673e` 把测试改成 27 条后，本 ADR 多处仍写 25 | 全部改为实测值（当时收敛为 **29**，现为 **30**，见 §8.6）；§8.4 保留"当时是 27"的历史口径并注明后续变化 |
 | MINOR (F-03) | `--live-reload` 成功后再跑**无效配置**，`capacitor.config.json` 仍带 `server.url`，`cap copy` 会把它写进 APK | 无效分支检测到 `server` 块时**重置为发布形态**（无 `server` 块）；已是发布形态则不动（不做无谓的行尾改写）。新增用例覆盖三段：live-reload → 无效 → 断言无 `server`；再看一次仍不变 |
 | MINOR (F-04) | "config 写失败时回滚 env"的逻辑**零覆盖**，删掉它测试仍全绿 | 新增用例：用同名目录占位让 config rename 失败，断言 `mobile-env.js` 被回滚删除且无 `.tmp` 残留。变异复核：删掉回滚 → 该用例转红 |
 | MINOR (F-05) | 守卫只比相对次序，把 env 标签挪进 `<head>` 仍绿 | 断言三个 `<script>` 都在 `<body>` 之后、`</body>` 之前；变异（挪进 head）实测 `insideBody=false` 能被检出 |
 | MINOR (F-06) | §5.1 复现命令写成 `gradlew assembleDebug`，Windows 下 CommandNotFoundException | 改为 `.\gradlew.bat assembleDebug` |
 | MINOR (F-07/09) | §5.1 资源清单只列 5 项，`assets/public/` 实际 8 条；`npx cap add android` 在既有工程上 exit 1 未注明 | 清单补齐并说明另 3 条来源；`cap add android` 标注"仅首次创建工程时需要" |
 
-第 5 轮整改后复验：`npm run test:mobile` **29/29**（LF 与模拟 CRLF 工作树各一次）、
+第 5 轮整改后复验（**历史记录，当时为 29 条**）：`npm run test:mobile` **29/29**（LF 与模拟 CRLF 工作树各一次）、
 仓库根 `node --test mobile/tests/*.test.js` **29/29**、F-03/F-04/F-05 三条新用例各有变异证明。
 `docs/handoff/android-mobile.md` 里指向本 ADR 的相对链接 `../phase4/adr-p4-03-mobile-tech-stack.md`
 已核实可解析（ADR 随本分支入库）。**仍无真机/模拟器；本轮未重打包 APK。**
+
+> 2026-10-27 第 5 轮复审（N-01）更正：本行上一版被改成 `30/30`，与 §8.4 `:619` 的
+> "第 5 轮增至 29" 直接冲突。`07815e6` 那一轮**确实是 29 条**（`mobile-config` 13 +
+> `mobile-env` 16），30 是后来 `3d902de` 加了一条不可读 config 用例才到的。
+> 历史段落保留当时的真实值，不随当前值改写。
+
+### 8.6 第 6 轮（对 `3d902de` 的复审）发现项与整改
+
+第 3 轮（`review-android-r3.md`）确认 R2 的 F-01..F-07 **全部真修好**，另提出 3 条 MINOR。
+`3d902de` 修了这 3 条，第 4 轮复审（`review-android-r4.md`）判 **FAIL**，原因是：
+
+| 编号 | 级别 | 内容 | 整改 |
+| --- | --- | --- | --- |
+| **F-14** | **MAJOR** | `3d902de` 把套件从 29 条加到 **30** 条（env 16→17），却**一处文档都没更新**：11 处仍写 29（`adr:170/174/175/438/439/642-643`、`handoff:22/181`、`tasks:40`、`documentation-status:19`、`traceability-matrix:128`），而 §5.2 还称 29 是"实测"值。这与它正在修的 F-01 是同一类错误，且正落在 #149 第三条验收（文档同步）上 | 11 处**当前值**改为 **30**（13 + 17）；`§8.4/:619` 与 `§8.5/:646` 属**历史记录**，保留当时的 **27/29** 并各自注明后续变化，不随当前值改写。本条失守记录在 §8.6 本身 |
+| F-13 | MINOR | 同一提交新增的 §5.1.3 把 F-10 写成"**未修**…留作后续"，而该提交本身已修，描述的修法与实现逐字一致 | §5.1.3 改写为"已修"，列出三态表，并留下这条更正说明 |
+| F-12 | MINOR | F-09 只堵了注释与 `<template>`，另有多种"脚本不会执行"的形态仍 30/30 绿 | **未修**，记录为已知边界：本守卫针对的是"标签存在但被包裹"这一类，不是通用 HTML 语义分析。见下方说明 |
+
+**F-12 的边界说明（不掩饰）**：`stripInert` 是正则级的注释/模板剥离，不是 HTML 解析器。
+它挡住的是**最可能被误写出来的两种**（整段注释掉、整段放进 `<template>`）。
+以下形态**仍会漏检**，每一种都在第 5、6 轮复审中被实测为 `30/30` 全绿：
+
+| 形态 | 为什么不执行 |
+| --- | --- |
+| `<noscript>` 内（含未闭合写法） | 只在禁用脚本时渲染，正常环境不执行 |
+| 未闭合的 `<!--` | 其后整段成为注释 |
+| 未闭合的 `<template>` | 其后整段进入文档片段 |
+| `<svg>` 内 | 命名空间不同 |
+| `<textarea>` / `<title>` / `<xmp>` 内 | RAWTEXT / RCDATA 元素，内容是文本不是标记 |
+| `<plaintext>` 内 | 其后整份文档都变成纯文本（RAWTEXT） |
+| `<script type="text/template">` 数据块内 | 非可执行脚本类型，内容是数据 |
+
+**这是一份"已实测到的"清单，不是穷举。** 第 4 轮报告列了 4 种，第 5 轮找到 8 种，
+第 6 轮的探针又找到上面最后两种（`<plaintext>`、非可执行 `<script>` 数据块）。
+只要守卫仍是正则级，这个数字就可能继续增长——**每加一种就说明它是用一个黑名单在追一类问题**，
+而不是在判定"这段标记会不会执行"。
+
+它们都要求刻意写出畸形或语义微妙的标记，且其中多类在现代浏览器里本身就会让整页渲染异常——
+所以定为 MINOR 而非 MAJOR。真正的修法是引入 HTML 解析器做"是否会执行"的判定，
+代价远超本卡范围，**留作后续**。

@@ -125,7 +125,7 @@
 | NEW-TST-006 | 后端覆盖率 | P0 | — | P4 Test T12 | 部分：统计已建立、可重复（语句 **74.94%** = 4034/5383，目标 ≥85%，**未达标**），见 [覆盖率报告](../quality/coverage-report.md)；门禁待 P4 T46 #173 |
 | NEW-TST-007 | 分支覆盖率 | P0 | — | P4 Test T12 | 部分：统计已建立、可重复（分支 **60.08%** = 930/1548，目标 ≥75%，**未达标**），见 [覆盖率报告](../quality/coverage-report.md) |
 | NEW-TST-008 | 高风险覆盖率 | P0 | — | P4 Test T12 | 未验证：高风险面清单未定义、未单独统计（目标 ≥90%），需 P4 Test T11 白盒路径说明支撑 |
-| NEW-TST-009 | 单元测试 | P0 | — | P4 Test T10～T13 | 部分：现有 **672** 条 Django 回归（其中 `deploy.*` 174 条）加 `test:e2ee` 170 条 / `test:mobile` 29 条 JS 回归；完整需求覆盖待各专项任务。历史数字 404 已作废 |
+| NEW-TST-009 | 单元测试 | P0 | — | P4 Test T10～T13 | 部分：现有 **672** 条 Django 回归（其中 `deploy.*` 174 条）加 `test:e2ee` 170 条 / `test:mobile` 30 条 JS 回归；完整需求覆盖待各专项任务。历史数字 404 已作废 |
 | NEW-TST-010 | 接口测试 | P0 | — | P4 Test T13 | 部分：2026-10-18 新增 HTTP 侧用例 61 条（私聊 16 / 群聊 10 / sync 6 / 撤回状态删除私聊 7 / **群聊分支 8** / 文件 14），本机实测全通过；编号见 [T13 验收记录](../testing/p4-test-t13-http-ws-integration.md)；仍缺非作者人类评审与 CI run |
 | NEW-TST-011 | WebSocket 测试 | P0 | — | P4 Test T13 | 部分：2026-10-18 新增 WS 侧用例 18 条（信封 5 / 回执 3 / 撤回私聊 4 / **撤回群聊 3** / typing 3）；`message.recall` 事件由零覆盖变为 7 条；WS 群聊发送未新增（基线 `test_group_realtime.py` 已有 7 处断言）；仍缺 Redis 多进程与弱网证据 |
 | NEW-TST-012 | 数据库集成测试 | P0 | — | P4 Test T14 | 已验证：真实 PostgreSQL 16 CI [#195](https://github.com/HeanX/iChat_Pro/issues/195) |
